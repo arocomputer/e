@@ -11,7 +11,7 @@ use common::{clear_env_keys, env_lock, read_tool, request_json, serve_sse, test_
 use e::core::providers::catalog::{self, Api, Model, Thinking};
 use e::core::providers::{
     self, ChatMessage, Event, FailureCause, FinishReason, ImageInput, Request, SseSplitter,
-    SseStream, ToolCall, MAX_SSE_EVENT_BYTES,
+    SseStream, ToolCall, Usage, MAX_SSE_EVENT_BYTES,
 };
 
 // ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ struct DialectCase {
     sse: &'static str,
     text: &'static str,
     reasoning: &'static str,
-    usage: Option<(u64, u64, u64)>,
+    usage: Option<Usage>,
     tool: ToolExpect,
     finish: Option<FinishReason>,
 }
@@ -137,7 +137,12 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "Hello",
             reasoning: "hmm",
-            usage: Some((12, 3, 4)),
+            usage: Some(Usage {
+                input: 8,
+                output: 3,
+                cache_read: 4,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Exact {
                 id: "c1",
                 args: "{\"path\":\"a.txt\"}",
@@ -154,7 +159,7 @@ fn dialects() -> Vec<DialectCase> {
             history: History::AnthropicToolLoop,
             sse: concat!(
                 "event: message_start\n",
-                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":40}}}\n\n",
+                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":60,\"cache_creation\":{\"ephemeral_5m_input_tokens\":50,\"ephemeral_1h_input_tokens\":10}}}}\n\n",
                 "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
                 "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n",
                 "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
@@ -171,9 +176,13 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "hello world",
             reasoning: "hmm",
-            // Anthropic's prompt fields are disjoint: input is the inclusive
-            // total (100 uncached + 40 cache-read), cache_read the subset.
-            usage: Some((140, 25, 40)),
+            usage: Some(Usage {
+                input: 100,
+                output: 25,
+                cache_read: 40,
+                cache_write_5m: 50,
+                cache_write_1h: 10,
+            }),
             tool: ToolExpect::Exact {
                 id: "tu_1",
                 args: "{\"path\":\"a.txt\"}",
@@ -198,7 +207,11 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "hi",
             reasoning: "planning\n\ntesting",
-            usage: Some((10, 2, 0)),
+            usage: Some(Usage {
+                input: 10,
+                output: 2,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Exact {
                 id: "c1",
                 args: "{\"path\":\"a.txt\"}",
@@ -221,7 +234,12 @@ fn dialects() -> Vec<DialectCase> {
             text: "hello world",
             reasoning: "planning",
             // Thought tokens count as output.
-            usage: Some((90, 25, 30)),
+            usage: Some(Usage {
+                input: 60,
+                output: 25,
+                cache_read: 30,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Synthesized {
                 name: "read",
                 id_prefix: "g-call-1",
@@ -390,7 +408,7 @@ async fn collect_stream(
     String,
     String,
     Vec<ToolCall>,
-    Option<(u64, u64, u64)>,
+    Option<Usage>,
     Option<FinishReason>,
 ) {
     let (mut rx, _handle) = providers::stream(request);
@@ -408,11 +426,7 @@ async fn collect_stream(
             Event::TextDelta(d) => text.push_str(&d),
             Event::ReasoningDelta(d) => reasoning.push_str(&d),
             Event::ToolCall(c) => calls.push(c),
-            Event::Usage {
-                input,
-                output,
-                cache_read,
-            } => usage = Some((input, output, cache_read)),
+            Event::Usage(observed) => usage = Some(observed),
             Event::Error(err) => panic!("stream errored: {}", err.message),
             Event::Done(end) => {
                 finish = Some(end.finish);

@@ -24,9 +24,19 @@ impl App {
             SessionEvent::Compacted {
                 summary,
                 context_tokens,
+                response,
             } => {
                 self.compacting = false;
                 self.context_tokens = context_tokens;
+                if let (Some(usage), Some(active), Some(pricing)) = (
+                    response.usage,
+                    self.active.as_mut(),
+                    self.agent.model.pricing.as_ref(),
+                ) {
+                    if let Some(total) = &mut active.cost_usd {
+                        *total += pricing.estimate(usage);
+                    }
+                }
                 // Compaction changes model context, not the user's scrollback.
                 // Keep prior tool details and their live block references valid.
                 self.transcript.push(Block::new(
@@ -209,30 +219,18 @@ impl App {
                     }
                 }
             }
-            SessionEvent::Usage {
-                input,
-                output,
-                cache_read,
-            } => {
-                // `input` is the inclusive prompt total per the Usage
-                // contract — adding the cached subset again would double
-                // count and trigger compaction early.
-                self.context_tokens = input.saturating_add(output);
+            SessionEvent::Usage(usage) => {
+                let prompt = usage.prompt_tokens();
+                self.context_tokens = prompt.saturating_add(usage.output);
                 if let Some(s) = &mut self.active {
                     if let (Some(total), Some(pricing)) =
                         (&mut s.cost_usd, &self.agent.model.pricing)
                     {
-                        *total += pricing.estimate(input, output, cache_read);
+                        *total += pricing.estimate(usage);
                     }
-                    // Every step resends the whole context, so `input` is the
-                    // latest request's size, not new work — summing it across
-                    // steps re-counted the same tokens once per step and
-                    // showed absurd totals for long tool loops. Latest wins
-                    // (displacing the seed estimate); only `output` — the
-                    // tokens each step actually generated — accumulates, and
-                    // the live chars/4 estimate resets to cover only what the
-                    // next step streams.
-                    s.turn.note_usage(input, output);
+                    // Every step resends the whole context, so prompt size is
+                    // latest-wins while generated output accumulates.
+                    s.turn.note_usage(prompt, usage.output);
                 }
             }
             SessionEvent::Retry {

@@ -228,7 +228,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // (Gemini sends usageMetadata per chunk), so forwarding every
         // frame would let a consumer that sums per-step usage count
         // the same tokens more than once.
-        let mut step_usage: Option<(u64, u64, u64)> = None;
+        let mut step_usage: Option<providers::Usage> = None;
         // Cumulative argument bytes this attempt, for the liveness
         // row. Deliberately not part of the retry-safety check: a
         // partial call never left the dialect, so replaying the
@@ -295,12 +295,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 ProviderEvent::ToolCallStart { .. } | ProviderEvent::ToolCallEnd { .. } => {}
                 ProviderEvent::ToolCall(call) => calls.push(call),
                 ProviderEvent::ReasoningItem(item) => reasoning_items.push(item),
-                ProviderEvent::Usage {
-                    input,
-                    output,
-                    cache_read,
-                } => {
-                    step_usage = Some((input, output, cache_read));
+                ProviderEvent::Usage(usage) => {
+                    step_usage = Some(usage);
                 }
                 ProviderEvent::Error(err) => {
                     // A suspension that outlived the resume window
@@ -525,19 +521,11 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 }
             }
         }
-        // One Usage per step, the stream's final frame: `input` is
-        // this request's full context, `output` what this step alone
-        // generated. Emitted even when the stream then errored — the
-        // tokens were still consumed.
-        if let Some((input, output, cache_read)) = step_usage {
-            last_context = input.saturating_add(output);
-            let _ = events
-                .send(SessionEvent::Usage {
-                    input,
-                    output,
-                    cache_read,
-                })
-                .await;
+        // One Usage per step, the stream's final frame. Emitted even
+        // when the stream then errored — the tokens were still consumed.
+        if let Some(usage) = step_usage {
+            last_context = usage.prompt_tokens().saturating_add(usage.output);
+            let _ = events.send(SessionEvent::Usage(usage)).await;
         } else {
             let provisional = ChatMessage::assistant(text.clone(), calls.clone());
             last_context =
@@ -568,14 +556,12 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     )
                 };
                 let unrun = calls.clone();
-                let mut final_message = ChatMessage::assistant(std::mem::take(&mut text), calls);
-                if let Some((input, output, cache_read)) = step_usage {
-                    final_message = final_message.with_usage(providers::MessageUsage {
-                        input,
-                        output,
-                        cache_read,
-                    });
-                }
+                let final_message = ChatMessage::assistant(std::mem::take(&mut text), calls)
+                    .with_response(providers::ResponseMeta::new(
+                        &model,
+                        providers::ResponsePurpose::Turn,
+                        step_usage,
+                    ));
                 log.commit_async(final_message).await;
                 for call in unrun {
                     log.commit_async(ChatMessage::tool_result_with_meta(
@@ -663,17 +649,12 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         for item in reasoning_items.drain(..) {
             log.commit_async(ChatMessage::reasoning(item)).await;
         }
-        // Commit the assistant turn (text + any calls), with the
-        // step's real usage attached when the stream reported it —
-        // the session file then carries the token accounting.
-        let mut final_message = ChatMessage::assistant(text, calls.clone());
-        if let Some((input, output, cache_read)) = step_usage {
-            final_message = final_message.with_usage(providers::MessageUsage {
-                input,
-                output,
-                cache_read,
-            });
-        }
+        // Commit the assistant turn with response provenance and any
+        // reported usage; compaction carries this metadata forward without
+        // putting it back into provider history.
+        let final_message = ChatMessage::assistant(text, calls.clone()).with_response(
+            providers::ResponseMeta::new(&model, providers::ResponsePurpose::Turn, step_usage),
+        );
         log.commit_async(final_message).await;
 
         if calls.is_empty() {

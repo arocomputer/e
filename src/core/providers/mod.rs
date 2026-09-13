@@ -183,24 +183,88 @@ pub struct ToolResultMeta {
     pub summary: String,
 }
 
-/// Token usage for one assistant step, persisted beside the message so a
-/// session file can answer "where did the time and tokens go" without the
-/// provider. `input` is the request's full context (cached tokens included,
-/// matching the dialects' Usage event), `output` what the step generated.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, serde::Deserialize)]
-pub struct MessageUsage {
+/// Disjoint token counters for one provider request. `input` excludes cache
+/// reads and writes; `prompt_tokens` reconstructs the complete context size.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, serde::Deserialize)]
+pub struct Usage {
     pub input: u64,
     pub output: u64,
+    #[serde(default)]
     pub cache_read: u64,
+    #[serde(default)]
+    pub cache_write_5m: u64,
+    #[serde(default)]
+    pub cache_write_1h: u64,
 }
 
-/// A conversation record. The tagged payload makes tool results, assistant
-/// calls, and user attachments distinct while retaining the JSONL wire shape.
+impl Usage {
+    /// Complete prompt size, including every cache category.
+    pub fn prompt_tokens(self) -> u64 {
+        self.input
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_write_5m)
+            .saturating_add(self.cache_write_1h)
+    }
+
+    /// Add another provider request without allowing malformed counters to wrap.
+    pub fn add(&mut self, other: Usage) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write_5m = self.cache_write_5m.saturating_add(other.cache_write_5m);
+        self.cache_write_1h = self.cache_write_1h.saturating_add(other.cache_write_1h);
+    }
+}
+
+/// Provenance and accounting for one model response. Session logs persist this
+/// beside, not inside, the provider-facing message and retain it through compaction.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct ResponseMeta {
+    pub id: String,
+    /// Completion time in Unix milliseconds; unlike the containing log-entry
+    /// time, this remains stable when compaction carries the response forward.
+    pub timestamp: u64,
+    pub provider: String,
+    pub model: String,
+    pub purpose: ResponsePurpose,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+impl ResponseMeta {
+    /// Mint one durable local response identity without exposing account data.
+    pub fn new(model: &catalog::Model, purpose: ResponsePurpose, usage: Option<Usage>) -> Self {
+        Self {
+            id: uuid::Uuid::now_v7().to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0),
+            provider: model.provider.clone(),
+            model: model.id.clone(),
+            purpose,
+            usage,
+        }
+    }
+}
+
+/// Why e made a provider request; non-chat work still belongs in usage totals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsePurpose {
+    Turn,
+    Compaction,
+}
+
+/// A conversation record. Response metadata is session provenance, not model
+/// input, so ordinary message serialization deliberately leaves it out.
 #[derive(Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub content: String,
     #[serde(flatten)]
     pub kind: MessageKind,
+    #[serde(skip)]
+    response: Option<Box<ResponseMeta>>,
 }
 
 /// Fields that are valid for each message role. Provider-owned reasoning
@@ -217,8 +281,6 @@ pub enum MessageKind {
     Assistant {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<MessageUsage>,
     },
     Tool {
         tool_call_id: String,
@@ -247,6 +309,7 @@ impl ChatMessage {
                 images,
                 internal: false,
             },
+            response: None,
         }
     }
 
@@ -254,10 +317,8 @@ impl ChatMessage {
     pub fn assistant(content: impl Into<String>, tool_calls: Vec<ToolCall>) -> Self {
         Self {
             content: content.into(),
-            kind: MessageKind::Assistant {
-                tool_calls,
-                usage: None,
-            },
+            kind: MessageKind::Assistant { tool_calls },
+            response: None,
         }
     }
 
@@ -266,6 +327,7 @@ impl ChatMessage {
         Self {
             content: content.into(),
             kind: MessageKind::Reasoning,
+            response: None,
         }
     }
 
@@ -277,6 +339,7 @@ impl ChatMessage {
                 tool_call_id: call_id.into(),
                 tool_meta: None,
             },
+            response: None,
         }
     }
 
@@ -296,15 +359,24 @@ impl ChatMessage {
                     summary: summary.into(),
                 }),
             },
+            response: None,
         }
     }
 
-    /// Attach provider accounting to an assistant record.
-    pub fn with_usage(mut self, observed: MessageUsage) -> Self {
-        if let MessageKind::Assistant { usage, .. } = &mut self.kind {
-            *usage = Some(observed);
-        }
+    /// Attach response provenance for session persistence; provider dialects ignore it.
+    pub fn with_response(mut self, response: ResponseMeta) -> Self {
+        self.response = Some(Box::new(response));
         self
+    }
+
+    /// Response provenance restored from a session entry, if this message caused a request.
+    pub fn response(&self) -> Option<&ResponseMeta> {
+        self.response.as_deref()
+    }
+
+    /// Restore metadata held by the session envelope, never provider history.
+    pub(crate) fn restore_response(&mut self, response: Option<ResponseMeta>) {
+        self.response = response.map(Box::new);
     }
 
     /// Mark a continuation or steering echo without counting a new user turn.
@@ -896,15 +968,9 @@ pub enum Event {
     },
     /// A completed tool request (dialects accumulate the argument deltas).
     ToolCall(ToolCall),
-    /// Token usage from the terminal usage frame. `input` is the TOTAL
-    /// prompt-side count — cached tokens included — so it alone measures
-    /// context size; `cache_read` is the informational cached subset.
-    /// Dialects whose wire fields are disjoint sum them into `input`.
-    Usage {
-        input: u64,
-        output: u64,
-        cache_read: u64,
-    },
+    /// Disjoint counters from the terminal usage frame. Dialects normalize
+    /// inclusive wire totals before this crosses the provider seam.
+    Usage(Usage),
     /// A Responses-dialect reasoning item (verbatim JSON): the API demands
     /// it be resent ahead of the function calls it produced, so the agent
     /// stores it in history and the dialect replays it.

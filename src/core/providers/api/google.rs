@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, send_request, with_attribution, Event, FinishReason, ProviderError,
-    Request, SseStream, StreamEnd, ToolCall,
+    Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 /// Older Gemini responses carried no wire id. A UUID fallback stays unique
@@ -166,7 +166,7 @@ pub async fn run(
 
     let response_context = crate::core::providers::ResponseContext::from_response(&response);
     let mut sse = SseStream::new(response.bytes_stream()).with_response(response_context);
-    let mut usage: Option<(u64, u64, u64)> = None;
+    let mut usage: Option<Usage> = None;
     loop {
         let payload = sse.next().await?;
         let value: serde_json::Value = match serde_json::from_str(&payload) {
@@ -184,12 +184,15 @@ pub async fn run(
         }
         if let Some(meta) = value.get("usageMetadata").filter(|u| u.is_object()) {
             // Cumulative — the latest frame wins. Thought tokens are output.
-            usage = Some((
-                meta["promptTokenCount"].as_u64().unwrap_or(0),
-                meta["candidatesTokenCount"].as_u64().unwrap_or(0)
+            let total = meta["promptTokenCount"].as_u64().unwrap_or(0);
+            let cached = meta["cachedContentTokenCount"].as_u64().unwrap_or(0);
+            usage = Some(Usage {
+                input: total.saturating_sub(cached),
+                output: meta["candidatesTokenCount"].as_u64().unwrap_or(0)
                     + meta["thoughtsTokenCount"].as_u64().unwrap_or(0),
-                meta["cachedContentTokenCount"].as_u64().unwrap_or(0),
-            ));
+                cache_read: cached,
+                ..Usage::default()
+            });
         }
         if let Some(reason) = value["promptFeedback"]["blockReason"].as_str() {
             return Err(ProviderError::rejected(format!("prompt blocked: {reason}"))
@@ -242,14 +245,8 @@ pub async fn run(
             }
         }
         if let Some(reason) = candidate["finishReason"].as_str() {
-            if let Some((input, output, cache_read)) = usage {
-                let _ = tx
-                    .send(Event::Usage {
-                        input,
-                        output,
-                        cache_read,
-                    })
-                    .await;
+            if let Some(usage) = usage {
+                let _ = tx.send(Event::Usage(usage)).await;
             }
             let finish = match reason {
                 "STOP" => FinishReason::Normal,

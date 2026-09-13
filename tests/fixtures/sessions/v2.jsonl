@@ -1,0 +1,2 @@
+{"type":"session","format_version":2,"id":"response","cwd":"/tmp/e-fixture","created":3,"model":"anthropic/claude-sonnet-5"}
+{"type":"message","id":"entry-a","parent":null,"timestamp":3,"response":{"id":"response-a","timestamp":3,"provider":"anthropic","model":"claude-sonnet-5","purpose":"compaction","usage":{"input":100,"output":20,"cache_read":40,"cache_write_5m":10,"cache_write_1h":5}},"message":{"role":"user","content":"response session"}}

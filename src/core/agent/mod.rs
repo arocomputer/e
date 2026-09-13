@@ -145,12 +145,13 @@ impl TurnLog {
     fn load_compacted(
         &self,
         summary: &str,
+        response: Option<providers::ResponseMeta>,
         kept: Vec<ChatMessage>,
         cancel: &AtomicBool,
         expected: &[ChatMessage],
     ) -> bool {
         crate::core::config::home::with_home(self.home.clone(), || {
-            self.install_compacted(summary, kept, cancel, expected)
+            self.install_compacted(summary, response, kept, cancel, expected)
         })
     }
 
@@ -158,11 +159,15 @@ impl TurnLog {
     fn install_compacted(
         &self,
         summary: &str,
+        response: Option<providers::ResponseMeta>,
         kept: Vec<ChatMessage>,
         cancel: &AtomicBool,
         expected: &[ChatMessage],
     ) -> bool {
-        let seed_message = ChatMessage::user(crate::core::agent::compact::seed(summary));
+        let mut seed_message = ChatMessage::user(crate::core::agent::compact::seed(summary));
+        if let Some(response) = response {
+            seed_message = seed_message.with_response(response);
+        }
         let mut fresh_history = Vec::with_capacity(kept.len() + 1);
         fresh_history.push(seed_message.clone());
         fresh_history.extend(kept);
@@ -293,7 +298,7 @@ async fn compact_log(
         result = compact::summarize(log.model.clone(), &older, session_id) => result?,
         _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
     };
-    let mut projected = vec![ChatMessage::user(compact::seed(&summary))];
+    let mut projected = vec![ChatMessage::user(compact::seed(&summary.text))];
     projected.extend(kept.iter().cloned());
     let tokens = compact::estimate_request_tokens(system, &projected);
     if tokens >= compact::estimate_request_tokens(system, &history)
@@ -305,10 +310,17 @@ async fn compact_log(
         return Err("compaction cancelled; history was preserved".into());
     }
     let writer = log.clone();
-    let checkpoint = summary.clone();
+    let checkpoint = summary.text.clone();
+    let response = summary.response.clone();
     let installation_cancel = cancel.clone();
     let installed = tokio::task::spawn_blocking(move || {
-        writer.load_compacted(&checkpoint, kept, &installation_cancel, &history)
+        writer.load_compacted(
+            &checkpoint,
+            Some(response),
+            kept,
+            &installation_cancel,
+            &history,
+        )
     })
     .await
     .map_err(|error| format!("compaction commit failed: {error}"))?;
@@ -319,8 +331,9 @@ async fn compact_log(
         return Err("compaction could not be installed; history changed or could not be saved; history was preserved".into());
     }
     completion.send(SessionEvent::Compacted {
-        summary,
+        summary: summary.text,
         context_tokens: tokens,
+        response: summary.response,
     });
     Ok(true)
 }
@@ -424,6 +437,7 @@ pub enum SessionEvent {
     Compacted {
         summary: String,
         context_tokens: u64,
+        response: providers::ResponseMeta,
     },
     TextDelta(String),
     ReasoningDelta(String),
@@ -456,11 +470,7 @@ pub enum SessionEvent {
     },
     /// An extension tool named the session.
     Named(String),
-    Usage {
-        input: u64,
-        output: u64,
-        cache_read: u64,
-    },
+    Usage(providers::Usage),
     /// Diagnostic facts emitted immediately before the compatible Error message.
     ErrorDetails(Box<failure::ErrorDetails>),
     Error(String),
@@ -781,7 +791,7 @@ impl Agent {
         let summary = summary.to_string();
         let expected = self.history_snapshot();
         tokio::task::spawn_blocking(move || {
-            log.load_compacted(&summary, kept, &AtomicBool::new(false), &expected)
+            log.load_compacted(&summary, None, kept, &AtomicBool::new(false), &expected)
         })
         .await
         .unwrap_or(false)
@@ -1330,6 +1340,7 @@ mod option_tests {
             agent.record_user("shell output committed during summary".into());
             assert!(!log.load_compacted(
                 "stale summary",
+                None,
                 vec![],
                 &AtomicBool::new(false),
                 &snapshot
@@ -1371,7 +1382,7 @@ mod option_tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let task = std::thread::spawn(move || {
-            worker.load_compacted("summary", vec![], &worker_cancel, &expected)
+            worker.load_compacted("summary", None, vec![], &worker_cancel, &expected)
         });
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {

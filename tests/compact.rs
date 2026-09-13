@@ -19,6 +19,7 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
     let _env = env_lock();
     let reply = concat!(
         "data: {\"choices\":[{\"delta\":{\"content\":\"Goal: fix the parser. Next: run tests.\"}}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":12,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n",
         "data: [DONE]\n\n",
     );
     let (port, server) = serve_sse(&[reply]);
@@ -52,7 +53,12 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
     let summary = e::core::agent::compact::summarize(model.clone(), &history[..3], String::new())
         .await
         .unwrap();
-    assert_eq!(summary, "Goal: fix the parser. Next: run tests.");
+    assert_eq!(summary.text, "Goal: fix the parser. Next: run tests.");
+    assert_eq!(
+        summary.response.purpose,
+        e::core::providers::ResponsePurpose::Compaction
+    );
+    assert_eq!(summary.response.usage.unwrap().input, 40);
 
     // The request carried the flattened history, tool output trimmed.
     let sent = server.join().unwrap().remove(0);
@@ -66,7 +72,11 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
 
     // The seed lands as the first message of a fresh session file.
     let (agent, _rx) = Agent::new(model);
-    assert!(agent.load_compacted(&summary, history[3..].to_vec()).await);
+    assert!(
+        agent
+            .load_compacted(&summary.text, history[3..].to_vec())
+            .await
+    );
     let seeded = agent.history_snapshot();
     assert_eq!(seeded.len(), 2, "seed plus the kept tail");
     assert!(seeded[0].content.contains("Goal: fix the parser."));
@@ -301,7 +311,7 @@ async fn one_huge_tool_call_cannot_bypass_the_summary_budget() {
     let summary = e::core::agent::compact::summarize(model, &history, String::new())
         .await
         .unwrap();
-    assert_eq!(summary, "summary");
+    assert_eq!(summary.text, "summary");
     let sent = server.join().unwrap();
     let request = request_json(&sent[0]);
     let flattened = request["messages"][1]["content"].as_str().unwrap();

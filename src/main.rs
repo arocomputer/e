@@ -501,9 +501,7 @@ struct TurnAccumulator {
     warnings: Vec<String>,
     aborted: bool,
     terminal: bool,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
+    usage: e::core::providers::Usage,
     tool_calls: u64,
     tool_failures: u64,
 }
@@ -523,15 +521,12 @@ impl TurnAccumulator {
             SessionEvent::ToolEnd { outcome, .. } if outcome.is_error() => {
                 self.tool_failures += 1;
             }
-            SessionEvent::Usage {
-                input,
-                output,
-                cache_read,
-            } => {
-                self.input_tokens = self.input_tokens.saturating_add(*input);
-                self.output_tokens = self.output_tokens.saturating_add(*output);
-                self.cache_read_tokens = self.cache_read_tokens.saturating_add(*cache_read);
+            SessionEvent::Compacted { response, .. } => {
+                if let Some(usage) = response.usage {
+                    self.usage.add(usage);
+                }
             }
+            SessionEvent::Usage(usage) => self.usage.add(*usage),
             SessionEvent::Warning(warning) => self.warnings.push(warning.clone()),
             SessionEvent::Retry {
                 attempt,
@@ -582,15 +577,14 @@ impl TurnAccumulator {
             "error_details": self.error_details,
             "warnings": self.warnings,
             "usage": {
-                "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens,
-                "cache_read_tokens": self.cache_read_tokens,
+                "input_tokens": self.usage.input,
+                "output_tokens": self.usage.output,
+                "cache_read_tokens": self.usage.cache_read,
+                "cache_write_5m_tokens": self.usage.cache_write_5m,
+                "cache_write_1h_tokens": self.usage.cache_write_1h,
+                "prompt_tokens": self.usage.prompt_tokens(),
             },
-            "cost_usd": pricing.map(|rates| rates.estimate(
-                self.input_tokens,
-                self.output_tokens,
-                self.cache_read_tokens,
-            )),
+            "cost_usd": pricing.map(|rates| rates.estimate(self.usage)),
             "tools": {"calls": self.tool_calls, "failures": self.tool_failures},
         })
     }
