@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check real terminal frames against a loopback streaming provider.
 
-Build with cargo build. Run with a Python environment containing pyte:
+Run through `./x ui`, which builds the binary and provides pyte:
   ./x ui --out /tmp/e-ui
 Artifacts contain only generated prompts and a dummy credential. Each scenario
 gets its own HOME, E_HOME, workspace, raw PTY capture, and rendered frames.

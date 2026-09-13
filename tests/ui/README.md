@@ -7,23 +7,21 @@ provider requests remain available after a pass or failure.
 
 ## Run
 
-On macOS or Linux, create a Python environment once:
-
 ```sh
-python3 -m venv /tmp/e-ui-env
-/tmp/e-ui-env/bin/pip install -r tests/ui/requirements.txt
-PYTHON=/tmp/e-ui-env/bin/python ./x ui
+./x ui
 ```
 
-`./x ui` builds the current binary and runs the seven checked scenarios. It
-prints the temporary artifact directory and exits nonzero if a check fails.
+`./x ui` builds the current binary, creates a Python environment with the
+packages in `requirements.txt` under `target/ui-env` on first run (set
+`PYTHON` to use another interpreter), and runs the seven checked scenarios.
+It prints the temporary artifact directory and exits nonzero if a check fails.
 Both Linux and macOS CI run it after `./x check` and retain artifacts on failure.
 Rust rendering and PTY tests remain part of `./x test` without Python packages.
 
 Choose one scenario or a fresh output directory:
 
 ```sh
-PYTHON=/tmp/e-ui-env/bin/python ./x ui --out /tmp/e-ui-review diff-counts
+./x ui --out /tmp/e-ui-review diff-counts
 ```
 
 | Scenario | Contract |
@@ -50,7 +48,7 @@ a success marker occurred somewhere in the raw output.
 Open a generated `.txt` snapshot or replay a `.raw` capture:
 
 ```sh
-/tmp/e-ui-env/bin/python scripts/term.py /tmp/e-ui-review/diff-counts/session.raw 100 30
+target/ui-env/bin/python scripts/term.py /tmp/e-ui-review/diff-counts/session.raw 100 30
 ```
 
 Do not print raw captures directly into your terminal. Exploratory scenarios
@@ -60,7 +58,7 @@ Older investigation scenarios remain available explicitly as capture-only
 repros. They do not claim a test pass:
 
 ```sh
-PYTHON=/tmp/e-ui-env/bin/python ./x ui --record-only narrow-trust paste-control
+./x ui --record-only narrow-trust paste-control
 ```
 
 Each scenario gets fresh `HOME`, `E_HOME`, and workspace directories. Fixtures
