@@ -25,17 +25,14 @@ impl App {
                 summary,
                 context_tokens,
                 response,
+                pricing,
             } => {
                 self.compacting = false;
                 self.context_tokens = context_tokens;
-                if let (Some(usage), Some(active), Some(pricing)) = (
-                    response.usage,
-                    self.active.as_mut(),
-                    self.agent.model.pricing.as_ref(),
-                ) {
-                    if let Some(total) = &mut active.cost_usd {
-                        *total += pricing.estimate(usage);
-                    }
+                if let (Some(usage), Some(active), Some(pricing)) =
+                    (response.usage, self.active.as_mut(), pricing.as_ref())
+                {
+                    *active.cost_usd.get_or_insert(0.0) += pricing.estimate(usage);
                 }
                 // Compaction changes model context, not the user's scrollback.
                 // Keep prior tool details and their live block references valid.
@@ -56,7 +53,9 @@ impl App {
                     sleep_stopped: false,
                     tool_blocks: std::collections::HashMap::new(),
                     pending_tools: 0,
-                    cost_usd: self.agent.model.pricing.as_ref().map(|_| 0.0),
+                    // The first usage event supplies the request model's rates;
+                    // the selected model may change while that request is live.
+                    cost_usd: None,
                 });
             }
             SessionEvent::Steered(text) => {
@@ -219,14 +218,12 @@ impl App {
                     }
                 }
             }
-            SessionEvent::Usage(usage) => {
+            SessionEvent::Usage { usage, pricing } => {
                 let prompt = usage.prompt_tokens();
                 self.context_tokens = prompt.saturating_add(usage.output);
                 if let Some(s) = &mut self.active {
-                    if let (Some(total), Some(pricing)) =
-                        (&mut s.cost_usd, &self.agent.model.pricing)
-                    {
-                        *total += pricing.estimate(usage);
+                    if let Some(pricing) = pricing {
+                        *s.cost_usd.get_or_insert(0.0) += pricing.estimate(usage);
                     }
                     // Every step resends the whole context, so prompt size is
                     // latest-wins while generated output accumulates.

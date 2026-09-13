@@ -525,7 +525,12 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // when the stream then errored — the tokens were still consumed.
         if let Some(usage) = step_usage {
             last_context = usage.prompt_tokens().saturating_add(usage.output);
-            let _ = events.send(SessionEvent::Usage(usage)).await;
+            let _ = events
+                .send(SessionEvent::Usage {
+                    usage,
+                    pricing: model.pricing.clone(),
+                })
+                .await;
         } else {
             let provisional = ChatMessage::assistant(text.clone(), calls.clone());
             last_context =

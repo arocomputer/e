@@ -526,7 +526,7 @@ impl TurnAccumulator {
                     self.usage.add(usage);
                 }
             }
-            SessionEvent::Usage(usage) => self.usage.add(*usage),
+            SessionEvent::Usage { usage, .. } => self.usage.add(*usage),
             SessionEvent::Warning(warning) => self.warnings.push(warning.clone()),
             SessionEvent::Retry {
                 attempt,

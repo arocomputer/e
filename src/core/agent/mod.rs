@@ -334,6 +334,7 @@ async fn compact_log(
         summary: summary.text,
         context_tokens: tokens,
         response: summary.response,
+        pricing: log.model.pricing.clone(),
     });
     Ok(true)
 }
@@ -438,6 +439,8 @@ pub enum SessionEvent {
         summary: String,
         context_tokens: u64,
         response: providers::ResponseMeta,
+        /// Rates captured from the model that made the request.
+        pricing: Option<providers::catalog::Pricing>,
     },
     TextDelta(String),
     ReasoningDelta(String),
@@ -470,7 +473,11 @@ pub enum SessionEvent {
     },
     /// An extension tool named the session.
     Named(String),
-    Usage(providers::Usage),
+    Usage {
+        usage: providers::Usage,
+        /// Rates captured from the model that made the request.
+        pricing: Option<providers::catalog::Pricing>,
+    },
     /// Diagnostic facts emitted immediately before the compatible Error message.
     ErrorDetails(Box<failure::ErrorDetails>),
     Error(String),
