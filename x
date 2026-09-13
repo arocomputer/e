@@ -32,9 +32,14 @@ case "$command" in
     # `cargo clean`); PYTHON points at another interpreter instead.
     if [ -z "${PYTHON:-}" ]; then
       PYTHON=target/ui-env/bin/python
-      if [ ! -x "$PYTHON" ]; then
+      # The marker records that requirements installed successfully; without
+      # it an interrupted or failed pip leaves a reusable-looking venv whose
+      # interpreter cannot import pyte, and every later run would skip the
+      # repair instead of installing again.
+      if [ ! -x "$PYTHON" ] || [ ! -f target/ui-env/.requirements-installed ]; then
         python3 -m venv target/ui-env
         target/ui-env/bin/pip install --quiet -r tests/ui/requirements.txt
+        : > target/ui-env/.requirements-installed
       fi
     fi
     "$PYTHON" tests/ui/run.py "$@"
