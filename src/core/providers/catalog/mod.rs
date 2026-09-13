@@ -89,18 +89,30 @@ pub struct Pricing {
     pub output_per_million: f64,
     #[serde(default)]
     pub cache_read_per_million: Option<f64>,
+    #[serde(default)]
+    pub cache_write_5m_per_million: Option<f64>,
+    #[serde(default)]
+    pub cache_write_1h_per_million: Option<f64>,
 }
 
 impl Pricing {
-    pub fn estimate(&self, input: u64, output: u64, cache_read: u64) -> f64 {
-        let cached = cache_read.min(input);
-        let uncached = input.saturating_sub(cached);
-        let cached_rate = self
+    /// Price disjoint provider counters; undeclared cache rates conservatively
+    /// fall back to ordinary input rather than dropping billed tokens.
+    pub fn estimate(&self, usage: super::Usage) -> f64 {
+        let cache_read = self
             .cache_read_per_million
             .unwrap_or(self.input_per_million);
-        (uncached as f64 * self.input_per_million
-            + cached as f64 * cached_rate
-            + output as f64 * self.output_per_million)
+        let cache_write_5m = self
+            .cache_write_5m_per_million
+            .unwrap_or(self.input_per_million);
+        let cache_write_1h = self
+            .cache_write_1h_per_million
+            .unwrap_or(self.input_per_million);
+        (usage.input as f64 * self.input_per_million
+            + usage.output as f64 * self.output_per_million
+            + usage.cache_read as f64 * cache_read
+            + usage.cache_write_5m as f64 * cache_write_5m
+            + usage.cache_write_1h as f64 * cache_write_1h)
             / 1_000_000.0
     }
 }
@@ -592,9 +604,16 @@ mod pricing_tests {
             input_per_million: 2.0,
             output_per_million: 8.0,
             cache_read_per_million: Some(0.5),
+            cache_write_5m_per_million: Some(2.5),
+            cache_write_1h_per_million: Some(4.0),
         };
-        // 750k uncached + 250k cached + 100k output.
-        let cost = pricing.estimate(1_000_000, 100_000, 250_000);
-        assert!((cost - 2.425).abs() < f64::EPSILON);
+        let cost = pricing.estimate(crate::core::providers::Usage {
+            input: 750_000,
+            output: 100_000,
+            cache_read: 250_000,
+            cache_write_5m: 100_000,
+            cache_write_1h: 50_000,
+        });
+        assert!((cost - 2.875).abs() < f64::EPSILON);
     }
 }
