@@ -21,6 +21,8 @@ output, cache-read, five-minute cache-write, and one-hour cache-write counters.
 It is restored as out-of-band message metadata in memory and excluded from every
 provider dialect's serialization. Copying retained messages preserves the
 response id; a compaction summary carries the summarization response on its seed.
+A response with no replayable content is written as its own entry, leaving the
+message tree unchanged.
 
 Readers continue to accept versions 0 and 1 without rewriting them. Their old
 inline usage is ignored by the core rather than translated into counters whose

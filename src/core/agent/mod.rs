@@ -80,6 +80,24 @@ impl TurnLog {
         note_persist(&self.persist_warned, result, &self.events);
     }
 
+    /// Persist a provider response with no replayable message, honoring no-save mode.
+    async fn record_response(&self, response: providers::ResponseMeta) {
+        if !self.save_session {
+            return;
+        }
+        let log = self.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut session = log.session.lock().unwrap_or_else(|e| e.into_inner());
+            match session.as_mut() {
+                Some(session) => session.append_response(response),
+                None => Ok(()),
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("response append task panicked")));
+        note_persist(&self.persist_warned, result, &self.events);
+    }
+
     /// Persist diagnostic metadata outside model history, honoring no-save mode.
     async fn record_error(&self, details: failure::ErrorDetails) {
         if !self.save_session {

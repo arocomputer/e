@@ -521,6 +521,11 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 }
             }
         }
+        // Mint response provenance once so a response with no replayable
+        // content can still be recorded, while ordinary replies attach the
+        // same envelope to their assistant message.
+        let response =
+            providers::ResponseMeta::new(&model, providers::ResponsePurpose::Turn, step_usage);
         // One Usage per step, the stream's final frame. Emitted even
         // when the stream then errored — the tokens were still consumed.
         if let Some(usage) = step_usage {
@@ -562,11 +567,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 };
                 let unrun = calls.clone();
                 let final_message = ChatMessage::assistant(std::mem::take(&mut text), calls)
-                    .with_response(providers::ResponseMeta::new(
-                        &model,
-                        providers::ResponsePurpose::Turn,
-                        step_usage,
-                    ));
+                    .with_response(response.clone());
                 log.commit_async(final_message).await;
                 for call in unrun {
                     log.commit_async(ChatMessage::tool_result_with_meta(
@@ -574,6 +575,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     ))
                     .await;
                 }
+            } else {
+                log.record_response(response.clone()).await;
             }
             if stream_cancelled {
                 break Outcome::Cancelled;
@@ -625,6 +628,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 .items
                 .is_empty()
         {
+            // The request completed and may have been billed even though it
+            // produced nothing safe to replay. Keep its response envelope out
+            // of model history before either retrying or surfacing the error.
+            log.record_response(response.clone()).await;
             if !empty_retried && max_attempts > 1 {
                 empty_retried = true;
                 let _ = events
@@ -657,9 +664,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // Commit the assistant turn with response provenance and any
         // reported usage; compaction carries this metadata forward without
         // putting it back into provider history.
-        let final_message = ChatMessage::assistant(text, calls.clone()).with_response(
-            providers::ResponseMeta::new(&model, providers::ResponsePurpose::Turn, step_usage),
-        );
+        let final_message = ChatMessage::assistant(text, calls.clone()).with_response(response);
         log.commit_async(final_message).await;
 
         if calls.is_empty() {

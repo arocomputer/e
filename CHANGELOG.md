@@ -9,8 +9,9 @@ the pipeline publishes.
 
 - Provider usage now uses disjoint uncached, cache-read, and cache-write
   counters. Saved sessions keep response identity, provider, model, purpose,
-  and usage outside replayed message content, including compaction requests;
-  copied compacted history retains the original response identity. RPC output
+  and usage outside replayed message content, including compaction requests
+  and billed blank replies; copied history retains the original response
+  identity. RPC output
   reports every category and pricing accepts separate cache-write rates.
 - Clipboard paste now handles Command+V without inserting a stray `v`, reads
   macOS image clipboards with one pasteboard probe, falls back to text, shows read

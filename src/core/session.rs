@@ -2,10 +2,11 @@
 //! `~/.e/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`.
 //!
 //! One line per entry: a `session` header, then `message` entries carrying
-//! replayable ChatMessage content and an optional response envelope. The
-//! envelope keeps provider provenance and disjoint usage out of model history;
-//! its response identity survives when compaction copies recent messages into
-//! a fresh log. The agent creates the file lazily on
+//! replayable ChatMessage content and an optional response envelope. A standalone
+//! `response` entry retains a billed reply that produced no replayable content.
+//! Envelopes keep provider provenance and disjoint usage out of model history;
+//! their identity survives when compaction copies recent messages into a fresh
+//! log. The agent creates the file lazily on
 //! the first user send, and listing also rejects header-only or assistant-only
 //! files, so opening and closing e never counts as a session. Resume replays
 //! messages back into the agent. The title is derived from the first user
@@ -68,6 +69,10 @@ enum Entry {
         response: Option<ResponseMeta>,
         message: ChatMessage,
     },
+    /// A provider response with no replayable message, such as a billed blank
+    /// reply that the turn loop retries.
+    #[serde(rename = "response")]
+    Response { response: ResponseMeta },
     /// A display name an extension set via session_name — shown in /resume,
     /// overriding the title derived from the first user message.
     #[serde(rename = "name")]
@@ -211,6 +216,14 @@ impl SessionLog {
         self.append_record(line.as_bytes())?;
         self.current = Some(id);
         Ok(())
+    }
+
+    /// Persist a response that produced no message, without changing the
+    /// replay tree or the parent of the next message.
+    pub fn append_response(&mut self, response: ResponseMeta) -> std::io::Result<()> {
+        let mut line = serde_json::to_string(&Entry::Response { response })?;
+        line.push('\n');
+        self.append_record(line.as_bytes())
     }
 
     /// Append backend diagnostics beside the session without changing its format.
