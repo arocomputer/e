@@ -12,19 +12,16 @@ use unicode_width::UnicodeWidthChar;
 
 /// Color generated attachment labels with the palette's existing light gray,
 /// leaving the user's prompt in its normal transcript style.
-fn style_image_labels(line: &str, theme: &Theme) -> String {
+fn style_image_labels(line: &str, count: usize, theme: &Theme) -> String {
     let mut rest = line;
     let mut out = String::new();
-    while let Some(after_open) = rest.strip_prefix("[Image ") {
-        let Some(close) = after_open.find(']') else {
+    for index in 1..=count {
+        let label = format!("[Image {index}]");
+        let Some(after_label) = rest.strip_prefix(&label) else {
             break;
         };
-        if close == 0 || !after_open[..close].chars().all(|ch| ch.is_ascii_digit()) {
-            break;
-        }
-        let end = "[Image ".len() + close + 1;
-        out.push_str(&theme.fg("dim", &rest[..end]));
-        rest = &rest[end..];
+        out.push_str(&theme.fg("dim", &label));
+        rest = after_label;
         if let Some(after_space) = rest.strip_prefix(' ') {
             out.push(' ');
             rest = after_space;
@@ -162,6 +159,8 @@ pub struct Block {
     pub live_preview_rows: usize,
     /// Maximum action-label rows in the transcript; review remains unabridged.
     pub tool_label_rows: usize,
+    /// Number of real image attachments whose generated prefix may be styled.
+    image_count: usize,
     cache: Option<RenderCache>,
     /// True while provider deltas are appending to this text block.
     streaming: bool,
@@ -190,10 +189,17 @@ impl Block {
             more: 0,
             live_preview_rows: 5,
             tool_label_rows: 2,
+            image_count: 0,
             cache: None,
             streaming: false,
             generation: 0,
         }
+    }
+
+    /// Mark a user block as carrying image attachments before it is rendered.
+    pub fn with_images(mut self, count: usize) -> Self {
+        self.image_count = count;
+        self
     }
 
     pub fn touch(&mut self) {
@@ -477,7 +483,7 @@ impl Block {
                         rows.push(theme.fg("userMessageText", "┃"));
                         continue;
                     }
-                    let line = style_image_labels(line, theme);
+                    let line = style_image_labels(line, self.image_count, theme);
                     for row in wrap_styled(&line, width.saturating_sub(2).max(8)) {
                         rows.push(format!("{rail}{}", bold(&row)));
                     }
@@ -1310,10 +1316,14 @@ mod tests {
     #[test]
     fn image_labels_use_the_existing_light_gray() {
         let theme = theme();
-        let styled = style_image_labels("[Image 1] [Image 2] explain this", &theme);
+        let styled = style_image_labels("[Image 1] [Image 2] explain this", 2, &theme);
         assert!(styled.contains(&theme.fg("dim", "[Image 1]")));
         assert!(styled.contains(&theme.fg("dim", "[Image 2]")));
         assert!(styled.ends_with("explain this"));
+        assert_eq!(
+            style_image_labels("[Image 1] is ordinary text", 0, &theme),
+            "[Image 1] is ordinary text"
+        );
     }
 
     /// The blink phase must not invalidate finished blocks: during a turn the

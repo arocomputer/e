@@ -948,12 +948,14 @@ impl App {
             match m.role() {
                 "user" => {
                     open_group = None;
-                    let content = if m.images().is_empty() {
+                    let count = m.images().len();
+                    let content = if count == 0 {
                         m.content.clone()
                     } else {
-                        display_image_prompt(&m.content, m.images().len())
+                        display_image_prompt(&m.content, count)
                     };
-                    self.transcript.push(Block::new(Kind::User, content));
+                    self.transcript
+                        .push(Block::new(Kind::User, content).with_images(count));
                 }
                 "assistant" => {
                     if !m.content.trim().is_empty() {
@@ -1816,8 +1818,9 @@ impl App {
             system_prompt(),
         );
         if !held {
-            self.transcript
-                .push(Block::new(Kind::User, display_image_prompt(&text, count)));
+            self.transcript.push(
+                Block::new(Kind::User, display_image_prompt(&text, count)).with_images(count),
+            );
         }
     }
 
@@ -2161,7 +2164,7 @@ fn image_labels(count: usize) -> String {
 /// Add attachment labels when the prompt text does not already carry them.
 fn display_image_prompt(text: &str, count: usize) -> String {
     let labels = image_labels(count);
-    let already_labeled = (1..=count).all(|index| text.contains(&format!("[Image {index}]")));
+    let already_labeled = text.starts_with(&labels);
     if already_labeled {
         text.to_string()
     } else if text.trim().is_empty() {
@@ -2593,9 +2596,6 @@ async fn run_scoped(
     for warning in model::config_warnings() {
         app.notice(format!("warning: {warning}"));
     }
-    for warning in crate::core::config::store::take_warnings() {
-        app.notice(format!("warning: {warning}"));
-    }
     if !agent_options.save_session {
         app.notice("session saving disabled for this run".into());
     }
@@ -2607,6 +2607,11 @@ async fn run_scoped(
     }
     if crate::core::config::trust::status(&app.agent.cwd()).is_none() {
         app.trust = Some(TrustStage::new(&app.agent.cwd()));
+    }
+    // The trust lookup may be the first read of trust.json; drain afterward so
+    // its recovery joins warnings collected while constructing the app.
+    for warning in crate::core::config::store::take_warnings() {
+        app.notice(format!("warning: {warning}"));
     }
     // The harness pattern: check for a newer release in the background at
     // launch, install it silently, and say so — the running session is

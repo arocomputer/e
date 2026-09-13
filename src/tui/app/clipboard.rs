@@ -185,15 +185,19 @@ function run(argv) {
             if (url.path.js) paths.push(ObjC.unwrap(url.path));
         }
     }
-    if (paths.length > 0) return "files" + zero + paths.join(zero) + zero;
-
     const types = ObjC.deepUnwrap(pasteboard.types);
     let data = null;
     if (types.includes("public.png")) data = pasteboard.dataForType($("public.png"));
     else if (types.includes("public.tiff")) data = pasteboard.dataForType($("public.tiff"));
-    if (!data) return "none";
-    if (!data.writeToFileAtomically($(argv[0]), true)) throw new Error("image write failed");
-    return "image";
+    // Export a bitmap even when file URLs exist. Rust prefers valid image
+    // files, but can fall back to this representation when a URL is stale or
+    // points at something unsupported.
+    if (data && !data.writeToFileAtomically($(argv[0]), true)) {
+        throw new Error("image write failed");
+    }
+    if (paths.length > 0) return "files" + zero + paths.join(zero) + zero;
+    if (data) return "image";
+    return "none";
 }
 "#;
 
@@ -221,19 +225,7 @@ function run(argv) {
         if !output.success {
             return Err("clipboard could not be read".into());
         }
-        if output.stdout.starts_with(b"image") {
-            return match ImageInput::from_path(&raw_path) {
-                Ok(image) => Ok(vec![image]),
-                Err(_) => {
-                    let converted =
-                        run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
-                    if !converted.success {
-                        return Err("clipboard image could not be converted to PNG".into());
-                    }
-                    ImageInput::from_path(&png_path).map(|image| vec![image])
-                }
-            };
-        }
+        let mut file_error = None;
         if let Some(encoded) = output.stdout.strip_prefix(b"files\0") {
             // osascript appends a newline after its result. The JXA result's
             // final NUL marks the exact payload, preserving newlines in names.
@@ -247,9 +239,25 @@ function run(argv) {
                 .map(|path| String::from_utf8(path.to_vec()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| "clipboard file path is not valid UTF-8".to_string())?;
-            return ImageInput::from_paths(&paths);
+            match ImageInput::from_paths(&paths) {
+                Ok(images) => return Ok(images),
+                Err(error) => file_error = Some(error),
+            }
         }
-        Err("clipboard does not contain a supported image".into())
+        if raw_path.metadata().is_ok_and(|metadata| metadata.len() > 0) {
+            return match ImageInput::from_path(&raw_path) {
+                Ok(image) => Ok(vec![image]),
+                Err(_) => {
+                    let converted =
+                        run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
+                    if !converted.success {
+                        return Err("clipboard image could not be converted to PNG".into());
+                    }
+                    ImageInput::from_path(&png_path).map(|image| vec![image])
+                }
+            };
+        }
+        Err(file_error.unwrap_or_else(|| "clipboard does not contain a supported image".into()))
     })();
     let _ = std::fs::remove_file(&raw_path);
     let _ = std::fs::remove_file(&png_path);

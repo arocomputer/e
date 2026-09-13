@@ -8,12 +8,12 @@ the pipeline publishes.
 ## Unreleased
 
 - Clipboard paste now handles Command+V without inserting a stray `v`, reads
-  macOS image clipboards with one helper launch, falls back to text, shows read
+  macOS image clipboards with one pasteboard probe, falls back to text, shows read
   and attachment state outside editable history, colors `[Image n]` labels in
   the existing light gray, and defers Enter until the clipboard result arrives.
   Scoped-model settings show preserved unavailable IDs and accurate availability
-  counts; corrupt configuration warnings name
-  the recovery file instead of silently presenting defaults.
+  counts; corrupt settings warnings name the recovery file instead of silently
+  presenting defaults.
 - Restore compact Inline mode by default. `/settings` now offers TUI Mode with
   Inline and Fullscreen choices; existing `composer_position: bottom` preferences
   remain supported until a new mode is saved.
