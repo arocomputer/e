@@ -148,10 +148,7 @@ short errors, and colored diff counts. See [tests/ui/README.md](../tests/ui/READ
 for checked scenarios and capture-only repros of paste safety and trust panels:
 
 ```sh
-cargo build
-python3 -m venv /tmp/e-replay-venv
-/tmp/e-replay-venv/bin/pip install -r tests/ui/requirements.txt
-PYTHON=/tmp/e-replay-venv/bin/python ./x ui --out /tmp/e-replay-new
+./x ui --out /tmp/e-replay-new
 ```
 
 Use a fresh output directory. Read the generated `.txt` frames or replay the
