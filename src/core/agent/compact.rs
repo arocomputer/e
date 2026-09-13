@@ -11,7 +11,9 @@
 //! kept messages — the old session stays fully resumable.
 
 use crate::core::providers::catalog::Model;
-use crate::core::providers::{self, ChatMessage, Event, Request};
+use crate::core::providers::{
+    self, ChatMessage, Event, Request, ResponseMeta, ResponsePurpose, Usage,
+};
 
 /// Ceiling of the auto-compact reserve (large windows).
 pub const RESERVE_TOKENS: u64 = 16_384;
@@ -130,12 +132,19 @@ pub fn split(history: &[ChatMessage], context_window: u64) -> (Vec<ChatMessage>,
 /// `session_id` carries the conversation's stable id so the summarization
 /// request rides the same gateway session as the turn it compacts (empty for
 /// an unsaved session).
+#[derive(Debug)]
+pub struct Summary {
+    pub text: String,
+    pub response: ResponseMeta,
+}
+
 pub async fn summarize(
     model: Model,
     history: &[ChatMessage],
     session_id: String,
-) -> Result<String, String> {
+) -> Result<Summary, String> {
     let flattened = budget_transcript(history, model.context_window)?;
+    let response_model = model.clone();
     let request = Request {
         model,
         system: SYSTEM.into(),
@@ -147,10 +156,12 @@ pub async fn summarize(
     let (mut rx, handle) = providers::stream(request);
     let _stream = StreamGuard(handle);
     let mut summary = String::new();
+    let mut usage: Option<Usage> = None;
     let mut complete = false;
     while let Some(event) = rx.recv().await {
         match event {
             Event::TextDelta(d) => summary.push_str(&d),
+            Event::Usage(observed) => usage = Some(observed),
             Event::Error(err) => return Err(err.message),
             Event::Done(end) => {
                 if !matches!(end.finish, providers::FinishReason::Normal) || end.malformed > 0 {
@@ -168,7 +179,10 @@ pub async fn summarize(
     if summary.trim().is_empty() {
         return Err("the model returned an empty summary".into());
     }
-    Ok(summary.trim().to_string())
+    Ok(Summary {
+        text: summary.trim().to_string(),
+        response: ResponseMeta::new(&response_model, ResponsePurpose::Compaction, usage),
+    })
 }
 
 /// Cancel the provider task when a summarization future is dropped.

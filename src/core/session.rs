@@ -2,7 +2,11 @@
 //! `~/.e/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`.
 //!
 //! One line per entry: a `session` header, then `message` entries carrying
-//! the same ChatMessage the agent uses. The agent creates the file lazily on
+//! replayable ChatMessage content and an optional response envelope. A standalone
+//! `response` entry retains a billed reply that produced no replayable content.
+//! Envelopes keep provider provenance and disjoint usage out of model history;
+//! their identity survives when compaction copies recent messages into a fresh
+//! log. The agent creates the file lazily on
 //! the first user send, and listing also rejects header-only or assistant-only
 //! files, so opening and closing e never counts as a session. Resume replays
 //! messages back into the agent. The title is derived from the first user
@@ -28,12 +32,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::core::config::home;
-use crate::core::providers::ChatMessage;
+use crate::core::providers::{ChatMessage, ResponseMeta};
 
-/// Current on-disk session format. Version 0 is the header shape written by
-/// pre-release builds before the field existed; readers deliberately retain
-/// support for it.
-pub const FORMAT_VERSION: u32 = 1;
+/// Current on-disk session format. Version 2 separates response provenance
+/// from replayable messages. Readers still accept earlier logs; their inline
+/// usage is ignored rather than perpetuating the old mixed contract.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -56,13 +60,19 @@ enum Entry {
         #[serde(default)]
         parent: Option<String>,
         /// Wall-clock write time, epoch milliseconds. Absent (0) on records
-        /// written before timestamps existed; diagnosis of a session — where
-        /// did the time and tokens go — reads this beside each message's
-        /// `usage`.
+        /// written before timestamps existed. Response completion time lives
+        /// in the response envelope so copied history keeps its original day.
         #[serde(default)]
         timestamp: u64,
+        /// Provider provenance stays outside replayable message content.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<ResponseMeta>,
         message: ChatMessage,
     },
+    /// A provider response with no replayable message, such as a billed blank
+    /// reply that the turn loop retries.
+    #[serde(rename = "response")]
+    Response { response: ResponseMeta },
     /// A display name an extension set via session_name — shown in /resume,
     /// overriding the title derived from the first user message.
     #[serde(rename = "name")]
@@ -199,12 +209,21 @@ impl SessionLog {
             id: id.clone(),
             parent: self.current.clone(),
             timestamp: now_ms(),
+            response: message.response().cloned(),
             message: message.clone(),
         })?;
         line.push('\n');
         self.append_record(line.as_bytes())?;
         self.current = Some(id);
         Ok(())
+    }
+
+    /// Persist a response that produced no message, without changing the
+    /// replay tree or the parent of the next message.
+    pub fn append_response(&mut self, response: ResponseMeta) -> std::io::Result<()> {
+        let mut line = serde_json::to_string(&Entry::Response { response })?;
+        line.push('\n');
+        self.append_record(line.as_bytes())
     }
 
     /// Append backend diagnostics beside the session without changing its format.
@@ -372,8 +391,10 @@ impl SessionLog {
                     id,
                     parent,
                     timestamp: _,
-                    message,
+                    response,
+                    mut message,
                 }) => {
+                    message.restore_response(response);
                     let (id, parent) = if id.is_empty() {
                         (format!("legacy-{}", out.len()), previous.clone())
                     } else {
@@ -766,18 +787,21 @@ mod tests {
                 id: "a".into(),
                 parent: None,
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::user("the real prompt"),
             },
             Entry::Message {
                 id: "b".into(),
                 parent: Some("a".into()),
                 timestamp: 0,
+                response: None,
                 message: steered,
             },
             Entry::Message {
                 id: "c".into(),
                 parent: Some("b".into()),
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::assistant("reply", Vec::new()),
             },
         ];
@@ -814,24 +838,28 @@ mod tests {
                 id: "root".into(),
                 parent: None,
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::user("root"),
             },
             Entry::Message {
                 id: "abandoned".into(),
                 parent: Some("root".into()),
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::assistant("old tail", Vec::new()),
             },
             Entry::Message {
                 id: "branch".into(),
                 parent: Some("root".into()),
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::user("new branch"),
             },
             Entry::Message {
                 id: "head".into(),
                 parent: Some("branch".into()),
                 timestamp: 0,
+                response: None,
                 message: ChatMessage::assistant("new answer", Vec::new()),
             },
         ];

@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, send_request, with_attribution, Event, FailureCause, FinishReason,
-    ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 pub async fn run(
@@ -279,12 +279,14 @@ pub async fn run(
                         let cached = usage["input_tokens_details"]["cached_tokens"]
                             .as_u64()
                             .unwrap_or(0);
+                        let total = usage["input_tokens"].as_u64().unwrap_or(0);
                         let _ = tx
-                            .send(Event::Usage {
-                                input: usage["input_tokens"].as_u64().unwrap_or(0),
+                            .send(Event::Usage(Usage {
+                                input: total.saturating_sub(cached),
                                 output: usage["output_tokens"].as_u64().unwrap_or(0),
                                 cache_read: cached,
-                            })
+                                ..Usage::default()
+                            }))
                             .await;
                     }
                     // `response.incomplete` is a truncated reply the API still

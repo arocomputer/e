@@ -36,6 +36,11 @@
 - The default system prompt asks for concise answers and clear file paths.
 - Changelogs and GitHub releases use short summaries and grouped bullets, without an appended install block.
 
+- Provider usage now uses disjoint uncached, cache-read, and cache-write
+  counters. Saved sessions keep response identity, provider, model, purpose,
+  and usage outside replayed message content, including compaction requests
+  and billed blank replies; copied history retains the original response identity. RPC output reports every category and pricing accepts separate cache-write rates.
+
 ### Bug fixes
 
 - Deleting a pasted-text or diff marker discards its hidden payload. Diff markers select on the first Backspace and delete on the second. History and completion preserve attachments that remain in the draft, and CRLF pastes no longer gain extra newlines.

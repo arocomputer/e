@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, retry_after_seconds, send_request, with_attribution, Event,
-    FinishReason, ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    FinishReason, ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 /// Provider/model/level combinations that rejected our `reasoning_effort`
@@ -291,12 +291,14 @@ pub async fn run(
                 let cached = usage["prompt_tokens_details"]["cached_tokens"]
                     .as_u64()
                     .unwrap_or(0);
+                let total = usage["prompt_tokens"].as_u64().unwrap_or(0);
                 let _ = tx
-                    .send(Event::Usage {
-                        input: usage["prompt_tokens"].as_u64().unwrap_or(0),
+                    .send(Event::Usage(Usage {
+                        input: total.saturating_sub(cached),
                         output: usage["completion_tokens"].as_u64().unwrap_or(0),
                         cache_read: cached,
-                    })
+                        ..Usage::default()
+                    }))
                     .await;
             }
         }
