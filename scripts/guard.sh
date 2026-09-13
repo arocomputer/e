@@ -29,9 +29,10 @@ prod_rs() {
 #    else — in the shipped binary (src/) or its dev tooling (scripts/). A new
 #    host means a new place user data can go — add it here deliberately or
 #    the build fails.
-allowed_hosts="localhost models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com github.com ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
+# Numeric loopback is used by tests/ui/run.py's synthetic streaming server.
+allowed_hosts="localhost 127.0.0.1 models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com github.com ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
 found_hosts=$(
-  { prod_rs $(find src -name '*.rs' 2>/dev/null); find scripts -type f 2>/dev/null | xargs cat 2>/dev/null; } |
+  { prod_rs $(find src -name '*.rs' 2>/dev/null); find scripts tests/ui -type f ! -path '*/__pycache__/*' -exec cat -- {} + 2>/dev/null; } |
     grep -ohE 'https?://[A-Za-z0-9.-]+' | sed -E 's#https?://##' | sort -u
 )
 for host in $found_hosts; do
@@ -62,15 +63,19 @@ fi
 if out=$(prod_rs $(find src/core -name '*.rs' 2>/dev/null) | grep -E 'fs::write|File::create|OpenOptions' |
     grep -v '^src/core/config/store.rs:' | grep -v '^src/core/session.rs:' |
     grep -v '^src/core/config/home.rs:' | grep -v '^src/core/tools/' |
-    grep -v '^src/core/update.rs:' | grep -v '^src/core/providers/diagnostics.rs:' |
-    grep -v '^src/core/diff.rs:.*OpenOptions::new()'); then
+    grep -v '^src/core/update.rs:' | grep -v '^src/core/providers/diagnostics.rs:'); then
   bad "direct file write in src/core outside audited store/session/tool/update/diagnostics paths:"
   say "$out"
 fi
 
-# The diff reader uses OpenOptions for O_NOFOLLOW, never for writes.
-if out=$(prod_rs src/core/diff.rs | grep -E '\.(write|append|create|create_new)\(|\.truncate\((true|false)\)|O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)'); then
+# The diff extension reads with O_NOFOLLOW, never for writes; and it spawns
+# only a git binary resolved from absolute, workspace-outside PATH entries.
+if out=$(prod_rs packages/diff/src/diff.rs | grep -E '\.(write|append|create|create_new)\(|\.truncate\((true|false)\)|O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)'); then
   bad "write-capable file options in the read-only diff reader:"
+  say "$out"
+fi
+if out=$(prod_rs packages/diff/src/diff.rs | grep -E 'Command::new\(' | grep -v 'Command::new(program)'); then
+  bad "diff extension spawns a program it did not resolve through the trusted git path:"
   say "$out"
 fi
 

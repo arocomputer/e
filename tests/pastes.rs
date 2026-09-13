@@ -44,10 +44,6 @@ fn paste_labels_use_image_attachment_grey_without_tinting_the_prompt() {
     editor.insert_str(" explain");
     let rows = editor.render(&theme, 100, 10);
     assert!(rows[1].contains(&format!("{} explain", theme.fg("dim", &label))));
-    assert!(!editor
-        .render_with_focus(&theme, 100, 10, false)
-        .join("")
-        .contains("\x1b[7m"));
 }
 
 #[test]

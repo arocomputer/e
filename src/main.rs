@@ -25,7 +25,7 @@ use e::tui::app;
 fn print_help(host: &e::core::extensions::ExtensionHost) {
     println!(
         "e — a coding agent for your terminal\n\n\
-usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin counts as prompt text)\n  \
+usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use `e rpc` headless)\n  \
 e -c, --continue      continue this directory's most recent session\n  \
 e -r, --resume        pick a session to resume\n  \
 e rpc                 JSONL request/response protocol on stdin/stdout\n  \
@@ -252,6 +252,23 @@ async fn main() -> std::io::Result<()> {
     };
     let args = &options.positional;
 
+    // Diagnostics were classified before extensions started (above); one
+    // arriving here rode in behind an extension flag the raw scan could not
+    // tell from a value-taking one. Refuse rather than send the word to the
+    // model as a prompt with extensions running.
+    if matches!(
+        leading_positional_subcommand(&options),
+        Some("doctor" | "providers")
+    ) {
+        usage_error(
+            &host,
+            json_requested,
+            "diagnostics cannot follow extension flags — run `e doctor` or `e providers` first"
+                .into(),
+        )
+        .await;
+    }
+
     // One isolated near-miss word is a mistyped command, not a prompt.
     if let Some(message) = unknown_command_hint(&options) {
         usage_error(&host, false, message).await;
@@ -302,6 +319,11 @@ async fn main() -> std::io::Result<()> {
                 "e {} is not a release build — update from source, not e update",
                 e::VERSION
             );
+            host.shutdown().await;
+            return Ok(());
+        }
+        if e::core::update::target().is_none() {
+            println!("{}", e::core::update::NO_RELEASE);
             host.shutdown().await;
             return Ok(());
         }
@@ -475,6 +497,7 @@ fn rpc_options(defaults: &Options, request: &RpcRequest) -> Result<Options, Stri
 struct TurnAccumulator {
     output: String,
     error: Option<String>,
+    error_details: Option<e::core::agent::failure::ErrorDetails>,
     warnings: Vec<String>,
     aborted: bool,
     terminal: bool,
@@ -520,6 +543,9 @@ impl TurnAccumulator {
                 "{} — retrying ({attempt}/{limit}) in {delay_secs}s: {reason}",
                 cause.label()
             )),
+            SessionEvent::ErrorDetails(details) => {
+                self.error_details = Some(details.as_ref().clone())
+            }
             SessionEvent::Error(message) => self.error = Some(message.clone()),
             SessionEvent::TurnEnd { aborted } => {
                 self.aborted = *aborted;
@@ -553,6 +579,7 @@ impl TurnAccumulator {
             "effort": effort,
             "aborted": self.aborted,
             "error": self.error,
+            "error_details": self.error_details,
             "warnings": self.warnings,
             "usage": {
                 "input_tokens": self.input_tokens,

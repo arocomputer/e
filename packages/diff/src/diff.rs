@@ -26,9 +26,12 @@ pub struct Snapshot {
     pub patch: String,
 }
 
-/// Run Git without a shell, pager, external diff, or index refresh writes.
+/// Run Git without a shell, pager, external diff, or index refresh writes,
+/// and only ever a trusted executable: a repository must not be able to run
+/// its own `git` through a relative PATH entry like `.`.
 async fn git(cwd: &Path, args: &[OsString]) -> Result<(bool, Vec<u8>, bool), String> {
-    let mut child = tokio::process::Command::new("git")
+    let program = git_program()?;
+    let mut child = tokio::process::Command::new(program)
         .args([
             "--no-pager",
             "--literal-pathspecs",
@@ -68,6 +71,62 @@ async fn git(cwd: &Path, args: &[OsString]) -> Result<(bool, Vec<u8>, bool), Str
     result
 }
 
+/// The Git executable, resolved once per process from absolute PATH entries
+/// that live outside the workspace, falling back to the usual system
+/// locations. Relative entries (`.`) and anything inside the current
+/// directory are rejected: the classic workspace attack is a dropped `git`
+/// plus a PATH that resolves it through the repository.
+fn git_program() -> Result<PathBuf, String> {
+    static GIT: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    GIT.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let workspace = cwd.canonicalize().unwrap_or(cwd);
+        resolve_git(std::env::var_os("PATH").as_deref(), &workspace)
+            .map(Ok)
+            .unwrap_or_else(|| {
+                Err("no trusted git executable found on an absolute PATH entry".into())
+            })
+    })
+    .clone()
+}
+
+/// Absolute, workspace-outside executables named `git`: the user's PATH first
+/// (their chosen install wins), then the standard system locations. Public
+/// and pure so the trust boundary can be tested directly.
+pub fn resolve_git(path: Option<&std::ffi::OsStr>, workspace: &Path) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = std::env::split_paths(path.unwrap_or_default())
+        .filter(|entry| entry.is_absolute())
+        .map(|entry| entry.join("git"))
+        .collect();
+    candidates.extend(
+        [
+            "/usr/bin/git",
+            "/usr/local/bin/git",
+            "/opt/homebrew/bin/git",
+        ]
+        .map(PathBuf::from),
+    );
+    candidates.into_iter().find(|candidate| {
+        let executable = |path: &Path| {
+            let Ok(meta) = std::fs::metadata(path) else {
+                return false;
+            };
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                meta.is_file() && meta.permissions().mode() & 0o111 != 0
+            }
+            #[cfg(not(unix))]
+            meta.is_file()
+        };
+        executable(candidate)
+            && candidate
+                .canonicalize()
+                .ok()
+                .is_some_and(|resolved| !resolved.starts_with(workspace) && executable(&resolved))
+    })
+}
+
 fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
 }
@@ -104,28 +163,30 @@ fn numstat(bytes: &[u8]) -> Result<Vec<File>, String> {
 }
 
 /// Read a new file for stats or preview. Symlinks show their target, never its contents.
-async fn new_text(path: &Path) -> Result<Option<String>, String> {
-    let meta = tokio::fs::symlink_metadata(path)
+async fn new_text(root: &Path, rel: &Path) -> Result<Option<String>, String> {
+    let path = root.join(rel);
+    let meta = tokio::fs::symlink_metadata(&path)
         .await
         .map_err(|e| e.to_string())?;
     if meta.file_type().is_symlink() {
-        return tokio::fs::read_link(path)
+        return tokio::fs::read_link(&path)
             .await
             .map(|p| Some(p.to_string_lossy().into_owned()))
             .map_err(|e| e.to_string());
     }
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    let (root, rel) = (root.to_path_buf(), rel.to_path_buf());
+    let file = tokio::task::spawn_blocking(move || open_in_root(&root, &rel))
+        .await
+        .map_err(|e| e.to_string())??;
+    // fstat on the fd actually opened, not a racy path stat.
+    let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.is_file() || meta.len() > MAX_FILE {
         return Ok(None);
     }
-    let file = tokio::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .await
-        .map_err(|e| e.to_string())?;
-    if !file.metadata().await.map_err(|e| e.to_string())?.is_file() {
-        return Ok(None);
-    }
+    let file = tokio::fs::File::from_std(file);
     let mut bytes = Vec::new();
     file.take(MAX_FILE + 1)
         .read_to_end(&mut bytes)
@@ -135,6 +196,41 @@ async fn new_text(path: &Path) -> Result<Option<String>, String> {
         return Ok(None);
     }
     Ok(String::from_utf8(bytes).ok())
+}
+
+/// Open one file below `root` for reading without following symlinks in any
+/// component between the root and the target. A final-component check alone
+/// (`O_NOFOLLOW` on the last open) still lets an attacker replace an
+/// intermediate directory with a symlink between listing and reading;
+/// directory-FD traversal closes that window. Public for testing.
+pub fn open_in_root(root: &Path, rel: &Path) -> Result<std::fs::File, String> {
+    use rustix::fs::{openat, Mode, OFlags, CWD};
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err("path escapes the review root".into());
+    }
+    let mut dir = openat(
+        CWD,
+        root,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut parts = rel.components().peekable();
+    while let Some(part) = parts.next() {
+        let mut flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+        if parts.peek().is_some() {
+            flags |= OFlags::DIRECTORY;
+        } else {
+            // A directory swapped for a FIFO must not hang the read.
+            flags |= OFlags::NONBLOCK;
+        }
+        dir = openat(&dir, part.as_os_str(), flags, Mode::empty()).map_err(|e| e.to_string())?;
+    }
+    Ok(std::fs::File::from(dir))
 }
 
 /// A bounded review document. Every patch keeps its original path, including
@@ -219,7 +315,7 @@ async fn scan(cwd: &Path) -> Result<(PathBuf, Vec<OsString>, Vec<File>), String>
         if files.iter().any(|file| file.path == path) {
             continue;
         }
-        let text = new_text(&root.join(&path)).await.ok().flatten();
+        let text = new_text(&root, &path).await.ok().flatten();
         files.push(File {
             path,
             added: text.as_ref().map(|s| s.lines().count()),
@@ -238,7 +334,7 @@ async fn scan(cwd: &Path) -> Result<(PathBuf, Vec<OsString>, Vec<File>), String>
 async fn patch(root: &Path, diff_options: &[OsString], file: &File) -> Result<String, String> {
     let mut patch;
     if file.new {
-        patch = match new_text(&root.join(&file.path)).await? {
+        patch = match new_text(root, &file.path).await? {
             Some(text) if text.is_empty() => "Empty new file".into(),
             Some(text) => {
                 let mut patch = format!("@@ -0,0 +1,{} @@\n", text.lines().count());

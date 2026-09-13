@@ -11,9 +11,12 @@ falls back to e's built-in bindings untouched.
 }
 ```
 
-- A chord is `[ctrl+][alt+][shift+]<key>`, any order, case-insensitive.
-  `<key>` is `enter`, `backspace`, `delete`, `left`, `right`, `up`, `down`,
-  `home`, `end`, or a single character.
+- A chord is `[ctrl+][alt+][shift+]<key>`, modifiers in any order,
+  case-insensitive. `<key>` is `enter`, `backspace`, `delete`, `left`,
+  `right`, `up`, `down`, `home`, `end`, or a single character — `+` and `-`
+  included (`ctrl+-`, `ctrl++`): modifiers are read off the front and
+  whatever remains is the key. A capital letter is spelled with its
+  modifier, `shift+a`, since that is how the terminal reports it.
 - The value is an action name — `enter`, `newline`, `backspace`, `delete`,
   `left`, `right`, `up`, `down`, `word_left`, `word_right`, `home`, `end`,
   `kill_to_end`, `kill_to_start`, `kill_word` — or `"none"` to unbind a
@@ -27,25 +30,28 @@ Apply instantly with `/reload` (or after closing `/settings`).
 
 ## Full transcript
 
-`Ctrl+O` opens full detail at the latest output. Tool results wrap with a
-primary-colour `│` and two spaces before the dim text, matching fx's current
-reader. The footer has a navigation row, a blank row, and the usual model and
-context status. There is no separate Review depth.
+`Ctrl+O` opens the review screen at the latest output. Tool details wrap with
+the reference's `│` rails. The footer has a navigation row, a blank row, and
+the usual model and context status. The screen has two depths:
+Review folds each tool detail to three lines behind a `→ to expand` hint;
+Full shows every row.
 
 - `Up`/`Down` scroll one row; the mouse wheel scrolls three.
 - `PageUp`/`PageDown` scroll a page. `Home`/`End` jump to the ends.
+- `←`/`→` switch between the Review and Full depths.
 - Scrolling up pauses following new output. Returning to the bottom resumes it.
 - `Ctrl+O` or `Esc` closes the reader. `Ctrl+C` closes it and retains e's global
   cancellation behavior. Typing and pasting in the reader leave the draft alone.
 
 The reader uses the alternate terminal screen, so it does not replace normal
-scrollback with expanded tool output. Opening it from `/diff` keeps the diff
-panel underneath. Closing returns to the previous view and preserves the draft.
+scrollback with expanded tool output. Closing returns to the previous view and
+preserves the draft.
 
 Set `transcript_hint` in `~/.e/settings.json` to override the footer wording.
-It applies on the next open. The default is
-`full detail · ctrl+o close · pgup/pgdn scroll · esc close`.
-Themes can override `toolDetailRail`, which defaults to the terminal foreground.
+It applies on the next open, at both depths. The defaults are
+`Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close` and
+`Full detail · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close`.
+The rail connector renders in the theme's `muted` tone.
 
 The reference layout is in
 [fx's transcript footer](https://github.com/vercel-labs/fx/blob/8f2271f89466133b9ad3c591b5a6d5199444c7e7/src/ui/footer/paint_plan.zig).
@@ -81,10 +87,41 @@ These preferences in `~/.e/settings.json` take effect in a new editor:
 
 ## Diff review
 
-`/diff` opens a mouse-driven review document above the shared composer.
-Scroll the pane with the wheel, click file summaries to jump, and drag source
-to add an inline diff attachment on release. Keyboard input stays with the
-composer. Enter sends the prompt without closing review. Backspace selects a
-diff attachment first; a second Backspace removes its payload and marker.
+`/diff` is not built in. It ships as the `packages/diff` extension: install
+the `e-diff` binary into `~/.e/extensions/` and the command prints the
+current Git review — file summaries and patches — into the transcript.
+`/diff <path>` prints one file's patch. Keyboard and mouse behavior are
+unchanged while it reads; see `docs/diff.md` for comparison rules,
+limits, and preferences.
 
-See `e docs diff` for comparison rules and preferences.
+  (ctrl+c, ctrl+p, ctrl+v or Command+V for clipboard image/text paste, tab,
+  shift+tab, menu navigation) reach this keymap — binding one of those here has no effect,
+  since the app-level handler runs first.
+
+Apply instantly with `/reload` (or after closing `/settings`).
+
+## Global cancellation and trust navigation
+
+Ctrl+C works in every panel. The first press cancels active work and sign-in,
+clears the draft and any held launch prompt, closes trust and queue navigation,
+and arms exit. Press it again within 1.5 seconds to quit.
+Quitting at the trust question does not record a trust decision.
+
+Long trust questions and choices wrap. If they exceed the terminal height,
+PgUp/PgDn scroll the text without changing the choice; Up/Down change the choice
+and reveal its label. The scrolling hint can be overridden with
+`"trust_scroll_hint"` in `~/.e/settings.json`.
+
+Pastes normalize CRLF and standalone CR to one newline each. Terminal control
+characters in a draft display as replacement characters, while tabs display
+as spaces. The underlying draft retains those characters for submission.
+Up/Down preserve display columns across wide and combining characters.
+
+## Shell composer
+
+Typing `!` as the first character replaces the first `┃` gutter with a green
+`!`, using the theme's `bashMode` token. Command text keeps its normal color;
+wrapped lines keep neutral rails. Deleting the leading `!` restores the normal
+composer. The draft and submitted command retain the original prefix. When
+that prefix is `! `, its space remains editable in the gutter, with its own
+cursor and selection highlight.

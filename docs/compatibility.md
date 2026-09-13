@@ -36,6 +36,12 @@ resuming their sessions with the new writer; mixed PID-lock and OS-lock
 writers must not open the same session concurrently. Existing JSONL needs
 no migration. Empty `.lock` sidecars are expected and should not be deleted.
 
+Provider failure diagnostics use separate `<session-stem>.errors.jsonl` files,
+leaving version 1 message logs unchanged and readable by older versions. These
+sidecars carry their own `format_version: 1` and link records to message IDs.
+They can be removed without changing conversation history. Headless responses
+add an optional `error_details` object while retaining the `error` string.
+
 On Unix, e creates its state directories with `0700` and session logs with
 `0600`. Configuration writes and session creation or reopening also tighten
 the e home directory to `0700`, protecting older files underneath it without
@@ -59,6 +65,16 @@ creator. On Unix, the parent directory is synced before success is reported.
 Unix writes also check that the target still names the opened inode before
 and after copying. A detected external replacement fails the write so the
 caller can reread and retry; external writers still need their own coordination.
+
+Tool integer arguments accept JSON unsigned integers, integral JSON floats below
+2^64, and decimal integer strings within the u64 range. Out-of-range values fail
+validation instead of saturating. A read line larger than the output window is
+reported as an error with an offset to skip it, never as a complete truncated
+line. Files and saved sessions need no migration.
+
+On filesystems without hard links, a failed new-file copy removes its partial
+target when it still identifies the created file. Freshness checks allow a
+confirmed deletion but fail closed on other metadata errors.
 
 ## Not a supported contract
 

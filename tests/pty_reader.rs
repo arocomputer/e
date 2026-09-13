@@ -66,7 +66,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
         .current_dir(workspace)
         .env("E_HOME", &home.dir)
         .env("CAP_PROMPT", "\u{f}")
-        .env("CAP_WAIT_FOR", "full detail · ctrl+o close")
+        .env("CAP_WAIT_FOR", "Review · ←/→ switch")
         .env("CAP_EXIT", "\u{f}")
         .env("CAP_EXIT_WAIT", "1")
         .output()
@@ -87,7 +87,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
         review.contains("READER_OUTPUT_END"),
         "reader opened blank or at the wrong end"
     );
-    assert!(review.contains("full detail · ctrl+o close · pgup/pgdn scroll · esc close"));
+    assert!(review.contains("Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close"));
     assert!(
         !restored.contains("READER_OUTPUT_END"),
         "full output leaked into normal transcript"

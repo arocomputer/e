@@ -124,6 +124,7 @@ fn future_configuration_formats_are_never_downgraded() {
 #[test]
 fn a_corrupt_file_is_quarantined_not_reset() {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = e::core::config::store::take_warnings();
     let h = home("corrupt");
     std::fs::write(h.join("settings.json"), "{ this is not json").unwrap();
 
@@ -137,8 +138,16 @@ fn a_corrupt_file_is_quarantined_not_reset() {
     let quarantined = std::fs::read_dir(&h)
         .unwrap()
         .flatten()
-        .any(|e| e.file_name().to_string_lossy().contains("corrupt-"));
-    assert!(quarantined, "corrupt file was not quarantined");
+        .find(|e| e.file_name().to_string_lossy().contains("corrupt-"))
+        .map(|entry| entry.path())
+        .expect("corrupt file was not quarantined");
+    let warnings = e::core::config::store::take_warnings();
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains(&quarantined.display().to_string())),
+        "the recovery warning must name the backup: {warnings:?}"
+    );
 }
 
 #[test]

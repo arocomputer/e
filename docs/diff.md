@@ -1,80 +1,72 @@
-# Diff review
+# Diff review (extension)
 
-Run `/diff` to open or close a live, read-only Git diff beside the conversation.
-The conversation stays on the left, with a narrower diff pane on the right.
-One full-width composer sits below both. The pane is a continuous document:
-file counts at the top, then each file's header and source. Click a file in the
-summary to jump to its changes, or scroll through the whole document.
+`/diff` is not part of the e binary. It ships as e's first packaged extension,
+`packages/diff`, a standalone Rust program that speaks e's extension line
+protocol (see `docs/extensions.md`). Install it and `/diff` appears beside the
+built-in commands in the picker; remove the file and nothing about it remains.
 
-Source rows show line numbers, syntax colors, and addition/removal backgrounds.
-Changed words have stronger backgrounds. Removed rows use old line numbers;
-context and added rows use new ones. Long lines wrap without repeating their
-line number. Hunk headers are hidden, with separators between disjoint hunks.
-Very large replacements use a bounded word comparison.
+The review is read-only and never writes the Git index. It compares the
+current workspace against `HEAD`: staged and unstaged changes together, plus
+non-ignored untracked files, including changes made outside e. A repository
+without commits compares its files to an empty tree. Renames appear as a
+deletion and an addition. Session-only or branch-base comparisons, staging,
+and reverting are not offered.
 
-The comparison is the current workspace versus `HEAD`, including staged and
-unstaged changes together and non-ignored untracked files. It includes changes
-made outside e. A repository without commits compares its current files to an
-empty tree. Renames appear as a deletion and an addition. This version does not
-provide session-only or branch-base comparisons, staging, or reverting.
+## Usage
 
-The panel refreshes after tool completion and periodically while visible.
-An unchanged refresh preserves selection and scroll. If source changes during
-a drag, that selection clears rather than attaching different text. Existing
-draft attachments remain immutable snapshots.
+- `/diff` prints the continuous review document into the transcript: a
+  file-count header with `+added/-removed` totals, one summary row per changed
+  file, then each file's heading and patch — line numbers, syntax colors,
+  word-level change backgrounds, and wrapped long rows, with hunk headers
+  hidden.
+- `/diff <path>` prints one file's patch alone.
+- Rows carry the extension's own palette (below); the transcript re-wraps them
+  to the terminal width.
 
-## Interaction
+## Build and install
 
-The mouse controls review. Keyboard input stays with the composer, so Enter
-submits your prompt without closing the diff. There is no diff focus mode,
-Ctrl+D shortcut, or navigation hint on the status line.
+```sh
+cargo build --release -p e-diff
+cp target/release/e-diff ~/.e/extensions/e-diff
+```
 
-- Wheel over the pane to scroll. Shift+wheel moves a page.
-- Click a file summary to jump to that file's source.
-- Drag across source rows. Releasing the mouse adds a blue `⧉ 4 lines from diff`
-  marker to the composer. A single source row reads `⧉ 1 line from diff`.
-- Selecting again replaces that marker and its payload in place, leaving your
-  other draft text and caret position intact.
-- The first Backspace at the marker selects it. A second removes it and its
-  payload. Moving away cancels the selection. Ordinary pasted-text deletion
-  keeps its existing behavior.
-- Click the header's `×`, or run `/diff` again, to close review.
-
-Attachments contain source text and file paths, without renderer styling, diff
-signs, line numbers, or hunk headers. Tabs and indentation survive. Selecting
-wrapped fragments attaches each logical source line only once. A selection can
-cross file boundaries; the payload identifies each file. Selection never submits
-by itself, and selecting a new range does not change an already submitted prompt.
-
-The split needs 110 columns by default. On narrower terminals the diff fills
-the area above the composer. Closing it restores chat and scrollback. Review
-uses the alternate terminal screen. Resizing reflows wrapped source and clears
-transient selection without changing an attachment already in the draft.
+Restart e (or run `/reload`). The extension needs a `git` executable on an
+absolute PATH entry outside the workspace; system locations are used as a
+fallback. Relative PATH entries and workspace-supplied binaries are never run.
 
 ## Preferences
 
-These keys in `~/.e/settings.json` apply when you next open the panel:
+Keys in `~/.e/settings.json` reach the extension through the protocol's
+`extensions_config`; they apply on the next `/diff`:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `diff_min_width` | `110` | Minimum split width, at least 60 columns |
-| `diff_width_percent` | `40` | Diff share of the terminal, between 30 and 70 percent |
-| `diff_refresh_ms` | `1000` | Periodic refresh interval, at least 250 ms |
+| `theme` | host default | `"light"` selects the extension's light palette |
+| `diff_text_width` | `78` | Transcript row width, 40 to 120 columns |
+| `diff_min_width` | `110` | Split width for the live pane design (library only) |
+| `diff_width_percent` | `40` | Pane share (library only) |
+| `diff_refresh_ms` | `1000` | Pane refresh interval (library only) |
 | `diff_title` | `{count} {files} changed` | Header, with file count and singular/plural noun |
-| `diff_selection_label` | `⧉ {count} {lines} from diff` | Inline attachment label, with singular/plural line count |
+| `diff_selection_label` | `⧉ {count} {lines} from diff` | Attachment label the pane produces on selection (library only) |
 
-Colors use the active theme. `border` colors dividers and `dim` colors
-secondary text and attachment markers. The `diff*` tokens control the code
-pane, selection, attachment marker, word highlights, syntax, line numbers, and counts. See
-`e docs themes` for the token list. Other code blocks keep their existing palette.
+## Safety limits
 
-Git reads have a five-second timeout and bounded output. Each refresh includes
+Git reads have a five-second timeout and bounded output. Each review includes
 at most 128 patches and 4 MiB of patch text, and stops starting patches after
-five seconds. Omitted files are reported at the end of the document. Patches over 256 KiB
-show a truncation notice. Binary files have no line counts. New files over
-2 MiB or containing non-UTF-8/binary data show a preview-unavailable message;
-symlinks show their target path without reading the target. Failures appear in
-the panel instead of blocking the conversation. External diff, textconv, and
-clean/process filters are disabled. Filter-managed files such as Git LFS files
-therefore compare their workspace contents to the stored Git blob. The viewer
-does not write the index.
+five seconds; omitted files are reported at the end of the document. Patches
+over 256 KiB show a truncation notice. Binary files have no line counts. New
+files over 2 MiB or containing non-UTF-8/binary data show a
+preview-unavailable message. Every path component between the repository root
+and a read file is opened without following symlinks, so a symlinked directory
+reports an error rather than leaking its target's contents; top-level symlinks
+show their target path, never the target's text. External diff, textconv, and
+clean/process filters are disabled, so filter-managed files (Git LFS included)
+compare workspace contents to the stored Git blob.
+
+## The library
+
+`packages/diff` keeps more than the command uses today: the continuous pane's
+mouse navigation, drag-to-attach selection, and viewport rendering are library
+code with tests, waiting for a host UI protocol that could surface them again.
+`packages/terminal` holds the styling primitives (`e-terminal`) shared by e and
+the extension, so the review renders with the same theme code as the host.

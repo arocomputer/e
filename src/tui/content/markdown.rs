@@ -28,8 +28,23 @@ use crate::tui::render::*;
 use crate::tui::theme::Theme;
 
 /// A link open carrying a document-scoped id, so a link split across
-/// wrapped rows stays one link in id-aware terminals.
+/// wrapped rows stays one link in id-aware terminals. Whitespace — legal in
+/// a `<…>` destination — is percent-encoded: the word-wrapper splits on
+/// spaces and must never find one inside the sequence.
 fn osc8_id(id: u64, url: &str) -> String {
+    let url: String = url
+        .chars()
+        .map(|c| {
+            if c.is_whitespace() {
+                c.encode_utf8(&mut [0; 4])
+                    .bytes()
+                    .map(|b| format!("%{b:02X}"))
+                    .collect()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect();
     format!("\x1b]8;id=e-{id};{url}\x1b\\")
 }
 const OSC8_CLOSE: &str = "\x1b]8;;\x1b\\";
@@ -42,93 +57,7 @@ fn valid_link_url(url: &str) -> bool {
     url.len() <= 2083 && !url.chars().any(|c| c.is_control())
 }
 
-/// Visible width of a styled string (ANSI SGR and OSC sequences are zero).
-pub fn visible_width(styled: &str) -> usize {
-    let mut width = 0;
-    let mut chars = styled.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            match chars.peek() {
-                Some('[') => {
-                    while let Some(&n) = chars.peek() {
-                        chars.next();
-                        if n.is_ascii_alphabetic() {
-                            break;
-                        }
-                    }
-                }
-                Some(']') => {
-                    // OSC … terminated by BEL or ST (ESC \)
-                    while let Some(n) = chars.next() {
-                        if n == '\x07' {
-                            break;
-                        }
-                        if n == '\x1b' {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        }
-        width += c.width().unwrap_or(0);
-    }
-    width
-}
-
-/// Clip a styled line to `max` visible columns, passing escape sequences
-/// through untouched. Width is display columns (CJK is two, combining
-/// zero), and OSC sequences copy through their BEL/ST terminator — cutting
-/// an OSC 8 link mid-URL would leak the rest as visible text. A clipped
-/// line closes any hyperlink and SGR run so nothing bleeds past it.
-pub fn clip_styled(styled: &str, max: usize) -> String {
-    if visible_width(styled) <= max {
-        return styled.to_string();
-    }
-    let mut out = String::new();
-    let mut visible = 0usize;
-    let mut chars = styled.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            out.push(c);
-            if chars.peek() == Some(&']') {
-                // OSC: runs to BEL or ST (ESC \).
-                while let Some(n) = chars.next() {
-                    out.push(n);
-                    if n == '\x07' {
-                        break;
-                    }
-                    if n == '\x1b' {
-                        if let Some(t) = chars.next() {
-                            out.push(t);
-                        }
-                        break;
-                    }
-                }
-            } else {
-                // CSI and friends: runs to the alphabetic final byte.
-                for e in chars.by_ref() {
-                    out.push(e);
-                    if e.is_ascii_alphabetic() || e == '\\' {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        let w = c.width().unwrap_or(0);
-        if visible + w > max {
-            break;
-        }
-        out.push(c);
-        visible += w;
-    }
-    out.push_str(OSC8_CLOSE);
-    out.push_str("\x1b[m");
-    out
-}
+pub use e_terminal::text::{clip_styled, visible_width};
 
 /// The inline styling open at some point in a line: SGR attributes, the
 /// foreground, and any OSC 8 hyperlink. The reference closes everything at a
@@ -997,14 +926,29 @@ fn table_vertical_lines(out: &mut Vec<String>, content: &str, inner_width: usize
         while i < chars.len() {
             let c = chars[i];
             if c == '\x1b' {
-                // Copy the whole escape sequence at zero columns.
+                // Copy the whole escape sequence at zero columns: CSI to its
+                // final letter, OSC (hyperlinks) to BEL or ST — a split
+                // mid-sequence would count the URI as visible columns and
+                // leave the terminal reading the box as OSC data.
                 row.push(c);
                 i += 1;
+                let osc = chars.get(i) == Some(&']');
                 while i < chars.len() {
                     let n = chars[i];
                     row.push(n);
                     i += 1;
-                    if n.is_ascii_alphabetic() || n == '\\' || n == '\x07' {
+                    if osc {
+                        if n == '\x07' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            if let Some(&t) = chars.get(i) {
+                                row.push(t);
+                                i += 1;
+                            }
+                            break;
+                        }
+                    } else if n.is_ascii_alphabetic() {
                         break;
                     }
                 }

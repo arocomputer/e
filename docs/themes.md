@@ -20,30 +20,28 @@ A theme is a JSON file: `~/.e/themes/<name>.json`. Every name in
   JSON verbatim; save it under a new name and edit.
 
 Tokens you will most likely touch: `userMessageText` (the composer rail and
-user text), `dim`, `border` (dividers), `muted`, `bashMode` (the `!` rail),
+user text), `dim`, `border` (dividers), `muted`, `bashMode` (the `!` shell marker),
 `accent`, and the `syntax*` family for code tinting. Unknown tokens are
 ignored; missing tokens fall back to the terminal default — a partial theme
 is valid.
 
 Apply instantly with `/reload` (or pick it in `/settings`).
 
-The full transcript reader uses `toolDetailRail` for its `│` rails. It defaults
-to the terminal foreground, while the two-space indent and output use `dim`.
-Its footer uses `userMessageText` for `┃` and `muted` for navigation.
+The full transcript reader rails tool details with a `│` in the theme's
+`muted` tone and dim output text. Its footer uses `userMessageText` for `┃`
+and `muted` for navigation.
 
 ## Diff review
 
-The `/diff` pane has its own palette. Changing these tokens does not recolor
-Markdown code blocks or inline tool summaries.
+The `/diff` command is the `packages/diff` extension, and its palette ships
+inside the extension rather than in the host themes: the `diffPaneBg`,
+`diffText`, `diffAddedBg`/`diffRemovedBg`, `diffSelectedBg`, `diffLineNumber`,
+and `diffSyntax*` tokens live in `packages/diff/src/theme_{dark,light}.json`.
+`~/.e/themes/` cannot recolor the extension's output today; the host's
+`theme` setting selects which embedded palette `/diff` renders with.
 
-- `diffPaneBg`, `diffText`: pane background and source text.
-- `diffAddedBg`, `diffRemovedBg`: full-row change backgrounds.
-- `diffAddedWordBg`, `diffRemovedWordBg`: stronger backgrounds behind changed words.
-- `diffSelectedBg`: selected source rows, with word changes still visible.
-- `diffLineNumber`, `diffAdded`, `diffRemoved`: line numbers, signs, and counts.
-- `diffSelectionText`: inline diff attachment marker.
-- `diffSyntaxKeyword`, `diffSyntaxString`, `diffSyntaxNumber`,
-  `diffSyntaxComment`, `diffSyntaxFunction`, `diffSyntaxType`: source syntax colors.
-
-The bundled dark and light themes use separate diff colors. A partial custom
-theme may leave these tokens unset to use terminal defaults.
+Edit/write summary counts use `toolDiffAddedMarker` and `toolDiffRemovedMarker`
+for truecolor terminals, or `toolDiffAddedMarkerFallback` and
+`toolDiffRemovedMarkerFallback` otherwise. These also color the review's diff
+markers. The defaults are green for additions and red for deletions; labels and
+tree rails remain neutral.

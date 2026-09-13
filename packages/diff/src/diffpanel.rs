@@ -1,11 +1,10 @@
 //! Continuous, mouse-driven Git review. Selection becomes owned prompt context;
 //! keyboard input always stays with the composer.
-use crate::core::diff::{File, Review};
-use crate::core::tools::sanitize_display;
-use crate::tui::{
-    markdown::{clip_styled, visible_width},
-    panel,
-    render::bold,
+use crate::diff::{File, Review};
+use crate::style::sanitize_display;
+use crate::style::{
+    bold, panel,
+    text::{clip_styled, visible_width},
     theme::Theme,
 };
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -47,10 +46,6 @@ pub struct DiffPanel {
     pub files: Vec<File>,
     pub error: Option<String>,
     pub loading: bool,
-    pub dirty: bool,
-    pub next_refresh: std::time::Instant,
-    pub task: Option<tokio::task::JoinHandle<()>>,
-    pub generation: u64,
     pub min_width: usize,
     pub percent: usize,
     pub refresh_ms: u64,
@@ -69,25 +64,23 @@ pub struct DiffPanel {
     title: String,
 }
 
-impl Drop for DiffPanel {
-    fn drop(&mut self) {
-        if let Some(task) = self.task.take() {
-            task.abort();
-        }
-    }
-}
-
 impl DiffPanel {
-    pub fn new(generation: u64) -> Self {
-        use crate::core::config::settings::{get_string, get_u64};
+    pub fn new(config: &serde_json::Value) -> Self {
+        let get_string = |key: &str| {
+            config
+                .get(key.strip_prefix("diff_").unwrap_or(key))
+                .and_then(serde_json::Value::as_str)
+                .map(String::from)
+        };
+        let get_u64 = |key: &str| {
+            config
+                .get(key.strip_prefix("diff_").unwrap_or(key))
+                .and_then(serde_json::Value::as_u64)
+        };
         Self {
             files: Vec::new(),
             error: None,
             loading: false,
-            dirty: true,
-            next_refresh: std::time::Instant::now(),
-            task: None,
-            generation,
             min_width: get_u64("diff_min_width").unwrap_or(110).max(60) as usize,
             percent: get_u64("diff_width_percent").unwrap_or(40).clamp(30, 70) as usize,
             refresh_ms: get_u64("diff_refresh_ms").unwrap_or(1000).max(250),
@@ -118,7 +111,6 @@ impl DiffPanel {
     /// Changed source clears pointer selection, never the snapshot owned by the draft.
     pub fn apply(&mut self, result: Result<Review, String>) {
         self.loading = false;
-        self.task = None;
         match result {
             Ok(review) => {
                 let changed = self.files != review.files
@@ -370,6 +362,77 @@ impl DiffPanel {
             }
             self.palette = palette;
         }
+        let title = self.document_title(theme, width);
+        let header = format!(
+            "{title}{}{} ",
+            " ".repeat(width.saturating_sub(visible_width(&title) + 2)),
+            theme.fg("dim", "×")
+        );
+        self.close_column = width.saturating_sub(2);
+        let mut body = Vec::new();
+        if let Some(error) = &self.error {
+            body.push(theme.fg("error", &sanitize_display(error).replace('\n', " ")));
+        } else if self.files.is_empty() {
+            body.push(theme.fg(
+                "dim",
+                if self.loading {
+                    "Loading…"
+                } else {
+                    "Working tree clean"
+                },
+            ));
+        } else {
+            let first = self.scroll;
+            let last = self
+                .lines
+                .len()
+                .min(first + height.saturating_sub(1).max(1));
+            for index in first..last {
+                let selected = self.anchor.is_some_and(|anchor| {
+                    index >= anchor.min(self.cursor) && index <= anchor.max(self.cursor)
+                });
+                body.push(self.line_row(theme, width, index, selected));
+            }
+        }
+        panel::review_frame(theme, width, header, body, height)
+    }
+
+    /// The whole review document as styled rows for transcript output: every
+    /// line, no viewport scroll, no pane background. The command surface of
+    /// the extension — the transcript re-wraps rows to the terminal width.
+    pub fn document(&mut self, theme: &Theme, width: usize) -> Vec<String> {
+        self.layout(width);
+        let palette: Vec<String> = [
+            "diffSyntaxKeyword",
+            "diffSyntaxString",
+            "diffSyntaxNumber",
+            "diffSyntaxComment",
+            "diffSyntaxFunction",
+            "diffSyntaxType",
+        ]
+        .map(|token| theme.fg_prefix(token).to_string())
+        .to_vec();
+        if self.palette != palette {
+            for section in &mut self.sections {
+                section.styled.clear();
+            }
+            self.palette = palette;
+        }
+        if let Some(error) = &self.error {
+            return vec![theme.fg("error", &sanitize_display(error).replace('\n', " "))];
+        }
+        if self.files.is_empty() {
+            return vec![theme.fg("dim", "Working tree clean")];
+        }
+        let mut rows = vec![self.document_title(theme, width)];
+        for index in 0..self.lines.len() {
+            rows.push(self.line_row(theme, width, index, false));
+        }
+        rows
+    }
+
+    /// Bold count line shared by the pane header and the transcript document.
+    fn document_title(&self, theme: &Theme, width: usize) -> String {
         let count = self.files.len();
         let title = sanitize_display(&self.title)
             .replace('\n', " ")
@@ -385,93 +448,64 @@ impl DiffPanel {
             .iter()
             .filter_map(|file| file.removed)
             .fold(0usize, usize::saturating_add);
-        let title = clip_styled(
+        clip_styled(
             &format!(
                 " {}  {}",
                 bold(&theme.fg("diffText", &title)),
                 stats(theme, Some(added), Some(removed))
             ),
             width.saturating_sub(3),
-        );
-        let header = format!(
-            "{title}{}{} ",
-            " ".repeat(width.saturating_sub(visible_width(&title) + 2)),
-            theme.fg("dim", "×")
-        );
-        self.close_column = width.saturating_sub(2);
-        let mut body = Vec::new();
-        if let Some(error) = &self.error {
-            body.push(theme.fg("error", &sanitize_display(error).replace('\n', " ")));
-        } else if self.files.is_empty() {
-            body.push(theme.fg(
+        )
+    }
+
+    /// One document row by index. Highlighting is computed lazily per
+    /// section and cached, so a transcript dump pays only for what it shows.
+    fn line_row(&mut self, theme: &Theme, width: usize, index: usize, selected: bool) -> String {
+        match self.lines[index] {
+            Line::File(file) => {
+                let file = &self.files[file];
+                let stats = stats(theme, file.added, file.removed);
+                let name = crate::style::clip_plain(
+                    &display_path(&file.path),
+                    width.saturating_sub(visible_width(&stats) + 3),
+                );
+                format!(
+                    " {}{}{stats} ",
+                    theme.fg("dim", &name),
+                    " ".repeat(
+                        width.saturating_sub(visible_width(&name) + visible_width(&stats) + 2)
+                    )
+                )
+            }
+            Line::Divider => theme.fg(
+                "border",
+                &format!(" {} ", "─".repeat(width.saturating_sub(2))),
+            ),
+            Line::Heading(section) => format!(
+                " {}",
+                bold(&theme.fg("diffText", &display_path(&self.sections[section].path)))
+            ),
+            Line::Omitted => theme.fg(
                 "dim",
-                if self.loading || self.dirty {
-                    "Loading…"
-                } else {
-                    "Working tree clean"
-                },
-            ));
-        } else {
-            for (index, line) in self
-                .lines
-                .iter()
-                .enumerate()
-                .skip(self.scroll)
-                .take(height.saturating_sub(1))
-            {
-                body.push(match *line {
-                    Line::File(index) => {
-                        let file = &self.files[index];
-                        let stats = stats(theme, file.added, file.removed);
-                        let name = crate::tui::transcript::clip_plain(
-                            &display_path(&file.path),
-                            width.saturating_sub(visible_width(&stats) + 3),
-                        );
-                        format!(
-                            " {}{}{stats} ",
-                            theme.fg("dim", &name),
-                            " ".repeat(
-                                width.saturating_sub(
-                                    visible_width(&name) + visible_width(&stats) + 2
-                                )
-                            )
-                        )
-                    }
-                    Line::Divider => theme.fg(
-                        "border",
-                        &format!(" {} ", "─".repeat(width.saturating_sub(2))),
-                    ),
-                    Line::Heading(section) => format!(
-                        " {}",
-                        bold(&theme.fg("diffText", &display_path(&self.sections[section].path)))
-                    ),
-                    Line::Omitted => theme.fg(
-                        "dim",
-                        " More files omitted: review size or time limit reached",
-                    ),
-                    Line::Source {
-                        section,
-                        row,
-                        column,
-                    } => {
-                        let section = &mut self.sections[section];
-                        if section.styled.is_empty() {
-                            let lang = section
-                                .path
-                                .extension()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("");
-                            section.styled = patch::syntax(&section.rows, theme, lang);
-                        }
-                        let selected = self.anchor.is_some_and(|anchor| {
-                            index >= anchor.min(self.cursor) && index <= anchor.max(self.cursor)
-                        });
-                        source_row(theme, section, row, column, width, selected)
-                    }
-                });
+                " More files omitted: review size or time limit reached",
+            ),
+            Line::Source {
+                section,
+                row,
+                column,
+            } => {
+                let section = &mut self.sections[section];
+                if section.styled.is_empty() {
+                    let lang = section
+                        .path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    section.styled = patch::syntax(&section.rows, theme, lang);
+                }
+                source_row(theme, section, row, column, width, selected)
             }
         }
-        panel::review_frame(theme, width, header, body, height)
     }
 }
 

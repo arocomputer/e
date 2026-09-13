@@ -164,7 +164,8 @@ pub async fn run(
     )
     .await?;
 
-    let mut sse = SseStream::new(response.bytes_stream());
+    let response_context = crate::core::providers::ResponseContext::from_response(&response);
+    let mut sse = SseStream::new(response.bytes_stream()).with_response(response_context);
     let mut usage: Option<(u64, u64, u64)> = None;
     loop {
         let payload = sse.next().await?;
@@ -175,6 +176,12 @@ pub async fn run(
                 continue;
             }
         };
+        // Gemini streams a failure after the headers as a `google.rpc.Status`
+        // frame `{"error":{"code":500,"status":"INTERNAL",…}}`; the body
+        // then ends without a finishReason, which would read as a stall.
+        if let Some(error) = value.get("error").filter(|e| e.is_object()) {
+            return Err(ProviderError::from_error_frame(error).with_response(sse.response.clone()));
+        }
         if let Some(meta) = value.get("usageMetadata").filter(|u| u.is_object()) {
             // Cumulative — the latest frame wins. Thought tokens are output.
             usage = Some((
@@ -185,7 +192,8 @@ pub async fn run(
             ));
         }
         if let Some(reason) = value["promptFeedback"]["blockReason"].as_str() {
-            return Err(ProviderError::rejected(format!("prompt blocked: {reason}")));
+            return Err(ProviderError::rejected(format!("prompt blocked: {reason}"))
+                .with_response(sse.response.clone()));
         }
         let candidate = &value["candidates"][0];
         if let Some(parts) = candidate["content"]["parts"].as_array() {

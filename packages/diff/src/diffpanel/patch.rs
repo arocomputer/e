@@ -1,7 +1,7 @@
 //! Unified patches projected as source rows, with bounded word-level comparisons.
 
-use crate::core::tools::strip_ansi;
-use crate::tui::{highlight::highlight_diff_block, theme::Theme};
+use crate::style::strip_ansi;
+use crate::style::{highlight_diff_block, theme::Theme};
 use std::ops::Range;
 use unicode_width::UnicodeWidthChar;
 
@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn deleted_comment_openers_do_not_tint_added_source() {
-        let theme = crate::tui::theme::load_bundled(false).unwrap();
+        let theme = crate::style::theme(false, &serde_json::json!({}));
         let rows = parse("@@ -1 +1 @@\n-/* old\n+const n = 1;");
         let styled = syntax(&rows, &theme, "ts");
         assert!(styled[0].contains(theme.fg_prefix("diffSyntaxComment")));
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn horizontal_crop_keeps_partial_wide_cells_and_combining_marks() {
-        let theme = crate::tui::theme::load_bundled(false).unwrap();
+        let theme = crate::style::theme(false, &serde_json::json!({}));
         let paint = |skip, width| {
             code(
                 &theme,
