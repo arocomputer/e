@@ -6,11 +6,16 @@ version = "0.0.0"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
-description = "Programmatic access to e's coding-agent core"
+description = "e's coding agent as a library: sessions, turns, one event stream"
 publish = false
 
-# The path dependency is the edge to the library target the facade consumes.
 [dependencies]
 e = { path = ".." }
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+futures = "0.3"
 thiserror = "2"
-tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v7"] }

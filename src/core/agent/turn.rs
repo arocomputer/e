@@ -693,6 +693,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 call.clone(),
                 ToolCallPresentation {
                     id,
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
                     category: presentation.category,
                     running: presentation.running,
                     completed: presentation.completed,

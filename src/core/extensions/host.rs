@@ -10,7 +10,7 @@
 //! into the user's prompt.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -123,6 +123,17 @@ impl Link {
             *slot = None;
         }
     }
+
+    /// Kill the child without waiting for its exit. Cancellation guards call
+    /// this before handing the wait to a background reaper.
+    fn kill_now(&self) {
+        self.retire();
+        if let Ok(mut slot) = self.child.try_lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.start_kill();
+            }
+        }
+    }
 }
 
 pub struct ExtensionHost {
@@ -168,18 +179,68 @@ impl FlagValue {
 }
 
 impl ExtensionHost {
-    /// Discover and start every extension. `notices` receives extension
-    /// `notify` messages and startup diagnostics for the transcript.
+    /// Discover and start every extension for this process: its working
+    /// directory and command line are the extensions'. `notices` receives
+    /// extension `notify` messages and startup diagnostics for the transcript.
     pub async fn start(notices: mpsc::Sender<String>) -> Arc<ExtensionHost> {
+        Self::start_in(
+            notices,
+            std::env::current_dir().unwrap_or_default(),
+            std::env::args().skip(1).collect(),
+        )
+        .await
+    }
+
+    /// `start` for an embedding whose workspace is not the process's: every
+    /// extension runs in `cwd` and is told so at `initialize`, and `argv` is
+    /// what typed extension flags are parsed from — pass an empty vector when
+    /// the host's command line has nothing to do with e.
+    pub async fn start_in(
+        notices: mpsc::Sender<String>,
+        cwd: PathBuf,
+        argv: Vec<String>,
+    ) -> Arc<ExtensionHost> {
         // Spawn and hand-shake every extension concurrently: a slow (or
         // timing-out) child must not delay the ones after it, so startup
         // costs one handshake, not their sum. Results are collected in
         // discovery order — tool-clash resolution below is
         // first-declaration-wins and must stay deterministic.
         let paths = discover();
+        // If an embedding drops this future during a handshake, kill every
+        // child that has started and hand its wait to the runtime. Each child
+        // registers as soon as its link exists.
+        let spawned_links: Arc<Mutex<Vec<Arc<Link>>>> = Arc::new(Mutex::new(Vec::new()));
+        struct StartupGuard {
+            spawned: Arc<Mutex<Vec<Arc<Link>>>>,
+            armed: bool,
+        }
+        impl Drop for StartupGuard {
+            fn drop(&mut self) {
+                if self.armed {
+                    for link in self
+                        .spawned
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .iter()
+                    {
+                        link.kill_now();
+                        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                            let link = link.clone();
+                            runtime.spawn(async move { link.reap().await });
+                        }
+                    }
+                }
+            }
+        }
+        let mut guard = StartupGuard {
+            spawned: spawned_links.clone(),
+            armed: true,
+        };
         let started = futures::future::join_all(paths.iter().map(|path| {
             let notices = notices.clone();
-            async move { (path, spawn(path, notices).await) }
+            let cwd = cwd.clone();
+            let spawned = &spawned_links;
+            async move { (path, spawn(path, &cwd, notices, Some(spawned)).await) }
         }))
         .await;
         let mut extensions = Vec::new();
@@ -220,7 +281,6 @@ impl ExtensionHost {
         // Every extension that declares typed flags gets them now, before any
         // startup hook — a tool-only extension can read its flags anytime, not
         // just during startup. `flags` is a notification (no reply expected).
-        let argv: Vec<String> = std::env::args().skip(1).collect();
         let parsed = host.parse_flags(&argv);
         if !parsed.as_object().map(|m| m.is_empty()).unwrap_or(true) {
             for ext in &host.extensions {
@@ -234,6 +294,8 @@ impl ExtensionHost {
                 }
             }
         }
+        // The host now owns every link and handles normal shutdown.
+        guard.armed = false;
         host
     }
 
@@ -895,12 +957,17 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extension, String> {
+async fn spawn(
+    path: &PathBuf,
+    cwd: &Path,
+    notices: mpsc::Sender<String>,
+    startup_registry: Option<&Arc<Mutex<Vec<Arc<Link>>>>>,
+) -> Result<Extension, String> {
     let mut child = tokio::process::Command::new(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .current_dir(std::env::current_dir().unwrap_or_default())
+        .current_dir(cwd)
         // Every exit path reaps through `Link::reap`; this is the backstop
         // for a child that outlives the reap timeout and lands in tokio's
         // orphan queue instead.
@@ -957,6 +1024,15 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
         exit_notice: Mutex::new((None, false)),
         notices,
     });
+    // Register before the handshake begins. If the startup future is
+    // cancelled while we await `initialize`, the guard still finds this
+    // child and kills it.
+    if let Some(registry) = startup_registry {
+        registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(link.clone());
+    }
 
     // Writer task: serialized line output.
     let (writer, mut writer_rx) = mpsc::channel::<String>(64);
@@ -1035,7 +1111,7 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
         "protocol": protocol::PROTOCOL_VERSION,
         "capabilities": ["tool.update"],
         "e_version": crate::VERSION,
-        "cwd": std::env::current_dir().unwrap_or_default().display().to_string(),
+        "cwd": cwd.display().to_string(),
         // Namespaced extension config from ~/.e/settings.json:
         // {"extensions":{"<name>":{…}}} — each extension reads its own key.
         "extensions_config": crate::core::config::settings::extensions_config(),

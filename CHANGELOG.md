@@ -20,6 +20,7 @@
 - Extensions can live in directories under `~/.e/extensions/`, keeping their entry point and helper files together.
 - `e rpc` accepts a built-in `tools` allowlist and returns the saved `session` path. The subagent example uses these for delegated tasks and access to their full results.
 - `e help` prints the same usage as `e --help`.
+- The `e-sdk` package is implemented: `Session::builder()` resolves model, effort, tools, home, and a session file to resume up front; `prompt()` returns a lazy, backpressured `Turn` that streams typed events and settles into a `Reply` (or a `TurnError` carrying the partial reply); `steer()`, `cancel()`, and drop-to-interrupt mirror the terminal. Sessions are memory-only and extension-free unless asked. Core: tool batch events carry each call's name and raw arguments, `Agent::steer` holds a message for a running turn without ever starting one, `submit_message_with_steers` queues steering atomically with its prompt, and `ExtensionHost::start_in` lets an embedding choose the extensions' workspace and command line.
 
 ### Improvements
 

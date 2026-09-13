@@ -4155,6 +4155,8 @@ mod tests {
             let batch = || SessionEvent::ToolBatchStart {
                 calls: vec![crate::core::agent::ToolCallPresentation {
                     id: 1,
+                    name: "bash".into(),
+                    arguments: "{}".into(),
                     category: "command".into(),
                     running: "Running".into(),
                     completed: "Ran".into(),
@@ -4191,6 +4193,8 @@ mod tests {
         app.on_session_event(SessionEvent::ToolBatchStart {
             calls: vec![crate::core::agent::ToolCallPresentation {
                 id: 1,
+                name: "bash".into(),
+                arguments: "{}".into(),
                 category: "command".into(),
                 running: "Running".into(),
                 completed: "Ran".into(),
@@ -4298,6 +4302,8 @@ mod tests {
         app.on_session_event(SessionEvent::ToolBatchStart {
             calls: vec![crate::core::agent::ToolCallPresentation {
                 id: 2,
+                name: "bash".into(),
+                arguments: "{}".into(),
                 category: "command".into(),
                 running: "Running".into(),
                 completed: "Ran".into(),
@@ -4382,6 +4388,8 @@ mod tests {
         SessionEvent::ToolBatchStart {
             calls: vec![crate::core::agent::ToolCallPresentation {
                 id: 1,
+                name: "read".into(),
+                arguments: "{\"path\":\"f.rs\"}".into(),
                 category: "read".into(),
                 running: "reading".into(),
                 completed: "read".into(),
