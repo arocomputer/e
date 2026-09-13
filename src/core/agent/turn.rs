@@ -575,8 +575,6 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     ))
                     .await;
                 }
-            } else {
-                log.record_response(response.clone()).await;
             }
             if stream_cancelled {
                 break Outcome::Cancelled;
