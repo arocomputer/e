@@ -161,6 +161,28 @@ fn now_ms() -> u64 {
 }
 
 impl SessionLog {
+    /// Prove that a fresh log for this workspace can actually be created:
+    /// the `sessions/` directories exist with private modes and a file can
+    /// be written in them, without leaving one behind. The SDK calls this at
+    /// build time so a persistence failure surfaces up front; the terminal
+    /// relies on `create` at the first message instead.
+    pub fn preflight(cwd: &Path) -> std::io::Result<()> {
+        home::ensure()?;
+        let cwd = normalized_cwd(cwd);
+        let dir = home::sessions_dir().join(cwd_slug(&cwd));
+        home::private_dir(&home::sessions_dir())?;
+        home::private_dir(&dir)?;
+        // Give each call its own path so concurrent builds cannot remove
+        // another build's probe.
+        let probe = dir.join(format!(
+            ".preflight-{}-{}",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::write(&probe, b"\0")?;
+        std::fs::remove_file(&probe)
+    }
+
     /// Create a fresh session log for this workspace.
     pub fn create(cwd: &Path, model: &str) -> std::io::Result<SessionLog> {
         home::ensure()?;

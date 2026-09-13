@@ -53,8 +53,10 @@ src/tui/     the frontend (short paths re-export from the groups)
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
-sdk/         e-sdk, a second consumer of the library target with its own
-             release boundary (docs/sdk.md, decisions/0002); unstable
+sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
+             (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
+             a consumer of the library target with its own release boundary
+             (decisions/0002), never a fourth layer
 packages/    extensions and shared crates, never compiled into the e binary
   terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
                   primitives shared by e and its extensions

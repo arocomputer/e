@@ -258,7 +258,7 @@ pub enum ResponsePurpose {
 
 /// A conversation record. Response metadata is session provenance, not model
 /// input, so ordinary message serialization deliberately leaves it out.
-#[derive(Clone, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub content: String,
     #[serde(flatten)]
@@ -269,7 +269,7 @@ pub struct ChatMessage {
 
 /// Fields that are valid for each message role. Provider-owned reasoning
 /// remains opaque and is replayed only by the dialect that recognizes it.
-#[derive(Clone, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum MessageKind {
     User {

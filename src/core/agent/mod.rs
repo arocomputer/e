@@ -436,10 +436,13 @@ where
     }
 }
 
-/// Presentation contract for one call in a provider-issued tool batch.
+/// One call in a provider-issued tool batch: the call as the model made it
+/// (`name`, raw JSON `arguments`) plus the labels a transcript shows for it.
 #[derive(Clone, Debug)]
 pub struct ToolCallPresentation {
     pub id: u64,
+    pub name: String,
+    pub arguments: String,
     pub category: String,
     pub running: String,
     pub completed: String,
@@ -990,6 +993,58 @@ impl Agent {
             return true;
         }
         pending.running = true;
+        drop(pending);
+        self.log().commit(message);
+        self.start(system, false);
+        false
+    }
+
+    /// Hold a message for the running turn only. Unlike `submit`, this never
+    /// starts a turn: when none is running it returns false and records
+    /// nothing, so a caller racing the turn's end cannot commit a stray
+    /// prompt. The check and the hold share the queue lock with the
+    /// supervisor's end-of-turn transition.
+    pub fn steer(&mut self, text: String) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if !pending.running {
+            return false;
+        }
+        pending.next_id += 1;
+        let key = pending.next_id;
+        pending.items.push((key, ChatMessage::user(text)));
+        true
+    }
+
+    /// Submit a prompt and hold steering messages for the turn in one
+    /// critical section. The worker's first step drains the queue before it
+    /// builds its first request, so a steer enqueued here — rather than
+    /// handed over after the turn started, when a fast turn could finish
+    /// first — can never be raced out of the conversation. When a turn is
+    /// already running everything queues as steering, mirroring
+    /// `submit_message`; it never starts a second turn. The return follows
+    /// `submit_message`: true when the prompt was only held as steering,
+    /// false when it started a fresh turn.
+    pub fn submit_message_with_steers(
+        &mut self,
+        message: ChatMessage,
+        system: String,
+        steers: Vec<ChatMessage>,
+    ) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.running {
+            for held in steers.into_iter().chain(std::iter::once(message)) {
+                pending.next_id += 1;
+                let key = pending.next_id;
+                pending.items.push((key, held));
+            }
+            return true;
+        }
+        pending.running = true;
+        for held in steers {
+            pending.next_id += 1;
+            let key = pending.next_id;
+            pending.items.push((key, held));
+        }
         drop(pending);
         self.log().commit(message);
         self.start(system, false);
@@ -1605,5 +1660,19 @@ mod option_tests {
 
         assert_eq!(output.outcome, tools::ToolOutcome::Blocked);
         assert!(output.content.contains("tool allowlist"));
+    }
+
+    #[tokio::test]
+    async fn steer_holds_nothing_while_idle() {
+        let (mut agent, _events) = Agent::with_options(
+            crate::core::providers::catalog::builtin_catalog().remove(0),
+            AgentOptions {
+                save_session: false,
+                ..AgentOptions::default()
+            },
+        );
+        assert!(!agent.steer("late".into()));
+        assert!(agent.history_snapshot().is_empty());
+        assert_eq!(agent.queued_count(), 0);
     }
 }
