@@ -10,6 +10,30 @@ use crate::tui::render::{bold, dim};
 use crate::tui::theme::Theme;
 use unicode_width::UnicodeWidthChar;
 
+/// Color generated attachment labels with the palette's existing light gray,
+/// leaving the user's prompt in its normal transcript style.
+fn style_image_labels(line: &str, theme: &Theme) -> String {
+    let mut rest = line;
+    let mut out = String::new();
+    while let Some(after_open) = rest.strip_prefix("[Image ") {
+        let Some(close) = after_open.find(']') else {
+            break;
+        };
+        if close == 0 || !after_open[..close].chars().all(|ch| ch.is_ascii_digit()) {
+            break;
+        }
+        let end = "[Image ".len() + close + 1;
+        out.push_str(&theme.fg("dim", &rest[..end]));
+        rest = &rest[end..];
+        if let Some(after_space) = rest.strip_prefix(' ') {
+            out.push(' ');
+            rest = after_space;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Review details are either a retained result or a running child's buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolDetail {
@@ -453,7 +477,8 @@ impl Block {
                         rows.push(theme.fg("userMessageText", "┃"));
                         continue;
                     }
-                    for row in wrap_styled(line, width.saturating_sub(2).max(8)) {
+                    let line = style_image_labels(line, theme);
+                    for row in wrap_styled(&line, width.saturating_sub(2).max(8)) {
                         rows.push(format!("{rail}{}", bold(&row)));
                     }
                 }
@@ -1280,6 +1305,15 @@ mod tests {
 
     fn theme() -> Theme {
         crate::tui::theme::load_bundled(false).unwrap()
+    }
+
+    #[test]
+    fn image_labels_use_the_existing_light_gray() {
+        let theme = theme();
+        let styled = style_image_labels("[Image 1] [Image 2] explain this", &theme);
+        assert!(styled.contains(&theme.fg("dim", "[Image 1]")));
+        assert!(styled.contains(&theme.fg("dim", "[Image 2]")));
+        assert!(styled.ends_with("explain this"));
     }
 
     /// The blink phase must not invalidate finished blocks: during a turn the

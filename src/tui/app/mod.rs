@@ -114,10 +114,10 @@ enum AppJob {
     Reloaded(std::sync::Arc<crate::core::extensions::ExtensionHost>),
     /// The background updater installed a new version.
     Updated(String),
-    /// Images read after ctrl+v, tied to the draft that requested them.
-    ClipboardImages {
+    /// Clipboard content read asynchronously, tied to the draft that requested it.
+    ClipboardPaste {
         generation: u64,
-        images: Result<Vec<crate::core::providers::ImageInput>, String>,
+        paste: Result<clipboard::Paste, String>,
         /// The pasted text to restore when a path attachment cannot load —
         /// a clipboard read has nothing to restore, a paste does.
         fallback: Option<String>,
@@ -212,6 +212,8 @@ struct App {
     composer_generation: u64,
     /// One clipboard read at a time; cleared when its result lands.
     clipboard_reading: bool,
+    /// Enter pressed during a clipboard read submits after its payload lands.
+    clipboard_submit_pending: bool,
     agent: Agent,
     active: Option<ActiveTurn>,
     overlay: Option<String>,
@@ -556,6 +558,14 @@ impl App {
             // row; a longer draft scrolls behind the ┃↑ marker.
             let cap = (height / 2 + 1).max(3);
             let mut composer = self.editor.render(&self.theme, width, cap);
+            if !self.composer_images.is_empty() {
+                // Attachment labels are chrome, not editable prompt text.
+                // The existing dim token is the palette's light gray.
+                lines.push(
+                    self.theme
+                        .fg("dim", &image_labels(self.composer_images.len())),
+                );
+            }
             // The queued banner band: the collapsed summary (ink-bright),
             // the review's hint line while it edits the queue, a gap row —
             // and with chrome above it the composer trades its leading
@@ -646,10 +656,14 @@ impl App {
             || self.auth.is_some()
             || self.settings.is_some()
             || self.menu.is_some();
+        let overlay = self
+            .overlay
+            .as_deref()
+            .or(self.clipboard_reading.then_some("reading clipboard…"));
         lines.extend(statusline(
             &self.theme,
             &data,
-            self.overlay.as_deref(),
+            overlay,
             hint,
             panel_open,
             width,
@@ -673,7 +687,9 @@ impl App {
         if pool.len() <= 1 {
             let scoped = model::scope().map(|s| !s.is_empty()).unwrap_or(false);
             self.notice(
-                if scoped {
+                if scoped && pool.is_empty() {
+                    "no scoped models are currently available; your saved scope is unchanged"
+                } else if scoped {
                     "only one model in scope"
                 } else {
                     "only one model available"
@@ -1258,9 +1274,9 @@ impl App {
                     .await
                     .unwrap_or_else(|_| Err("image attachment reader panicked".into()));
                     let _ = results
-                        .send(AppJob::ClipboardImages {
+                        .send(AppJob::ClipboardPaste {
                             generation,
-                            images,
+                            paste: images.map(clipboard::Paste::Images),
                             fallback,
                         })
                         .await;
@@ -1285,6 +1301,7 @@ impl App {
     /// Forget attachments with a discarded or replaced composer draft.
     fn discard_composer_images(&mut self) {
         self.composer_images.clear();
+        self.clipboard_submit_pending = false;
         self.composer_generation = self.composer_generation.wrapping_add(1);
     }
 
@@ -1298,16 +1315,9 @@ impl App {
     }
 
     /// Start a bounded clipboard read without blocking terminal input. One
-    /// read at a time — a second ctrl+v while one is in flight is declined
+    /// read at a time — a second paste while one is in flight is declined
     /// rather than stacked, so a slow helper cannot accumulate waiters.
-    fn paste_clipboard_images(&mut self) {
-        if !self.agent.model.image_input {
-            self.notice(format!(
-                "{} does not accept image input",
-                model::slug(&self.agent.model)
-            ));
-            return;
-        }
+    fn paste_clipboard(&mut self) {
         if self.clipboard_reading {
             return;
         }
@@ -1315,79 +1325,79 @@ impl App {
         let generation = self.composer_generation;
         let results = self.results.clone();
         crate::core::config::home::spawn(async move {
-            let images = tokio::task::spawn_blocking(clipboard::images)
+            let paste = tokio::task::spawn_blocking(clipboard::read)
                 .await
-                .unwrap_or_else(|_| Err("clipboard image reader panicked".into()));
+                .unwrap_or_else(|_| Err("clipboard reader panicked".into()));
             let _ = results
-                .send(AppJob::ClipboardImages {
+                .send(AppJob::ClipboardPaste {
                     generation,
-                    images,
+                    paste,
                     fallback: None,
                 })
                 .await;
         });
     }
 
-    /// Add clipboard images to the current draft and insert their visible labels.
-    fn attach_clipboard_images(
+    /// Apply a clipboard or pasted-path result to the current draft. Attachment
+    /// state renders outside the editor so history can never contain fake labels.
+    fn apply_clipboard_paste(
         &mut self,
         generation: u64,
-        images: Result<Vec<crate::core::providers::ImageInput>, String>,
+        paste: Result<clipboard::Paste, String>,
         fallback: Option<String>,
     ) {
-        // Only a clipboard job owns the in-flight flag; a path-paste read
-        // never set it.
-        if fallback.is_none() {
+        // Only a direct clipboard job owns these flags; a path-paste read
+        // never set them.
+        let submit_after = if fallback.is_none() {
             self.clipboard_reading = false;
-        }
+            std::mem::take(&mut self.clipboard_submit_pending)
+        } else {
+            false
+        };
         if generation != self.composer_generation {
             return;
         }
-        let images = match images {
-            Ok(images) if !images.is_empty() => images,
-            Ok(_) => return,
+        match paste {
+            Ok(clipboard::Paste::Images(images)) if !images.is_empty() => {
+                let mut batch = self.composer_images.clone();
+                batch.extend(images.iter().cloned());
+                if let Err(error) = crate::core::providers::ImageInput::validate_batch(&batch) {
+                    self.notice(error);
+                    self.restore_fallback(fallback);
+                } else if self.agent.model.image_input {
+                    self.composer_images.extend(images);
+                    self.sync_menu();
+                } else {
+                    self.notice(format!(
+                        "{} does not accept image input",
+                        model::slug(&self.agent.model)
+                    ));
+                }
+            }
+            Ok(clipboard::Paste::Images(_)) => {}
+            Ok(clipboard::Paste::Text(text)) => {
+                self.editor.insert_paste(&text);
+                self.sync_menu();
+            }
             Err(error) => {
                 self.notice(error);
                 self.restore_fallback(fallback);
-                return;
             }
-        };
-        let mut batch = self.composer_images.clone();
-        batch.extend(images.iter().cloned());
-        if let Err(error) = crate::core::providers::ImageInput::validate_batch(&batch) {
-            self.notice(error);
-            self.restore_fallback(fallback);
-            return;
         }
-        let first = self.composer_images.len() + 1;
-        let last = first + images.len();
-        let labels = (first..last)
-            .map(|index| format!("[Image {index}]"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let text = self.editor.text();
-        let cursor = self.editor.cursor();
-        let before = text.chars().nth(cursor.saturating_sub(1));
-        let after = text.chars().nth(cursor);
-        let prefix = if before.is_some_and(|ch| !ch.is_whitespace()) {
-            " "
-        } else {
-            ""
-        };
-        let suffix = if after.is_some_and(|ch| !ch.is_whitespace()) {
-            " "
-        } else {
-            ""
-        };
-        // The labels are e's own text, not user input: a literal insert,
-        // never the expandable paste placeholder.
-        self.editor.insert_str(&format!("{prefix}{labels}{suffix}"));
-        self.composer_images.extend(images);
-        self.sync_menu();
+        if submit_after {
+            let text = self.editor.text();
+            self.editor.set_text("");
+            self.submit_composer(text);
+        }
     }
 
     /// Submit the visible draft with any clipboard images attached to it.
     fn submit_composer(&mut self, text: String) {
+        if self.clipboard_reading {
+            self.editor.set_text(&text);
+            self.clipboard_submit_pending = true;
+            return;
+        }
         if self.composer_images.is_empty() {
             if !text.trim().is_empty() {
                 self.composer_generation = self.composer_generation.wrapping_add(1);
@@ -1430,10 +1440,12 @@ impl App {
     /// Submit attached images through the same ordered input-hook path as text.
     fn submit_images(&mut self, text: String, images: Vec<crate::core::providers::ImageInput>) {
         let text = self.editor.expand_pastes(&text);
-        let trimmed = text.trim().to_string();
-        if trimmed.is_empty() {
-            return;
-        }
+        let trimmed = text.trim();
+        let prompt = if trimmed.is_empty() {
+            "Describe this image.".to_string()
+        } else {
+            trimmed.to_string()
+        };
         // History is recorded where the prompt is actually accepted — the
         // hook may consume or replace this text.
         if self.host.has_input_hook() {
@@ -1441,18 +1453,18 @@ impl App {
             let results = self.results.clone();
             let sequence = self.input_verdicts.reserve();
             crate::core::config::home::spawn(async move {
-                let verdict = host.hook_input(&trimmed).await;
+                let verdict = host.hook_input(&prompt).await;
                 let _ = results
                     .send(AppJob::InputVerdict {
                         sequence,
-                        text: trimmed,
+                        text: prompt,
                         images: Some(images),
                         verdict,
                     })
                     .await;
             });
         } else {
-            self.submit_with_images(trimmed, images);
+            self.submit_with_images(prompt, images);
         }
     }
 
@@ -2138,7 +2150,7 @@ fn command_arg<'a>(input: &'a str, command: &str) -> Option<&'a str> {
         .filter(|rest| rest.is_empty() || rest.starts_with(' '))
 }
 
-/// Stable labels used in the composer and transcript for attached images.
+/// Stable labels used in composer chrome and the transcript for attachments.
 fn image_labels(count: usize) -> String {
     (1..=count)
         .map(|index| format!("[Image {index}]"))
@@ -2368,6 +2380,14 @@ fn rewind_target(
 /// unmentioned falls through to e's built-in bindings below, so an empty or
 /// missing file reproduces this function's behavior exactly.
 fn key_of(event: &KeyEvent, keymap: &crate::core::config::keybindings::Keymap) -> Option<Key> {
+    // Crossterm can report Command/Super through the enhanced keyboard
+    // protocol. Never degrade an unhandled modified key to printable text.
+    if event
+        .modifiers
+        .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)
+    {
+        return None;
+    }
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let shift = event.modifiers.contains(KeyModifiers::SHIFT);
@@ -2522,6 +2542,7 @@ async fn run_scoped(
         composer_images: Vec::new(),
         composer_generation: 0,
         clipboard_reading: false,
+        clipboard_submit_pending: false,
         agent,
         active: None,
         overlay: None,
@@ -2570,6 +2591,9 @@ async fn run_scoped(
     app.transcript
         .push(Block::new(Kind::Banner, crate::VERSION));
     for warning in model::config_warnings() {
+        app.notice(format!("warning: {warning}"));
+    }
+    for warning in crate::core::config::store::take_warnings() {
         app.notice(format!("warning: {warning}"));
     }
     if !agent_options.save_session {
@@ -2669,14 +2693,17 @@ async fn run_scoped(
                     }
                     TermEvent::Key(k) if k.kind != crossterm::event::KeyEventKind::Release => {
                         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+                        let system_paste = k
+                            .modifiers
+                            .intersects(KeyModifiers::SUPER | KeyModifiers::META)
+                            && matches!(k.code, KeyCode::Char('v') | KeyCode::Char('V'));
                         if ctrl && k.code == KeyCode::Char('c') {
                             app.interrupt_or_exit();
-                        } else if ctrl
-                            && k.code == KeyCode::Char('v')
+                        } else if ((ctrl && k.code == KeyCode::Char('v')) || system_paste)
                             && app.composer_free()
                             && !app.editor.mask
                         {
-                            app.paste_clipboard_images();
+                            app.paste_clipboard();
                         } else if app.viewer.is_some() {
                             let close = k.code == KeyCode::Esc
                                 || (ctrl && k.code == KeyCode::Char('o'));
@@ -3061,12 +3088,12 @@ async fn run_scoped(
                         ));
                         app.update_installed = Some(version);
                     }
-                    Some(AppJob::ClipboardImages {
+                    Some(AppJob::ClipboardPaste {
                         generation,
-                        images,
+                        paste,
                         fallback,
                     }) => {
-                        app.attach_clipboard_images(generation, images, fallback);
+                        app.apply_clipboard_paste(generation, paste, fallback);
                     }
                     Some(AppJob::Reloaded(host)) => {
                         app.reloading = false;
@@ -3427,6 +3454,11 @@ mod tests {
         assert!(matches!(key_of(&ctrl_w, &keymap), Some(Key::KillWord)));
         let plain_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
         assert!(matches!(key_of(&plain_x, &keymap), Some(Key::Char('x'))));
+        let command_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::SUPER);
+        assert!(
+            key_of(&command_v, &keymap).is_none(),
+            "an unhandled Command key must not insert its printable character"
+        );
         // On a non-empty composer ctrl+d is forward delete (the empty
         // composer's quit is the app-level handler's job, before key_of).
         let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
@@ -3621,6 +3653,33 @@ mod tests {
     }
 
     #[test]
+    fn saved_unavailable_models_remain_visible_in_the_scope_picker() {
+        let mut app = session_app();
+        let missing = "signed-out/model".to_string();
+        app.staged_scope = Some(vec![missing.clone()]);
+        app.menu = Some(Menu::new(
+            MenuKind::Scoped,
+            "Scoped models",
+            HINT_SCOPED,
+            Vec::new(),
+        ));
+
+        app.open_scoped_menu();
+        let menu = app.menu.as_mut().expect("scope picker remains open");
+        menu.select_value(&missing);
+        let rendered = menu.render(&app.theme, 80).join("\n");
+        assert!(rendered.contains(&missing));
+        assert!(rendered.contains("unavailable"));
+        assert_eq!(
+            app.staged_scope.as_deref(),
+            Some(std::slice::from_ref(&missing))
+        );
+
+        app.toggle_scoped();
+        assert_eq!(app.staged_scope.as_deref(), Some([].as_slice()));
+    }
+
+    #[test]
     fn a_paste_over_an_open_surface_stays_text() {
         let mut app = session_app();
         app.viewer = Some(Viewer {
@@ -3643,8 +3702,25 @@ mod tests {
         assert_eq!(app.editor.text(), "line1\nline2\n");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enter_waits_for_the_clipboard_result_before_submitting() {
+        let mut app = session_app();
+        app.clipboard_reading = true;
+
+        app.submit_composer("question".into());
+        assert_eq!(app.editor.text(), "question");
+        assert!(app.clipboard_submit_pending);
+
+        app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text(" answer".into())), None);
+        assert!(!app.clipboard_reading);
+        assert!(!app.clipboard_submit_pending);
+        assert_eq!(app.editor.text(), "");
+        app.editor.key(Key::Up);
+        assert_eq!(app.editor.text(), "question answer");
+    }
+
     #[test]
-    fn clipboard_images_get_numbered_composer_and_chat_labels() {
+    fn clipboard_images_stay_out_of_editable_text_and_get_chat_labels() {
         let mut app = session_app();
         app.agent.model.image_input = true;
         let image = || crate::core::providers::ImageInput {
@@ -3652,10 +3728,19 @@ mod tests {
             data: std::sync::Arc::from("AA=="),
         };
 
-        app.attach_clipboard_images(0, Ok(vec![image(), image()]), None);
+        app.apply_clipboard_paste(
+            0,
+            Ok(clipboard::Paste::Images(vec![image(), image()])),
+            None,
+        );
 
-        assert_eq!(app.editor.text(), "[Image 1] [Image 2]");
+        assert_eq!(app.editor.text(), "");
         assert_eq!(app.composer_images.len(), 2);
+        let attachment_label = app.theme.fg("dim", "[Image 1] [Image 2]");
+        assert!(app
+            .frame(80, 20)
+            .iter()
+            .any(|line| line.contains(&attachment_label)));
         assert_eq!(
             display_image_prompt("explain these", 2),
             "[Image 1] [Image 2] explain these"
@@ -3847,6 +3932,7 @@ mod tests {
             composer_images: Vec::new(),
             composer_generation: 0,
             clipboard_reading: false,
+            clipboard_submit_pending: false,
             agent,
             active: None,
             overlay: None,
