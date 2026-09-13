@@ -82,24 +82,29 @@ impl App {
         items
     }
 
-    /// The scoped-models multi-select: every available model, Space toggling
-    /// membership, Ctrl+S saving the staged scope. The reference semantics:
+    /// The scoped-models multi-select: available models plus saved unavailable
+    /// entries, Space toggling membership, Ctrl+S saving. The reference semantics:
     /// no scope stored = everything in scope; the first toggle narrows the
     /// scope to just that model. Edits stay staged until Ctrl+S — closing
     /// without it (Enter or Esc) leaves the saved scope untouched.
     pub(super) fn open_scoped_menu(&mut self) {
         let available = model::available();
-        if available.is_empty() {
-            self.notice("no models available — use /login to sign in to a provider".into());
-            return;
-        }
         // Stage a copy of the saved scope; nothing persists until Ctrl+S.
         // A rebuild while the picker is open (Space promoting a row) keeps
         // the buffer — only a fresh open seeds from what's saved.
-        if self.menu.as_ref().map(|m| m.kind) != Some(MenuKind::Scoped) {
+        let rebuilding = self.menu.as_ref().map(|m| m.kind) == Some(MenuKind::Scoped);
+        if !rebuilding {
             self.staged_scope = model::scope();
         }
         let staged = self.staged_scope.clone().unwrap_or_default();
+        if available.is_empty() && staged.is_empty() && !rebuilding {
+            self.notice("no models available — use /login to sign in to a provider".into());
+            return;
+        }
+        let available_ids = available
+            .iter()
+            .map(model::slug)
+            .collect::<std::collections::HashSet<_>>();
         let mut available = model::provider_grouped(available);
         // The staged entries lead the list — what you curated, not a hunt —
         // most recently staged first, so what you just picked is at the very
@@ -114,7 +119,7 @@ impl App {
             };
             available.sort_by_key(rank);
         }
-        let items: Vec<MenuItem> = available
+        let mut items: Vec<MenuItem> = available
             .iter()
             .map(|m| {
                 let slug = model::slug(m);
@@ -127,6 +132,18 @@ impl App {
                 item
             })
             .collect();
+        // Keep signed-out, removed, or renamed choices visible and removable.
+        // Their IDs stay persisted until the user explicitly toggles them off.
+        items.extend(
+            staged
+                .iter()
+                .filter(|id| !available_ids.contains(*id))
+                .map(|id| {
+                    let mut item = MenuItem::new(id, "unavailable", id);
+                    item.meta = "in scope".into();
+                    item
+                }),
+        );
         self.menu = Some(Menu::new(
             MenuKind::Scoped,
             "Scoped models",
@@ -181,10 +198,14 @@ impl App {
         self.notice(if ids.is_empty() {
             "scope cleared — ctrl+p cycles every model again".into()
         } else {
+            let available = model::available()
+                .into_iter()
+                .map(|entry| model::slug(&entry))
+                .collect::<std::collections::HashSet<_>>();
+            let available_count = ids.iter().filter(|id| available.contains(*id)).count();
             format!(
-                "scope saved — ctrl+p cycles {} model{}",
-                ids.len(),
-                if ids.len() == 1 { "" } else { "s" }
+                "scope saved: {available_count} available, {} unavailable",
+                ids.len() - available_count
             )
         });
     }

@@ -10,6 +10,27 @@ use crate::tui::render::{bold, dim};
 use crate::tui::theme::Theme;
 use unicode_width::UnicodeWidthChar;
 
+/// Color generated attachment labels with the palette's existing light gray,
+/// leaving the user's prompt in its normal transcript style.
+fn style_image_labels(line: &str, count: usize, theme: &Theme) -> String {
+    let mut rest = line;
+    let mut out = String::new();
+    for index in 1..=count {
+        let label = format!("[Image {index}]");
+        let Some(after_label) = rest.strip_prefix(&label) else {
+            break;
+        };
+        out.push_str(&theme.fg("dim", &label));
+        rest = after_label;
+        if let Some(after_space) = rest.strip_prefix(' ') {
+            out.push(' ');
+            rest = after_space;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Review details are either a retained result or a running child's buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolDetail {
@@ -138,6 +159,8 @@ pub struct Block {
     pub live_preview_rows: usize,
     /// Maximum action-label rows in the transcript; review remains unabridged.
     pub tool_label_rows: usize,
+    /// Number of real image attachments whose generated prefix may be styled.
+    image_count: usize,
     cache: Option<RenderCache>,
     /// True while provider deltas are appending to this text block.
     streaming: bool,
@@ -166,10 +189,17 @@ impl Block {
             more: 0,
             live_preview_rows: 5,
             tool_label_rows: 2,
+            image_count: 0,
             cache: None,
             streaming: false,
             generation: 0,
         }
+    }
+
+    /// Mark a user block as carrying image attachments before it is rendered.
+    pub fn with_images(mut self, count: usize) -> Self {
+        self.image_count = count;
+        self
     }
 
     pub fn touch(&mut self) {
@@ -453,7 +483,8 @@ impl Block {
                         rows.push(theme.fg("userMessageText", "┃"));
                         continue;
                     }
-                    for row in wrap_styled(line, width.saturating_sub(2).max(8)) {
+                    let line = style_image_labels(line, self.image_count, theme);
+                    for row in wrap_styled(&line, width.saturating_sub(2).max(8)) {
                         rows.push(format!("{rail}{}", bold(&row)));
                     }
                 }
@@ -1280,6 +1311,19 @@ mod tests {
 
     fn theme() -> Theme {
         crate::tui::theme::load_bundled(false).unwrap()
+    }
+
+    #[test]
+    fn image_labels_use_the_existing_light_gray() {
+        let theme = theme();
+        let styled = style_image_labels("[Image 1] [Image 2] explain this", 2, &theme);
+        assert!(styled.contains(&theme.fg("dim", "[Image 1]")));
+        assert!(styled.contains(&theme.fg("dim", "[Image 2]")));
+        assert!(styled.ends_with("explain this"));
+        assert_eq!(
+            style_image_labels("[Image 1] is ordinary text", 0, &theme),
+            "[Image 1] is ordinary text"
+        );
     }
 
     /// The blink phase must not invalidate finished blocks: during a turn the

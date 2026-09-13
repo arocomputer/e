@@ -1,4 +1,4 @@
-//! Read image attachments from the desktop clipboard without a resident helper.
+//! Read image attachments or text from the desktop clipboard without a resident helper.
 //!
 //! Every subprocess run is bounded twice — a wall-clock deadline and a
 //! stdout cap — so a hung or flooding clipboard owner (or a PATH-replaced
@@ -9,7 +9,7 @@ use crate::core::providers::{ImageInput, MAX_IMAGE_BYTES};
 
 /// One clipboard read may take this long before its helpers are killed.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 /// Bounded helpers are looked up at their system paths, not via `PATH`.
 #[cfg(target_os = "macos")]
 const OSASCRIPT: &str = "/usr/bin/osascript";
@@ -145,83 +145,60 @@ fn await_reader(done: &std::sync::mpsc::Receiver<()>) {
     let _ = done.recv_timeout(std::time::Duration::from_secs(2));
 }
 
-/// Read one clipboard payload. File-copy clipboards may contain several image
-/// paths; bitmap clipboards produce one encoded image.
-pub(super) fn images() -> Result<Vec<ImageInput>, String> {
-    platform_images()
+/// Clipboard content accepted by the composer. Images remain real attachment
+/// data rather than editable placeholder text.
+pub(super) enum Paste {
+    Images(Vec<ImageInput>),
+    Text(String),
+}
+
+/// Read the richest supported clipboard representation. A copied image wins;
+/// when there is no image, ctrl+v can still act as a text paste.
+pub(super) fn read() -> Result<Paste, String> {
+    match platform_images() {
+        Ok(images) => Ok(Paste::Images(images)),
+        Err(image_error) => match platform_text() {
+            Ok(text) if !text.is_empty() => Ok(Paste::Text(text)),
+            _ => Err(image_error),
+        },
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_images() -> Result<Vec<ImageInput>, String> {
-    if let Some(images) = macos_file_images() {
-        return Ok(images);
-    }
-    macos_bitmap().map(|image| vec![image])
-}
-
-#[cfg(target_os = "macos")]
-fn macos_file_images() -> Option<Vec<ImageInput>> {
-    const SCRIPT: &str = r#"
-on run
-    try
-        set clipboardItems to the clipboard as list
-        set paths to {}
-        repeat with clipboardItem in clipboardItems
-            set end of paths to POSIX path of clipboardItem
-        end repeat
-        set AppleScript's text item delimiters to (character id 0)
-        return paths as text
-    on error
-        return ""
-    end try
-end run
-"#;
-    let output = run(OSASCRIPT, &["-e", SCRIPT]).ok()?;
-    if !output.success {
-        return None;
-    }
-    let text = String::from_utf8(output.stdout).ok()?;
-    // NUL-delimited — a NUL cannot occur in a POSIX path, so a filename
-    // containing a newline survives intact. Trim nothing: a path is data.
-    let paths: Vec<String> = text
-        .split('\0')
-        .filter(|path| !path.is_empty())
-        .map(String::from)
-        .collect();
-    if paths.is_empty() {
-        return None;
-    }
-    ImageInput::from_paths(&paths).ok()
-}
-
-#[cfg(target_os = "macos")]
-fn macos_bitmap() -> Result<ImageInput, String> {
     use std::os::unix::fs::OpenOptionsExt as _;
 
+    // JXA reaches AppKit's pasteboard directly. It keeps e dependency-free but
+    // avoids AppleScript's expensive clipboard coercion (roughly 40–60 ms
+    // rather than 700 ms for the same screenshot in a local benchmark).
     const SCRIPT: &str = r#"
-on run argv
-    set outputPath to item 1 of argv
-    try
-        set imageData to the clipboard as «class PNGf»
-    on error
-        try
-            set imageData to the clipboard as TIFF picture
-        on error
-            error "clipboard does not contain an image"
-        end try
-    end try
-    set outputFile to open for access POSIX file outputPath with write permission
-    try
-        set eof outputFile to 0
-        write imageData to outputFile
-        close access outputFile
-    on error messageText
-        try
-            close access outputFile
-        end try
-        error messageText
-    end try
-end run
+ObjC.import("AppKit");
+function run(argv) {
+    const pasteboard = $.NSPasteboard.generalPasteboard;
+    const zero = String.fromCharCode(0);
+    const paths = [];
+    const items = pasteboard.pasteboardItems;
+    for (let index = 0; index < items.count; index++) {
+        const value = items.objectAtIndex(index).stringForType($("public.file-url"));
+        if (value.js) {
+            const url = $.NSURL.URLWithString(value);
+            if (url.path.js) paths.push(ObjC.unwrap(url.path));
+        }
+    }
+    const types = ObjC.deepUnwrap(pasteboard.types);
+    let data = null;
+    if (types.includes("public.png")) data = pasteboard.dataForType($("public.png"));
+    else if (types.includes("public.tiff")) data = pasteboard.dataForType($("public.tiff"));
+    // Export a bitmap even when file URLs exist. Rust prefers valid image
+    // files, but can fall back to this representation when a URL is stale or
+    // points at something unsupported.
+    if (data && !data.writeToFileAtomically($(argv[0]), true)) {
+        throw new Error("image write failed");
+    }
+    if (paths.length > 0) return "files" + zero + paths.join(zero) + zero;
+    if (data) return "image";
+    return "none";
+}
 "#;
 
     // The system temp dir, not the e home: the export is transient and is
@@ -244,21 +221,43 @@ end run
         .map_err(|error| format!("clipboard: {error}"))?;
 
     let result = (|| {
-        let output = run(OSASCRIPT, &["-e", SCRIPT, raw]).map_err(unusable)?;
+        let output = run(OSASCRIPT, &["-l", "JavaScript", "-e", SCRIPT, raw]).map_err(unusable)?;
         if !output.success {
-            return Err("clipboard does not contain an image".into());
+            return Err("clipboard could not be read".into());
         }
-        match ImageInput::from_path(&raw_path) {
-            Ok(image) => Ok(image),
-            Err(_) => {
-                let converted =
-                    run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
-                if !converted.success {
-                    return Err("clipboard image could not be converted to PNG".into());
-                }
-                ImageInput::from_path(&png_path)
+        let mut file_error = None;
+        if let Some(encoded) = output.stdout.strip_prefix(b"files\0") {
+            // osascript appends a newline after its result. The JXA result's
+            // final NUL marks the exact payload, preserving newlines in names.
+            let end = encoded
+                .iter()
+                .rposition(|byte| *byte == 0)
+                .unwrap_or(encoded.len());
+            let paths = encoded[..end]
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+                .map(|path| String::from_utf8(path.to_vec()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "clipboard file path is not valid UTF-8".to_string())?;
+            match ImageInput::from_paths(&paths) {
+                Ok(images) => return Ok(images),
+                Err(error) => file_error = Some(error),
             }
         }
+        if raw_path.metadata().is_ok_and(|metadata| metadata.len() > 0) {
+            return match ImageInput::from_path(&raw_path) {
+                Ok(image) => Ok(vec![image]),
+                Err(_) => {
+                    let converted =
+                        run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
+                    if !converted.success {
+                        return Err("clipboard image could not be converted to PNG".into());
+                    }
+                    ImageInput::from_path(&png_path).map(|image| vec![image])
+                }
+            };
+        }
+        Err(file_error.unwrap_or_else(|| "clipboard does not contain a supported image".into()))
     })();
     let _ = std::fs::remove_file(&raw_path);
     let _ = std::fs::remove_file(&png_path);
@@ -266,9 +265,18 @@ end run
 }
 
 #[cfg(target_os = "macos")]
+fn platform_text() -> Result<String, String> {
+    let output = run("/usr/bin/pbpaste", &[]).map_err(unusable)?;
+    if !output.success {
+        return Err("clipboard text could not be read".into());
+    }
+    String::from_utf8(output.stdout).map_err(|_| "clipboard text is not valid UTF-8".into())
+}
+
+#[cfg(target_os = "macos")]
 fn unusable(error: RunError) -> String {
     match error {
-        RunError::Missing => "osascript is not available".into(),
+        RunError::Missing => "clipboard helper is not available".into(),
         RunError::Failed(message) => message,
     }
 }
@@ -367,9 +375,31 @@ fn percent_decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+#[cfg(target_os = "linux")]
+fn platform_text() -> Result<String, String> {
+    for (program, args) in [
+        ("wl-paste", vec!["--no-newline"]),
+        ("xclip", vec!["-selection", "clipboard", "-o"]),
+    ] {
+        match command_output(program, &args)? {
+            Some(bytes) => {
+                return String::from_utf8(bytes)
+                    .map_err(|_| "clipboard text is not valid UTF-8".into())
+            }
+            None => continue,
+        }
+    }
+    Err("clipboard does not contain text".into())
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn platform_images() -> Result<Vec<ImageInput>, String> {
     Err("clipboard images are not supported on this platform".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_text() -> Result<String, String> {
+    Err("clipboard text is not supported on this platform".into())
 }
 
 #[cfg(all(test, target_os = "linux"))]
