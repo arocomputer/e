@@ -7,6 +7,9 @@ the pipeline publishes.
 
 ## Unreleased
 
+- Saved assistant usage now includes an opaque identity and model slug so
+  external collectors can deduplicate compacted history and attribute turns
+  after model changes. Older sessions remain readable.
 - Clipboard paste now handles Command+V without inserting a stray `v`, reads
   macOS image clipboards with one pasteboard probe, falls back to text, shows read
   and attachment state outside editable history, colors `[Image n]` labels in

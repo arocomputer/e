@@ -574,6 +574,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                         input,
                         output,
                         cache_read,
+                        id: Some(uuid::Uuid::now_v7().to_string()),
+                        model: Some(providers::catalog::slug(&model)),
                     });
                 }
                 log.commit_async(final_message).await;
@@ -672,6 +674,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 input,
                 output,
                 cache_read,
+                id: Some(uuid::Uuid::now_v7().to_string()),
+                model: Some(providers::catalog::slug(&model)),
             });
         }
         log.commit_async(final_message).await;

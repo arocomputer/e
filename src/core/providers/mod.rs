@@ -187,11 +187,17 @@ pub struct ToolResultMeta {
 /// session file can answer "where did the time and tokens go" without the
 /// provider. `input` is the request's full context (cached tokens included,
 /// matching the dialects' Usage event), `output` what the step generated.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, serde::Deserialize)]
+/// The usage identity and model keep copied compaction history deduplicable and
+/// correctly attributed outside e. Older session records omit both.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct MessageUsage {
     pub input: u64,
     pub output: u64,
     pub cache_read: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// A conversation record. The tagged payload makes tool results, assistant
@@ -1442,6 +1448,33 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn usage_identity_and_model_survive_session_copies() {
+        let message = ChatMessage::assistant("done", Vec::new()).with_usage(MessageUsage {
+            input: 100,
+            output: 9,
+            cache_read: 80,
+            id: Some("request-a".into()),
+            model: Some("openai-codex/gpt-6-astra".into()),
+        });
+        let copied: ChatMessage =
+            serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap();
+        assert!(copied == message);
+
+        let old: ChatMessage = serde_json::from_str(
+            r#"{"content":"done","role":"assistant","usage":{"input":100,"output":9,"cache_read":80}}"#,
+        )
+        .unwrap();
+        let MessageKind::Assistant {
+            usage: Some(usage), ..
+        } = old.kind
+        else {
+            panic!("assistant usage was not restored");
+        };
+        assert_eq!(usage.id, None);
+        assert_eq!(usage.model, None);
+    }
 
     #[test]
     fn http_client_build_failure_is_a_network_error_and_is_cached() {
