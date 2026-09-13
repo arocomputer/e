@@ -176,6 +176,18 @@ An extension speaks the protocol directly — `subagent.mjs` and the shell
 `ping.sh` below are single self-contained files, reading a JSON request per
 line and writing a response per line. e installs nothing beside an extension.
 
+## Packaged extensions
+
+Extensions are programs, not scripts only: anything that speaks the line
+protocol qualifies, including a compiled Rust binary. The first packaged
+extension lives at `packages/diff` — the Git review surface, `e-diff`. It is
+a workspace member, not an `e` dependency: the release binary never ships it,
+and building it is opt-in (`cargo build --release -p e-diff`, then copy the
+executable into `~/.e/extensions/`). `packages/terminal` (`e-terminal`) holds
+the palette/text primitives both e and e-diff render with, so the extension's
+output looks like the host's without the host compiling it for anyone who
+never installs the extension.
+
 **`scaffold.mjs`** is an *optional* convenience: the same stdin/stdout framing,
 id routing, and a `connect({ manifest, handlers })` wrapper, so you write
 handlers instead of a read loop. If you want it, drop it into your extension's

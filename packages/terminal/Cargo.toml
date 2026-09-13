@@ -1,0 +1,11 @@
+[package]
+name = "e-terminal"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Terminal styling and panel protocol shared by e and optional extensions"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-width = "0.2"

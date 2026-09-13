@@ -53,6 +53,13 @@ src/tui/     the frontend (short paths re-export from the groups)
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
+sdk/         e-sdk, a second consumer of the library target with its own
+             release boundary (docs/sdk.md, decisions/0002); unstable
+packages/    extensions and shared crates, never compiled into the e binary
+  terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
+                  primitives shared by e and its extensions
+  diff/           e-diff, the first packaged extension: Git review over the
+                  line protocol (/diff, /diff <path>); see docs/diff.md
 ```
 
 ## Running one thing, not everything
@@ -98,6 +105,13 @@ surface? Route it through `panel.rs` so it can't diverge.
 - One event stream. The frontend subscribes once; text, tools, usage, errors all
   arrive on it in order (`SessionEvent`). Compaction and continuation belong
   to the core. Frontends never reset running state or resubmit stranded prompts.
+- Hit every consumer. The core has three frontends — the TUI, `e rpc`, and
+  `sdk/` — and four provider dialects. A change to the turn loop, events, or
+  tools needs a decision per frontend, and a provider-shaped change a decision
+  per dialect, even when the decision is "no change here". Persisted and
+  user-facing contracts (CLI, sessions, configuration, the extension protocol)
+  follow `docs/compatibility.md`: fixtures under `tests/fixtures/` are release
+  artifacts, so a contract change adds or updates one in the same PR.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - `~/.e/` is the only home e reads. Never reach into another tool's directory.
@@ -115,3 +129,28 @@ surface? Route it through `panel.rs` so it can't diverge.
   sovereign home, store-only config writes, where `unsafe` lives, SHA-pinned
   CI actions. If a change legitimately moves a boundary, update the guard in
   the same commit — never work around it.
+- Docs: a choice that is expensive to reverse (a persisted or wire format, a
+  trust boundary, process architecture, a cross-cutting invariant) gets a
+  `docs/decisions/` entry. Everything else is a comment beside the code, or
+  nothing — never a PR summary appended to a doc. When a change makes existing
+  guidance wrong, rewrite it; don't add a second account next to the first.
+
+## Pull requests
+
+- Never open a PR unless the developer explicitly asks you to.
+- Conventional commit titles, plain language: `fix(tui): tool trees stay
+  connected after compaction`. The type is `fix`, `feat`, `perf`, `refactor`,
+  `docs`, `test`, or `chore`; the scope is the area triage labels by path —
+  `core`, `tui`, `sdk`, `infra`, `docs` — or omitted when the change spans
+  them. The title becomes the squash commit on `main`, so write it as the
+  one line someone reads in `git log`.
+- Body: the problem in a sentence or two, then how you fixed it. End with
+  the model and harness that did the work.
+- Rendering changes carry a captured frame (`scripts/ptycap.py`), not a
+  description of bytes.
+- One concern per PR. If the description says "also", split it. Unrelated
+  cleanup you spotted mid-change is its own PR.
+- Behavior that changes gets a test, and a regression test fails against the
+  unfixed code for the intended reason. Anything user-visible gets a
+  `CHANGELOG.md` entry under `Unreleased`; CI, templates, and result files
+  don't.
