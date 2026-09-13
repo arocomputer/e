@@ -36,7 +36,7 @@ jobs:
             add_label area:core 1d76db 'Agent, providers, tools, storage, and extensions' || true
           echo "$files" | grep -q '^src/tui/' && \
             add_label area:tui 5319e7 'Terminal interface and rendering' || true
-          echo "$files" | grep -Eq '^(sdk/|docs/sdk.md)' && \
+          echo "$files" | grep -Eq '^(sdk/|docs/sdk\.md)' && \
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
           echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md)' && \
             add_label documentation 0075ca 'Documentation changes' || true
