@@ -1357,6 +1357,14 @@ impl App {
             false
         };
         if generation != self.composer_generation {
+            // The old payload cannot enter a newer draft, but Enter may have
+            // been pressed on that draft while this stale read still owned the
+            // in-flight flag. Release the requested submission now.
+            if submit_after {
+                let text = self.editor.text();
+                self.editor.set_text("");
+                self.submit_composer(text);
+            }
             return;
         }
         match paste {
@@ -3722,6 +3730,20 @@ mod tests {
         assert_eq!(app.editor.text(), "");
         app.editor.key(Key::Up);
         assert_eq!(app.editor.text(), "question answer");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stale_clipboard_result_releases_a_newer_pending_submit() {
+        let mut app = session_app();
+        app.clipboard_reading = true;
+        app.discard_composer_images();
+        app.submit_composer("new draft".into());
+
+        app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text("stale".into())), None);
+
+        assert_eq!(app.editor.text(), "");
+        app.editor.key(Key::Up);
+        assert_eq!(app.editor.text(), "new draft");
     }
 
     #[test]
