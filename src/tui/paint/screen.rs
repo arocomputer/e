@@ -363,6 +363,7 @@ struct PendingFrame {
     sequence: u64,
     posted_at: std::time::Instant,
     lines: Vec<String>,
+    alternate: bool,
 }
 
 /// Paint progress as observed by the app loop. "Completed" means stdout
@@ -447,6 +448,46 @@ impl Drop for PaintThreadGuard {
     }
 }
 
+/// Preserve the main-screen renderer while a full-height review owns the terminal.
+/// Dropping the paint worker restores the main buffer even after a failed frame.
+#[derive(Default)]
+struct ReviewScreen {
+    main: Option<Screen>,
+}
+
+impl ReviewScreen {
+    fn switch(&mut self, screen: &mut Screen, alternate: bool) -> io::Result<()> {
+        if alternate && self.main.is_none() {
+            crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+            let review = Screen::new(screen.cols, screen.rows, 0);
+            self.main = Some(std::mem::replace(screen, review));
+        } else if !alternate && self.main.is_some() {
+            crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+            if let Some(main) = self.main.take() {
+                *screen = main;
+            }
+        }
+        Ok(())
+    }
+
+    fn resize(&mut self, screen: &mut Screen, cols: u16, rows: u16) {
+        if let Some(main) = self.main.as_mut() {
+            main.resize(cols, rows);
+            *screen = Screen::new(cols, rows, 0);
+        } else {
+            screen.resize(cols, rows);
+        }
+    }
+}
+
+impl Drop for ReviewScreen {
+    fn drop(&mut self) {
+        if self.main.is_some() {
+            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        }
+    }
+}
+
 /// The paint thread: owns the `Screen` and its blocking stdout writes so a
 /// slow terminal can never stall the event loop. `anchor` is the launch
 /// cursor row — the frame paints below it, never over what came before.
@@ -468,6 +509,7 @@ impl Painter {
                 mailbox: shared.clone(),
             };
             let mut screen = Screen::new(cols, rows, anchor);
+            let mut review = ReviewScreen::default();
             let (lock, wake) = &*shared;
             loop {
                 let (frame, resize, shutdown) = {
@@ -478,7 +520,7 @@ impl Painter {
                     (box_.frame.take(), box_.resize.take(), box_.shutdown)
                 };
                 if let Some((cols, rows)) = resize {
-                    screen.resize(cols, rows);
+                    review.resize(&mut screen, cols, rows);
                 }
                 // A panic in the paint path must cost one garbled frame —
                 // not the session. The screen is marked unknown so the next
@@ -487,17 +529,20 @@ impl Painter {
                 if let Some(frame) = frame {
                     let sequence = frame.sequence;
                     let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        review.switch(&mut screen, frame.alternate)?;
                         screen.paint(&frame.lines)
                     }));
                     let mut mailbox = lock.lock().unwrap_or_else(|e| e.into_inner());
                     match painted {
                         Ok(Ok(())) => mailbox.complete(sequence),
                         Ok(Err(error)) => {
-                            screen.resize(screen.cols, screen.rows);
+                            let (cols, rows) = (screen.cols, screen.rows);
+                            review.resize(&mut screen, cols, rows);
                             mailbox.fail(sequence, format!("terminal write failed: {error}"));
                         }
                         Err(_) => {
-                            screen.resize(screen.cols, screen.rows);
+                            let (cols, rows) = (screen.cols, screen.rows);
+                            review.resize(&mut screen, cols, rows);
                             mailbox.fail(sequence, "paint worker panicked".into());
                         }
                     }
@@ -522,6 +567,11 @@ impl Painter {
     }
 
     pub fn frame(&mut self, lines: Vec<String>) {
+        self.frame_in_view(lines, false);
+    }
+
+    /// Post the terminal-buffer mode with its frame so rapid toggles cannot mismatch them.
+    pub fn frame_in_view(&mut self, lines: Vec<String>, alternate: bool) {
         self.next_sequence = self.next_sequence.wrapping_add(1);
         let sequence = self.next_sequence;
         let posted_at = std::time::Instant::now();
@@ -532,6 +582,7 @@ impl Painter {
                 sequence,
                 posted_at,
                 lines,
+                alternate,
             });
         });
     }
@@ -659,6 +710,7 @@ mod tests {
             sequence: 2,
             posted_at,
             lines: vec!["new".into()],
+            alternate: false,
         });
 
         mailbox.complete(1);

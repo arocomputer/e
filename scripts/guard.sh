@@ -62,8 +62,15 @@ fi
 if out=$(prod_rs $(find src/core -name '*.rs' 2>/dev/null) | grep -E 'fs::write|File::create|OpenOptions' |
     grep -v '^src/core/config/store.rs:' | grep -v '^src/core/session.rs:' |
     grep -v '^src/core/config/home.rs:' | grep -v '^src/core/tools/' |
-    grep -v '^src/core/update.rs:' | grep -v '^src/core/providers/diagnostics.rs:'); then
+    grep -v '^src/core/update.rs:' | grep -v '^src/core/providers/diagnostics.rs:' |
+    grep -v '^src/core/diff.rs:.*OpenOptions::new()'); then
   bad "direct file write in src/core outside audited store/session/tool/update/diagnostics paths:"
+  say "$out"
+fi
+
+# The diff reader uses OpenOptions for O_NOFOLLOW, never for writes.
+if out=$(prod_rs src/core/diff.rs | grep -E '\.(write|append|create|create_new)\(|\.truncate\((true|false)\)|O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)'); then
+  bad "write-capable file options in the read-only diff reader:"
   say "$out"
 fi
 

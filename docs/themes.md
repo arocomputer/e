@@ -26,3 +26,7 @@ ignored; missing tokens fall back to the terminal default — a partial theme
 is valid.
 
 Apply instantly with `/reload` (or pick it in `/settings`).
+
+The full transcript reader uses `toolDetailRail` for its `│` rails. It defaults
+to the terminal foreground, while the two-space indent and output use `dim`.
+Its footer uses `userMessageText` for `┃` and `muted` for navigation.

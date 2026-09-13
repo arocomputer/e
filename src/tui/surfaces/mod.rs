@@ -2,6 +2,7 @@
 //! trust. Every surface frames through `panel` so the look can't diverge.
 
 pub mod authpanel;
+pub mod diffpanel;
 pub mod menu;
 pub mod panel;
 pub mod settingspanel;

@@ -370,15 +370,7 @@ impl Block {
         } else {
             "└"
         };
-        let marker = theme.fg("muted", marker);
-        let available = width.saturating_sub(2 + display_width(&child.running));
-        let target = clip_plain(&child.target, available);
-        let label = if target.is_empty() {
-            child.running.clone()
-        } else {
-            format!("{} {target}", child.running)
-        };
-        let mut rows = vec![format!("{marker} {}", theme.fg("muted", &label))];
+        let mut rows = tool_label_rows(theme, width, marker, &child.running, &child.target, "");
         append_tool_preview(&mut rows, child, theme, width);
         rows
     }
@@ -418,7 +410,14 @@ impl Block {
                 ));
                 continue;
             }
-            rows.push((child_row(theme, width, child, connector), child.detail));
+            let child_rows = child_rows(theme, width, child, connector);
+            let last = child_rows.len().saturating_sub(1);
+            rows.extend(
+                child_rows
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, row)| (row, if i == last { child.detail } else { None })),
+            );
         }
         rows
     }
@@ -589,7 +588,7 @@ impl Block {
                     }
                     let last = index + 1 == self.tool_children.len() && focused.is_none();
                     let connector = if last { "└" } else { "├" };
-                    rows.push(child_row(theme, width, child, connector));
+                    rows.extend(child_rows(theme, width, child, connector));
                     append_tool_preview(&mut rows, child, theme, width);
                 }
                 rows
@@ -693,7 +692,7 @@ fn prefix_by_width(text: &str, width: usize) -> String {
 
 /// Clip by display cells the reference way: fits → unchanged; one cell →
 /// a bare ellipsis; otherwise a width-1 prefix plus `…`.
-fn clip_plain(text: &str, width: usize) -> String {
+pub(crate) fn clip_plain(text: &str, width: usize) -> String {
     if display_width(text) <= width {
         return text.to_string();
     }
@@ -799,17 +798,9 @@ fn suffix_stat_width(suffix: &str) -> usize {
     width
 }
 
-/// Pipe rows appear only while the command owns execution focus — the
-/// reference grammar. Completion withdraws them; full output lives behind
-/// ctrl+o, never inline. Live rows are a shell thing: a write or edit shows
-/// in the tree as its one action row, never as the file's content streaming
-/// beneath it.
-/// One child's status row, shared by the live tree and review screen: muted
-/// connector, state-specific verb, failure reason, and edit/write stat suffix.
-fn child_row(theme: &Theme, width: usize, child: &ToolChild, connector: &str) -> String {
-    // A tool tree is one muted work log. State belongs in the verb and result,
-    // not in bright connectors that make random branches look selected.
-    let connector = theme.fg("muted", connector);
+/// A child's status rows, shared by the tree and review. Multiline targets
+/// keep their connectors and colour instead of injecting bare physical rows.
+fn child_rows(theme: &Theme, width: usize, child: &ToolChild, connector: &str) -> Vec<String> {
     let action = match child.state {
         ToolState::Pending | ToolState::Running => child.running.as_str(),
         ToolState::Completed => child.completed.as_str(),
@@ -840,17 +831,60 @@ fn child_row(theme: &Theme, width: usize, child: &ToolChild, connector: &str) ->
         }
         _ => child.target.clone(),
     };
-    let suffix_width: usize = suffix_stat_width(&suffix);
-    let available = width.saturating_sub(2 + display_width(action) + suffix_width);
-    let target = clip_plain(&target_plain, available);
-    let label = if target.is_empty() {
-        action.to_string()
-    } else {
-        format!("{action} {target}")
-    };
-    format!("{connector} {}{suffix}", theme.fg("muted", &label))
+    tool_label_rows(theme, width, connector, action, &target_plain, &suffix)
 }
 
+/// Frame and clip each complete label within its tree column, including the verb's
+/// separating space. Only the final row closes a branch.
+fn tool_label_rows(
+    theme: &Theme,
+    width: usize,
+    connector: &str,
+    action: &str,
+    target: &str,
+    suffix: &str,
+) -> Vec<String> {
+    let lines: Vec<&str> = if target.is_empty() {
+        vec![""]
+    } else {
+        target.lines().collect()
+    };
+    let last = lines.len().saturating_sub(1);
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let tail = if i == last { suffix } else { "" };
+            let label = if i != 0 {
+                (*line).to_string()
+            } else if line.is_empty() {
+                action.to_string()
+            } else {
+                format!("{action} {line}")
+            };
+            let label = clip_plain(&label, width.saturating_sub(2 + suffix_stat_width(tail)));
+            let rail = if i == last {
+                connector
+            } else if i == 0 {
+                "├"
+            } else {
+                "│"
+            };
+            let rail = if i > 0 && connector == "├" {
+                "│"
+            } else {
+                rail
+            };
+            format!(
+                "{} {}{tail}",
+                theme.fg("muted", rail),
+                theme.fg("muted", &label)
+            )
+        })
+        .collect()
+}
+
+/// Show command output as pipe rows only while it runs. Finished output stays in review.
 fn append_tool_preview(rows: &mut Vec<String>, child: &ToolChild, theme: &Theme, width: usize) {
     if child.state != ToolState::Running {
         return;
@@ -1148,6 +1182,90 @@ mod tests {
         block.finish_tool(1, ToolOutcome::Completed, "done".into(), "");
         assert_eq!(block.focused_running(), None);
         assert!(block.overlay_rows(&theme, 80).is_empty());
+    }
+
+    #[test]
+    fn multiline_command_continuations_stay_connected_and_muted() {
+        let theme = theme();
+        let mut block = Block::tool_group(vec![ToolChild::pending(
+            1,
+            "command".into(),
+            "Running".into(),
+            "Ran".into(),
+            "git status\nls scripts".into(),
+        )]);
+        block.start_tool(1);
+        let expected = |rail: &str, label: &str| {
+            format!("{} {}", theme.fg("muted", rail), theme.fg("muted", label))
+        };
+        assert_eq!(
+            block.overlay_rows(&theme, 80),
+            vec![
+                expected("├", "Running git status"),
+                expected("│", "ls scripts")
+            ]
+        );
+        block.finish_tool(1, ToolOutcome::Completed, "done".into(), "");
+        block.seal();
+        let rows = block.lines_for_test(&theme, 80);
+        assert_eq!(
+            &rows[1..],
+            &[expected("├", "Ran git status"), expected("└", "ls scripts")]
+        );
+        assert!(rows.iter().all(|row| !row.contains('\n')));
+        let review = block.review_lines(&theme, 80);
+        assert_eq!(review[2].0, expected("└", "ls scripts"));
+    }
+
+    #[test]
+    fn image_path_rows_stay_muted_connected_and_within_the_tool_column() {
+        use crate::core::tools::strip_ansi as strip_sgr;
+        let theme = theme();
+        let path = "'/Users/test/Library/Application Support/clipboard/screenshot-界.png'";
+        for target in [path.to_string(), format!("sips -g pixelWidth\r\n{path}")] {
+            let mut block = Block::tool_group(vec![ToolChild::pending(
+                1,
+                "command".into(),
+                "Running".into(),
+                "Ran".into(),
+                target,
+            )]);
+            block.start_tool(1);
+            for width in [40, 80, 160] {
+                let rows = block.overlay_rows(&theme, width);
+                assert!(rows.iter().all(|row| !row.contains(['\n', '\r'])));
+                assert!(rows
+                    .iter()
+                    .all(|row| display_width(&strip_sgr(row)) <= width));
+                for row in rows {
+                    let plain = strip_sgr(&row);
+                    let rail = &plain[..plain.chars().next().unwrap().len_utf8()];
+                    assert_eq!(
+                        row,
+                        format!(
+                            "{} {}",
+                            theme.fg("muted", rail),
+                            theme.fg("muted", &plain[rail.len() + 1..])
+                        )
+                    );
+                }
+            }
+            block.finish_tool(1, ToolOutcome::Completed, "done".into(), "");
+            block.seal();
+            let rows = block.lines_for_test(&theme, 160);
+            let label = if rows.len() > 2 {
+                path.to_string()
+            } else {
+                format!("Ran {path}")
+            };
+            assert!(rows.last().unwrap().contains(&theme.fg("muted", &label)));
+            let review = block.review_lines(&theme, 160);
+            assert!(review
+                .last()
+                .unwrap()
+                .0
+                .contains(&theme.fg("muted", &label)));
+        }
     }
 
     #[test]

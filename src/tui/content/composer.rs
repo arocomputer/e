@@ -9,12 +9,21 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::tui::theme::Theme;
 
+/// A collapsed paste owns a character range in the draft, not matching text elsewhere.
+struct Paste {
+    id: usize,
+    start: usize,
+    end: usize,
+    content: String,
+}
+
+/// Editable draft with owned paste attachments and input history.
 pub struct Editor {
     /// Render `•` per character — for secret entry (/login keys).
     pub mask: bool,
-    /// Live paste placeholders: (token, full text), expanded on submit.
-    pastes: Vec<(String, String)>,
-    paste_seq: usize,
+    /// Live paste ranges, expanded once on submit and retired on deletion.
+    pastes: Vec<Paste>,
+    paste_label: String,
     /// Pastes longer than this many codepoints collapse to a placeholder
     /// token; `0` disables collapsing. A user preference (see
     /// `settings::paste_placeholder`), not a constant.
@@ -27,6 +36,7 @@ pub struct Editor {
     history: Vec<String>,
     history_pos: Option<usize>,
     draft: String,
+    draft_pastes: Vec<Paste>,
     /// Inner width from the latest render; vertical arrow keys need the
     /// visual layout to know whether a line movement is possible.
     inner_width: Option<usize>,
@@ -128,8 +138,9 @@ impl Editor {
             history: Vec::new(),
             history_pos: None,
             draft: String::new(),
+            draft_pastes: Vec::new(),
             pastes: Vec::new(),
-            paste_seq: 0,
+            paste_label: crate::core::config::settings::paste_label(),
             paste_limit: crate::core::config::settings::paste_placeholder() as usize,
             inner_width: None,
             scroll: 0,
@@ -144,11 +155,44 @@ impl Editor {
         self.cursor
     }
 
+    /// Replace the draft, discarding its attachments and saved history draft.
     pub fn set_text(&mut self, s: &str) {
         self.text = s.chars().collect();
         self.cursor = self.text.len();
         self.selection_anchor = None;
         self.history_pos = None;
+        self.pastes.clear();
+        self.draft.clear();
+        self.draft_pastes.clear();
+    }
+
+    /// Replace a completion suffix without losing attachments in the unchanged prefix.
+    pub fn replace_suffix(&mut self, start: usize, suffix: &str) {
+        self.replace_range(start, self.text.len(), suffix);
+    }
+
+    /// Edit a character range. Touching a paste replaces the entire attachment.
+    fn replace_range(&mut self, mut start: usize, mut end: usize, replacement: &str) {
+        for paste in &self.pastes {
+            if start < paste.end && end > paste.start {
+                start = start.min(paste.start);
+                end = end.max(paste.end);
+            }
+        }
+        let inserted = replacement.chars().count();
+        self.pastes.retain_mut(|paste| {
+            if start < paste.end && end > paste.start {
+                return false;
+            }
+            if paste.start >= end {
+                paste.start = paste.start - (end - start) + inserted;
+                paste.end = paste.end - (end - start) + inserted;
+            }
+            true
+        });
+        self.text.splice(start..end, replacement.chars());
+        self.cursor = start + inserted;
+        self.selection_anchor = None;
     }
 
     /// The active selection as an ordered char range, None when empty.
@@ -167,9 +211,7 @@ impl Editor {
             self.selection_anchor = None;
             return false;
         };
-        self.text.drain(start..end);
-        self.cursor = start;
-        self.selection_anchor = None;
+        self.replace_range(start, end, "");
         true
     }
 
@@ -233,47 +275,82 @@ impl Editor {
     }
 
     pub fn insert(&mut self, c: char) {
-        self.text.insert(self.cursor, c);
-        self.cursor += 1;
+        self.insert_str(c.encode_utf8(&mut [0; 4]));
     }
 
-    /// A paste becomes a placeholder token when it runs past the
-    /// configured threshold (codepoints, line count regardless; the token
-    /// expands back on submit). Anything smaller inserts literally, and a
-    /// threshold of `0` disables collapsing entirely — every paste inserts raw.
+    /// Normalize paste newlines and collapse text above the configured codepoint limit.
+    /// Labels report character counts; optional line fields count source lines, not wrapping.
     pub fn insert_paste(&mut self, text: &str) {
         self.delete_selection();
-        let lines = text.lines().count().max(1);
-        if self.paste_limit == 0 || text.chars().count() <= self.paste_limit {
-            self.insert_str(text);
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let chars = text.chars().count();
+        if self.paste_limit == 0 || chars <= self.paste_limit {
+            self.insert_str(&text);
             return;
         }
-        self.paste_seq += 1;
-        let token = format!(
-            "[Pasted text #{}, {} line{}]",
-            self.paste_seq,
-            lines,
-            if lines == 1 { "" } else { "s" }
-        );
-        self.pastes.push((token.clone(), text.to_string()));
+        let lines = text.lines().count().max(1);
+        let id = self
+            .pastes
+            .iter()
+            .filter(|paste| self.cursor <= paste.start || self.cursor >= paste.end)
+            .map(|paste| paste.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let token = self
+            .paste_label
+            .replace("{id}", &id.to_string())
+            .replace("{lines}", &lines.to_string())
+            .replace("{plural}", if lines == 1 { "" } else { "s" })
+            .replace("{chars}", &chars.to_string());
+        // An empty override must never create an invisible attachment.
+        if token.is_empty() {
+            self.insert_str(&text);
+            return;
+        }
         self.insert_str(&token);
+        self.pastes.push(Paste {
+            id,
+            start: self.cursor - token.chars().count(),
+            end: self.cursor,
+            content: text,
+        });
+        self.pastes.sort_by_key(|paste| paste.start);
     }
 
-    /// Replace every live placeholder with its pasted content, retiring all
-    /// mappings: the draft that owned them is gone once submitted, and a
-    /// token typed later must not resurrect an old payload.
-    pub fn expand_pastes(&mut self, text: &str) -> String {
-        let mut out = text.to_string();
-        for (token, content) in self.pastes.drain(..) {
-            out = out.replace(&token, &content);
+    /// Insert a snapshot attachment with editable, dim chrome and atomic deletion.
+    /// It does not consume a pasted-text number.
+    pub fn insert_attachment(&mut self, label: &str, content: &str) {
+        self.delete_selection();
+        if label.is_empty() {
+            self.insert_str(content);
+            return;
         }
+        self.insert_str(label);
+        self.pastes.push(Paste {
+            id: 0,
+            start: self.cursor - label.chars().count(),
+            end: self.cursor,
+            content: content.into(),
+        });
+        self.pastes.sort_by_key(|paste| paste.start);
+    }
+
+    /// Read the full draft, expanding only owned ranges, never text inside a payload.
+    pub fn expanded_text(&self) -> String {
+        let mut out = String::new();
+        let mut start = 0;
+        for paste in &self.pastes {
+            out.extend(self.text[start..paste.start].iter());
+            out.push_str(&paste.content);
+            start = paste.end;
+        }
+        out.extend(self.text[start..].iter());
         out
     }
 
     pub fn insert_str(&mut self, s: &str) {
-        for c in s.chars() {
-            self.insert(c);
-        }
+        self.replace_range(self.cursor, self.cursor, s);
     }
 
     /// Where a vertical motion would land: the same column in the visual
@@ -308,26 +385,29 @@ impl Editor {
                 match self.history_pos {
                     None => {
                         self.draft = self.text();
+                        self.draft_pastes = std::mem::take(&mut self.pastes);
                         self.history_pos = Some(self.history.len() - 1);
                     }
                     Some(0) => {}
                     Some(p) => self.history_pos = Some(p - 1),
                 }
                 if let Some(p) = self.history_pos {
-                    let entry = self.history[p].clone();
-                    self.set_text(&entry);
-                    self.history_pos = Some(p);
+                    self.text = self.history[p].chars().collect();
+                    self.cursor = self.text.len();
+                    self.pastes.clear();
                 }
             }
             _ => match self.history_pos {
                 Some(p) if p + 1 < self.history.len() => {
-                    let entry = self.history[p + 1].clone();
-                    self.set_text(&entry);
+                    self.text = self.history[p + 1].chars().collect();
+                    self.cursor = self.text.len();
+                    self.pastes.clear();
                     self.history_pos = Some(p + 1);
                 }
                 Some(_) => {
-                    let draft = self.draft.clone();
-                    self.set_text(&draft);
+                    self.text = std::mem::take(&mut self.draft).chars().collect();
+                    self.cursor = self.text.len();
+                    self.pastes = std::mem::take(&mut self.draft_pastes);
                     self.history_pos = None;
                 }
                 None => {}
@@ -345,11 +425,8 @@ impl Editor {
                 Consumed
             }
             Key::Enter => {
-                let text = self.text();
-                self.text.clear();
-                self.cursor = 0;
-                self.selection_anchor = None;
-                self.history_pos = None;
+                let text = self.expanded_text();
+                self.set_text("");
                 Submit(text)
             }
             Key::Newline => {
@@ -359,14 +436,13 @@ impl Editor {
             }
             Key::Backspace => {
                 if !self.delete_selection() && self.cursor > 0 {
-                    self.cursor -= 1;
-                    self.text.remove(self.cursor);
+                    self.replace_range(self.cursor - 1, self.cursor, "");
                 }
                 Consumed
             }
             Key::Delete => {
                 if !self.delete_selection() && self.cursor < self.text.len() {
-                    self.text.remove(self.cursor);
+                    self.replace_range(self.cursor, self.cursor + 1, "");
                 }
                 Consumed
             }
@@ -452,24 +528,41 @@ impl Editor {
             }
             Key::KillToEnd => {
                 self.selection_anchor = None;
-                self.text.truncate(self.cursor);
+                self.replace_range(self.cursor, self.text.len(), "");
                 Consumed
             }
             Key::KillToStart => {
                 self.selection_anchor = None;
-                self.text.drain(..self.cursor);
-                self.cursor = 0;
+                self.replace_range(0, self.cursor, "");
                 Consumed
             }
             Key::KillWord => {
                 if !self.delete_selection() {
                     let start = self.word_left();
-                    self.text.drain(start..self.cursor);
-                    self.cursor = start;
+                    self.replace_range(start, self.cursor, "");
                 }
                 Consumed
             }
         }
+    }
+
+    /// Style only owned paste ranges, including fragments on wrapped rows.
+    fn styled_slice(&self, theme: &Theme, chars: &[char], start: usize, end: usize) -> String {
+        let mut out = String::new();
+        let mut from = start;
+        if !self.mask {
+            for paste in &self.pastes {
+                let lo = paste.start.max(start);
+                let hi = paste.end.min(end);
+                if lo < hi {
+                    out.extend(chars[from..lo].iter());
+                    out.push_str(&theme.fg("dim", &chars[lo..hi].iter().collect::<String>()));
+                    from = hi;
+                }
+            }
+        }
+        out.extend(chars[from..end].iter());
+        out
     }
 
     /// Render the composer band: a leading blank (the reference paints its
@@ -479,6 +572,17 @@ impl Editor {
     /// show; a longer draft scrolls behind a cursor-following window whose
     /// first row wears `┃↑` when rows hide above.
     pub fn render(&mut self, theme: &Theme, width: usize, max_body_rows: usize) -> Vec<String> {
+        self.render_with_focus(theme, width, max_body_rows, true)
+    }
+
+    /// A side panel can own input focus while the draft remains visible without a caret.
+    pub fn render_with_focus(
+        &mut self,
+        theme: &Theme,
+        width: usize,
+        max_body_rows: usize,
+        focused: bool,
+    ) -> Vec<String> {
         // A draft starting with `!` is a shell command: the rail turns the
         // bash-mode color — the whole indicator, no words.
         let rail_token =
@@ -508,43 +612,44 @@ impl Editor {
         let selection = self.selection();
         let mut body: Vec<String> = Vec::with_capacity(rows.len() + 1);
         for (index, row) in rows.iter().enumerate() {
-            let slice = &chars[row.start..row.end];
             let full_final_row = index == last
                 && self.cursor == self.text.len()
                 && self.cursor == row.end
                 && row_width(&chars, row) >= inner;
-            let cursor_here = cursor_row == Some(index);
+            let cursor_here = focused && cursor_row == Some(index);
             let rendered = if let Some((start, end)) = selection
                 .map(|(a, b)| (a.max(row.start), b.min(row.end)))
                 .filter(|(a, b)| a < b)
             {
-                let before: String = chars[row.start..start].iter().collect();
-                let span: String = chars[start..end].iter().collect();
-                let after: String = chars[end..row.end].iter().collect();
+                let before = self.styled_slice(theme, &chars, row.start, start);
+                let span = self.styled_slice(theme, &chars, start, end);
+                let after = self.styled_slice(theme, &chars, end, row.end);
                 format!("{before}\x1b[7m{span}\x1b[27m{after}")
             } else if selection.is_some() {
-                slice.iter().collect()
+                self.styled_slice(theme, &chars, row.start, row.end)
             } else if cursor_here && !full_final_row {
-                let at = self.cursor - row.start;
-                let before: String = slice[..at].iter().collect();
-                let cursor_char = slice
-                    .get(at)
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| " ".into());
-                let after: String = slice[at..].iter().skip(1).collect();
+                let at = self.cursor;
+                let before = self.styled_slice(theme, &chars, row.start, at);
+                let cursor_char = if at < row.end {
+                    self.styled_slice(theme, &chars, at, at + 1)
+                } else {
+                    " ".into()
+                };
+                let after = self.styled_slice(theme, &chars, (at + 1).min(row.end), row.end);
                 format!("{before}\x1b[7m{cursor_char}\x1b[27m{after}")
             } else {
-                slice.iter().collect()
+                self.styled_slice(theme, &chars, row.start, row.end)
             };
             body.push(rendered);
         }
         // A cursor resting past a full final row needs one extra empty row.
-        let trailing_cursor = rows.last().is_some_and(|row| {
-            self.cursor == self.text.len()
-                && !self.text.is_empty()
-                && self.cursor == row.end
-                && row_width(&chars, row) >= inner
-        });
+        let trailing_cursor = focused
+            && rows.last().is_some_and(|row| {
+                self.cursor == self.text.len()
+                    && !self.text.is_empty()
+                    && self.cursor == row.end
+                    && row_width(&chars, row) >= inner
+            });
         if trailing_cursor {
             body.push("\x1b[7m \x1b[27m".to_string());
         }

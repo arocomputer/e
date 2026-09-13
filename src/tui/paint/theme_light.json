@@ -23,6 +23,7 @@
 		"muted": "statusline",
 		"dim": "dim",
 		"text": "",
+		"toolDetailRail": "",
 		"thinkingText": "statusline",
 		"selectedBg": "selected",
 		"selectedText": "selectedInk",

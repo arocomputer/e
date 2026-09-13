@@ -7,6 +7,14 @@ use super::*;
 impl App {
     /// The single session stream, in order. Turn bookkeeping hangs off it.
     pub(super) fn on_session_event(&mut self, event: SessionEvent) {
+        if matches!(
+            &event,
+            SessionEvent::ToolEnd { .. } | SessionEvent::TurnEnd { .. }
+        ) {
+            if let Some(panel) = &mut self.diff {
+                panel.dirty = true;
+            }
+        }
         match event {
             SessionEvent::Discarded(prompts) => {
                 for text in prompts {
