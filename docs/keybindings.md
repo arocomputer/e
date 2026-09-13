@@ -78,3 +78,13 @@ These preferences in `~/.e/settings.json` take effect in a new editor:
   Optional `{lines}` and `{plural}` fields count source lines. `{plural}` is
   empty for one line and `s` otherwise. An empty label inserts
   the full text rather than creating an invisible attachment.
+
+## Diff review
+
+`/diff` opens a mouse-driven review document above the shared composer.
+Scroll the pane with the wheel, click file summaries to jump, and drag source
+to add an inline diff attachment on release. Keyboard input stays with the
+composer. Enter sends the prompt without closing review. Backspace selects a
+diff attachment first; a second Backspace removes its payload and marker.
+
+See `e docs diff` for comparison rules and preferences.

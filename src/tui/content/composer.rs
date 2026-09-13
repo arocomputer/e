@@ -318,22 +318,47 @@ impl Editor {
         self.pastes.sort_by_key(|paste| paste.start);
     }
 
-    /// Insert a snapshot attachment with editable, dim chrome and atomic deletion.
-    /// It does not consume a pasted-text number.
+    /// Replace the draft's diff snapshot in place, or insert it at the caret.
+    /// The marker is blue, owns its payload, and does not consume a paste number.
     pub fn insert_attachment(&mut self, label: &str, content: &str) {
-        self.delete_selection();
         if label.is_empty() {
-            self.insert_str(content);
             return;
         }
-        self.insert_str(label);
+        let existing = self
+            .pastes
+            .iter()
+            .find(|paste| paste.id == 0)
+            .map(|paste| (paste.start, paste.end));
+        let old_cursor = self.cursor;
+        let start = if let Some((start, end)) = existing {
+            self.replace_range(start, end, label);
+            start
+        } else {
+            self.delete_selection();
+            if self.cursor > 0 && !self.text[self.cursor - 1].is_whitespace() {
+                self.insert_str(" ");
+            }
+            let start = self.cursor;
+            self.insert_str(label);
+            start
+        };
+        let end = start + label.chars().count();
         self.pastes.push(Paste {
             id: 0,
-            start: self.cursor - label.chars().count(),
-            end: self.cursor,
+            start,
+            end,
             content: content.into(),
         });
         self.pastes.sort_by_key(|paste| paste.start);
+        if let Some((old_start, old_end)) = existing {
+            self.cursor = if old_cursor <= old_start {
+                old_cursor
+            } else if old_cursor >= old_end {
+                old_cursor - (old_end - old_start) + (end - start)
+            } else {
+                end
+            };
+        }
     }
 
     /// Read the full draft, expanding only owned ranges, never text inside a payload.
@@ -436,7 +461,15 @@ impl Editor {
             }
             Key::Backspace => {
                 if !self.delete_selection() && self.cursor > 0 {
-                    self.replace_range(self.cursor - 1, self.cursor, "");
+                    if let Some(paste) = self.pastes.iter().find(|paste| {
+                        paste.id == 0 && self.cursor > paste.start && self.cursor <= paste.end
+                    }) {
+                        // First Backspace selects the whole chip; the next deletes it.
+                        self.selection_anchor = Some(paste.start);
+                        self.cursor = paste.end;
+                    } else {
+                        self.replace_range(self.cursor - 1, self.cursor, "");
+                    }
                 }
                 Consumed
             }
@@ -556,7 +589,14 @@ impl Editor {
                 let hi = paste.end.min(end);
                 if lo < hi {
                     out.extend(chars[from..lo].iter());
-                    out.push_str(&theme.fg("dim", &chars[lo..hi].iter().collect::<String>()));
+                    out.push_str(&theme.fg(
+                        if paste.id == 0 {
+                            "diffSelectionText"
+                        } else {
+                            "dim"
+                        },
+                        &chars[lo..hi].iter().collect::<String>(),
+                    ));
                     from = hi;
                 }
             }

@@ -1,5 +1,6 @@
 """Run a command on a real pty of fixed size, type a prompt, capture raw output."""
-import os, pty, sys, time, select, fcntl, termios, struct, signal
+import os, pty, sys, time, select, fcntl, termios, struct, signal, json
+from collections import deque
 
 out_path, cols, rows, wait_before, wait_after, *cmd = sys.argv[1:]
 cols, rows = int(cols), int(rows)
@@ -8,6 +9,8 @@ prompt = os.environ.get("CAP_PROMPT", "")
 wait_for = os.environ.get("CAP_WAIT_FOR", "").encode()
 exit_keys = os.environ.get("CAP_EXIT", "")
 exit_wait = float(os.environ.get("CAP_EXIT_WAIT", "1"))
+# Timed [seconds-after-start, keys] pairs exercise panels that load asynchronously.
+steps = deque(json.loads(os.environ.get("CAP_STEPS", "[]")))
 
 pid, fd = pty.fork()
 if pid == 0:
@@ -16,6 +19,7 @@ if pid == 0:
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 buf = bytearray()
+started = time.monotonic()
 deadline = time.time() + wait_before
 typed = False
 end = time.time() + wait_before + wait_after
@@ -29,6 +33,9 @@ while time.time() < end:
         if not chunk:
             break
         buf += chunk
+    while steps and time.monotonic() - started >= steps[0][0]:
+        _, keys = steps.popleft()
+        os.write(fd, keys.encode())
     if not typed and time.time() >= deadline and prompt:
         os.write(fd, prompt.encode() + b"\r")
         typed = True

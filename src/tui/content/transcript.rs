@@ -17,6 +17,8 @@ pub struct ToolChild {
     pub running: String,
     pub completed: String,
     pub target: String,
+    // Preserve path identity before display sanitization for consecutive edits.
+    edit_target: Option<String>,
     pub state: ToolState,
     pub result: Option<String>,
     pub output: String,
@@ -45,6 +47,7 @@ impl ToolChild {
     ) -> Self {
         Self {
             id,
+            edit_target: (category == "edit").then(|| target.clone()),
             category: crate::core::tools::sanitize_display(&category),
             running: crate::core::tools::sanitize_display(&running),
             completed: crate::core::tools::sanitize_display(&completed),
@@ -566,7 +569,12 @@ impl Block {
                 // the transient row below the transcript — and while it is
                 // out, the tree stays open: the last static child keeps `├`.
                 let focused = self.focused_running();
-                for (index, child) in self.tool_children.iter().enumerate() {
+                let combine =
+                    crate::core::config::settings::get_string("combine_consecutive_edits")
+                        .as_deref()
+                        != Some("off");
+                let mut children = self.tool_children.iter().enumerate().peekable();
+                while let Some((index, child)) = children.next() {
                     if focused == Some(index) {
                         continue;
                     }
@@ -586,9 +594,40 @@ impl Block {
                         ));
                         continue;
                     }
-                    let last = index + 1 == self.tool_children.len() && focused.is_none();
+                    let mut end = index;
+                    let mut totals = edit_counts(child);
+                    if combine {
+                        while let Some((next, candidate)) = children.peek() {
+                            if candidate.edit_target != child.edit_target
+                                || candidate.completed != child.completed
+                            {
+                                break;
+                            }
+                            let (Some((added, removed)), Some((a, d))) =
+                                (totals, edit_counts(candidate))
+                            else {
+                                break;
+                            };
+                            totals = Some((added.saturating_add(a), removed.saturating_add(d)));
+                            end = *next;
+                            children.next();
+                        }
+                    }
+                    let last = end + 1 == self.tool_children.len() && focused.is_none();
                     let connector = if last { "└" } else { "├" };
-                    rows.extend(child_rows(theme, width, child, connector));
+                    if let Some((added, removed)) = totals.filter(|_| end > index) {
+                        let suffix = diff_stat_suffix(theme, &format!("+{added} -{removed}"));
+                        rows.extend(tool_label_rows(
+                            theme,
+                            width,
+                            connector,
+                            &child.completed,
+                            &child.target,
+                            &suffix,
+                        ));
+                    } else {
+                        rows.extend(child_rows(theme, width, child, connector));
+                    }
                     append_tool_preview(&mut rows, child, theme, width);
                 }
                 rows
@@ -757,9 +796,23 @@ fn notice_rows(
     rows
 }
 
-/// The reference's edit/write stat suffix: ` +N / -M` with the diff-marker
-/// hue on each count and a dim slash; one-sided edits drop the slash, and a
-/// summary that isn't a `+N -M` pair rides muted unchanged.
+/// Only successful edit calls with known counts can join the preceding row.
+/// Raw tool children stay untouched for session history and the full reader.
+fn edit_counts(child: &ToolChild) -> Option<(usize, usize)> {
+    if child.state != ToolState::Completed || child.edit_target.is_none() {
+        return None;
+    }
+    let summary = child.result.as_deref()?;
+    if summary == "+0 lines" {
+        return Some((0, 0));
+    }
+    let mut parts = summary.split_whitespace();
+    let added = parts.next()?.strip_prefix('+')?.parse().ok()?;
+    let removed = parts.next()?.strip_prefix('-')?.parse().ok()?;
+    parts.next().is_none().then_some((added, removed))
+}
+
+/// Edit/write counts share the row's muted gray. One-sided edits omit the slash.
 fn diff_stat_suffix(theme: &Theme, result: &str) -> String {
     let mut adds = None;
     let mut dels = None;
@@ -1148,6 +1201,80 @@ mod tests {
         block.finish_streaming();
         assert!(block.cache.is_none(), "the final render was not forced");
         assert!(block.lines(&theme, 80, true).join("\n").contains("second"));
+    }
+
+    #[test]
+    fn consecutive_edits_share_one_row_but_review_keeps_every_call() {
+        let make = |id, path: &str| {
+            ToolChild::pending(
+                id,
+                "edit".into(),
+                "Editing".into(),
+                "Edited".into(),
+                path.into(),
+            )
+        };
+        let mut block = Block::tool_group(vec![make(1, "a.rs"), make(2, "a.rs"), make(3, "a.rs")]);
+        for (id, summary) in [(1, "+3 -2"), (2, "+2 -1"), (3, "+1 -0")] {
+            block.finish_tool(id, ToolOutcome::Completed, summary.into(), "");
+        }
+        let theme = theme();
+        let rows = block.lines_for_test(&theme, 80);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[1],
+            format!(
+                "{} {} {}",
+                theme.fg("muted", "└"),
+                theme.fg("muted", "Edited a.rs"),
+                theme.fg("muted", "+6 / -3")
+            )
+        );
+        assert!(rows[0].contains("3 tool calls"));
+        assert_eq!(
+            block
+                .review_lines(&theme, 80)
+                .iter()
+                .filter(|(row, _)| row.contains("Edited a.rs"))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn another_tool_or_a_failed_edit_breaks_edit_grouping() {
+        let make = |id, category: &str, path: &str| {
+            ToolChild::pending(
+                id,
+                category.into(),
+                "Working".into(),
+                "Edited".into(),
+                path.into(),
+            )
+        };
+        let mut block = Block::tool_group(vec![
+            make(1, "edit", "a.rs"),
+            make(2, "read", "a.rs"),
+            make(3, "edit", "a.rs"),
+            make(4, "edit", "a.rs"),
+            make(5, "edit", "a.rs"),
+            make(6, "edit", "b.rs"),
+        ]);
+        for id in 1..=6 {
+            block.finish_tool(
+                id,
+                if id == 4 {
+                    ToolOutcome::Failed
+                } else {
+                    ToolOutcome::Completed
+                },
+                "+1 -1".into(),
+                "",
+            );
+        }
+        let rows = block.lines_for_test(&theme(), 80);
+        assert_eq!(rows.len(), 7);
+        assert!(rows.iter().any(|row| row.contains("Failed a.rs")));
     }
 
     /// The focused running call uses a transient overlay but remains visually

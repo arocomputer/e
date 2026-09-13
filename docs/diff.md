@@ -1,9 +1,16 @@
 # Diff review
 
 Run `/diff` to open or close a live, read-only Git diff beside the conversation.
-The conversation stays on the left. The right panel lists changed files and
-added/removed line counts above the selected file's unified diff. Tests and
-generated files remain visible.
+The conversation stays on the left, with a narrower diff pane on the right.
+One full-width composer sits below both. The pane is a continuous document:
+file counts at the top, then each file's header and source. Click a file in the
+summary to jump to its changes, or scroll through the whole document.
+
+Source rows show line numbers, syntax colors, and addition/removal backgrounds.
+Changed words have stronger backgrounds. Removed rows use old line numbers;
+context and added rows use new ones. Long lines wrap without repeating their
+line number. Hunk headers are hidden, with separators between disjoint hunks.
+Very large replacements use a bounded word comparison.
 
 The comparison is the current workspace versus `HEAD`, including staged and
 unstaged changes together and non-ignored untracked files. It includes changes
@@ -12,33 +19,37 @@ empty tree. Renames appear as a deletion and an addition. This version does not
 provide session-only or branch-base comparisons, staging, or reverting.
 
 The panel refreshes after tool completion and periodically while visible.
-Only the selected file's patch loads. A refresh preserves the selected path
-and scroll position, clamping them if the file changes or disappears. If the
-patch changes while you are selecting lines, the selection clears rather than
-attaching different text under the old selection.
+An unchanged refresh preserves selection and scroll. If source changes during
+a drag, that selection clears rather than attaching different text. Existing
+draft attachments remain immutable snapshots.
 
-## Navigation
+## Interaction
 
-- `Ctrl+D` switches focus between the conversation and the diff panel.
-- In the file list, `Up`/`Down` or `k`/`j` select a file. `Enter` focuses its diff.
-- In the diff, `Up`/`Down` or `k`/`j` move through lines. `PageUp`/`PageDown`
-  scroll a page; `Home`/`End` move to the ends. `Left`/`Right` scroll horizontally.
-- Hold `Shift` while moving through the diff to select lines. `Enter` attaches
-  the selection, or the current line, to the draft and returns focus to it.
-- Click a file to select it. Drag across diff rows to select lines, then press
-  `Enter` to attach them. The mouse wheel navigates the area under the pointer.
-- `Esc` returns from the diff to the file list, then closes the panel.
-  Clicking the header's `×` also closes it.
+The mouse controls review. Keyboard input stays with the composer, so Enter
+submits your prompt without closing the diff. There is no diff focus mode,
+Ctrl+D shortcut, or navigation hint on the status line.
 
-An attachment contains a snapshot of the selected diff and its hunk header,
-not a live file reference. Its dim `[Diff …]` marker owns that text. Deleting
-or replacing the marker discards the snapshot. It never submits by itself.
+- Wheel over the pane to scroll. Shift+wheel moves a page.
+- Click a file summary to jump to that file's source.
+- Drag across source rows. Releasing the mouse adds a blue `⧉ 4 lines from diff`
+  marker to the composer. A single source row reads `⧉ 1 line from diff`.
+- Selecting again replaces that marker and its payload in place, leaving your
+  other draft text and caret position intact.
+- The first Backspace at the marker selects it. A second removes it and its
+  payload. Moving away cancels the selection. Ordinary pasted-text deletion
+  keeps its existing behavior.
+- Click the header's `×`, or run `/diff` again, to close review.
 
-The split needs 110 terminal columns by default. Below that width, the focused
-pane fills the screen; `Ctrl+D` switches between review and the draft without
-losing either. Review uses the alternate terminal screen so closing it restores
-the normal transcript and scrollback. A terminal resize follows e's existing
-transcript reflow behavior.
+Attachments contain source text and file paths, without renderer styling, diff
+signs, line numbers, or hunk headers. Tabs and indentation survive. Selecting
+wrapped fragments attaches each logical source line only once. A selection can
+cross file boundaries; the payload identifies each file. Selection never submits
+by itself, and selecting a new range does not change an already submitted prompt.
+
+The split needs 110 columns by default. On narrower terminals the diff fills
+the area above the composer. Closing it restores chat and scrollback. Review
+uses the alternate terminal screen. Resizing reflows wrapped source and clears
+transient selection without changing an attachment already in the draft.
 
 ## Preferences
 
@@ -47,17 +58,19 @@ These keys in `~/.e/settings.json` apply when you next open the panel:
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `diff_min_width` | `110` | Minimum split width, at least 60 columns |
-| `diff_width_percent` | `50` | Diff share of the terminal, between 30 and 70 percent |
+| `diff_width_percent` | `40` | Diff share of the terminal, between 30 and 70 percent |
 | `diff_refresh_ms` | `1000` | Periodic refresh interval, at least 250 ms |
-| `diff_title` | `Diff · workspace vs HEAD` | Header text |
-| `diff_hint` | `↑↓ move · Enter · Ctrl+D focus · Esc back` | Status-row hint |
+| `diff_title` | `{count} {files} changed` | Header, with file count and singular/plural noun |
+| `diff_selection_label` | `⧉ {count} {lines} from diff` | Inline attachment label, with singular/plural line count |
 
-Colours use the active theme: `border` for dividers, `dim` for secondary text
-and attachment markers, `userMessageText` for the selected file, and the
-`toolDiffAddedMarker`/`toolDiffRemovedMarker` tokens and their terminal
-fallbacks for additions and deletions.
+Colors use the active theme. `border` colors dividers and `dim` colors
+secondary text and attachment markers. The `diff*` tokens control the code
+pane, selection, attachment marker, word highlights, syntax, line numbers, and counts. See
+`e docs themes` for the token list. Other code blocks keep their existing palette.
 
-Git reads have a five-second timeout and bounded output. Patches over 256 KiB
+Git reads have a five-second timeout and bounded output. Each refresh includes
+at most 128 patches and 4 MiB of patch text, and stops starting patches after
+five seconds. Omitted files are reported at the end of the document. Patches over 256 KiB
 show a truncation notice. Binary files have no line counts. New files over
 2 MiB or containing non-UTF-8/binary data show a preview-unavailable message;
 symlinks show their target path without reading the target. Failures appear in

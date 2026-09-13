@@ -78,8 +78,7 @@ struct QueueReview {
 enum AppJob {
     DiffLoaded {
         generation: u64,
-        requested: Option<std::path::PathBuf>,
-        result: Result<crate::core::diff::Snapshot, String>,
+        result: Result<crate::core::diff::Review, String>,
     },
     /// A line for the transcript (login progress, extension notify…).
     Notice(String),
@@ -316,7 +315,15 @@ impl App {
         Some(format!("{}{}", theme.fg(token, &line[..7]), &line[7..]))
     }
 
+    /// Ordinary chat joins the transcript and composer; review lays them out separately.
     fn conversation_frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = self.transcript_frame(width);
+        lines.extend(self.composer_frame(width, height));
+        lines
+    }
+
+    /// Transcript and live activity only, without editor or footer chrome.
+    fn transcript_frame(&mut self, width: usize) -> Vec<String> {
         let blink_on = self
             .active
             .as_ref()
@@ -385,16 +392,18 @@ impl App {
                 }
             }
         }
-        let dock_start = lines.len();
+        lines
+    }
+
+    /// One full-width editor and status band, shared beneath both review panes.
+    fn composer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = Vec::new();
         let entering_key = matches!(self.auth, Some(AuthStage::ApiKey { .. }));
         if !entering_key {
             // The reference caps the composer at half the frame plus one
             // row; a longer draft scrolls behind the ┃↑ marker.
             let cap = (height / 2 + 1).max(3);
-            let focused = !self.diff.as_ref().is_some_and(|panel| panel.focused);
-            let mut composer = self
-                .editor
-                .render_with_focus(&self.theme, width, cap, focused);
+            let mut composer = self.editor.render_with_focus(&self.theme, width, cap, true);
             // The queued banner band: the collapsed summary (ink-bright),
             // the review's hint line while it edits the queue, a gap row —
             // and with chrome above it the composer trades its leading
@@ -437,6 +446,9 @@ impl App {
                 lines.push(String::new());
                 composer[0] = self.theme.fg("border", &"─".repeat(width));
             }
+            if self.diff.is_some() {
+                composer[0] = self.theme.fg("border", &"─".repeat(width));
+            }
             lines.extend(composer);
         }
         if let Some(stage) = &self.trust {
@@ -467,20 +479,18 @@ impl App {
             || self.auth.is_some()
             || self.settings.is_some()
             || self.menu.is_some();
-        lines.extend(statusline(
+        let mut footer = statusline(
             &self.theme,
             &data,
             self.overlay.as_deref(),
             hint,
             panel_open,
             width,
-        ));
-        if self.diff.is_some() && lines.len() < height {
-            lines.splice(
-                dock_start..dock_start,
-                vec![String::new(); height - lines.len()],
-            );
+        );
+        if self.diff.is_some() && !panel_open && footer.len() > 1 {
+            footer[0] = self.theme.fg("border", &"─".repeat(width));
         }
+        lines.extend(footer);
         lines
     }
 
@@ -2202,7 +2212,7 @@ async fn run_scoped(
                     }
                     TermEvent::Key(k) if k.kind != crossterm::event::KeyEventKind::Release => {
                         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-                        if app.diff_key(k) || app.viewer_key(k, cols as usize, rows as usize) {
+                        if app.viewer_key(k, cols as usize, rows as usize) {
                         } else if ctrl && k.code == KeyCode::Char('o') {
                             app.viewer = Some(Viewer::new());
                         } else if let Some(stage) = &mut app.trust {
@@ -2501,9 +2511,9 @@ async fn run_scoped(
             }
             job = results_rx.recv() => {
                 match job {
-                    Some(AppJob::DiffLoaded { generation, requested, result }) => {
+                    Some(AppJob::DiffLoaded { generation, result }) => {
                         if let Some(panel) = app.diff.as_mut().filter(|p| p.generation == generation) {
-                            panel.apply(requested, result);
+                            panel.apply(result);
                         }
                     }
                     Some(AppJob::Notice(notice)) => app.notice(notice),
@@ -2699,12 +2709,8 @@ async fn run_scoped(
                 }
             }
         }
-        app.refresh_diff(cols as usize);
-        let capture_mouse = app.viewer.is_some()
-            || app
-                .diff
-                .as_ref()
-                .is_some_and(|p| p.focused || p.left_width(cols as usize).is_some());
+        app.refresh_diff();
+        let capture_mouse = app.viewer.is_some() || app.diff.is_some();
         if capture_mouse != mouse_enabled {
             if capture_mouse {
                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
@@ -3313,7 +3319,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_split_docks_the_draft_and_preserves_it_across_focus_and_resize() {
+    fn diff_split_docks_the_draft_and_preserves_it_across_resize() {
         let mut app = session_app();
         app.transcript
             .push(Block::new(Kind::Assistant, "Review this change"));
@@ -3322,19 +3328,16 @@ mod tests {
         let panel = app.diff.as_mut().unwrap();
         panel.min_width = 110;
         panel.percent = 50;
-        panel.apply(
-            None,
-            Ok(crate::core::diff::Snapshot {
-                files: vec![crate::core::diff::File {
-                    path: "a.rs".into(),
-                    added: Some(1),
-                    removed: Some(1),
-                    new: false,
-                }],
-                selected: Some("a.rs".into()),
-                patch: "@@ -1 +1 @@\n-before\n+after".into(),
-            }),
-        );
+        panel.apply(Ok(crate::core::diff::Review {
+            files: vec![crate::core::diff::File {
+                path: "a.rs".into(),
+                added: Some(1),
+                removed: Some(1),
+                new: false,
+            }],
+            patches: vec![("a.rs".into(), "@@ -1 +1 @@\n-before\n+after".into())],
+            truncated: false,
+        }));
         let rows = app.frame(120, 30);
         assert_eq!(rows.len(), 30);
         assert!(rows
@@ -3344,8 +3347,9 @@ mod tests {
             rows[27..].iter().any(|r| r.contains("my unsent draft")),
             "composer is docked at the bottom"
         );
-        assert!(rows.iter().any(|r| r.contains("+after")));
-        assert!(app.diff_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
+        assert!(rows.iter().any(|r| r.contains("after")));
+        assert_eq!(rows[26], app.theme.fg("border", &"─".repeat(120)));
+        assert_eq!(rows[28], app.theme.fg("border", &"─".repeat(120)));
         assert!(app
             .frame(80, 30)
             .iter()
@@ -3354,6 +3358,24 @@ mod tests {
         app.toggle_diff();
         assert!(app.diff.is_none());
         assert_eq!(app.editor.text(), "my unsent draft");
+    }
+
+    #[test]
+    fn diff_attachment_stays_in_composer_and_needs_two_backspaces() {
+        let mut app = session_app();
+        app.toggle_diff();
+        app.diff_action(crate::tui::diffpanel::Action::Attach {
+            label: "⧉ 4 lines from diff".into(),
+            content: "selected source".into(),
+        });
+        let rows = app.frame(120, 30);
+        assert!(!rows.last().unwrap().contains("lines from diff"));
+        assert!(rows[27].contains("⧉ 4 lines from diff"));
+        app.editor.key(crate::tui::composer::Key::Backspace);
+        assert!(app.editor.expanded_text().contains("selected source"));
+        app.editor.key(crate::tui::composer::Key::Backspace);
+        assert!(app.editor.expanded_text().is_empty());
+        assert!(app.diff.is_some());
     }
 
     #[test]

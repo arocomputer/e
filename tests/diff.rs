@@ -1,8 +1,8 @@
 //! Workspace diff reads and the split panel's navigation/attachment contract.
 mod common;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use e::core::diff::{self, File, Snapshot};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use e::core::diff::{self, File, Review};
 use e::tui::diffpanel::{Action, DiffPanel};
 use std::path::Path;
 use std::process::Command;
@@ -172,131 +172,161 @@ async fn non_repository_returns_an_explanation() {
         .contains("Git working tree"));
 }
 
-/// Two files with enough context to test navigation and immutable selections.
-fn snapshot(selected: &str, patch: &str) -> Snapshot {
-    Snapshot {
-        files: ["a.rs", "b.rs"]
+/// One source document, with paths independent from display escaping.
+fn review(patches: &[(&str, &str)]) -> Review {
+    Review {
+        files: patches
             .iter()
-            .map(|path| File {
+            .map(|(path, _)| File {
                 path: path.into(),
                 added: Some(1),
                 removed: Some(1),
                 new: false,
             })
             .collect(),
-        selected: Some(selected.into()),
-        patch: patch.into(),
+        patches: patches
+            .iter()
+            .map(|(path, patch)| ((*path).into(), (*patch).into()))
+            .collect(),
+        truncated: false,
+    }
+}
+
+fn mouse(kind: MouseEventKind, row: usize) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: 8,
+        row: row as u16,
+        modifiers: KeyModifiers::NONE,
     }
 }
 
 #[test]
-fn diff_selection_attaches_a_snapshot_and_remains_deletable() {
+fn release_attaches_source_once_per_logical_line_and_refresh_keeps_the_snapshot() {
+    use MouseEventKind::*;
     let _lock = common::env_lock();
-    let _home = common::Home::new("diff-attachment");
+    let _home = common::Home::new("diff-source");
     let mut panel = DiffPanel::new(1);
-    panel.apply(None, Ok(snapshot("a.rs", "@@ -1 +1 @@\n-before\n+after")));
-    panel.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    panel.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    panel.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
-    let Action::Attach { label, content } =
-        panel.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-    else {
-        panic!("expected selected diff");
+    let source =
+        "@@ -0,0 +1 @@\n+\tconst 界 = 'a long line that wraps across several display rows';";
+    panel.apply(Ok(review(&[("src/lib/time.ts", source)])));
+    let theme = e::tui::theme::resolve("dark", false);
+    let rows = panel.render(&theme, 35, 30);
+    let first = rows.iter().position(|row| row.contains("const")).unwrap();
+    let last = rows.iter().position(|row| row.contains("rows")).unwrap();
+    assert!(last > first);
+    assert!(matches!(
+        panel.mouse(mouse(Down(MouseButton::Left), first)),
+        Action::None
+    ));
+    assert!(matches!(
+        panel.mouse(mouse(Drag(MouseButton::Left), last)),
+        Action::None
+    ));
+    let Action::Attach { label, content } = panel.mouse(mouse(Up(MouseButton::Left), last)) else {
+        panic!("source attachment");
     };
-    assert!(content.ends_with("-before\n+after"));
-    assert!(content.contains("@@ -1 +1 @@"));
-    assert!(!panel.focused);
-    panel.apply(
-        Some("a.rs".into()),
-        Ok(snapshot("a.rs", "@@ -1 +1 @@\n-before\n+later")),
-    );
-    assert!(!content.contains("later"));
+    assert_eq!(label, "⧉ 1 line from diff");
+    assert_eq!(content, "Selected lines from src/lib/time.ts:\n\tconst 界 = 'a long line that wraps across several display rows';\n");
     let mut editor = e::tui::composer::Editor::new();
     editor.insert_attachment(&label, &content);
+    panel.apply(Ok(review(&[("src/lib/time.ts", "@@ -0,0 +1 @@\n+later")])));
     assert_eq!(editor.expanded_text(), content);
     editor.key(e::tui::composer::Key::Backspace);
-    assert_eq!(editor.expanded_text(), "");
+    assert_eq!(editor.expanded_text(), content);
+    editor.key(e::tui::composer::Key::Backspace);
+    assert!(editor.expanded_text().is_empty());
 }
 
 #[test]
-fn mouse_selection_waits_for_enter_and_refresh_discards_changed_selection() {
-    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let _lock = common::env_lock();
-    let _home = common::Home::new("diff-mouse");
-    let mut panel = DiffPanel::new(1);
-    panel.apply(None, Ok(snapshot("a.rs", "@@ -1 +1 @@\n-before\n+after")));
-    let theme = e::tui::theme::resolve("dark", false);
-    let rows = panel.render(&theme, 60, 30);
-    let row = rows.iter().position(|row| row.contains("-before")).unwrap() as u16;
-    for (kind, row) in [
-        (MouseEventKind::Down(MouseButton::Left), row),
-        (MouseEventKind::Drag(MouseButton::Left), row + 1),
-        (MouseEventKind::Up(MouseButton::Left), row + 1),
-    ] {
-        assert!(matches!(
-            panel.mouse(MouseEvent {
-                kind,
-                column: 1,
-                row,
-                modifiers: KeyModifiers::NONE
-            }),
-            Action::None
-        ));
-    }
-    assert!(panel.focused);
-    assert!(panel.render(&theme, 60, 30).join("\n").contains("\x1b[7m"));
-    panel.apply(
-        Some("a.rs".into()),
-        Ok(snapshot("a.rs", "@@ -1 +1 @@\n-before\n+later")),
-    );
-    assert!(!panel.render(&theme, 60, 30).join("\n").contains("\x1b[7m"));
-    let Action::Attach { content, .. } =
-        panel.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-    else {
-        panic!("expected current line attachment");
-    };
-    assert!(content.ends_with("+later"));
-    assert!(!content.contains("-before"));
-}
-
-#[test]
-fn late_refresh_cannot_change_the_file_the_user_selected() {
+fn refresh_during_a_drag_cannot_attach_different_source() {
+    use MouseEventKind::*;
     let _lock = common::env_lock();
     let _home = common::Home::new("diff-refresh");
     let mut panel = DiffPanel::new(1);
-    panel.apply(None, Ok(snapshot("a.rs", "@@ -1 +1 @@\n-a\n+b")));
-    panel.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    assert_eq!(panel.selected.as_deref(), Some(Path::new("b.rs")));
-    panel.apply(Some("a.rs".into()), Ok(snapshot("a.rs", "old response")));
-    assert_eq!(panel.selected.as_deref(), Some(Path::new("b.rs")));
-    assert!(panel.dirty);
-    assert!(!panel.loading);
+    panel.apply(Ok(review(&[("a.rs", "@@ -1 +1 @@\n-before\n+after")])));
+    let rows = panel.render(&e::tui::theme::resolve("dark", false), 60, 30);
+    let row = rows.iter().position(|row| row.contains("before")).unwrap();
+    panel.mouse(mouse(Down(MouseButton::Left), row));
+    panel.mouse(mouse(Drag(MouseButton::Left), row + 1));
+    panel.apply(Ok(review(&[("a.rs", "@@ -1 +1 @@\n-before\n+later")])));
+    assert!(matches!(
+        panel.mouse(mouse(Up(MouseButton::Left), row + 1)),
+        Action::None
+    ));
 }
 
 #[test]
-fn diff_frame_uses_shared_dividers_and_bounds_untrusted_text() {
+fn file_summaries_jump_and_wheel_scrolls_one_continuous_document() {
+    use MouseEventKind::*;
+    let _lock = common::env_lock();
+    let _home = common::Home::new("diff-scroll");
+    let mut panel = DiffPanel::new(1);
+    panel.apply(Ok(review(&[
+        (
+            "a.rs",
+            "@@ -0,0 +1,12 @@\n+a1\n+a2\n+a3\n+a4\n+a5\n+a6\n+a7\n+a8\n+a9\n+a10\n+a11\n+a12",
+        ),
+        ("b.rs", "@@ -0,0 +1 @@\n+b1"),
+    ])));
+    let theme = e::tui::theme::resolve("dark", false);
+    let start = panel.render(&theme, 60, 12);
+    assert!(start[1].contains("a.rs") && start[2].contains("b.rs"));
+    panel.mouse(mouse(ScrollDown, 8));
+    let scrolled = panel.render(&theme, 60, 12);
+    assert_ne!(start, scrolled);
+    assert!(matches!(
+        panel.mouse(mouse(Up(MouseButton::Left), 8)),
+        Action::None
+    ));
+    panel.mouse(mouse(ScrollUp, 8));
+    panel.render(&theme, 60, 12);
+    panel.mouse(mouse(Down(MouseButton::Left), 2));
+    assert!(panel
+        .render(&theme, 60, 12)
+        .iter()
+        .any(|row| row.contains("b1")));
+}
+
+#[test]
+fn review_frame_bounds_untrusted_text_and_wraps_without_raw_patch_headers() {
     let _lock = common::env_lock();
     let _home = common::Home::new("diff-frame");
     let mut panel = DiffPanel::new(1);
-    panel.apply(
-        None,
-        Ok(snapshot(
-            "a.rs",
-            "@@ -1 +1 @@\n-界界界界界界\n+\x1b]52;c;bad\x07safe",
-        )),
-    );
+    panel.apply(Ok(review(&[(
+        "a.rs",
+        "@@ -1 +1 @@\n-界界界界界界\n+\x1b]52;c;bad\x07safe",
+    )])));
     for width in [1, 20, 55] {
         for height in [1, 8, 30] {
             let theme = e::tui::theme::resolve("dark", false);
             let rows = panel.render(&theme, width, height);
             assert_eq!(rows.len(), height);
-            assert_eq!(rows[0], theme.fg("border", &"─".repeat(width)));
-            assert!(
-                rows.iter()
-                    .all(|r| e::tui::markdown::visible_width(r) <= width),
-                "{width}x{height}: {rows:?}"
-            );
+            assert!(rows[0].starts_with(&theme.bg_prefix("diffPaneBg")));
+            assert!(rows
+                .iter()
+                .all(|row| e::tui::markdown::visible_width(row) <= width));
+            assert!(!rows.join("\n").contains("@@"));
             assert!(!rows.join("\n").contains("]52"));
         }
     }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn continuous_review_includes_tracked_and_untracked_files_without_index_writes() {
+    let _lock = common::env_lock();
+    let dir = repo();
+    std::fs::write(dir.dir.join("tracked"), "before\n").unwrap();
+    git(&dir.dir, &["add", "."]);
+    git(&dir.dir, &["commit", "-m", "base"]);
+    let index = std::fs::read(dir.dir.join(".git/index")).unwrap();
+    std::fs::write(dir.dir.join("tracked"), "after\n").unwrap();
+    std::fs::write(dir.dir.join("untracked"), "new\n").unwrap();
+    let review = diff::load_review(&dir.dir).await.unwrap();
+    assert_eq!(review.patches.len(), 2);
+    assert!(review.patches[0].1.contains("+after"));
+    assert!(review.patches[1].1.contains("+new"));
+    assert!(!review.truncated);
+    assert_eq!(std::fs::read(dir.dir.join(".git/index")).unwrap(), index);
 }

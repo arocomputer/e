@@ -1,7 +1,6 @@
-//! Live read-only diff panel. File navigation and patch selection are separate
-//! from the composer; refreshes preserve the file and position being reviewed.
-
-use crate::core::diff::{File, Snapshot};
+//! Continuous, mouse-driven Git review. Selection becomes owned prompt context;
+//! keyboard input always stays with the composer.
+use crate::core::diff::{File, Review};
 use crate::core::tools::sanitize_display;
 use crate::tui::{
     markdown::{clip_styled, visible_width},
@@ -9,27 +8,43 @@ use crate::tui::{
     render::bold,
     theme::Theme,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use std::path::PathBuf;
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use std::path::{Path, PathBuf};
+use unicode_width::UnicodeWidthChar;
+mod patch;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
-    Files,
-    Patch,
-}
-
-/// Results that need the app's composer or lifecycle rather than panel state.
+/// Actions that belong to the app rather than the read-only review document.
 pub enum Action {
     None,
     Close,
     Attach { label: String, content: String },
 }
 
+/// Immutable source and width-independent syntax for one file.
+struct Section {
+    path: PathBuf,
+    source: String,
+    rows: Vec<patch::Row>,
+    styled: Vec<String>,
+    digits: usize,
+}
+
+/// Visual rows retain source coordinates so wrapped lines copy only once.
+#[derive(Clone, Copy)]
+enum Line {
+    File(usize),
+    Divider,
+    Heading(usize),
+    Source {
+        section: usize,
+        row: usize,
+        column: usize,
+    },
+    Omitted,
+}
+
 pub struct DiffPanel {
     pub files: Vec<File>,
-    pub selected: Option<PathBuf>,
-    pub focused: bool,
-    pub focus: Focus,
     pub error: Option<String>,
     pub loading: bool,
     pub dirty: bool,
@@ -39,18 +54,19 @@ pub struct DiffPanel {
     pub min_width: usize,
     pub percent: usize,
     pub refresh_ms: u64,
-    patch: Vec<String>,
-    horizontal: usize,
-    close_column: usize,
+    pub height: usize,
+    sections: Vec<Section>,
+    lines: Vec<Line>,
+    layout_width: Option<usize>,
+    palette: Vec<String>,
+    truncated: bool,
+    scroll: usize,
     cursor: usize,
     anchor: Option<usize>,
-    scroll: usize,
-    file_scroll: usize,
-    file_rows: usize,
-    patch_start: usize,
-    patch_rows: usize,
+    dragging: bool,
+    close_column: usize,
+    selection_label: String,
     title: String,
-    hint: String,
 }
 
 impl Drop for DiffPanel {
@@ -66,9 +82,6 @@ impl DiffPanel {
         use crate::core::config::settings::{get_string, get_u64};
         Self {
             files: Vec::new(),
-            selected: None,
-            focused: true,
-            focus: Focus::Files,
             error: None,
             loading: false,
             dirty: true,
@@ -76,297 +89,320 @@ impl DiffPanel {
             task: None,
             generation,
             min_width: get_u64("diff_min_width").unwrap_or(110).max(60) as usize,
-            percent: get_u64("diff_width_percent").unwrap_or(50).clamp(30, 70) as usize,
+            percent: get_u64("diff_width_percent").unwrap_or(40).clamp(30, 70) as usize,
             refresh_ms: get_u64("diff_refresh_ms").unwrap_or(1000).max(250),
-            patch: Vec::new(),
-            horizontal: 0,
-            close_column: 0,
+            height: 0,
+            sections: Vec::new(),
+            lines: Vec::new(),
+            layout_width: None,
+            palette: Vec::new(),
+            truncated: false,
+            scroll: 0,
             cursor: 0,
             anchor: None,
-            scroll: 0,
-            file_scroll: 0,
-            file_rows: 0,
-            patch_start: 0,
-            patch_rows: 1,
-            title: get_string("diff_title").unwrap_or_else(|| "Diff · workspace vs HEAD".into()),
-            hint: get_string("diff_hint")
-                .unwrap_or_else(|| "↑↓ move · Enter · Ctrl+D focus · Esc back".into()),
+            dragging: false,
+            close_column: 0,
+            selection_label: get_string("diff_selection_label")
+                .map(|label| sanitize_display(&label).replace('\n', " "))
+                .filter(|label| !label.trim().is_empty())
+                .unwrap_or_else(|| "⧉ {count} {lines} from diff".into()),
+            title: get_string("diff_title").unwrap_or_else(|| "{count} {files} changed".into()),
         }
     }
 
-    /// A wide terminal splits; a narrow one shows only the focused pane.
+    /// Narrow terminals keep the diff above the same full-width composer.
     pub fn left_width(&self, width: usize) -> Option<usize> {
-        (width >= self.min_width).then(|| width.saturating_sub(3 + width * self.percent / 100))
+        (width >= self.min_width).then(|| width.saturating_sub(2 + width * self.percent / 100))
     }
 
-    fn selected_index(&self) -> usize {
-        self.files
-            .iter()
-            .position(|f| Some(&f.path) == self.selected.as_ref())
-            .unwrap_or(0)
-    }
-
-    /// Apply only the requested file's response. A refresh must not steal selection.
-    pub fn apply(&mut self, requested: Option<PathBuf>, result: Result<Snapshot, String>) {
+    /// Changed source clears pointer selection, never the snapshot owned by the draft.
+    pub fn apply(&mut self, result: Result<Review, String>) {
         self.loading = false;
         self.task = None;
-        if requested != self.selected {
-            self.dirty = true;
-            return;
-        }
         match result {
-            Ok(snapshot) => {
-                let changed_file = self.selected != snapshot.selected;
-                let mut in_hunk = false;
-                let patch: Vec<String> = snapshot
-                    .patch
-                    .lines()
-                    .filter(|line| {
-                        if line.starts_with("@@") {
-                            in_hunk = true;
-                        }
-                        in_hunk
-                            || !(line.starts_with("diff --git ")
-                                || line.starts_with("index ")
-                                || line.starts_with("--- ")
-                                || line.starts_with("+++ "))
-                    })
-                    .map(str::to_string)
-                    .collect();
-                if changed_file {
-                    self.cursor = 0;
-                    self.scroll = 0;
-                }
-                if patch != self.patch {
+            Ok(review) => {
+                let changed = self.files != review.files
+                    || self.truncated != review.truncated
+                    || self.sections.len() != review.patches.len()
+                    || self.sections.iter().zip(&review.patches).any(
+                        |(section, (path, source))| {
+                            section.path != *path || section.source != *source
+                        },
+                    );
+                if changed {
                     self.anchor = None;
+                    self.dragging = false;
+                    self.layout_width = None;
+                    self.sections = review
+                        .patches
+                        .into_iter()
+                        .map(|(path, source)| {
+                            let rows = patch::parse(&source);
+                            let digits = rows
+                                .iter()
+                                .filter_map(|row| row.number)
+                                .max()
+                                .unwrap_or(0)
+                                .to_string()
+                                .len()
+                                .max(2);
+                            Section {
+                                path,
+                                source,
+                                rows,
+                                styled: Vec::new(),
+                                digits,
+                            }
+                        })
+                        .collect();
                 }
-                self.files = snapshot.files;
-                self.selected = snapshot.selected;
-                self.patch = patch;
-                self.cursor = self.cursor.min(self.patch.len().saturating_sub(1));
-                self.scroll = self.scroll.min(self.patch.len().saturating_sub(1));
+                self.files = review.files;
+                self.truncated = review.truncated;
                 self.error = None;
             }
             Err(error) => {
                 self.error = Some(error);
-            }
-        }
-    }
-
-    fn select_file(&mut self, index: usize) {
-        if let Some(file) = self.files.get(index) {
-            if self.selected.as_ref() != Some(&file.path) {
-                self.selected = Some(file.path.clone());
-                self.patch.clear();
-                self.horizontal = 0;
-                self.cursor = 0;
-                self.scroll = 0;
                 self.anchor = None;
-                self.dirty = true;
+                self.dragging = false;
             }
         }
     }
 
-    /// Copy a selection now, so later edits cannot change the next prompt's attachment.
-    fn attach(&mut self) -> Action {
-        let Some(path) = self.selected.as_ref() else {
-            return Action::None;
+    /// Reflow the scrolling document only after a source or width change.
+    fn layout(&mut self, width: usize) {
+        if self.layout_width == Some(width) {
+            return;
+        }
+        self.anchor = None;
+        self.dragging = false;
+        self.layout_width = Some(width);
+        self.lines = (0..self.files.len()).map(Line::File).collect();
+        for (section, file) in self.sections.iter().enumerate() {
+            self.lines
+                .extend([Line::Divider, Line::Heading(section), Line::Divider]);
+            let code_width = width.saturating_sub(file.digits + 4).max(1);
+            for (row, source) in file.rows.iter().enumerate() {
+                let (mut column, mut start) = (0, 0);
+                self.lines.push(Line::Source {
+                    section,
+                    row,
+                    column: 0,
+                });
+                for c in source.display.chars() {
+                    let cells = c.width().unwrap_or(0);
+                    if cells > 0 && column > start && column + cells - start > code_width {
+                        start = column;
+                        self.lines.push(Line::Source {
+                            section,
+                            row,
+                            column,
+                        });
+                    }
+                    column += cells;
+                }
+            }
+        }
+        if self.truncated {
+            self.lines.push(Line::Omitted);
+        }
+        if !self.lines.is_empty() {
+            self.lines.push(Line::Divider);
+        }
+    }
+
+    /// Count logical source rows, excluding headers and repeated wrapped fragments.
+    fn selected_source(&self) -> Vec<(usize, usize)> {
+        let Some(anchor) = self.anchor else {
+            return Vec::new();
         };
-        if self.patch.is_empty() || self.error.is_some() {
+        let mut selected = Vec::new();
+        for line in self
+            .lines
+            .iter()
+            .take(anchor.max(self.cursor) + 1)
+            .skip(anchor.min(self.cursor))
+        {
+            if let Line::Source { section, row, .. } = *line {
+                if self.sections[section].rows[row].number.is_some()
+                    && selected.last() != Some(&(section, row))
+                {
+                    selected.push((section, row));
+                }
+            }
+        }
+        selected
+    }
+
+    /// Mouse release replaces the draft's diff attachment with this source snapshot.
+    fn attach(&self) -> Action {
+        if self.error.is_some() {
             return Action::None;
         }
-        let anchor = self.anchor.unwrap_or(self.cursor);
-        let lo = anchor.min(self.cursor);
-        let hi = anchor.max(self.cursor).min(self.patch.len() - 1);
-        let hunk = self.patch[..lo].iter().rfind(|line| line.starts_with("@@"));
-        let mut content = format!("Diff for {} (workspace vs HEAD):\n", path.display());
-        if let Some(hunk) = hunk {
-            content.push_str(hunk);
+        let selected = self.selected_source();
+        if selected.is_empty() {
+            return Action::None;
+        }
+        let count = selected.len();
+        let label = sanitize_display(&self.selection_label)
+            .replace("{count}", &count.to_string())
+            .replace("{lines}", if count == 1 { "line" } else { "lines" })
+            .replace('\n', " ");
+        let mut content = String::new();
+        let mut previous = None;
+        for (section, row) in selected {
+            if previous != Some(section) {
+                if previous.is_some() {
+                    content.push('\n');
+                }
+                content.push_str(&format!(
+                    "Selected lines from {}:\n",
+                    display_path(&self.sections[section].path)
+                ));
+                previous = Some(section);
+            }
+            content.push_str(&self.sections[section].rows[row].text);
             content.push('\n');
         }
-        content.push_str(&self.patch[lo..=hi].join("\n"));
-        let path = clip_styled(&display_path(path), 36);
-        let label = format!("[Diff {path}, {} lines]", hi - lo + 1);
-        self.anchor = None;
-        self.focused = false;
         Action::Attach { label, content }
     }
 
-    /// Keys are consumed only while the panel owns focus. Ctrl+C stays global.
-    pub fn key(&mut self, key: KeyEvent) -> Action {
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-        if key.code == KeyCode::Esc {
-            if self.focus == Focus::Patch {
-                self.focus = Focus::Files;
-                self.anchor = None;
-            } else {
-                return Action::Close;
-            }
-            return Action::None;
-        }
-        if key.code == KeyCode::Enter {
-            if self.focus == Focus::Files {
-                self.focus = Focus::Patch;
-            } else {
-                return self.attach();
-            }
-            return Action::None;
-        }
-        if self.focus == Focus::Files {
-            let index = self.selected_index();
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.select_file(index.saturating_sub(1)),
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.select_file((index + 1).min(self.files.len().saturating_sub(1)))
-                }
-                KeyCode::PageDown => self.select_file(
-                    (index + self.file_rows.max(1)).min(self.files.len().saturating_sub(1)),
-                ),
-                KeyCode::PageUp => self.select_file(index.saturating_sub(self.file_rows.max(1))),
-                KeyCode::Home => self.select_file(0),
-                KeyCode::End => self.select_file(self.files.len().saturating_sub(1)),
-                _ => {}
-            }
-        } else {
-            let before = self.cursor;
-            let step = self.patch_rows.max(1);
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.cursor = self.cursor.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => self.cursor += 1,
-                KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(step),
-                KeyCode::PageDown => self.cursor += step,
-                KeyCode::Left => {
-                    self.horizontal = self.horizontal.saturating_sub(8);
-                    return Action::None;
-                }
-                KeyCode::Right => {
-                    self.horizontal = (self.horizontal + 8).min(4096);
-                    return Action::None;
-                }
-                KeyCode::Home => self.cursor = 0,
-                KeyCode::End => self.cursor = self.patch.len().saturating_sub(1),
-                _ => return Action::None,
-            }
-            self.cursor = self.cursor.min(self.patch.len().saturating_sub(1));
-            if shift {
-                self.anchor.get_or_insert(before);
-            } else {
-                self.anchor = None;
-            }
-        }
-        Action::None
-    }
-
-    /// Mouse coordinates are local to the full-height panel.
+    /// Scroll without taking composer focus. File summaries jump to their source;
+    /// selecting and releasing source updates prompt context without an Enter action.
     pub fn mouse(&mut self, event: MouseEvent) -> Action {
         let row = event.row as usize;
+        if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
+            let was_dragging = std::mem::take(&mut self.dragging);
+            return if was_dragging {
+                self.attach()
+            } else {
+                Action::None
+            };
+        }
+        if row >= self.height {
+            return Action::None;
+        }
+        let index = self.scroll + row.saturating_sub(1);
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                self.focused = true;
-                if row == 1 && event.column as usize >= self.close_column {
-                    return Action::Close;
+                self.dragging = false;
+                if row == 0 {
+                    if event.column as usize >= self.close_column {
+                        return Action::Close;
+                    }
+                    return Action::None;
                 }
-                if (3..3 + self.file_rows).contains(&row) {
-                    self.focus = Focus::Files;
-                    self.select_file(self.file_scroll + row - 3);
-                } else if row >= self.patch_start
-                    && row < self.patch_start + self.patch_rows
-                    && !self.patch.is_empty()
-                {
-                    self.focus = Focus::Patch;
-                    self.cursor = (self.scroll + row - self.patch_start).min(self.patch.len() - 1);
-                    self.anchor = Some(self.cursor);
+                self.anchor = None;
+                match self.lines.get(index).copied() {
+                    Some(Line::File(file)) => {
+                        if let Some(section) = self
+                            .sections
+                            .iter()
+                            .position(|section| section.path == self.files[file].path)
+                        {
+                            if let Some(at) = self
+                                .lines
+                                .iter()
+                                .position(|line| matches!(line, Line::Heading(n) if *n == section))
+                            {
+                                self.scroll = at.saturating_sub(1);
+                            }
+                        } else if self.truncated {
+                            self.scroll = self
+                                .lines
+                                .len()
+                                .saturating_sub(self.height.saturating_sub(1));
+                        }
+                    }
+                    Some(Line::Source { section, row, .. })
+                        if self.sections[section].rows[row].number.is_some() =>
+                    {
+                        self.cursor = index;
+                        self.anchor = Some(index);
+                        self.dragging = true;
+                    }
+                    _ => {}
                 }
             }
-            MouseEventKind::Drag(MouseButton::Left) if self.anchor.is_some() => {
-                self.cursor = (self.scroll + row.saturating_sub(self.patch_start))
-                    .min(self.patch.len().saturating_sub(1));
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging && row > 0 => {
+                self.cursor = index.min(self.lines.len().saturating_sub(1));
             }
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                if row < self.patch_start {
-                    let index = self.selected_index();
-                    self.select_file(if event.kind == MouseEventKind::ScrollUp {
-                        index.saturating_sub(1)
-                    } else {
-                        (index + 1).min(self.files.len().saturating_sub(1))
-                    });
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if row > 0 => {
+                let step = if event.modifiers.contains(KeyModifiers::SHIFT) {
+                    self.height.saturating_sub(1).max(1)
                 } else {
-                    self.cursor = if event.kind == MouseEventKind::ScrollUp {
-                        self.cursor.saturating_sub(3)
-                    } else {
-                        (self.cursor + 3).min(self.patch.len().saturating_sub(1))
-                    };
-                    self.anchor = None;
-                }
+                    3
+                };
+                self.scroll = if event.kind == MouseEventKind::ScrollUp {
+                    self.scroll.saturating_sub(step)
+                } else {
+                    (self.scroll + step).min(
+                        self.lines
+                            .len()
+                            .saturating_sub(self.height.saturating_sub(1)),
+                    )
+                };
             }
             _ => {}
         }
         Action::None
     }
 
-    /// Fixed-height layout using the shared panel frame and theme tokens.
+    /// Only visible files pay for syntax highlighting; caches survive scrolling.
     pub fn render(&mut self, theme: &Theme, width: usize, height: usize) -> Vec<String> {
-        let available = height.saturating_sub(5);
-        self.file_rows = self.files.len().min(6).min(available / 3);
-        let selected = self.selected_index();
-        if selected < self.file_scroll {
-            self.file_scroll = selected;
+        self.height = height;
+        self.layout(width);
+        self.scroll = self
+            .scroll
+            .min(self.lines.len().saturating_sub(height.saturating_sub(1)));
+        let palette = [
+            "diffSyntaxKeyword",
+            "diffSyntaxString",
+            "diffSyntaxNumber",
+            "diffSyntaxComment",
+            "diffSyntaxFunction",
+            "diffSyntaxType",
+        ]
+        .map(|token| theme.fg_prefix(token).to_string())
+        .to_vec();
+        if self.palette != palette {
+            for section in &mut self.sections {
+                section.styled.clear();
+            }
+            self.palette = palette;
         }
-        if selected >= self.file_scroll + self.file_rows.max(1) {
-            self.file_scroll = selected + 1 - self.file_rows.max(1);
-        }
-        let mut body = Vec::new();
-        for (index, file) in self
+        let count = self.files.len();
+        let title = sanitize_display(&self.title)
+            .replace('\n', " ")
+            .replace("{count}", &count.to_string())
+            .replace("{files}", if count == 1 { "file" } else { "files" });
+        let added = self
             .files
             .iter()
-            .enumerate()
-            .skip(self.file_scroll)
-            .take(self.file_rows)
-        {
-            let count = |v: Option<usize>| v.map(|n| n.to_string()).unwrap_or_else(|| "?".into());
-            let stats = format!("+{} -{}", count(file.added), count(file.removed));
-            let name = clip_styled(
-                &display_path(&file.path),
-                width.saturating_sub(stats.len() + 2),
-            );
-            let pad = width.saturating_sub(visible_width(&name) + stats.len());
-            let name = if index == selected {
-                bold(&theme.fg("userMessageText", &name))
-            } else {
-                theme.fg("dim", &name)
-            };
-            let added = theme.fg(
-                Theme::diff_marker_token(true),
-                &format!("+{}", count(file.added)),
-            );
-            let removed = theme.fg(
-                Theme::diff_marker_token(false),
-                &format!("-{}", count(file.removed)),
-            );
-            body.push(format!("{name}{}{added} {removed}", " ".repeat(pad)));
-        }
-        body.push(theme.fg("border", &"─".repeat(width)));
-        let path = self
-            .selected
-            .as_ref()
-            .map(|p| display_path(p))
-            .unwrap_or_else(|| "No changes".into());
-        body.push(theme.fg("dim", &clip_styled(&path, width)));
-        body.push(String::new());
-        self.patch_start = 3 + body.len();
-        self.patch_rows = available.saturating_sub(body.len());
-        if self.cursor < self.scroll {
-            self.scroll = self.cursor;
-        }
-        if self.cursor >= self.scroll + self.patch_rows.max(1) {
-            self.scroll = self.cursor + 1 - self.patch_rows.max(1);
-        }
-        let range = self
-            .anchor
-            .map(|a| (a.min(self.cursor), a.max(self.cursor)));
+            .filter_map(|file| file.added)
+            .fold(0usize, usize::saturating_add);
+        let removed = self
+            .files
+            .iter()
+            .filter_map(|file| file.removed)
+            .fold(0usize, usize::saturating_add);
+        let title = clip_styled(
+            &format!(
+                " {}  {}",
+                bold(&theme.fg("diffText", &title)),
+                stats(theme, Some(added), Some(removed))
+            ),
+            width.saturating_sub(3),
+        );
+        let header = format!(
+            "{title}{}{} ",
+            " ".repeat(width.saturating_sub(visible_width(&title) + 2)),
+            theme.fg("dim", "×")
+        );
+        self.close_column = width.saturating_sub(2);
+        let mut body = Vec::new();
         if let Some(error) = &self.error {
-            body.push(theme.fg("error", &clip_styled(&sanitize_display(error), width)));
-        } else if self.patch.is_empty() {
+            body.push(theme.fg("error", &sanitize_display(error).replace('\n', " ")));
+        } else if self.files.is_empty() {
             body.push(theme.fg(
                 "dim",
                 if self.loading || self.dirty {
@@ -376,68 +412,152 @@ impl DiffPanel {
                 },
             ));
         } else {
-            for (i, line) in self
-                .patch
+            for (index, line) in self
+                .lines
                 .iter()
                 .enumerate()
                 .skip(self.scroll)
-                .take(self.patch_rows)
+                .take(height.saturating_sub(1))
             {
-                let text = clip_styled(
-                    &sanitize_display(line)
-                        .chars()
-                        .skip(self.horizontal)
-                        .collect::<String>(),
-                    width,
-                );
-                let token = if line.starts_with('+') && !line.starts_with("+++") {
-                    Theme::diff_marker_token(true)
-                } else if line.starts_with('-') && !line.starts_with("---") {
-                    Theme::diff_marker_token(false)
-                } else if line.starts_with("@@") {
-                    "accent"
-                } else {
-                    "dim"
-                };
-                let mut text = theme.fg(token, &text);
-                if range.is_some_and(|(lo, hi)| i >= lo && i <= hi) {
-                    text = format!("\x1b[7m{text}\x1b[27m");
-                } else if self.focused && self.focus == Focus::Patch && i == self.cursor {
-                    text = bold(&text);
-                }
-                body.push(text);
+                body.push(match *line {
+                    Line::File(index) => {
+                        let file = &self.files[index];
+                        let stats = stats(theme, file.added, file.removed);
+                        let name = crate::tui::transcript::clip_plain(
+                            &display_path(&file.path),
+                            width.saturating_sub(visible_width(&stats) + 3),
+                        );
+                        format!(
+                            " {}{}{stats} ",
+                            theme.fg("dim", &name),
+                            " ".repeat(
+                                width.saturating_sub(
+                                    visible_width(&name) + visible_width(&stats) + 2
+                                )
+                            )
+                        )
+                    }
+                    Line::Divider => theme.fg(
+                        "border",
+                        &format!(" {} ", "─".repeat(width.saturating_sub(2))),
+                    ),
+                    Line::Heading(section) => format!(
+                        " {}",
+                        bold(&theme.fg("diffText", &display_path(&self.sections[section].path)))
+                    ),
+                    Line::Omitted => theme.fg(
+                        "dim",
+                        " More files omitted: review size or time limit reached",
+                    ),
+                    Line::Source {
+                        section,
+                        row,
+                        column,
+                    } => {
+                        let section = &mut self.sections[section];
+                        if section.styled.is_empty() {
+                            let lang = section
+                                .path
+                                .extension()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("");
+                            section.styled = patch::syntax(&section.rows, theme, lang);
+                        }
+                        let selected = self.anchor.is_some_and(|anchor| {
+                            index >= anchor.min(self.cursor) && index <= anchor.max(self.cursor)
+                        });
+                        source_row(theme, section, row, column, width, selected)
+                    }
+                });
             }
         }
-        body.truncate(available);
-        body.resize(available, String::new());
-        let title = clip_styled(
-            &format!("{} · {} files", self.title, self.files.len()),
-            width.saturating_sub(2),
-        );
-        let header = format!(
-            "{title}{}×",
-            " ".repeat(width.saturating_sub(visible_width(&title) + 1))
-        );
-        self.close_column = width.saturating_sub(1);
-        let header = theme.fg(
-            if self.focused {
-                "userMessageText"
-            } else {
-                "dim"
-            },
-            &header,
-        );
-        let mut rows = panel::frame(theme, width, header, body);
-        rows.push(theme.fg("dim", &clip_styled(&self.hint, width)));
-        rows.truncate(height);
-        rows.into_iter()
-            .map(|row| clip_styled(&row, width))
-            .collect()
+        panel::review_frame(theme, width, header, body, height)
     }
 }
 
+/// Drop zero counts; keep unknown binary counts explicit.
+fn stats(theme: &Theme, added: Option<usize>, removed: Option<usize>) -> String {
+    [(added, '+', "diffAdded"), (removed, '-', "diffRemoved")]
+        .into_iter()
+        .filter(|(count, _, _)| *count != Some(0))
+        .map(|(count, sign, token)| {
+            theme.fg(
+                token,
+                &format!(
+                    "{sign}{}",
+                    count.map(|n| n.to_string()).unwrap_or_else(|| "?".into())
+                ),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Wrapped fragments repeat their sign but print the line number only once.
+fn source_row(
+    theme: &Theme,
+    section: &Section,
+    index: usize,
+    column: usize,
+    width: usize,
+    selected: bool,
+) -> String {
+    let row = &section.rows[index];
+    let selected = selected && row.number.is_some();
+    let bg = if selected {
+        "diffSelectedBg"
+    } else {
+        match row.kind {
+            '+' => "diffAddedBg",
+            '-' => "diffRemovedBg",
+            _ => "diffPaneBg",
+        }
+    };
+    let marker = match row.kind {
+        '+' => "diffAdded",
+        '-' => "diffRemoved",
+        _ => "diffLineNumber",
+    };
+    let number = if column == 0 {
+        row.number.map(|n| n.to_string()).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let sign = if row.number.is_some() { row.kind } else { ' ' };
+    let digits = section.digits;
+    let gutter = clip_styled(
+        &format!(
+            "{}{}",
+            theme.fg(
+                if selected {
+                    "diffText"
+                } else {
+                    "diffLineNumber"
+                },
+                &format!(" {number:>digits$} ")
+            ),
+            theme.fg(marker, &format!("{sign} "))
+        ),
+        width,
+    );
+    let text = patch::code(
+        theme,
+        &section.styled[index],
+        &row.words,
+        column,
+        width.saturating_sub(visible_width(&gutter)),
+        bg,
+        if row.kind == '-' {
+            "diffRemovedWordBg"
+        } else {
+            "diffAddedWordBg"
+        },
+    );
+    theme.bg(bg, &theme.fg("diffText", &format!("{gutter}{text}")))
+}
+
 /// Keep unusual Git path bytes from creating extra terminal rows.
-fn display_path(path: &std::path::Path) -> String {
+fn display_path(path: &Path) -> String {
     sanitize_display(&path.to_string_lossy())
         .replace('\n', "\\n")
         .replace('\t', "\\t")

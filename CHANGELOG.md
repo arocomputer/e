@@ -15,13 +15,15 @@
 
 ### New features
 
-- `/diff` opens live Git review with the conversation on the left and changed files and their diff on the right. Browse with the keyboard or mouse and attach selected changes to your draft. Narrow terminals switch between review and chat.
+- `/diff` opens a mouse-driven review document beside chat, with syntax colors, word-level changes, and wrapped source. Drag source to add a blue inline attachment without leaving the composer. Selecting again replaces its snapshot; two Backspaces remove it.
 - Ctrl+O adopts fx's full-output reader layout, with wrapped output, vertical rails, and a navigation footer. Scroll with the keyboard or mouse; End resumes following new output.
 - Extensions can live in directories under `~/.e/extensions/`, keeping their entry point and helper files together.
 - `e rpc` accepts a built-in `tools` allowlist and returns the saved `session` path. The subagent example uses these for delegated tasks and access to their full results.
 - `e help` prints the same usage as `e --help`.
 
 ### Improvements
+
+- Consecutive successful edits to the same file share one transcript row with cumulative counts. Any intervening tool call breaks the group. Ctrl+O and session history keep every call. Set `combine_consecutive_edits` to `"off"` in `~/.e/settings.json` to keep separate rows.
 
 - Pasted-text labels show their draft-local number and character count in the same dim gray as image attachments. Set `paste_placeholder` in `~/.e/settings.json` to change the collapse threshold; `0` inserts pastes literally.
 - Running tools stay connected to their tree while output streams. Multiline commands keep dim continuation rows, and completed commands replace previews with their retained output.
@@ -36,7 +38,7 @@
 
 ### Bug fixes
 
-- Deleting a pasted-text or diff marker discards its hidden payload. History and completion preserve attachments that remain in the draft, and CRLF pastes no longer gain extra newlines.
+- Deleting a pasted-text or diff marker discards its hidden payload. Diff markers select on the first Backspace and delete on the second. History and completion preserve attachments that remain in the draft, and CRLF pastes no longer gain extra newlines.
 - Ctrl+O no longer opens blank after long conversations. Closing either reader restores the main terminal buffer without adding expanded output to chat scrollback.
 - Long tool labels, including image paths, fit their column without a one-cell overflow.
 - Cancelled runs skip queued tools, and late tool events cannot change a newer turn. Continuous shell output no longer starves timeout checks.

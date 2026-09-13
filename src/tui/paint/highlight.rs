@@ -609,14 +609,56 @@ pub fn highlight_block(theme: &Theme, lang: &str, source: &str) -> Vec<String> {
     let Some(profile) = resolve(lang) else {
         return source.split('\n').map(String::from).collect();
     };
-    let kw = theme.fg_prefix("syntaxKeyword");
-    let strn = theme.fg_prefix("syntaxString");
-    let num = theme.fg_prefix("syntaxNumber");
-    let com = theme.fg_prefix("syntaxComment");
+    highlight_profile(theme, profile, source, false)
+}
+
+/// Use the diff palette without changing the grayscale code-panel contract.
+/// Comments retain state within each supplied side of a hunk.
+pub(crate) fn highlight_diff_block(theme: &Theme, lang: &str, source: &str) -> Vec<String> {
+    let Some(profile) = resolve(lang) else {
+        return source.split('\n').map(String::from).collect();
+    };
+    highlight_profile(theme, profile, source, true)
+}
+
+fn highlight_profile(theme: &Theme, profile: &Profile, source: &str, diff: bool) -> Vec<String> {
+    let tokens = if diff {
+        [
+            "diffSyntaxKeyword",
+            "diffSyntaxString",
+            "diffSyntaxNumber",
+            "diffSyntaxComment",
+        ]
+    } else {
+        [
+            "syntaxKeyword",
+            "syntaxString",
+            "syntaxNumber",
+            "syntaxComment",
+        ]
+    };
+    let [kw, strn, num, com] = tokens.map(|token| theme.fg_prefix(token));
+    let function = if diff {
+        theme.fg_prefix("diffSyntaxFunction")
+    } else {
+        ""
+    };
+    let ty = if diff {
+        theme.fg_prefix("diffSyntaxType")
+    } else {
+        ""
+    };
     let mut in_block_comment = false;
     source
         .split('\n')
-        .map(|line| highlight_one(profile, line, &mut in_block_comment, kw, strn, num, com))
+        .map(|line| {
+            highlight_one(
+                profile,
+                line,
+                &mut in_block_comment,
+                [kw, strn, num, com, function, ty],
+            )
+        })
         .collect()
 }
 
@@ -648,11 +690,9 @@ fn highlight_one(
     profile: &Profile,
     line: &str,
     in_block_comment: &mut bool,
-    kw: &str,
-    strn: &str,
-    num: &str,
-    com: &str,
+    ink: [&str; 6],
 ) -> String {
+    let [kw, strn, num, com, function, ty] = ink;
     let mut out = String::with_capacity(line.len() + 16);
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
@@ -757,6 +797,18 @@ fn highlight_one(
                 push_styled(&mut out, kw, &tok);
             } else if !num.is_empty() && word_matches(profile, profile.literals, &tok) {
                 push_styled(&mut out, num, &tok);
+            } else if !function.is_empty()
+                && chars[i..].iter().find(|c| !c.is_whitespace()) == Some(&'(')
+            {
+                push_styled(&mut out, function, &tok);
+            } else if !ty.is_empty()
+                && ([
+                    "number", "string", "boolean", "void", "bool", "int", "float", "usize", "isize",
+                ]
+                .contains(&tok.as_str())
+                    || (tok.starts_with(char::is_uppercase) && tok.chars().any(char::is_lowercase)))
+            {
+                push_styled(&mut out, ty, &tok);
             } else {
                 out.push_str(&tok);
             }

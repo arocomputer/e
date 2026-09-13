@@ -1,8 +1,8 @@
 //! Theme loading: `themes/{light,dark}.json` → a resolved palette.
 //!
-//! The files carry a `vars` block (eight grayscale xterm-256 values — the
-//! entire ramp) and a `colors` block mapping ~50 semantic tokens to either a
-//! var name, a direct value, or `""` for the terminal default. The parity
+//! The files carry a `vars` block with grayscale xterm-256 values and hex diff
+//! colors. The `colors` block maps tokens to a var name, a direct value, or
+//! `""` for the terminal default. The parity
 //! tests pin both the var values and that light/dark are structural mirrors.
 
 use serde::Deserialize;
@@ -94,6 +94,12 @@ impl Theme {
             Some(code) if code != "\x1b[39m" => code.replacen("\x1b[38;", "\x1b[48;", 1),
             _ => String::new(),
         }
+    }
+
+    /// Fill a row or span with a theme background, then restore the terminal background.
+    pub fn bg(&self, token: &str, text: &str) -> String {
+        let prefix = self.bg_prefix(token);
+        format!("{prefix}{text}\x1b[49m")
     }
 
     /// The diff-marker token for one side of a diff: the truecolor value when

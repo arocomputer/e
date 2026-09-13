@@ -137,9 +137,17 @@ async fn new_text(path: &Path) -> Result<Option<String>, String> {
     Ok(String::from_utf8(bytes).ok())
 }
 
-/// Compare the current worktree to HEAD, including staged and untracked files.
-/// A repository without commits compares its current files to an empty tree.
-pub async fn load(cwd: &Path, selected: Option<&Path>) -> Result<Snapshot, String> {
+/// A bounded review document. Every patch keeps its original path, including
+/// paths that cannot be represented as UTF-8. Omitted files are reported by the UI.
+#[derive(Debug)]
+pub struct Review {
+    pub files: Vec<File>,
+    pub patches: Vec<(PathBuf, String)>,
+    pub truncated: bool,
+}
+
+/// Scan once per refresh; reuse the root and disabled filters for each patch.
+async fn scan(cwd: &Path) -> Result<(PathBuf, Vec<OsString>, Vec<File>), String> {
     let (ok, mut root, _) = git(cwd, &args(&["rev-parse", "--show-toplevel"])).await?;
     if !ok {
         return Err("/diff needs a Git working tree".into());
@@ -223,62 +231,102 @@ pub async fn load(cwd: &Path, selected: Option<&Path>) -> Result<Snapshot, Strin
         }
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
-    let file = selected
-        .and_then(|path| files.iter().find(|f| f.path == path))
-        .or_else(|| files.first());
-    let mut patch = String::new();
-    let selected = if let Some(file) = file {
-        if file.new {
-            patch = match new_text(&root.join(&file.path)).await? {
-                Some(text) if text.is_empty() => "Empty new file".into(),
-                Some(text) => {
-                    let mut patch = format!("@@ -0,0 +1,{} @@\n", text.lines().count());
-                    for line in text.lines() {
-                        patch.push('+');
-                        patch.push_str(line);
-                        patch.push('\n');
-                        if patch.len() > MAX_OUTPUT {
-                            patch.truncate(patch.floor_char_boundary(MAX_OUTPUT));
-                            patch.push_str("\n… diff truncated\n");
-                            break;
-                        }
+    Ok((root, diff_options, files))
+}
+
+/// Read one file with the same limits and filter isolation as the file-list scan.
+async fn patch(root: &Path, diff_options: &[OsString], file: &File) -> Result<String, String> {
+    let mut patch;
+    if file.new {
+        patch = match new_text(&root.join(&file.path)).await? {
+            Some(text) if text.is_empty() => "Empty new file".into(),
+            Some(text) => {
+                let mut patch = format!("@@ -0,0 +1,{} @@\n", text.lines().count());
+                for line in text.lines() {
+                    patch.push('+');
+                    patch.push_str(line);
+                    patch.push('\n');
+                    if patch.len() > MAX_OUTPUT {
+                        patch.truncate(patch.floor_char_boundary(MAX_OUTPUT));
+                        patch.push_str("\n… diff truncated\n");
+                        break;
                     }
-                    if !text.ends_with('\n') && patch.len() <= MAX_OUTPUT {
-                        patch.push_str("\\ No newline at end of file\n");
-                    }
-                    patch
                 }
-                None => "Binary or large new file; preview unavailable".into(),
-            };
-        } else {
-            let mut diff_args = diff_options;
-            diff_args.extend(args(&[
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-color",
-                "--no-renames",
-                "--unified=3",
-                "HEAD",
-                "--",
-            ]));
-            diff_args.push(file.path.as_os_str().into());
-            let (ok, bytes, truncated) = git(&root, &diff_args).await?;
-            if !ok && !truncated {
-                return Err("Could not read the selected diff".into());
+                if !text.ends_with('\n') && patch.len() <= MAX_OUTPUT {
+                    patch.push_str("\\ No newline at end of file\n");
+                }
+                patch
             }
-            patch = String::from_utf8_lossy(&bytes).into_owned();
-            if truncated {
-                patch.push_str("\n… diff truncated");
-            }
-        }
-        Some(file.path.clone())
+            None => "Binary or large new file; preview unavailable".into(),
+        };
     } else {
-        None
+        let mut diff_args = diff_options.to_vec();
+        diff_args.extend(args(&[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--no-renames",
+            "--unified=3",
+            "HEAD",
+            "--",
+        ]));
+        diff_args.push(file.path.as_os_str().into());
+        let (ok, bytes, truncated) = git(root, &diff_args).await?;
+        if !ok && !truncated {
+            return Err("Could not read the selected diff".into());
+        }
+        patch = String::from_utf8_lossy(&bytes).into_owned();
+        if truncated {
+            patch.push_str("\n… diff truncated");
+        }
+    }
+    Ok(patch)
+}
+
+/// Compare one file with HEAD, including staged and non-ignored untracked changes.
+/// A repository without commits compares its current files to an empty tree.
+pub async fn load(cwd: &Path, selected: Option<&Path>) -> Result<Snapshot, String> {
+    let (root, options, files) = scan(cwd).await?;
+    let file = selected
+        .and_then(|path| files.iter().find(|file| file.path == path))
+        .or_else(|| files.first());
+    let (selected, patch) = if let Some(file) = file {
+        (Some(file.path.clone()), patch(&root, &options, file).await?)
+    } else {
+        (None, String::new())
     };
     Ok(Snapshot {
         files,
         selected,
         patch,
+    })
+}
+
+/// Load a continuous review without unbounded Git work or memory use. Per-file
+/// failures remain visible next to their path instead of hiding the other diffs.
+pub async fn load_review(cwd: &Path) -> Result<Review, String> {
+    let (root, options, files) = scan(cwd).await?;
+    let mut patches = Vec::new();
+    let mut bytes = 0usize;
+    let started = std::time::Instant::now();
+    for file in &files {
+        if patches.len() >= 128 || bytes >= 4 * 1024 * 1024 || started.elapsed().as_secs() >= 5 {
+            break;
+        }
+        let source = patch(&root, &options, file)
+            .await
+            .unwrap_or_else(|error| error);
+        if bytes.saturating_add(source.len()) > 4 * 1024 * 1024 {
+            break;
+        }
+        bytes += source.len();
+        patches.push((file.path.clone(), source));
+    }
+    let truncated = patches.len() < files.len();
+    Ok(Review {
+        files,
+        patches,
+        truncated,
     })
 }
