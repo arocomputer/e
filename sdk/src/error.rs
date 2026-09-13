@@ -30,6 +30,14 @@ pub enum Error {
     /// A `Tools::Only` entry names no built-in tool.
     #[error("unknown built-in tool `{0}`")]
     UnknownTool(String),
+    /// The resolved working directory cannot be used: it does not exist, is
+    /// not readable, or is not a directory. Checked in `build()` like every
+    /// other up-front option.
+    #[error("working directory `{}` cannot be used: {reason}", path.display())]
+    Cwd {
+        path: std::path::PathBuf,
+        reason: String,
+    },
     /// An attachment could not be read or is not an accepted image.
     #[error("{0}")]
     Image(String),
@@ -50,5 +58,8 @@ pub enum Error {
 #[error("{message}")]
 pub struct TurnError {
     pub message: String,
-    pub reply: Reply,
+    /// Boxed so `Error` variants stay small in the result-position sense
+    /// clippy enforces; the reply is the one large payload a failed turn
+    /// keeps, and readers deref through it transparently.
+    pub reply: Box<Reply>,
 }

@@ -73,9 +73,9 @@ Three types carry the design:
 
 Everything that can be checked up front fails in `build()`, with an
 `Error` naming what is wrong (unavailable model, no signed-in provider,
-unsupported effort, unknown tool, locked session file). A turn that ran and
-failed returns a `TurnError` whose `reply` holds everything the turn
-produced before it failed.
+unsupported effort, unknown tool, unusable working directory, locked or
+unreadable session file). A turn that ran and failed returns a `TurnError`
+whose `reply` holds everything the turn produced before it failed.
 
 ## Rules the types enforce
 

@@ -511,6 +511,75 @@ exit 1
     session.close().await;
 }
 
+/// Two bash calls in one batch, one wave at a time: cancelling after the
+/// first starts skips the second with no terminal event of its own. The
+/// reply must still settle both — once each — and a late detached event
+/// for the skipped turn must not leak into this one's stats.
+const TWO_SLEEPS: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
+    "\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"sleep 5\\\"}\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",",
+    "\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"sleep 5\\\"}\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_call_that_never_ran_still_counts_once_as_a_failure() {
+    let (port, _server) = serve_sse(&[TWO_SLEEPS]);
+    let home = mock_home("skip-count", &[("mock", port)]);
+    std::fs::write(home.0.join("settings.json"), r#"{"tool_concurrency": 1}"#).unwrap();
+    let ws = TempDir::new("skip-count-ws");
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("run both");
+    let mut cancelled = false;
+    while let Some(event) = turn.next().await {
+        if matches!(event, Event::ToolStart { .. }) && !cancelled {
+            turn.cancel();
+            cancelled = true;
+        }
+    }
+    assert!(cancelled, "the first call must have started");
+    let reply = turn.finish().await.unwrap();
+    assert_eq!(reply.stop, Stop::Cancelled);
+    assert_eq!(
+        (reply.tools.calls, reply.tools.failures),
+        (2, 2),
+        "every announced call settles exactly once"
+    );
+}
+
+#[tokio::test]
+async fn build_rejects_a_working_directory_that_is_not_one() {
+    let home = mock_home("bad-cwd", &[("mock", 9)]);
+    let file = home.0.join("a-file");
+    std::fs::write(&file, "not a directory").unwrap();
+    let error = Session::builder()
+        .home(&home.0)
+        .cwd(&file)
+        .model("mock/test")
+        .build()
+        .await
+        .expect_err("a file cannot be a workspace");
+    assert!(
+        matches!(error, e_sdk::Error::Cwd { .. }),
+        "expected a cwd error, got: {error}"
+    );
+    // The message names the path and says what is wrong with it.
+    let message = error.to_string();
+    assert!(
+        message.contains("a-file") && message.contains("not a directory"),
+        "{message}"
+    );
+}
+
 /// A session and its turns move between tasks: a server can build one per
 /// request and drive it from wherever the request is handled.
 #[test]

@@ -186,6 +186,21 @@ impl SessionBuilder {
 
     pub async fn build(self) -> Result<Session, Error> {
         let cwd = resolve_cwd(self.cwd);
+        // The documented contract is that everything checkable fails here:
+        // a missing or non-directory workspace must not wait for a tool to
+        // discover it mid-turn.
+        if let Err(error) = std::fs::metadata(&cwd) {
+            return Err(Error::Cwd {
+                path: cwd,
+                reason: error.to_string(),
+            });
+        }
+        if !cwd.is_dir() {
+            return Err(Error::Cwd {
+                path: cwd,
+                reason: "not a directory".into(),
+            });
+        }
         let home = resolve_home(self.home);
         let model = home::with_home(home.clone(), || resolve_model(self.model.as_deref()))?;
         if let Some(effort) = &self.effort {
@@ -224,12 +239,20 @@ impl SessionBuilder {
 
         if let Some(path) = &self.resume {
             // Ownership first: a file another e is appending to must not be
-            // replayed into a second, diverging history.
-            let (session, messages, name) = home::with_home(home.clone(), || {
-                let session = SessionLog::reopen(path)?;
-                let messages = SessionLog::load(path)?;
-                Ok::<_, std::io::Error>((session, messages, log::name_of(path)))
-            })?;
+            // replayed into a second, diverging history. The read and parse
+            // run on the blocking pool: a large session must not stall the
+            // executor (and every other future on a current-thread runtime).
+            let resume_path = path.clone();
+            let blocking_home = home.clone();
+            let (session, messages, name) = tokio::task::spawn_blocking(move || {
+                home::with_home(blocking_home, || {
+                    let session = SessionLog::reopen(&resume_path)?;
+                    let messages = SessionLog::load(&resume_path)?;
+                    Ok::<_, std::io::Error>((session, messages, log::name_of(&resume_path)))
+                })
+            })
+            .await
+            .map_err(|_| Error::Session(std::io::Error::other("session load task panicked")))??;
             agent.load_history(messages);
             agent.set_session(Some(session));
             agent.adopt_session_name(name);

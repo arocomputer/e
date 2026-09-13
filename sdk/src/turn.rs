@@ -150,6 +150,14 @@ pub struct Turn<'s> {
     /// Events already translated but not yet handed out: a tool batch
     /// arrives as one core event and leaves as one `ToolCall` per call.
     pending_events: VecDeque<Event>,
+    /// Call ids this turn announced. A cancelled wave can detach a tool
+    /// task that outlives the turn; its late events must not be read as
+    /// part of the next turn's stream.
+    announced: std::collections::HashSet<u64>,
+    /// Announced calls still missing their terminal event. Cancellation
+    /// can skip a queued call without emitting anything for it; the totals
+    /// still owe it as a failure.
+    unended: std::collections::HashSet<u64>,
 }
 
 impl<'s> Turn<'s> {
@@ -162,6 +170,8 @@ impl<'s> Turn<'s> {
             cost: None,
             early_steers: Vec::new(),
             pending_events: VecDeque::new(),
+            announced: std::collections::HashSet::new(),
+            unended: std::collections::HashSet::new(),
         }
     }
 
@@ -218,7 +228,10 @@ impl<'s> Turn<'s> {
         let mut reply = std::mem::take(&mut self.reply);
         reply.cost_usd = self.cost;
         match self.error.take() {
-            Some(message) => Err(TurnError { message, reply }),
+            Some(message) => Err(TurnError {
+                message,
+                reply: Box::new(reply),
+            }),
             None => Ok(reply),
         }
     }
@@ -265,6 +278,8 @@ impl<'s> Turn<'s> {
             SessionEvent::ReasoningDelta(delta) => Some(Event::Reasoning(delta)),
             SessionEvent::ToolBatchStart { calls } => {
                 self.reply.tools.calls += calls.len() as u64;
+                self.announced.extend(calls.iter().map(|call| call.id));
+                self.unended.extend(calls.iter().map(|call| call.id));
                 // One announcement per call keeps the stream flat; the
                 // batch boundary is visible as the run of `ToolCall`s
                 // before the first `ToolStart`.
@@ -287,6 +302,7 @@ impl<'s> Turn<'s> {
                 summary,
                 content,
             } => {
+                self.unended.remove(&id);
                 if outcome.is_error() {
                     self.reply.tools.failures += 1;
                 }
@@ -356,6 +372,12 @@ impl<'s> Turn<'s> {
             // the session's private sidecar; the message is the contract.
             SessionEvent::ErrorDetails(_) => None,
             SessionEvent::TurnEnd { aborted } => {
+                // Calls cancelled before they ran produce no `ToolEnd`: the
+                // batch was announced, so they belong in this turn's failure
+                // count, settled here once so a late detached event can
+                // never double-count one.
+                self.reply.tools.failures += self.unended.len() as u64;
+                self.unended.clear();
                 self.reply.stop = if aborted {
                     Stop::Cancelled
                 } else {
@@ -414,6 +436,20 @@ impl Stream for Turn<'_> {
                 State::Running => {
                     match self.session.events.poll_recv(cx) {
                         Poll::Ready(Some(event)) => {
+                            // A tool event for a call this turn never
+                            // announced is a cancelled turn's detached task
+                            // reporting late; it belongs to an earlier
+                            // reply, not this one's stats.
+                            let late = matches!(
+                                &event,
+                                SessionEvent::ToolStart { id }
+                                | SessionEvent::ToolOutput { id, .. }
+                                | SessionEvent::ToolEnd { id, .. }
+                                    if !self.announced.contains(id)
+                            );
+                            if late {
+                                continue;
+                            }
                             if let Some(event) = self.observe(event) {
                                 return Poll::Ready(Some(event));
                             }
