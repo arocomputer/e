@@ -243,6 +243,11 @@ pub fn paste_placeholder() -> u64 {
     get_u64("paste_placeholder").unwrap_or(1000)
 }
 
+/// Collapsed paste label. Counts describe source text, not wrapped screen rows.
+pub fn paste_label() -> String {
+    get_string("paste_label").unwrap_or_else(|| "[Pasted text #{id}, {chars} chars]".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

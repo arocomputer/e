@@ -412,11 +412,11 @@ impl App {
             MenuKind::Files => {
                 // Replace the @token under construction with the chosen path.
                 let text = self.editor.text();
-                let replaced = match text.rfind('@') {
-                    Some(at) => format!("{}{}", &text[..at], item.value),
-                    None => item.value,
-                };
-                self.editor.set_text(&replaced);
+                let start = text
+                    .rfind('@')
+                    .map(|at| text[..at].chars().count())
+                    .unwrap_or(0);
+                self.editor.replace_suffix(start, &item.value);
             }
             MenuKind::Sessions => {
                 self.resume_path(std::path::PathBuf::from(item.value));
@@ -428,13 +428,14 @@ impl App {
             MenuKind::Skills => {
                 // Replace the $token, then send the skill body as context.
                 let text = self.editor.text();
-                let rest = match text.rfind('$') {
-                    Some(at) => text[..at].trim_end().to_string(),
-                    None => String::new(),
-                };
-                // The skill body replaces the draft; its attachments were
-                // tied to what is being replaced.
+                let start = text
+                    .rfind('$')
+                    .map(|at| text[..at].chars().count())
+                    .unwrap_or(0);
+                self.editor.replace_suffix(start, "");
+                let rest = self.editor.expanded_text().trim_end().to_string();
                 self.discard_composer_images();
+
                 self.editor.set_text("");
                 if let Some(skill) =
                     crate::core::resources::skills::get(&item.value, &self.agent.cwd())

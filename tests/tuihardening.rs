@@ -181,7 +181,7 @@ fn composer_uses_display_width_and_one_cursor() {
 /// paste inserts literally.
 #[test]
 fn paste_placeholders_retire_on_submit() {
-    use e::tui::composer::Editor;
+    use e::tui::composer::{Editor, EditorResult, Key};
     let mut editor = Editor::new();
     editor.insert_paste("line one\nline two\nline three");
     assert!(
@@ -194,13 +194,14 @@ fn paste_placeholders_retire_on_submit() {
     editor.insert_paste(&long);
     let draft = editor.text();
     assert!(draft.contains("[Pasted text #1"));
-    let expanded = editor.expand_pastes(&draft);
-    assert!(expanded.contains("line two"));
-    assert!(expanded.contains("xxxx"));
-    // The mapping is gone: the same token now passes through literally.
-    let again = editor.expand_pastes(&draft);
-    assert!(
-        again.contains("[Pasted text #1"),
-        "stale payload re-expanded"
-    );
+    let EditorResult::Submit(expanded) = editor.key(Key::Enter) else {
+        panic!("expected submission");
+    };
+    assert_eq!(expanded, long);
+    // Retyping the marker cannot resurrect the submitted payload.
+    editor.insert_str(&draft);
+    let EditorResult::Submit(again) = editor.key(Key::Enter) else {
+        panic!("expected submission");
+    };
+    assert_eq!(again, draft);
 }

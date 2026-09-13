@@ -130,3 +130,41 @@ fn paste_replaces_selection_and_clears_it() {
     editor.key(Key::Left);
     assert_eq!(editor.cursor(), 2, "paste must not leave a stale selection");
 }
+
+#[test]
+fn extension_attachment_replacement_preserves_the_draft_and_caret() {
+    let mut editor = Editor::new();
+    editor.set_text("explain");
+    editor.insert_attachment("⧉ 1 line from diff", "old source");
+    editor.insert_str(" please");
+    editor.insert_attachment("⧉ 16 lines from diff", "new source");
+    assert_eq!(editor.text(), "explain ⧉ 16 lines from diff please");
+    assert_eq!(editor.expanded_text(), "explain new source please");
+    assert_eq!(editor.cursor(), editor.text().chars().count());
+    let rendered = editor
+        .render(&theme::load_bundled(false).unwrap(), 80, 24)
+        .join("\n");
+    assert!(rendered.contains(
+        &theme::load_bundled(false)
+            .unwrap()
+            .fg("attachmentText", "⧉ 16 lines from diff")
+    ));
+}
+
+#[test]
+fn extension_attachment_backspace_selects_then_deletes_and_motion_cancels_selection() {
+    let mut editor = Editor::new();
+    editor.insert_attachment("⧉ 1 line from diff", "source");
+    editor.key(Key::Backspace);
+    assert_eq!(editor.expanded_text(), "source");
+    assert!(editor
+        .render(&theme::load_bundled(false).unwrap(), 80, 24)
+        .join("\n")
+        .contains("\x1b[7m"));
+    editor.key(Key::Right);
+    editor.key(Key::Backspace);
+    assert_eq!(editor.expanded_text(), "source");
+    editor.key(Key::Backspace);
+    assert!(editor.text().is_empty());
+    assert!(editor.expanded_text().is_empty());
+}

@@ -4,9 +4,9 @@
 //! hands off here once a session should open.
 
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, Event as TermEvent, EventStream, KeyCode,
-    KeyEvent, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 use futures::StreamExt;
@@ -31,9 +31,12 @@ use crate::tui::transcript::{Block, Kind, Transcript};
 use crate::tui::trustpanel::{self, TrustStage};
 
 mod clipboard;
+
 mod events;
 mod login;
 mod menus;
+mod viewer;
+use viewer::Viewer;
 
 /// Per-turn frontend bookkeeping; the engine state lives in the Agent.
 struct ActiveTurn {
@@ -59,17 +62,6 @@ struct ActiveTurn {
     /// Accumulated provider-billed estimate for this turn, when the model
     /// declares rates. Unlike the context gauge, every request step counts.
     cost_usd: Option<f64>,
-}
-
-/// The ctrl+o full-detail screen: one stored output at a time, scrollable,
-/// ←/→ switching between outputs — the reference surface, e-sized.
-/// The ctrl+o review screen: the whole transcript with tool details
-/// spliced in, at one of the reference's two depths — Review folds each
-/// detail to three lines behind a `→ to expand` hint, Full shows all.
-#[derive(Clone, Copy)]
-struct Viewer {
-    full: bool,
-    scroll: usize,
 }
 
 /// The queued-prompt review's working state: a keyed snapshot of the
@@ -311,157 +303,6 @@ struct App {
 }
 
 impl App {
-    /// The review screen's cached body: the projected transcript rows,
-    /// rebuilt only when the cache's fingerprint no longer matches. The
-    /// fingerprint covers everything the projection reads — block state
-    /// (each block's generation, bumped on every touch), the block count,
-    /// and the output store's seq (new details and eviction).
-    fn viewer_rows(&mut self, width: usize, full: bool) -> &[String] {
-        let fingerprint = self.viewer_fingerprint();
-        let current = match &self.viewer_cache {
-            Some((cached_fp, cached_width, cached_full, _)) => {
-                *cached_fp == fingerprint && *cached_width == width && *cached_full == full
-            }
-            None => false,
-        };
-        if !current {
-            let rows = self.project_rows(width, full);
-            self.viewer_cache = Some((fingerprint, width, full, rows));
-        }
-        match &self.viewer_cache {
-            Some((_, _, _, rows)) => rows,
-            // Unreachable: the cache was just filled above. An empty slice
-            // renders as nothing rather than panicking if that ever breaks.
-            None => &[],
-        }
-    }
-
-    /// Everything the review projection reads, as one number.
-    fn viewer_fingerprint(&self) -> u64 {
-        self.transcript.fingerprint() ^ self.output_seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-    }
-
-    /// The projection itself, pure over the current transcript: the whole
-    /// transcript with each child row's stored detail railed beneath it —
-    /// folded to three lines behind the reference's `→ to expand` hint at
-    /// Review depth, whole at Full. Non-tool blocks render through the
-    /// per-block cache, so a rebuild pays only for blocks that changed.
-    fn project_rows(&mut self, width: usize, full: bool) -> Vec<String> {
-        const REVIEW_DETAIL_LINES: usize = 3;
-        let mut rows: Vec<String> = Vec::new();
-        for block in &mut self.transcript.blocks {
-            let lines = block.review_lines(&self.theme, width);
-            if lines.is_empty() {
-                continue;
-            }
-            if !rows.is_empty() {
-                rows.push(String::new());
-            }
-            let group_start = rows.len();
-            for (row, detail) in lines {
-                rows.push(crate::tui::markdown::clip_styled(&row, width));
-                use crate::tui::transcript::ToolDetail;
-                let Some(detail) = detail else { continue };
-                if let ToolDetail::Live(index) = detail {
-                    if block
-                        .tool_children
-                        .get(index)
-                        .is_some_and(|child| child.output_truncated)
-                    {
-                        rows.extend(crate::tui::transcript::tree_rows(
-                            &self.theme,
-                            width,
-                            "│",
-                            &self.theme.fg("dim", "Earlier live output omitted."),
-                        ));
-                    }
-                }
-                let body = match detail {
-                    ToolDetail::Stored(id) => Self::output_body(&self.outputs, id),
-                    ToolDetail::Live(index) => block
-                        .tool_children
-                        .get(index)
-                        .map(|child| child.output.as_str()),
-                };
-                let Some(body) = body else {
-                    rows.push(self.theme.fg("dim", "│  Full saved result unavailable."));
-                    continue;
-                };
-                let body_rows: Vec<String> = body
-                    .lines()
-                    .flat_map(|line| {
-                        let colored = Self::diff_row_color(&self.theme, line)
-                            .unwrap_or_else(|| self.theme.fg("dim", line));
-                        crate::tui::transcript::tree_rows(&self.theme, width, "│", &colored)
-                    })
-                    .collect();
-                let hidden = if full {
-                    0
-                } else {
-                    body_rows.len().saturating_sub(REVIEW_DETAIL_LINES)
-                };
-                let shown = body_rows.len() - hidden;
-                if matches!(detail, ToolDetail::Live(_)) {
-                    rows.extend(body_rows.into_iter().skip(hidden));
-                } else {
-                    rows.extend(body_rows.into_iter().take(shown));
-                }
-                if hidden > 0 {
-                    rows.extend(crate::tui::transcript::tree_rows(
-                        &self.theme,
-                        width,
-                        "│",
-                        &self
-                            .theme
-                            .fg("dim", &format!("{hidden} more rows · → to expand")),
-                    ));
-                }
-            }
-            // Close after the final argument, output, or omission row. Closing
-            // the action first would leave its inserted output disconnected.
-            if block.kind == Kind::ToolGroup && width >= 3 && rows.len() > group_start + 1 {
-                if let Some(last) = rows.last_mut() {
-                    *last = last.replacen(['├', '│'], "└", 1);
-                }
-            }
-        }
-        rows
-    }
-
-    /// The ctrl+o review screen: a scroll window over the projected
-    /// transcript, the `┃ Review …` navigation row at the bottom — the
-    /// reference's own wording per depth.
-    fn viewer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
-        let Some(viewer) = self.viewer else {
-            return Vec::new();
-        };
-        let body = self.viewer_rows(width, viewer.full);
-        let window = height.saturating_sub(1).max(1);
-        // The body can shrink under a deep scroll (the output store evicts;
-        // details disappear) — clamp so the screen never renders blank.
-        let scroll = viewer.scroll.min(body.len().saturating_sub(1));
-        let mut rows: Vec<String> = body.iter().skip(scroll).take(window).cloned().collect();
-        while rows.len() < window {
-            rows.push(String::new());
-        }
-        let nav = if viewer.full {
-            "Full detail · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close"
-        } else {
-            "Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close"
-        };
-        rows.push(format!(
-            "{} {}",
-            self.theme.fg("userMessageText", "┃"),
-            self.theme.fg("muted", nav)
-        ));
-        // Persist the clamp once `body`'s borrow is done, so ↑/↓ arithmetic
-        // starts from a scroll the body can actually show.
-        if let Some(viewer) = self.viewer.as_mut() {
-            viewer.scroll = scroll;
-        }
-        rows
-    }
-
     /// Color a detail-viewer row shaped like a diff row: the number-and-sign
     /// column takes the diff-marker hue (`+` green, `-` red), context and
     /// `⋯` elision rows dim, anything else passes through untouched — the
@@ -493,7 +334,22 @@ impl App {
         Some(format!("{}{}", theme.fg(token, &line[..7]), &line[7..]))
     }
 
+    /// Ordinary chat joins the transcript and composer into one frame.
     fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = self.transcript_frame(width);
+        let dock_start = lines.len();
+        lines.extend(self.composer_frame(width, height));
+        if self.bottom_pinned && lines.len() < height {
+            lines.splice(
+                dock_start..dock_start,
+                vec![String::new(); height - lines.len()],
+            );
+        }
+        lines
+    }
+
+    /// Transcript and live activity only, without editor or footer chrome.
+    fn transcript_frame(&mut self, width: usize) -> Vec<String> {
         let blink_on = self
             .active
             .as_ref()
@@ -552,6 +408,13 @@ impl App {
         if self.active.is_some() {
             lines.resize(lines.len().max(dock_start + 2), String::new());
         }
+        lines
+    }
+
+    /// One full-width editor and status band, shared beneath both review panes.
+    fn composer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+
         let entering_key = matches!(self.auth, Some(AuthStage::ApiKey { .. }));
         if !entering_key {
             // The reference caps the composer at half the frame plus one
@@ -566,6 +429,7 @@ impl App {
                         .fg("dim", &image_labels(self.composer_images.len())),
                 );
             }
+
             // The queued banner band: the collapsed summary (ink-bright),
             // the review's hint line while it edits the queue, a gap row —
             // and with chrome above it the composer trades its leading
@@ -631,19 +495,7 @@ impl App {
         } else if let Some(menu) = &self.menu {
             lines.extend(menu.render(&self.theme, width));
         }
-        let window = self.agent.model.context_window.max(1);
-        // Nothing is signed in for the current model — it's a bootstrap
-        // placeholder, not something the user chose, so don't show it.
-        let data = StatusData {
-            model: self.signed_in.then(|| self.agent.model_slug()),
-            effort: if self.signed_in {
-                self.status_effort.clone()
-            } else {
-                None
-            },
-            context_used: self.context_tokens,
-            context_total: Some(window),
-        };
+        let data = self.status_data();
         let hint = self
             .settings
             .as_ref()
@@ -660,21 +512,27 @@ impl App {
             .overlay
             .as_deref()
             .or(self.clipboard_reading.then_some("reading clipboard…"));
-        lines.extend(statusline(
-            &self.theme,
-            &data,
-            overlay,
-            hint,
-            panel_open,
-            width,
-        ));
-        if self.bottom_pinned && lines.len() < height {
-            lines.splice(
-                dock_start..dock_start,
-                vec![String::new(); height - lines.len()],
-            );
-        }
+        let footer = statusline(&self.theme, &data, overlay, hint, panel_open, width);
+        lines.extend(footer);
+
         lines
+    }
+
+    /// Shared model and context inputs for the composer and transcript footers.
+    fn status_data(&self) -> StatusData {
+        let window = self.agent.model.context_window.max(1);
+        // Nothing is signed in for the current model — it's a bootstrap
+        // placeholder, not something the user chose, so don't show it.
+        StatusData {
+            model: self.signed_in.then(|| self.agent.model_slug()),
+            effort: if self.signed_in {
+                self.status_effort.clone()
+            } else {
+                None
+            },
+            context_used: self.context_tokens,
+            context_total: Some(window),
+        }
     }
 
     /* ---------- pickers ---------- */
@@ -757,7 +615,7 @@ impl App {
         let consumed = match code {
             KeyCode::Up => {
                 if review.visible {
-                    stash(&mut review, self.editor.text());
+                    stash(&mut review, self.editor.expanded_text());
                     if review.selected > 0 {
                         review.selected -= 1;
                         self.editor.set_text(&review.entries[review.selected].1);
@@ -772,7 +630,7 @@ impl App {
                 }
             }
             KeyCode::Down if review.visible => {
-                stash(&mut review, self.editor.text());
+                stash(&mut review, self.editor.expanded_text());
                 if review.selected + 1 < review.entries.len() {
                     review.selected += 1;
                     self.editor.set_text(&review.entries[review.selected].1);
@@ -789,7 +647,7 @@ impl App {
                 // The visible draft commits only when it holds text — an
                 // emptied draft sends its entry unchanged.
                 if review.visible && !self.editor.is_empty() {
-                    stash(&mut review, self.editor.text());
+                    stash(&mut review, self.editor.expanded_text());
                 }
                 if review.dirty.iter().any(|d| *d) {
                     // Only edited entries rewrite: a trim drops an entry that
@@ -1449,7 +1307,6 @@ impl App {
 
     /// Submit attached images through the same ordered input-hook path as text.
     fn submit_images(&mut self, text: String, images: Vec<crate::core::providers::ImageInput>) {
-        let text = self.editor.expand_pastes(&text);
         let trimmed = text.trim();
         let prompt = if trimmed.is_empty() {
             "Describe this image.".to_string()
@@ -1479,7 +1336,6 @@ impl App {
     }
 
     fn submit(&mut self, text: String) {
-        let text = self.editor.expand_pastes(&text);
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
@@ -2679,7 +2535,7 @@ async fn run_scoped(
     if let Some(initial) = stage_initial_prompt(initial, hold_initial, &mut app.pending_initial) {
         app.submit_initial(initial);
     }
-    painter.frame(app.frame(cols as usize, rows as usize));
+    painter.frame_in_view(app.frame(cols as usize, rows as usize), false);
 
     // Frame pacing: every select arm may change what's on screen, but frames
     // are built at most once per interval — a token burst becomes one paint,
@@ -2688,17 +2544,26 @@ async fn run_scoped(
     let mut next_paint = tokio::time::Instant::now();
     let mut paint_deferred = false;
     let mut event_buf: Vec<SessionEvent> = Vec::with_capacity(128);
+    let mut mouse_enabled = false;
 
     loop {
         tokio::select! {
             maybe = events.next() => {
                 let Some(Ok(event)) = maybe else { break };
                 match event {
-                    TermEvent::Paste(text) => {
-                        // A paste is one unit. Image paths become attachments;
-                        // long text becomes the editor's expandable placeholder.
+                    TermEvent::Paste(text) if app.viewer.is_none() => {
                         app.paste(&text);
+
                     }
+                    TermEvent::Mouse(event) => {
+                        if app.viewer.is_some() {
+                            match event.kind {
+                                crossterm::event::MouseEventKind::ScrollUp => app.scroll_viewer(false, 3, cols as usize, rows as usize),
+                                crossterm::event::MouseEventKind::ScrollDown => app.scroll_viewer(true, 3, cols as usize, rows as usize),
+                                _ => {}
+                            }
+                        }
+                    },
                     TermEvent::Resize(c, r) => {
                         cols = c;
                         rows = r;
@@ -2717,45 +2582,10 @@ async fn run_scoped(
                             && !app.editor.mask
                         {
                             app.paste_clipboard();
-                        } else if app.viewer.is_some() {
-                            let close = k.code == KeyCode::Esc
-                                || (ctrl && k.code == KeyCode::Char('o'));
-                            if close {
-                                app.viewer = None;
-                            } else {
-                                let full =
-                                    app.viewer.as_ref().map(|v| v.full).unwrap_or(false);
-                                let total = app.viewer_rows(cols as usize, full).len();
-                                if let Some(viewer) = &mut app.viewer {
-                                    match k.code {
-                                        KeyCode::Up => {
-                                            viewer.scroll = viewer.scroll.saturating_sub(1)
-                                        }
-                                        KeyCode::Down => {
-                                            viewer.scroll =
-                                                (viewer.scroll + 1).min(total.saturating_sub(1))
-                                        }
-                                        KeyCode::PageUp => {
-                                            viewer.scroll = viewer.scroll.saturating_sub(20)
-                                        }
-                                        KeyCode::PageDown => {
-                                            viewer.scroll =
-                                                (viewer.scroll + 20).min(total.saturating_sub(1))
-                                        }
-                                        // ←/→ switch between the reference's
-                                        // two depths: Review folds details,
-                                        // Full expands everything.
-                                        KeyCode::Left => viewer.full = false,
-                                        KeyCode::Right => viewer.full = true,
-                                        _ => {}
-                                    }
-                                }
-                            }
+                        } else if app.viewer_key(k, cols as usize, rows as usize) {
+
                         } else if ctrl && k.code == KeyCode::Char('o') {
-                            app.viewer = Some(Viewer {
-                                full: false,
-                                scroll: 0,
-                            });
+                            app.viewer = Some(Viewer::new());
                         } else if let Some(stage) = &mut app.trust {
                             match k.code {
                                 KeyCode::Up => stage.step(-1),
@@ -3144,16 +2974,15 @@ async fn run_scoped(
                                 }
                                 text
                             };
+                            let output_id = (!output.content.trim().is_empty()).then(|| app.remember_output(format!("$ {cmd}"), display_output));
                             if let Some(idx) = app.shell_block.take() {
                                 if let Some(block) = app.transcript.blocks.get_mut(idx) {
                                     block.done = true;
                                     block.is_error = output.is_error();
                                     block.detail = Some(shown);
+                                    block.output_id = output_id;
                                     block.touch();
                                 }
-                            }
-                            if !output.content.trim().is_empty() {
-                                app.remember_output(format!("$ {cmd}"), display_output);
                             }
                             app.agent.record_user(format!(
                                 "I ran `{cmd}` in my shell. Output:\n```\n{}\n```",
@@ -3249,6 +3078,15 @@ async fn run_scoped(
                 }
             }
         }
+        let capture_mouse = app.viewer.is_some();
+        if capture_mouse != mouse_enabled {
+            if capture_mouse {
+                let _ = execute!(std::io::stdout(), EnableMouseCapture);
+            } else {
+                let _ = execute!(std::io::stdout(), DisableMouseCapture);
+            }
+            mouse_enabled = capture_mouse;
+        }
         let paint_status = painter.status();
         app.rendering_delayed = paint_status.delayed(Duration::from_millis(500));
         match paint_status.failure.as_ref().map(|(_, error)| error) {
@@ -3267,7 +3105,7 @@ async fn run_scoped(
             } else {
                 app.frame(cols as usize, rows as usize)
             };
-            painter.frame(frame);
+            painter.frame_in_view(frame, app.viewer.is_some());
             next_paint = now + FRAME_INTERVAL;
             paint_deferred = false;
         } else {
@@ -3318,7 +3156,8 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             std::io::stdout(),
             PopKeyboardEnhancementFlags,
-            DisableBracketedPaste
+            DisableBracketedPaste,
+            DisableMouseCapture
         );
         let _ = terminal::disable_raw_mode();
         use std::io::Write as _;
@@ -3695,10 +3534,7 @@ mod tests {
     #[test]
     fn a_paste_over_an_open_surface_stays_text() {
         let mut app = session_app();
-        app.viewer = Some(Viewer {
-            full: false,
-            scroll: 0,
-        });
+        app.viewer = Some(Viewer::new());
         let path = std::env::temp_dir().join("e-paste-gate-test.png");
         std::fs::write(&path, b"png").unwrap();
 
@@ -4108,11 +3944,40 @@ mod tests {
     }
 
     #[test]
+    fn full_reader_opens_at_tail_and_keeps_a_paused_reading_position() {
+        let mut app = session_app();
+        app.editor.set_text("unsent draft");
+        for i in 0..30 {
+            app.transcript
+                .push(Block::new(Kind::User, format!("message {i}")));
+        }
+        app.viewer = Some(Viewer::new());
+        let frame = app.viewer_frame(80, 24);
+        assert_eq!(frame.len(), 24);
+        assert!(frame[..21].iter().any(|row| row.contains("message 29")));
+        assert!(frame[21].contains("Review"));
+        assert_eq!(frame[22], "");
+        app.scroll_viewer(false, 5, 80, 24);
+        let paused = app.viewer_frame(80, 24);
+        app.transcript.push(Block::new(Kind::User, "new arrival"));
+        assert_eq!(app.viewer_frame(80, 24), paused);
+        app.scroll_viewer(true, usize::MAX, 80, 24);
+        assert!(app
+            .viewer_frame(80, 24)
+            .iter()
+            .any(|row| row.contains("new arrival")));
+        assert!(app.viewer_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 80, 24));
+        assert!(app.viewer.is_none());
+        assert_eq!(app.editor.text(), "unsent draft");
+    }
+
+    #[test]
     fn review_screen_rebuilds_after_transcript_changes() {
         let mut app = session_app();
         app.viewer = Some(Viewer {
-            full: false,
+            follow_tail: false,
             scroll: 0,
+            ..Viewer::new()
         });
         app.transcript
             .push(Block::new(Kind::User, "before the change"));
@@ -4131,8 +3996,9 @@ mod tests {
     fn review_screen_rebuilds_when_a_tool_reports() {
         let mut app = session_app();
         app.viewer = Some(Viewer {
-            full: false,
+            follow_tail: false,
             scroll: 0,
+            ..Viewer::new()
         });
         let child = crate::tui::transcript::ToolChild::pending(
             7,
@@ -4160,6 +4026,30 @@ mod tests {
             "the new detail must appear without a width or depth change"
         );
         assert_ne!(running, reported);
+    }
+
+    #[test]
+    fn review_screen_clamps_scroll_when_the_body_shrinks() {
+        let mut app = session_app();
+        app.transcript.push(Block::new(Kind::User, "some content"));
+        app.viewer = Some(Viewer {
+            follow_tail: false,
+            scroll: 500,
+            ..Viewer::new()
+        });
+
+        let frame = app.viewer_frame(80, 24);
+
+        let body = &frame[..frame.len() - 1];
+        assert!(
+            body.iter().any(|r| r.contains("some content")),
+            "a deep scroll must clamp to the shrunken body: {frame:?}"
+        );
+        assert_eq!(
+            app.viewer.as_ref().unwrap().scroll,
+            0,
+            "the clamp persists so ↑/↓ arithmetic starts in range"
+        );
     }
 
     /// Review closes each group after its inserted output, at either depth.
@@ -4214,29 +4104,6 @@ mod tests {
                 .iter()
                 .all(|row| row.starts_with('├') || row.starts_with('│')));
         }
-    }
-
-    #[test]
-    fn review_screen_clamps_scroll_when_the_body_shrinks() {
-        let mut app = session_app();
-        app.transcript.push(Block::new(Kind::User, "some content"));
-        app.viewer = Some(Viewer {
-            full: false,
-            scroll: 500,
-        });
-
-        let frame = app.viewer_frame(80, 24);
-
-        let body = &frame[..frame.len() - 1];
-        assert!(
-            body.iter().any(|r| r.contains("some content")),
-            "a deep scroll must clamp to the shrunken body: {frame:?}"
-        );
-        assert_eq!(
-            app.viewer.as_ref().unwrap().scroll,
-            0,
-            "the clamp persists so ↑/↓ arithmetic starts in range"
-        );
     }
 
     #[test]

@@ -4,6 +4,8 @@ CAP_RESIZE_AFTER is a byte marker that triggers one resize to CAP_RESIZE_COLS
 and CAP_RESIZE_ROWS. The sidecar records the byte offset for terminal replay.
 """
 import json, os, pty, sys, time, select, fcntl, termios, struct, signal
+from collections import deque
+
 
 out_path, cols, rows, wait_before, wait_after, *cmd = sys.argv[1:]
 cols, rows = int(cols), int(rows)
@@ -12,11 +14,14 @@ prompt = os.environ.get("CAP_PROMPT", "")
 wait_for = os.environ.get("CAP_WAIT_FOR", "").encode()
 exit_keys = os.environ.get("CAP_EXIT", "")
 exit_wait = float(os.environ.get("CAP_EXIT_WAIT", "1"))
+# Timed [seconds-after-start, keys] pairs exercise panels that load asynchronously.
+steps = deque(json.loads(os.environ.get("CAP_STEPS", "[]")))
 resize_after = os.environ.get("CAP_RESIZE_AFTER", "").encode()
 # CAP_RESIZE_COLS/ROWS are optional; default to the launch size so setting only
 # the trigger resizes to the same dimensions instead of raising KeyError.
 resize_cols = int(os.environ.get("CAP_RESIZE_COLS", cols))
 resize_rows = int(os.environ.get("CAP_RESIZE_ROWS", rows))
+
 
 pid, fd = pty.fork()
 if pid == 0:
@@ -25,6 +30,7 @@ if pid == 0:
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 buf = bytearray()
+started = time.monotonic()
 deadline = time.time() + wait_before
 typed = False
 background_answered = False
@@ -42,6 +48,9 @@ while time.time() < end:
         if not chunk:
             break
         buf += chunk
+    while steps and time.monotonic() - started >= steps[0][0]:
+        _, keys = steps.popleft()
+        os.write(fd, keys.encode())
     # Startup probes read stdin synchronously. Typing before their replies
     # can consume the prompt as a terminal response instead of user input.
     if not background_answered and b"\x1b]11;?" in buf:
@@ -51,6 +60,7 @@ while time.time() < end:
         os.write(fd, b"\x1b[1;1R")
         cursor_answered = True
     if not typed and time.time() >= deadline and prompt and b"\x1b[?2026l" in buf:
+
         os.write(fd, prompt.encode() + b"\r")
         typed = True
     if resize_after and not resized and resize_after in buf:
