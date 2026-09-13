@@ -1,8 +1,11 @@
+<!-- Title: type(scope): what changed, in plain language.
+     e.g. fix(tui): tool trees stay connected after compaction
+     Scopes: core, tui, sdk, infra, docs. The title becomes the squash commit on main. -->
+
 ## Checklist
 
-- [ ] `cargo test` passes — the parity suite is the visual spec; if a rendering change fails it, fix the code, don't loosen the test
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean
-- [ ] `./scripts/guard.sh` passes — if you had to change the guard itself (new network host, new write path, new unsafe block), say why in this PR
+- [ ] `./x check` passes — the parity suite is the visual spec; if a rendering change fails it, fix the code, don't loosen the test
+- [ ] The guard is unchanged, or this PR says why it moved (new network host, new write path, new unsafe block)
 - [ ] `CHANGELOG.md` has an entry under `Unreleased` (skip only for pure meta: CI, templates, result files)
 - [ ] Comments and docs touched by this change are updated
 - [ ] Persisted/extension/CLI contract changes include compatibility fixtures and migration behavior
