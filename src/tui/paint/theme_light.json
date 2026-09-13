@@ -10,9 +10,11 @@
 		"code": 241,
 		"selected": 251,
 		"selectedInk": 237,
-		"shell": 28
+		"shell": 28,
+		"attachment": "#3478d4"
 	},
 	"colors": {
+		"attachmentText": "attachment",
 		"accent": "accent",
 		"border": "divider",
 		"borderAccent": "divider",
