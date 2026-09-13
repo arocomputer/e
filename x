@@ -28,7 +28,16 @@ case "$command" in
     ;;
   ui)
     cargo build --locked
-    "${PYTHON:-python3}" tests/ui/run.py "$@"
+    # First run creates the env under target/ (gitignored, gone with
+    # `cargo clean`); PYTHON points at another interpreter instead.
+    if [ -z "${PYTHON:-}" ]; then
+      PYTHON=target/ui-env/bin/python
+      if [ ! -x "$PYTHON" ]; then
+        python3 -m venv target/ui-env
+        target/ui-env/bin/pip install --quiet -r tests/ui/requirements.txt
+      fi
+    fi
+    "$PYTHON" tests/ui/run.py "$@"
     ;;
   fmt)
     cargo fmt "$@"

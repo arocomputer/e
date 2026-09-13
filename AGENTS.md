@@ -9,7 +9,7 @@ cargo build          # fast dev build
 ./x test             # the whole behavioral contract
 ./x check            # format, lint, tests, and security-surface guard
 ./x bench            # release-mode performance budgets
-./x ui               # PTY frame/color checks; Python setup in tests/ui/README.md
+./x ui               # PTY frame/color checks; makes its own Python env on first run
 ```
 
 `./x test` is not optional. The visual design is pinned byte-for-byte in

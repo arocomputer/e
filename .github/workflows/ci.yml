@@ -45,13 +45,8 @@ jobs:
       - name: Repository contract
         run: ./x check
 
-      - name: Terminal frame dependencies
-        run: |
-          python3 -m venv "$RUNNER_TEMP/e-ui-env"
-          "$RUNNER_TEMP/e-ui-env/bin/pip" install -r tests/ui/requirements.txt
-
       - name: Terminal frame checks
-        run: PYTHON="$RUNNER_TEMP/e-ui-env/bin/python" ./x ui --out "$RUNNER_TEMP/e-ui-frames"
+        run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
 
       - name: Retain terminal frames on failure
         if: failure()
