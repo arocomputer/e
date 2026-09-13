@@ -2,7 +2,7 @@
 //!
 //! ```sh
 //! cargo run -p e-sdk --example ask -- "what does this repository do"
-//! E_MODEL=anthropic/claude-opus-4.7 cargo run -p e-sdk --example ask -- "..."
+//! E_MODEL=anthropic/claude-opus-5 cargo run -p e-sdk --example ask -- "..."
 //! ```
 //!
 //! Text goes to stdout as it streams; tool activity and the final usage

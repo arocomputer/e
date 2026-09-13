@@ -1015,6 +1015,42 @@ impl Agent {
         true
     }
 
+    /// Submit a prompt and hold steering messages for the turn in one
+    /// critical section. The worker's first step drains the queue before it
+    /// builds its first request, so a steer enqueued here — rather than
+    /// handed over after the turn started, when a fast turn could finish
+    /// first — can never be raced out of the conversation. When a turn is
+    /// already running everything queues as steering, mirroring
+    /// `submit_message`; it never starts a second turn. The return follows
+    /// `submit_message`: true when the prompt was only held as steering,
+    /// false when it started a fresh turn.
+    pub fn submit_message_with_steers(
+        &mut self,
+        message: ChatMessage,
+        system: String,
+        steers: Vec<ChatMessage>,
+    ) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.running {
+            for held in steers.into_iter().chain(std::iter::once(message)) {
+                pending.next_id += 1;
+                let key = pending.next_id;
+                pending.items.push((key, held));
+            }
+            return true;
+        }
+        pending.running = true;
+        for held in steers {
+            pending.next_id += 1;
+            let key = pending.next_id;
+            pending.items.push((key, held));
+        }
+        drop(pending);
+        self.log().commit(message);
+        self.start(system, false);
+        false
+    }
+
     /// Request a checkpoint at the next provider boundary, or immediately
     /// when idle. No frontend needs to summarize or replace history.
     pub fn request_compaction(&mut self, system: String) {

@@ -137,7 +137,10 @@ impl SessionBuilder {
     /// `sessions/`, the same files `e -r` resumes. Off by default: an
     /// embedding must opt into leaving files in the user's home.
     pub fn persist(mut self, persist: bool) -> Self {
-        self.persist = persist;
+        // A resumed session must keep appending to the file it came from:
+        // turning persistence off after `resume` would also release the
+        // file's lock and let another process pick up the same log.
+        self.persist = persist || self.resume.is_some();
         self
     }
 
@@ -226,6 +229,14 @@ impl SessionBuilder {
                 (ToolMode::All, Some(names))
             }
         };
+        // Persistence is checked up front like every other option: a home
+        // that cannot create logs must fail here, not keep the first prompt
+        // memory-only behind a warning.
+        if self.persist && self.resume.is_none() {
+            let probe_cwd = cwd.clone();
+            home::with_home(home.clone(), || SessionLog::preflight(&probe_cwd))
+                .map_err(Error::Session)?;
+        }
         let options = AgentOptions {
             cwd: Some(cwd),
             home: Some(home.clone()),

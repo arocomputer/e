@@ -240,18 +240,49 @@ impl<'s> Turn<'s> {
         let system = self.session.system_prompt();
         match start {
             Start::Prompt(message) => {
-                self.session.agent.submit_message(message, system);
+                // Queue steering in the same critical section that starts the
+                // turn: a turn fast enough to finish before the first poll
+                // cannot race an early steer out of the conversation.
+                let steers: Vec<ChatMessage> = std::mem::take(&mut self.early_steers)
+                    .into_iter()
+                    .map(ChatMessage::user)
+                    .collect();
+                if steers.is_empty() {
+                    self.session.agent.submit_message(message, system);
+                } else {
+                    self.session
+                        .agent
+                        .submit_message_with_steers(message, system, steers);
+                }
             }
-            Start::Compact => self.session.agent.request_compaction(system),
+            Start::Compact => {
+                self.session.agent.request_compaction(system);
+                self.queue_early_steers();
+            }
             Start::Refused(reason) => {
                 self.error = Some(reason);
                 self.state = State::Done;
+                if !self.early_steers.is_empty() {
+                    self.reply.warnings.push(
+                        "steering messages were refused with the prompt and not delivered".into(),
+                    );
+                    self.early_steers.clear();
+                }
                 return;
             }
         }
         self.state = State::Running;
+    }
+
+    /// Hold early steers for a compaction turn. If the checkpoint already
+    /// finished, the queue accepts nothing more — each undelivered steer
+    /// warns instead of vanishing silently.
+    fn queue_early_steers(&mut self) {
         for text in std::mem::take(&mut self.early_steers) {
             if !self.submit_steer(text) {
+                self.reply.warnings.push(
+                    "a steering message arrived too late for the turn and was not delivered".into(),
+                );
                 break;
             }
         }

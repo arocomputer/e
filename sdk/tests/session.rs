@@ -359,6 +359,100 @@ async fn tools_none_advertises_nothing_and_says_so() {
     assert!(message_texts(&body)[0].contains("no tools"));
 }
 
+/// `steer()` before the first poll promises delivery "when the turn starts".
+/// A turn fast enough to finish before anyone polls must not race the early
+/// steer out of the conversation: it rides in the same critical section as
+/// the prompt and lands in the very first request.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_early_steer_lands_in_the_first_request() {
+    let (port, server) = serve_sse(&[OK]);
+    let home = mock_home("early-steer", &[("mock", port)]);
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("first");
+    assert!(turn.steer("ride along"), "steering a fresh turn holds");
+    let reply = turn.finish().await.unwrap();
+    assert_eq!(reply.text, "ok");
+    let texts = message_texts(&request_json(&server.join().unwrap()[0]));
+    assert_eq!(
+        &texts[1..],
+        ["first", "ride along"],
+        "both messages precede any reply"
+    );
+}
+
+/// Turning persistence off after `resume()` must not silently release the
+/// resumed file: the session keeps appending to the log it came from.
+#[tokio::test(flavor = "multi_thread")]
+async fn resume_cannot_be_unpersisted_afterwards() {
+    let (port, _server) = serve_sse(&[OK, OK, OK]);
+    let home = mock_home("resume-locked", &[("mock", port)]);
+    let ws = TempDir::new("resume-locked-ws");
+    let builder = || {
+        Session::builder()
+            .home(&home.0)
+            .cwd(&ws.0)
+            .model("mock/test")
+    };
+    let mut session = builder().persist(true).build().await.unwrap();
+    session.prompt("first").await.unwrap();
+    let path = session.path().expect("a persisted session has a file");
+    drop(session);
+
+    let mut resumed = builder()
+        .resume(&path)
+        .persist(false)
+        .build()
+        .await
+        .unwrap();
+    resumed.prompt("second").await.unwrap();
+    assert_eq!(
+        e_sdk::transcript(&path).unwrap().len(),
+        4,
+        "the resumed file kept growing despite persist(false) after resume"
+    );
+}
+
+/// With `persist(true)`, a home that cannot create session logs fails at
+/// `build()` — the failure must not wait until the first prompt has already
+/// run and quietly gone memory-only.
+#[tokio::test]
+async fn build_checks_the_home_can_persist_before_any_turn() {
+    let (port, _server) = serve_sse(&[OK]);
+    let home = mock_home("unwritable", &[("mock", port)]);
+    let sessions = home.0.join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    std::fs::set_permissions(&sessions, {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::Permissions::from_mode(0o500)
+    })
+    .unwrap();
+    let result = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .persist(true)
+        .build()
+        .await;
+    std::fs::set_permissions(&sessions, {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::Permissions::from_mode(0o700)
+    })
+    .unwrap();
+    let error = match result {
+        Ok(_) => panic!("an unwritable sessions directory must fail the build"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, e_sdk::Error::Session(_)),
+        "expected the persistence preflight, got: {error}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_persisted_session_is_listed_and_resumes_from_its_file() {
     let (port, server) = serve_sse(&[OK, OK]);

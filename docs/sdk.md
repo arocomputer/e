@@ -35,7 +35,7 @@ use e_sdk::{Event, Session};
 
 let mut session = Session::builder()
     .cwd("/path/to/project")
-    .model("anthropic/claude-opus-4.7")
+    .model("anthropic/claude-opus-5")
     .build()
     .await?;
 
