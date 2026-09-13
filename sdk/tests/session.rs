@@ -529,6 +529,46 @@ fn install_extension(home: &TempDir, name: &str, script: &str) {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// Wait for an extension to write one nonempty marker file.
+#[cfg(unix)]
+async fn extension_marker(path: &std::path::Path) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Ok(value) = std::fs::read_to_string(path) {
+            if !value.trim().is_empty() {
+                return value.trim().to_string();
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "extension did not write {}",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// Wait until the operating system has no live or zombie process for `pid`.
+#[cfg(unix)]
+async fn extension_exited(pid: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("ps runs");
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if state.is_empty() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "extension {pid} still has state {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// A protocol-speaking extension that records its `initialize` request in
 /// its own working directory, then idles until e closes its stdin.
 #[cfg(unix)]
@@ -603,6 +643,76 @@ exit 1
         "the startup diagnostic must lead the first turn, got: {events:?}"
     );
     session.close().await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_build_kills_an_extension_waiting_to_initialize() {
+    const HANGING_EXTENSION: &str = r#"#!/bin/sh
+printf '%s\n' "$$" > startup.pid
+read line
+exec tail -f /dev/null
+"#;
+    let home = mock_home("ext-build-cancel", &[("mock", 1)]);
+    install_extension(&home, "hanging", HANGING_EXTENSION);
+    let ws = TempDir::new("ext-build-cancel-ws");
+    let build_home = home.0.clone();
+    let build_cwd = ws.0.clone();
+    let build = tokio::spawn(async move {
+        Session::builder()
+            .home(build_home)
+            .cwd(build_cwd)
+            .model("mock/test")
+            .extensions(true)
+            .build()
+            .await
+    });
+
+    let pid = extension_marker(&ws.0.join("startup.pid")).await;
+    build.abort();
+    assert!(
+        build.await.expect_err("build was cancelled").is_cancelled(),
+        "build task should report cancellation"
+    );
+    extension_exited(&pid).await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_close_keeps_its_extension_shutdown_fallback() {
+    const STUBBORN_EXTENSION: &str = r#"#!/bin/sh
+read line
+id=$(printf '%s' "$line" | sed -E 's/^\{"id":([0-9]+).*/\1/')
+printf '%s\n' "$$" > close.pid
+printf '{"id":%s,"result":{"name":"stubborn"}}\n' "$id"
+while IFS= read -r line; do
+  case "$line" in
+    *'"shutdown"'*) printf 'seen\n' > shutdown.seen ;;
+  esac
+done
+exec tail -f /dev/null
+"#;
+    let home = mock_home("ext-close-cancel", &[("mock", 1)]);
+    install_extension(&home, "stubborn", STUBBORN_EXTENSION);
+    let ws = TempDir::new("ext-close-cancel-ws");
+    let session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .extensions(true)
+        .build()
+        .await
+        .unwrap();
+    let pid = extension_marker(&ws.0.join("close.pid")).await;
+
+    let close = tokio::spawn(session.close());
+    extension_marker(&ws.0.join("shutdown.seen")).await;
+    close.abort();
+    assert!(
+        close.await.expect_err("close was cancelled").is_cancelled(),
+        "close task should report cancellation"
+    );
+    extension_exited(&pid).await;
 }
 
 /// Two bash calls in one batch, one wave at a time: cancelling after the

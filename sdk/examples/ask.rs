@@ -8,6 +8,8 @@
 //! Text goes to stdout as it streams; tool activity and the final usage
 //! line go to stderr, so the answer alone can be piped onward.
 
+use std::io::Write;
+
 use e_sdk::{Event, Session};
 
 #[tokio::main]
@@ -27,7 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut turn = session.prompt(prompt.join(" "));
     while let Some(event) = turn.next().await {
         match event {
-            Event::Text(delta) => print!("{delta}"),
+            Event::Text(delta) => {
+                print!("{delta}");
+                std::io::stdout().flush()?;
+            }
             Event::ToolCall {
                 name, arguments, ..
             } => eprintln!("→ {name} {arguments}"),

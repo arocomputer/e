@@ -123,6 +123,17 @@ impl Link {
             *slot = None;
         }
     }
+
+    /// Kill the child without waiting for its exit. Cancellation guards call
+    /// this before handing the wait to a background reaper.
+    fn kill_now(&self) {
+        self.retire();
+        if let Ok(mut slot) = self.child.try_lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.start_kill();
+            }
+        }
+    }
 }
 
 pub struct ExtensionHost {
@@ -195,10 +206,41 @@ impl ExtensionHost {
         // discovery order — tool-clash resolution below is
         // first-declaration-wins and must stay deterministic.
         let paths = discover();
+        // If an embedding drops this future during a handshake, kill every
+        // child that has started and hand its wait to the runtime. Each child
+        // registers as soon as its link exists.
+        let spawned_links: Arc<Mutex<Vec<Arc<Link>>>> = Arc::new(Mutex::new(Vec::new()));
+        struct StartupGuard {
+            spawned: Arc<Mutex<Vec<Arc<Link>>>>,
+            armed: bool,
+        }
+        impl Drop for StartupGuard {
+            fn drop(&mut self) {
+                if self.armed {
+                    for link in self
+                        .spawned
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .iter()
+                    {
+                        link.kill_now();
+                        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                            let link = link.clone();
+                            runtime.spawn(async move { link.reap().await });
+                        }
+                    }
+                }
+            }
+        }
+        let mut guard = StartupGuard {
+            spawned: spawned_links.clone(),
+            armed: true,
+        };
         let started = futures::future::join_all(paths.iter().map(|path| {
             let notices = notices.clone();
             let cwd = cwd.clone();
-            async move { (path, spawn(path, &cwd, notices).await) }
+            let spawned = &spawned_links;
+            async move { (path, spawn(path, &cwd, notices, Some(spawned)).await) }
         }))
         .await;
         let mut extensions = Vec::new();
@@ -252,6 +294,8 @@ impl ExtensionHost {
                 }
             }
         }
+        // The host now owns every link and handles normal shutdown.
+        guard.armed = false;
         host
     }
 
@@ -917,6 +961,7 @@ async fn spawn(
     path: &PathBuf,
     cwd: &Path,
     notices: mpsc::Sender<String>,
+    startup_registry: Option<&Arc<Mutex<Vec<Arc<Link>>>>>,
 ) -> Result<Extension, String> {
     let mut child = tokio::process::Command::new(path)
         .stdin(Stdio::piped())
@@ -979,6 +1024,15 @@ async fn spawn(
         exit_notice: Mutex::new((None, false)),
         notices,
     });
+    // Register before the handshake begins. If the startup future is
+    // cancelled while we await `initialize`, the guard still finds this
+    // child and kills it.
+    if let Some(registry) = startup_registry {
+        registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(link.clone());
+    }
 
     // Writer task: serialized line output.
     let (writer, mut writer_rx) = mpsc::channel::<String>(64);

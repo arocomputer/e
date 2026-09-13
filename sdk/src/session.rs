@@ -189,23 +189,38 @@ impl SessionBuilder {
 
     pub async fn build(self) -> Result<Session, Error> {
         let cwd = resolve_cwd(self.cwd);
-        // The documented contract is that everything checkable fails here:
-        // a missing or non-directory workspace must not wait for a tool to
-        // discover it mid-turn.
-        if let Err(error) = std::fs::metadata(&cwd) {
-            return Err(Error::Cwd {
-                path: cwd,
-                reason: error.to_string(),
-            });
-        }
-        if !cwd.is_dir() {
-            return Err(Error::Cwd {
-                path: cwd,
-                reason: "not a directory".into(),
-            });
-        }
         let home = resolve_home(self.home);
-        let model = home::with_home(home.clone(), || resolve_model(self.model.as_deref()))?;
+        // These checks read workspace metadata and home configuration, and
+        // the persistence probe writes a temporary file. Run them on the
+        // blocking pool so a slow disk cannot stall a current-thread runtime.
+        let model_query = self.model.clone();
+        let probe_cwd = cwd.clone();
+        let blocking_home = home.clone();
+        let persist = self.persist && self.resume.is_none();
+        let model = tokio::task::spawn_blocking(move || -> Result<Model, Error> {
+            let meta = std::fs::metadata(&probe_cwd).map_err(|error| Error::Cwd {
+                path: probe_cwd.clone(),
+                reason: error.to_string(),
+            })?;
+            if !meta.is_dir() {
+                return Err(Error::Cwd {
+                    path: probe_cwd,
+                    reason: "not a directory".into(),
+                });
+            }
+            home::with_home(blocking_home, || {
+                let model = resolve_model(model_query.as_deref())?;
+                // Persistence is checked up front like every other option: a
+                // home that cannot create logs must fail here, not keep the
+                // first prompt memory-only behind a warning.
+                if persist {
+                    SessionLog::preflight(&probe_cwd).map_err(Error::Session)?;
+                }
+                Ok(model)
+            })
+        })
+        .await
+        .map_err(|_| Error::Session(std::io::Error::other("session build task panicked")))??;
         if let Some(effort) = &self.effort {
             if !model.effort.iter().any(|level| level == effort) {
                 return Err(Error::Effort {
@@ -229,14 +244,6 @@ impl SessionBuilder {
                 (ToolMode::All, Some(names))
             }
         };
-        // Persistence is checked up front like every other option: a home
-        // that cannot create logs must fail here, not keep the first prompt
-        // memory-only behind a warning.
-        if self.persist && self.resume.is_none() {
-            let probe_cwd = cwd.clone();
-            home::with_home(home.clone(), || SessionLog::preflight(&probe_cwd))
-                .map_err(Error::Session)?;
-        }
         let options = AgentOptions {
             cwd: Some(cwd),
             home: Some(home.clone()),
@@ -438,8 +445,13 @@ impl Session {
     /// host that started extensions should prefer `close`.
     pub async fn close(mut self) {
         self.agent.interrupt();
-        if let Some(host) = self.host.take() {
+        // Keep `host` in place until shutdown completes. If this future is
+        // cancelled mid-await, `Drop` still finds the host and schedules its
+        // fallback. Taking it first would leave every extension process
+        // running with no one left to stop it.
+        if let Some(host) = self.host.clone() {
             host.shutdown().await;
+            self.host = None;
         }
     }
 }

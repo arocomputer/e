@@ -172,7 +172,13 @@ impl SessionLog {
         let dir = home::sessions_dir().join(cwd_slug(&cwd));
         home::private_dir(&home::sessions_dir())?;
         home::private_dir(&dir)?;
-        let probe = dir.join(format!(".preflight-{}", std::process::id()));
+        // Give each call its own path so concurrent builds cannot remove
+        // another build's probe.
+        let probe = dir.join(format!(
+            ".preflight-{}-{}",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
         std::fs::File::create(&probe)?;
         std::fs::remove_file(&probe)
     }
