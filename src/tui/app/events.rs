@@ -24,9 +24,16 @@ impl App {
             SessionEvent::Compacted {
                 summary,
                 context_tokens,
+                response,
+                pricing,
             } => {
                 self.compacting = false;
                 self.context_tokens = context_tokens;
+                if let (Some(usage), Some(active), Some(pricing)) =
+                    (response.usage, self.active.as_mut(), pricing.as_ref())
+                {
+                    *active.cost_usd.get_or_insert(0.0) += pricing.estimate(usage);
+                }
                 // Compaction changes model context, not the user's scrollback.
                 // Keep prior tool details and their live block references valid.
                 self.transcript.push(Block::new(
@@ -42,10 +49,13 @@ impl App {
                     turn: Turn::new(),
                     started: Instant::now(),
                     error: None,
+                    error_summary: None,
                     sleep_stopped: false,
                     tool_blocks: std::collections::HashMap::new(),
                     pending_tools: 0,
-                    cost_usd: self.agent.model.pricing.as_ref().map(|_| 0.0),
+                    // The first usage event supplies the request model's rates;
+                    // the selected model may change while that request is live.
+                    cost_usd: None,
                 });
             }
             SessionEvent::Steered(text) => {
@@ -55,7 +65,7 @@ impl App {
                     s.turn.phase = TurnPhase::Waiting;
                 }
                 // The next assistant text opens a fresh block; the burst
-                // that was live collapses where it sat.
+                // that was live stays expanded where it sat.
                 self.end_thinking_burst();
                 self.end_assistant_burst();
             }
@@ -76,10 +86,8 @@ impl App {
                 }
             }
             // Reasoning streams live in thinkingText while the burst runs;
-            // when the burst ends — reply text, tools, retry, steer, turn
-            // commit — it collapses to a single dim row. Raw provider text
-            // is stripped before it can reach the paint stream, like
-            // assistant text.
+            // the completed burst stays expanded. Raw provider text is
+            // stripped before it can reach the paint stream, like reply text.
             SessionEvent::ReasoningDelta(delta) => {
                 if let Some(s) = &mut self.active {
                     s.turn.phase = TurnPhase::Thinking;
@@ -100,9 +108,9 @@ impl App {
                 }
             }
             SessionEvent::ToolBatchStart { calls } => {
-                // The pre-batch reasoning burst ends where it sits; the tree
-                // then continues if the agent has not spoken since the last
-                // batch — one tree per working stretch, not one per batch.
+                // End the pre-batch reasoning where it sits. A tool tree
+                // continues only when no reply or expanded thinking
+                // separates this batch from the previous one.
                 self.end_thinking_burst();
                 self.end_assistant_burst();
                 if let Some(s) = &mut self.active {
@@ -121,6 +129,8 @@ impl App {
                         })
                         .collect();
                     let idx = self.transcript.extend_tool_group(children);
+                    self.transcript.blocks[idx].live_preview_rows = self.live_preview_rows;
+                    self.transcript.blocks[idx].tool_label_rows = self.tool_label_rows;
                     for call in calls {
                         s.tool_blocks.insert(call.id, idx);
                     }
@@ -208,30 +218,16 @@ impl App {
                     }
                 }
             }
-            SessionEvent::Usage {
-                input,
-                output,
-                cache_read,
-            } => {
-                // `input` is the inclusive prompt total per the Usage
-                // contract — adding the cached subset again would double
-                // count and trigger compaction early.
-                self.context_tokens = input.saturating_add(output);
+            SessionEvent::Usage { usage, pricing } => {
+                let prompt = usage.prompt_tokens();
+                self.context_tokens = prompt.saturating_add(usage.output);
                 if let Some(s) = &mut self.active {
-                    if let (Some(total), Some(pricing)) =
-                        (&mut s.cost_usd, &self.agent.model.pricing)
-                    {
-                        *total += pricing.estimate(input, output, cache_read);
+                    if let Some(pricing) = pricing {
+                        *s.cost_usd.get_or_insert(0.0) += pricing.estimate(usage);
                     }
-                    // Every step resends the whole context, so `input` is the
-                    // latest request's size, not new work — summing it across
-                    // steps re-counted the same tokens once per step and
-                    // showed absurd totals for long tool loops. Latest wins
-                    // (displacing the seed estimate); only `output` — the
-                    // tokens each step actually generated — accumulates, and
-                    // the live chars/4 estimate resets to cover only what the
-                    // next step streams.
-                    s.turn.note_usage(input, output);
+                    // Every step resends the whole context, so prompt size is
+                    // latest-wins while generated output accumulates.
+                    s.turn.note_usage(prompt, usage.output);
                 }
             }
             SessionEvent::Retry {
@@ -271,9 +267,14 @@ impl App {
                     });
                 }
             }
+            SessionEvent::ErrorDetails(details) => {
+                if let Some(s) = &mut self.active {
+                    s.error_summary = Some(details.summary);
+                }
+            }
             SessionEvent::Error(message) => {
                 if let Some(s) = &mut self.active {
-                    s.error = Some(message);
+                    s.error = Some(s.error_summary.take().unwrap_or(message));
                 } else {
                     self.notice(format!("error: {message}"));
                 }
@@ -363,8 +364,7 @@ impl App {
                 if let Some(message) = s.error {
                     // A failed turn ends visibly: the error persists in error
                     // color below the trailer, never a vanishing status blip.
-                    self.transcript
-                        .push(Block::new(Kind::Error, format!("error: {message}")));
+                    self.transcript.push(Block::new(Kind::Error, message));
                 }
                 // Release prompts held by frontend work such as shell passthrough.
                 // Prompts queued in the agent are consumed by the core itself.

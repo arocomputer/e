@@ -12,8 +12,131 @@ the pipeline publishes.
   returns a lazy, backpressured `Turn` that streams typed events and
   settles into a `Reply` (or a `TurnError` carrying the partial reply);
   `steer()`, `cancel()`, and drop-to-interrupt mirror the terminal. Sessions
-  are memory-only and extension-free unless asked. Tool batch events now
-  carry each call's name and raw arguments.
+  are memory-only and extension-free unless asked. Core: tool batch events
+  carry each call's name and raw arguments, `Agent::steer` holds a message
+  for a running turn without ever starting one, and
+  `ExtensionHost::start_in` lets an embedding choose the extensions'
+  workspace and command line.
+- Provider usage now uses disjoint uncached, cache-read, and cache-write
+  counters. Saved sessions keep response identity, provider, model, purpose,
+  and usage outside replayed message content, including compaction requests
+  and billed blank replies; copied history retains the original response
+  identity. RPC output
+  reports every category and pricing accepts separate cache-write rates.
+- Clipboard paste now handles Command+V without inserting a stray `v`, reads
+  macOS image clipboards with one pasteboard probe, falls back to text, shows read
+  and attachment state outside editable history, colors `[Image n]` labels in
+  the existing light gray, and defers Enter until the clipboard result arrives.
+  Scoped-model settings show preserved unavailable IDs and accurate availability
+  counts; corrupt settings warnings name the recovery file instead of silently
+  presenting defaults.
+- Restore compact Inline mode by default. `/settings` now offers TUI Mode with
+  Inline and Fullscreen choices; existing `composer_position: bottom` preferences
+  remain supported until a new mode is saved.
+- Tool labels use two terminal-width rows by default, adjustable through
+  `tool_label_rows`. Wider windows reveal more text; heredoc bodies stay in
+  Ctrl+O rather than filling the transcript. Full commands remain available.
+  Arithmetic shifts and `<<` inside shell comments do not hide subsequent lines.
+- Tool trees keep one closing review hint after completion. Ctrl+O branches
+  stay connected through arguments, output, and omission rows without changing
+  the review layout or controls.
+
+- Review follow-ups: partial tool arguments prevent retries, SSE error messages
+  are bounded before publication, and failed diagnostic rollback retires the
+  session handle. Error-summary settings load off async workers. Ctrl+C closes
+  trust and queue navigation without submitting held prompts, and the shell
+  prefix space has its own cursor and selection cell. The network guard now
+  scans tooling filenames containing spaces or quotes.
+
+- Running tools stay in connected, wrapped trees with live output tails and
+  Ctrl+O review. Leading `!` uses a green gutter marker, and edit counts show
+  green additions and red deletions.
+- Provider failures show brief UI errors and retain local diagnostic details in
+  private session sidecars and headless JSON. Partial completions with error
+  frames fail instead of appearing successful. Display-off time is not sleep.
+- Drafts, trust paths, and tab titles cannot inject terminal controls. Ctrl+C
+  cancels across panels, pasted line endings normalize once, vertical cursor
+  motion follows display columns, and long trust questions can be scrolled.
+- `./x ui` checks terminal frames for tool trees, composer placement, shell
+  styling, short errors, and diff colors on Linux and macOS CI.
+
+- Review fixes for the audit: background handles reserve their PID until pipes
+  close; failed new-file copies remove their partial target; metadata errors
+  fail freshness checks closed. Read windows reject oversized first lines with
+  an offset to skip them, and integer arguments reject overflow without rounding.
+- OAuth refresh waits are scoped to each home and provider; fresh Codex tokens
+  bypass them. Extension exit notices survive EOF immediately after initialize.
+  Stream error codes distinguish authentication failures and transient server
+  disconnects while preserving hard-quota classification.
+
+- Sessions survive a crash: a torn final line is truncated on reopen instead
+  of fusing with the next record, and dangling tool calls or orphaned
+  reasoning blocks are repaired anywhere in a history (on `/tree` too), so a
+  resumed session stays resumable and replayable on every dialect.
+- Providers: Anthropic and Together live model sync no longer discards every
+  chat model (`type` is a deny-list of non-chat kinds now, and the Anthropic
+  list asks for 1000 entries); a mid-stream `{"error":…}` frame in a
+  completions or Gemini body surfaces as the provider's error instead of a
+  clean success or a bare stall; provider-level `context_window`,
+  `max_output`, `effort`, `thinking`, and `pricing` in models.json apply to
+  built-in seed models as documented; parallel Anthropic tool results ride
+  in one user turn. models.md lists the `chatgpt` catalog strategy.
+- Tools: `write` creates files on link-less filesystems (exFAT) and after an
+  external delete; `edit` matches across CRLF line breaks and keeps the
+  file's endings; `read` cuts on a whole line and says which offset to
+  continue from; `grep` fails on a missing path and stops on a file whose
+  reads keep failing instead of spinning; `offset`, `limit`, and `timeout`
+  accept integral floats and numeric strings; a finished background handle
+  is never signalled again (pid reuse); a writable file inside a read-only
+  directory can be edited.
+- Extensions: a runtime crash is announced once in the transcript (louder
+  when the extension owned a `tool_call` or `input` hook); an over-long
+  stderr line is discarded instead of closing the pipe and killing the
+  extension; children are reaped on exit and shutdown; notice-only input
+  verdicts are shown; the startup-hook example now routes launches to existing
+  project directories, and the MCP guide notes the `npx -y` cold start; the
+  protocol.rs header matches what the host sends.
+- Config and CLI: self-update declines on platforms with no release
+  artifact instead of installing the x86_64-gnu tarball over a source build;
+  concurrent OAuth refreshes are serialized so one refresh token is never
+  redeemed twice; shift+letter and `-`/`+` chords bind; `doctor` or
+  `providers` behind an extension flag is a usage error, not a prompt; the
+  help text no longer claims piped stdin is read.
+- TUI: a caught panic (paint worker, tool task, turn worker) no longer drops
+  the terminal out of raw mode; the vertical table fallback and link
+  destinations with spaces keep OSC 8 sequences whole; `/models` scrolls
+  to the current model; CRLF pastes keep one newline per line; the
+  composer hangs seam whitespace off the row and moves ↑/↓ by display
+  column over wide characters.
+- GPT-6 Astra, OpenAI's new flagship, is seeded on both OpenAI providers: the
+  API (`openai`, 1.05M window, `xhigh`/`max` efforts included) and ChatGPT
+  Codex (`openai-codex`, 272k codex lane). The GPT-5.6 trio is seeded on the
+  API side too. Codex's live model discovery now works at all: its /models
+  is the ChatGPT model-picker payload, not an OpenAI `data` list, so it was
+  failing silently — the new `chatgpt` catalog strategy reads the picker
+  (work-mode entries, `-wm` suffix stripped, `max_tokens` as the window),
+  and a new Codex model appears in the picker with no e release.
+
+## 0.0.1 — 2026-09-08
+
+
+- ctrl+v attaches desktop-clipboard images to the composer draft: file copies
+  become attachments by path, bitmaps are read directly (macOS via osascript,
+  Linux via wl-paste/xclip). Helpers run with a timeout and a byte cap so a
+  hung or flooding clipboard cannot stall the session, and a failed read
+  surfaces as a notice. Attachments ride the same steering queue as text
+  (whole messages, images included), never attach over an open surface, and
+  commands submitted with a draft attached dispatch without them. Submitted
+  labels `[Image 1] [Image 2]` match the transcript.
+- The composer stays visible when a scrolled frame shrinks, and large streamed
+  appends paint every new row even when earlier Markdown changes. Resize keeps
+  native scrollback and redraws only the visible tail. Later tool batches retain
+  expanded thinking instead of deleting it.
+- Painting takes ownership of pending frames and compares only visible content,
+  reducing repeated work in long sessions. PTY regressions cover streaming and
+  tool completion across resize; release benchmarks now budget long-session
+  frame rendering.
+
 - Cancellation skips queued tool waves, and late tool events cannot change a
   newer turn. Rejected-image text stays a literal prompt, even when it starts
   with a command.
@@ -137,7 +260,6 @@ the pipeline publishes.
   author wrote; a definition is an ordinary paragraph). The parity suite
   pins both retirements so they cannot creep back unnoticed.
 
-## 0.0.1 — 2026-08-29
 
 - Provider failures are classified by the error body's own wording, not
   just the HTTP status: a hard quota or billing wall (OpenCode Zen Go's

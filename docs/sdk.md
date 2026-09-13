@@ -1,8 +1,8 @@
 # SDK
 
 The `e-sdk` package (`sdk/`) is e's coding agent as a Rust library: create a
-session against a working directory, prompt it, read one ordered event
-stream, get a reply. It links the same core the terminal frontend drives —
+session against a working directory, prompt it, read the core's ordered
+event stream (extension notices fill its gaps), get a reply. It links the same core the terminal frontend drives —
 the built-in tools, skills and AGENTS.md context, automatic compaction,
 on-disk session logs, extensions — without a terminal.
 
@@ -102,8 +102,12 @@ command output, a preview), `ToolEnd` (outcome and the retained content);
 `Usage` per provider request; `Compacting` and `Compacted` when the context
 window is checkpointed mid-turn; `Retry` with the backoff; `Steered`,
 `Discarded`; `Named` when an extension names the session; `Warning`; and
-`Notice` for extension messages. The core's error is not an event — it ends
-the turn, so it arrives as the `TurnError`.
+`Notice` for extension messages. Core events keep their order; a `Notice`
+is delivered only when no core event is waiting, so a talkative extension
+can interleave with model output but never delay it. Diagnostics raised
+while extensions started come out before the next turn's first event. The
+core's error is not an event — it ends the turn, so it arrives as the
+`TurnError`.
 
 ## Sessions on disk
 
@@ -118,9 +122,10 @@ it. That is the whole checkpoint story: a readable file, not opaque bytes.
 
 - **Not an extension.** Extensions are child processes speaking a JSONL
   protocol to a running e ([extensions.md](extensions.md)). The SDK links
-  the core into your program, and can start the home's extensions for their
-  tools and hooks (startup hooks and extension flags are CLI concerns and
-  do not run).
+  the core into your program, and with `extensions(true)` starts the home's
+  extensions for their tools and hooks. They run in the session's `cwd` and
+  are told so at `initialize`. Startup hooks do not run, and no flags are
+  parsed for them: the host process's command line is not e's.
 - **Not a daemon.** e stays a spawned process; there is no server to run.
 - **Not a tool kernel.** The SDK runs e's tools in the working directory you
   give it, as your user, without a permission prompt — the same safety

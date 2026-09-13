@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 
 use crate::core::providers::catalog::{Api, Model};
 
-const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_IMAGE_COUNT: usize = 10;
 const MAX_TOTAL_IMAGE_BYTES: u64 = 40 * 1024 * 1024;
 
@@ -32,6 +32,40 @@ pub struct ImageInput {
 impl ImageInput {
     pub fn from_path(path: &std::path::Path) -> Result<Self, String> {
         Self::from_path_with_size(path).map(|(image, _)| image)
+    }
+
+    /// Load image bytes supplied by the clipboard rather than a file path.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+        Self::from_bytes_named(bytes, "clipboard").map(|(image, _)| image)
+    }
+
+    /// Check count and aggregate size when attachments arrive over several
+    /// clipboard pastes instead of one `from_paths` call.
+    pub fn validate_batch(images: &[Self]) -> Result<(), String> {
+        if images.len() > MAX_IMAGE_COUNT {
+            return Err(format!(
+                "at most {MAX_IMAGE_COUNT} image attachments are allowed"
+            ));
+        }
+        let total = images.iter().try_fold(0u64, |total, image| {
+            let padding = image
+                .data
+                .bytes()
+                .rev()
+                .take_while(|byte| *byte == b'=')
+                .count() as u64;
+            let bytes = (image.data.len() as u64 / 4)
+                .checked_mul(3)
+                .and_then(|size| size.checked_sub(padding))
+                .ok_or_else(|| "image attachment sizes overflowed".to_string())?;
+            total
+                .checked_add(bytes)
+                .ok_or_else(|| "image attachment sizes overflowed".to_string())
+        })?;
+        if total > MAX_TOTAL_IMAGE_BYTES {
+            return Err("image attachments exceed 40 MiB in total".into());
+        }
+        Ok(())
     }
 
     /// Load a bounded first-turn attachment batch. Keeping count, aggregate,
@@ -69,7 +103,6 @@ impl ImageInput {
     }
 
     fn from_path_with_size(path: &std::path::Path) -> Result<(Self, u64), String> {
-        use base64::Engine as _;
         let metadata =
             std::fs::metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
         if !metadata.is_file() {
@@ -89,8 +122,14 @@ impl ImageInput {
         file.take(MAX_IMAGE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| format!("{}: {error}", path.display()))?;
+        Self::from_bytes_named(bytes, &path.display().to_string())
+    }
+
+    /// Validate, identify, and encode one already-read image.
+    fn from_bytes_named(bytes: Vec<u8>, source: &str) -> Result<(Self, u64), String> {
+        use base64::Engine as _;
         if bytes.len() as u64 > MAX_IMAGE_BYTES {
-            return Err(format!("{}: image exceeds 20 MiB", path.display()));
+            return Err(format!("{source}: image exceeds 20 MiB"));
         }
         let media_type = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
             "image/png"
@@ -102,8 +141,7 @@ impl ImageInput {
             "image/webp"
         } else {
             return Err(format!(
-                "{}: unsupported image data (use png, jpg, gif, or webp)",
-                path.display()
+                "{source}: unsupported image data (use png, jpg, gif, or webp)"
             ));
         };
         let size = bytes.len() as u64;
@@ -145,24 +183,88 @@ pub struct ToolResultMeta {
     pub summary: String,
 }
 
-/// Token usage for one assistant step, persisted beside the message so a
-/// session file can answer "where did the time and tokens go" without the
-/// provider. `input` is the request's full context (cached tokens included,
-/// matching the dialects' Usage event), `output` what the step generated.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, serde::Deserialize)]
-pub struct MessageUsage {
+/// Disjoint token counters for one provider request. `input` excludes cache
+/// reads and writes; `prompt_tokens` reconstructs the complete context size.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, serde::Deserialize)]
+pub struct Usage {
     pub input: u64,
     pub output: u64,
+    #[serde(default)]
     pub cache_read: u64,
+    #[serde(default)]
+    pub cache_write_5m: u64,
+    #[serde(default)]
+    pub cache_write_1h: u64,
 }
 
-/// A conversation record. The tagged payload makes tool results, assistant
-/// calls, and user attachments distinct while retaining the JSONL wire shape.
+impl Usage {
+    /// Complete prompt size, including every cache category.
+    pub fn prompt_tokens(self) -> u64 {
+        self.input
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_write_5m)
+            .saturating_add(self.cache_write_1h)
+    }
+
+    /// Add another provider request without allowing malformed counters to wrap.
+    pub fn add(&mut self, other: Usage) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write_5m = self.cache_write_5m.saturating_add(other.cache_write_5m);
+        self.cache_write_1h = self.cache_write_1h.saturating_add(other.cache_write_1h);
+    }
+}
+
+/// Provenance and accounting for one model response. Session logs persist this
+/// beside, not inside, the provider-facing message and retain it through compaction.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct ResponseMeta {
+    pub id: String,
+    /// Completion time in Unix milliseconds; unlike the containing log-entry
+    /// time, this remains stable when compaction carries the response forward.
+    pub timestamp: u64,
+    pub provider: String,
+    pub model: String,
+    pub purpose: ResponsePurpose,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+impl ResponseMeta {
+    /// Mint one durable local response identity without exposing account data.
+    pub fn new(model: &catalog::Model, purpose: ResponsePurpose, usage: Option<Usage>) -> Self {
+        Self {
+            id: uuid::Uuid::now_v7().to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0),
+            provider: model.provider.clone(),
+            model: model.id.clone(),
+            purpose,
+            usage,
+        }
+    }
+}
+
+/// Why e made a provider request; non-chat work still belongs in usage totals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsePurpose {
+    Turn,
+    Compaction,
+}
+
+/// A conversation record. Response metadata is session provenance, not model
+/// input, so ordinary message serialization deliberately leaves it out.
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub content: String,
     #[serde(flatten)]
     pub kind: MessageKind,
+    #[serde(skip)]
+    response: Option<Box<ResponseMeta>>,
 }
 
 /// Fields that are valid for each message role. Provider-owned reasoning
@@ -179,8 +281,6 @@ pub enum MessageKind {
     Assistant {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<MessageUsage>,
     },
     Tool {
         tool_call_id: String,
@@ -209,6 +309,7 @@ impl ChatMessage {
                 images,
                 internal: false,
             },
+            response: None,
         }
     }
 
@@ -216,10 +317,8 @@ impl ChatMessage {
     pub fn assistant(content: impl Into<String>, tool_calls: Vec<ToolCall>) -> Self {
         Self {
             content: content.into(),
-            kind: MessageKind::Assistant {
-                tool_calls,
-                usage: None,
-            },
+            kind: MessageKind::Assistant { tool_calls },
+            response: None,
         }
     }
 
@@ -228,6 +327,7 @@ impl ChatMessage {
         Self {
             content: content.into(),
             kind: MessageKind::Reasoning,
+            response: None,
         }
     }
 
@@ -239,6 +339,7 @@ impl ChatMessage {
                 tool_call_id: call_id.into(),
                 tool_meta: None,
             },
+            response: None,
         }
     }
 
@@ -258,15 +359,24 @@ impl ChatMessage {
                     summary: summary.into(),
                 }),
             },
+            response: None,
         }
     }
 
-    /// Attach provider accounting to an assistant record.
-    pub fn with_usage(mut self, observed: MessageUsage) -> Self {
-        if let MessageKind::Assistant { usage, .. } = &mut self.kind {
-            *usage = Some(observed);
-        }
+    /// Attach response provenance for session persistence; provider dialects ignore it.
+    pub fn with_response(mut self, response: ResponseMeta) -> Self {
+        self.response = Some(Box::new(response));
         self
+    }
+
+    /// Response provenance restored from a session entry, if this message caused a request.
+    pub fn response(&self) -> Option<&ResponseMeta> {
+        self.response.as_deref()
+    }
+
+    /// Restore metadata held by the session envelope, never provider history.
+    pub(crate) fn restore_response(&mut self, response: Option<ResponseMeta>) {
+        self.response = response.map(Box::new);
     }
 
     /// Mark a continuation or steering echo without counting a new user turn.
@@ -356,7 +466,8 @@ pub fn strip_incompatible_images(messages: &mut [ChatMessage], model: &Model) {
 
 /// Why a provider request failed, and what that implies for retrying it. The
 /// retry decision hangs off this alone, never off matching message text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FailureCause {
     /// Credentials are missing or were rejected locally, or the provider
     /// answered 401/403. Retrying cannot help; the user must sign in.
@@ -427,19 +538,59 @@ impl FailureCause {
     }
 }
 
-/// One provider-call failure: enough to drive the retry decision and to show
-/// two different messages a caller needs — a short reason for the live retry
-/// row, and the full detail for a terminal failure.
+/// Where the provider failure was observed, not a guess about its origin.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureStage {
+    Authorization,
+    Request,
+    ResponseHeaders,
+    ResponseBody,
+    Stream,
+}
+
+/// Only allowlisted response metadata is retained. Never copy all headers.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ResponseContext {
+    pub http_status: Option<u16>,
+    pub request_id: Option<String>,
+}
+
+impl ResponseContext {
+    /// Capture a bounded provider correlation id before consuming the body.
+    pub fn from_response(response: &reqwest::Response) -> Self {
+        let request_id = [
+            "x-request-id",
+            "request-id",
+            "anthropic-request-id",
+            "x-goog-request-id",
+        ]
+        .iter()
+        .find_map(|name| response.headers().get(*name).and_then(|v| v.to_str().ok()))
+        .map(|id| crate::core::tools::sanitize_display(&id.chars().take(256).collect::<String>()));
+        Self {
+            http_status: Some(response.status().as_u16()),
+            request_id,
+        }
+    }
+}
+
+/// A typed provider failure, retained for retry decisions and backend diagnosis.
 #[derive(Debug, Clone)]
 pub struct ProviderError {
-    /// Full detail; a terminal error block shows this.
+    /// Backend detail. The TUI uses the classified summary instead.
     pub message: String,
+    /// Bounded diagnostic body when the compatibility message is shorter.
+    pub detail: Option<Box<str>>,
     /// Squeezed to a line the activity row can hold, e.g. "504 Gateway
     /// Timeout". Equal to `message` when there is nothing shorter to say.
     pub short: String,
     pub cause: FailureCause,
     /// Seconds the provider asked us to wait (`Retry-After`), if it sent one.
     pub retry_after: Option<u64>,
+    pub stage: FailureStage,
+    pub response: Box<ResponseContext>,
+    pub provider_code: Option<String>,
 }
 
 /// Error-body wording that marks a hard account limit: retrying cannot
@@ -544,6 +695,17 @@ pub fn classify_text(text: &str) -> Option<FailureCause> {
     None
 }
 
+/// Bound both compatibility errors and stored diagnostics before cloning them.
+fn bounded_diagnostic(text: &str) -> String {
+    const LIMIT: usize = 8192;
+    let mut chars = text.chars();
+    let mut bounded: String = chars.by_ref().take(LIMIT).collect();
+    if chars.next().is_some() {
+        bounded.push_str(" [truncated]");
+    }
+    bounded
+}
+
 impl ProviderError {
     pub fn auth(message: impl Into<String>) -> Self {
         let message = message.into();
@@ -552,6 +714,10 @@ impl ProviderError {
             message,
             cause: FailureCause::Auth,
             retry_after: None,
+            stage: FailureStage::Authorization,
+            response: Box::default(),
+            provider_code: None,
+            detail: None,
         }
     }
     pub fn network(message: impl Into<String>) -> Self {
@@ -561,6 +727,10 @@ impl ProviderError {
             message,
             cause: FailureCause::Network,
             retry_after: None,
+            stage: FailureStage::Request,
+            response: Box::default(),
+            provider_code: None,
+            detail: None,
         }
     }
     pub fn stalled(message: impl Into<String>) -> Self {
@@ -570,6 +740,10 @@ impl ProviderError {
             message,
             cause: FailureCause::Stalled,
             retry_after: None,
+            stage: FailureStage::Stream,
+            response: Box::default(),
+            provider_code: None,
+            detail: None,
         }
     }
     pub fn rejected(message: impl Into<String>) -> Self {
@@ -579,18 +753,69 @@ impl ProviderError {
             message,
             cause: FailureCause::Rejected,
             retry_after: None,
+            stage: FailureStage::Stream,
+            response: Box::default(),
+            provider_code: None,
+            detail: None,
         }
     }
     /// A provider error frame delivered mid-stream, already classified by
     /// the dialect that parsed it (e.g. Anthropic's `overloaded_error`).
     pub fn frame(message: impl Into<String>, cause: FailureCause) -> Self {
-        let message = message.into();
+        let message = bounded_diagnostic(&message.into());
         ProviderError {
             short: message.clone(),
             message,
             cause,
             retry_after: None,
+            stage: FailureStage::Stream,
+            response: Box::default(),
+            provider_code: None,
+            detail: None,
         }
+    }
+    /// A bare `{"error":{…}}` frame inside a 200 stream — how OpenAI-style
+    /// gateways and Gemini report a failure once the connection is open.
+    /// The message's wording wins where it is specific (a quota wall);
+    /// otherwise numeric status codes and named provider codes classify it.
+    pub fn from_error_frame(error: &serde_json::Value) -> Self {
+        let message = error["message"]
+            .as_str()
+            .or_else(|| error.as_str())
+            .unwrap_or("unknown provider error")
+            .to_string();
+        let text_cause = classify_text(&error.to_string());
+        let code = error
+            .get("code")
+            .filter(|v| !v.is_null())
+            .unwrap_or(&error["type"]);
+        let code = code
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| code.to_string());
+        let cause = if text_cause == Some(FailureCause::QuotaExhausted) {
+            FailureCause::QuotaExhausted
+        } else {
+            match code.as_str() {
+                "401" | "403" | "invalid_api_key" | "authentication_error" | "permission_error" => {
+                    FailureCause::Auth
+                }
+                "429" | "rate_limit_exceeded" | "rate_limit_error" => FailureCause::RateLimited,
+                "408" | "server_error" | "internal_server_error" | "overloaded_error" => {
+                    FailureCause::ProviderUnavailable
+                }
+                code if code.parse::<u16>().is_ok_and(|n| (500..=599).contains(&n)) => {
+                    FailureCause::ProviderUnavailable
+                }
+                _ => text_cause.unwrap_or(FailureCause::Rejected),
+            }
+        };
+        ProviderError::frame(message, cause).with_code_value(
+            error
+                .get("code")
+                .filter(|v| !v.is_null())
+                .unwrap_or(&error["type"]),
+        )
     }
     /// Classify an HTTP status the provider actually returned; `body` is the
     /// response text the caller already read. The body's own wording wins
@@ -614,18 +839,66 @@ impl ProviderError {
             status.canonical_reason().unwrap_or("error")
         );
         let snippet: String = body.chars().take(300).collect();
+        let diagnostic: String = body.chars().take(4096).collect();
+        let diagnostic = if body.chars().count() > 4096 {
+            format!("{diagnostic} [truncated]")
+        } else {
+            diagnostic
+        };
         let message = if snippet.is_empty() {
             short.clone()
         } else {
             format!("{short}: {snippet}")
         };
+        let body_json = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
+        let code = body_json["error"]
+            .get("code")
+            .filter(|v| !v.is_null())
+            .or_else(|| body_json["error"].get("type"))
+            .or_else(|| body_json.get("code"))
+            .unwrap_or(&serde_json::Value::Null);
         ProviderError {
             message,
             short,
             cause,
             retry_after: None,
+            stage: FailureStage::ResponseBody,
+            response: Box::new(ResponseContext {
+                http_status: Some(status.as_u16()),
+                request_id: None,
+            }),
+            provider_code: None,
+            detail: Some(diagnostic.into_boxed_str()),
         }
+        .with_code_value(code)
     }
+    /// Keep diagnostic text bounded even when an SSE error frame is enormous.
+    pub fn diagnostic(&self) -> String {
+        bounded_diagnostic(self.detail.as_deref().unwrap_or(&self.message))
+    }
+
+    /// HTTP and SSE codes may be strings or numeric status values.
+    pub fn with_code_value(mut self, value: &serde_json::Value) -> Self {
+        self.provider_code = match value {
+            serde_json::Value::String(code) => Some(code.chars().take(256).collect()),
+            serde_json::Value::Number(code) => Some(code.to_string()),
+            _ => None,
+        };
+        self
+    }
+
+    /// Attach metadata from the response whose body or frame failed.
+    pub fn with_response(mut self, response: ResponseContext) -> Self {
+        self.response = Box::new(response);
+        self
+    }
+
+    /// Preserve the provider's machine-readable code separately from its wording.
+    pub fn with_code(mut self, code: Option<&str>) -> Self {
+        self.provider_code = code.map(|s| s.chars().take(256).collect());
+        self
+    }
+
     pub fn with_retry_after(mut self, seconds: Option<u64>) -> Self {
         self.retry_after = seconds;
         self
@@ -695,15 +968,9 @@ pub enum Event {
     },
     /// A completed tool request (dialects accumulate the argument deltas).
     ToolCall(ToolCall),
-    /// Token usage from the terminal usage frame. `input` is the TOTAL
-    /// prompt-side count — cached tokens included — so it alone measures
-    /// context size; `cache_read` is the informational cached subset.
-    /// Dialects whose wire fields are disjoint sum them into `input`.
-    Usage {
-        input: u64,
-        output: u64,
-        cache_read: u64,
-    },
+    /// Disjoint counters from the terminal usage frame. Dialects normalize
+    /// inclusive wire totals before this crosses the provider seam.
+    Usage(Usage),
     /// A Responses-dialect reasoning item (verbatim JSON): the API demands
     /// it be resent ahead of the function calls it produced, so the agent
     /// stores it in history and the dialect replays it.
@@ -762,12 +1029,30 @@ pub fn stream(request: Request) -> (mpsc::Receiver<Event>, tokio::task::JoinHand
     let home = crate::core::config::home::home();
     let handle = tokio::spawn(crate::core::config::home::scope(home, async move {
         let result = match runtime::authorize(&request.model).await {
-            Ok(authorization) => match request.model.api {
+            Ok(authorization) => (match request.model.api {
                 Api::Completions => api::completions::run(&request, &authorization, &tx).await,
                 Api::Responses => api::responses::run(&request, &authorization, &tx).await,
                 Api::Anthropic => api::anthropic::run(&request, &authorization, &tx).await,
                 Api::Google => api::google::run(&request, &authorization, &tx).await,
-            },
+            })
+            .map_err(|mut error| {
+                if !authorization.bearer.is_empty() {
+                    error.message = error.message.replace(&authorization.bearer, "[redacted]");
+                    error.short = error.short.replace(&authorization.bearer, "[redacted]");
+                    error.detail = error.detail.map(|text| {
+                        text.replace(&authorization.bearer, "[redacted]")
+                            .into_boxed_str()
+                    });
+                    error.response.request_id = error
+                        .response
+                        .request_id
+                        .map(|id| id.replace(&authorization.bearer, "[redacted]"));
+                    error.provider_code = error
+                        .provider_code
+                        .map(|code| code.replace(&authorization.bearer, "[redacted]"));
+                }
+                error
+            }),
             Err(error) => Err(error),
         };
         match result {
@@ -792,8 +1077,11 @@ pub async fn require_success(
     }
     let status = response.status();
     let retry_after = retry_after_seconds(&response);
+    let context = ResponseContext::from_response(&response);
     let text = response.text().await.unwrap_or_default();
-    Err(ProviderError::from_status(status, &text).with_retry_after(retry_after))
+    Err(ProviderError::from_status(status, &text)
+        .with_retry_after(retry_after)
+        .with_response(context))
 }
 
 /// Incremental SSE splitter: feed raw bytes, get complete `data:` payloads.
@@ -892,13 +1180,14 @@ pub struct SseStream<S> {
     queue: std::collections::VecDeque<String>,
     malformed: u32,
     event_timeout: std::time::Duration,
+    pub response: ResponseContext,
 }
 
 impl<S, T, E> SseStream<S>
 where
     S: futures::Stream<Item = Result<T, E>> + Unpin,
     T: AsRef<[u8]>,
-    E: std::fmt::Display,
+    E: std::error::Error + 'static,
 {
     pub fn new(stream: S) -> Self {
         SseStream {
@@ -907,7 +1196,14 @@ where
             queue: std::collections::VecDeque::new(),
             malformed: 0,
             event_timeout: std::time::Duration::from_secs(STREAM_IDLE_SECS),
+            response: ResponseContext::default(),
         }
+    }
+
+    /// Associate errors from this stream with its HTTP response.
+    pub fn with_response(mut self, response: ResponseContext) -> Self {
+        self.response = response;
+        self
     }
 
     /// Testable form of `new`: the timeout measures time until a complete SSE
@@ -920,6 +1216,13 @@ where
 
     /// The next complete payload; EOF fails as a stall (see the type docs).
     pub async fn next(&mut self) -> Result<String, ProviderError> {
+        self.next_payload()
+            .await
+            .map_err(|error| error.with_response(self.response.clone()))
+    }
+
+    /// Read one event before the public boundary attaches response metadata.
+    async fn next_payload(&mut self) -> Result<String, ProviderError> {
         let deadline = tokio::time::Instant::now() + self.event_timeout;
         loop {
             if let Some(payload) = self.queue.pop_front() {
@@ -1053,14 +1356,28 @@ pub async fn send_request_within(
 ) -> Result<reqwest::Response, ProviderError> {
     match tokio::time::timeout(wait, builder.send()).await {
         Ok(Ok(response)) => Ok(response),
-        // Connection and setup failures: the request never left, retryable.
-        Ok(Err(e)) => Err(ProviderError::network(format!("request failed: {e}"))),
+        Ok(Err(e)) => {
+            let message = format!("request failed: {}", transport_error_chain(&e));
+            if e.is_connect() || e.is_builder() {
+                Err(ProviderError::network(message))
+            } else {
+                // A loss while sending or awaiting headers does not prove
+                // the provider never received the request.
+                let mut error = ProviderError::stalled(message);
+                error.stage = FailureStage::ResponseHeaders;
+                Err(error)
+            }
+        }
         // The request was written but never answered — it may have been
         // delivered, so a retry is a calculated risk, not a certainty.
-        Err(_) => Err(ProviderError::stalled(format!(
-            "no response from provider for {}s",
-            wait.as_secs()
-        ))),
+        Err(_) => {
+            let mut error = ProviderError::stalled(format!(
+                "no response from provider for {}s",
+                wait.as_secs()
+            ));
+            error.stage = FailureStage::ResponseHeaders;
+            Err(error)
+        }
     }
 }
 
@@ -1070,7 +1387,7 @@ pub async fn send_request_within(
 pub async fn next_sse_chunk<S, T, E>(stream: &mut S) -> Result<Option<T>, ProviderError>
 where
     S: futures::Stream<Item = Result<T, E>> + Unpin,
-    E: std::fmt::Display,
+    E: std::error::Error + 'static,
 {
     next_sse_chunk_within(stream, std::time::Duration::from_secs(STREAM_IDLE_SECS)).await
 }
@@ -1081,18 +1398,40 @@ async fn next_sse_chunk_within<S, T, E>(
 ) -> Result<Option<T>, ProviderError>
 where
     S: futures::Stream<Item = Result<T, E>> + Unpin,
-    E: std::fmt::Display,
+    E: std::error::Error + 'static,
 {
     match tokio::time::timeout(wait, futures::StreamExt::next(stream)).await {
         Ok(None) => Ok(None),
         Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
         // A broken body transport (reset, truncated chunking) is retryable
         // by cause; the agent still refuses to retry once content streamed.
-        Ok(Some(Err(e))) => Err(ProviderError::stalled(format!("stream error: {e}"))),
+        Ok(Some(Err(e))) => Err(ProviderError::stalled(format!(
+            "provider response interrupted: {}",
+            transport_error_chain(&e)
+        ))),
         Err(_) => Err(ProviderError::stalled(
             "stream stalled before completing an SSE event",
         )),
     }
+}
+
+/// Keep the cause hidden by reqwest's generic body-decoding headline.
+/// Bound the chain and redact request URLs, which can contain credentials.
+fn transport_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = Vec::new();
+    let mut next = Some(error);
+    for _ in 0..5 {
+        let Some(error) = next else { break };
+        let mut message = error.to_string();
+        if let Some(url) = error.downcast_ref::<reqwest::Error>().and_then(|e| e.url()) {
+            message = message.replace(url.as_str(), "<provider URL>");
+        }
+        if parts.last() != Some(&message) {
+            parts.push(message);
+        }
+        next = error.source();
+    }
+    parts.join(": ")
 }
 
 /// Parse `Retry-After` as whole seconds. Every provider we talk to sends the
@@ -1110,6 +1449,64 @@ pub fn retry_after_seconds(response: &reqwest::Response) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    /// An unknown code must not hide a recognized type in an SSE error frame.
+    #[test]
+    fn named_error_types_survive_unknown_machine_codes() {
+        for (kind, code, expected) in [
+            (
+                "rate_limit_error",
+                "slow_down",
+                super::FailureCause::RateLimited,
+            ),
+            (
+                "service_unavailable_error",
+                "server_is_overloaded",
+                super::FailureCause::ProviderUnavailable,
+            ),
+        ] {
+            let error = super::ProviderError::from_error_frame(
+                &serde_json::json!({"type":kind,"code":code,"message":"try later"}),
+            );
+            assert_eq!(error.cause, expected);
+            assert_eq!(error.provider_code.as_deref(), Some(code));
+        }
+    }
+
+    /// Provider-controlled error text is bounded before compatibility events clone it.
+    #[test]
+    fn oversized_frame_messages_are_bounded_before_publication() {
+        let error =
+            super::ProviderError::frame("界".repeat(100_000), super::FailureCause::Rejected);
+        assert_eq!(error.message, format!("{} [truncated]", "界".repeat(8192)));
+        assert_eq!(error.short, error.message);
+        assert_eq!(error.diagnostic(), error.message);
+    }
+
+    /// Wire codes classify auth and transient errors without masking hard quota.
+    #[test]
+    fn error_frame_codes_preserve_retry_classification() {
+        use super::{FailureCause, ProviderError};
+        for code in [
+            serde_json::json!(401),
+            serde_json::json!(403),
+            serde_json::json!("401"),
+        ] {
+            assert_eq!(
+                ProviderError::from_error_frame(
+                    &serde_json::json!({"code":code,"message":"denied"})
+                )
+                .cause,
+                FailureCause::Auth
+            );
+        }
+        let error = serde_json::json!({"code":"server_error","message":"Provider disconnected unexpectedly"});
+        assert_eq!(
+            ProviderError::from_error_frame(&error).cause,
+            FailureCause::ProviderUnavailable
+        );
+        assert_eq!(ProviderError::from_error_frame(&serde_json::json!({"code":429,"type":"insufficient_quota","message":"quota exhausted"})).cause, FailureCause::QuotaExhausted);
+    }
+
     use super::*;
 
     #[test]

@@ -13,7 +13,7 @@ use crate::core::providers::catalog::Thinking;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, send_request, with_attribution, Event, FailureCause, FinishReason,
-    ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -38,10 +38,13 @@ pub async fn run(
     authorization: &Authorization,
     tx: &mpsc::Sender<Event>,
 ) -> Result<StreamEnd, ProviderError> {
-    // History → content blocks. Tool results ride user turns. Signed
-    // thinking blocks committed as "reasoning" messages replay verbatim at
-    // the head of the assistant turn they preceded — the API requires them
-    // back, complete with signatures, when continuing a tool loop.
+    // History → content blocks. Tool results ride user turns, and the
+    // results of one step's parallel calls share a single user turn: split
+    // across messages, the API still accepts them but the model learns to
+    // stop calling tools in parallel. Signed thinking blocks committed as
+    // "reasoning" messages replay verbatim at the head of the assistant
+    // turn they preceded — the API requires them back, complete with
+    // signatures, when continuing a tool loop.
     let mut messages: Vec<serde_json::Value> = Vec::new();
     let mut pending_thinking: Vec<serde_json::Value> = Vec::new();
     for m in &request.messages {
@@ -62,12 +65,27 @@ pub async fn run(
                     messages.push(json!({"role": "assistant", "content": content}));
                 }
             }
-            "tool" => messages.push(json!({
-                "role": "user",
-                "content": [{"type": "tool_result",
-                             "tool_use_id": m.tool_call_id().cloned().unwrap_or_default(),
-                             "content": m.content}],
-            })),
+            "tool" => {
+                let block = json!({
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id().cloned().unwrap_or_default(),
+                    "content": m.content,
+                });
+                match messages.last_mut() {
+                    Some(last)
+                        if last["role"] == "user"
+                            && last["content"][0]["type"] == "tool_result" =>
+                    {
+                        // The guard proves `content` is a non-empty array;
+                        // the else arm is the safe fallback, not a panic.
+                        match last["content"].as_array_mut() {
+                            Some(blocks) => blocks.push(block),
+                            None => messages.push(json!({"role": "user", "content": [block]})),
+                        }
+                    }
+                    _ => messages.push(json!({"role": "user", "content": [block]})),
+                }
+            }
             "reasoning" => {
                 // Only this dialect's own blocks; items from other dialects
                 // (Responses reasoning JSON) mean nothing here.
@@ -191,7 +209,8 @@ pub async fn run(
     )
     .await?;
 
-    let mut sse = SseStream::new(response.bytes_stream());
+    let response_context = crate::core::providers::ResponseContext::from_response(&response);
+    let mut sse = SseStream::new(response.bytes_stream()).with_response(response_context);
     // Tool input JSON streams in fragments per content block index.
     let mut open_tools: std::collections::BTreeMap<usize, ToolCall> = Default::default();
     // A thinking block accumulates text and its opaque signature; on stop it
@@ -199,6 +218,8 @@ pub async fn run(
     let mut open_thinking: Option<(String, String)> = None;
     let mut input_tokens = 0u64;
     let mut cache_read = 0u64;
+    let mut cache_write_5m = 0u64;
+    let mut cache_write_1h = 0u64;
     let mut output_tokens = 0u64;
     let mut finish = FinishReason::Normal;
 
@@ -211,13 +232,23 @@ pub async fn run(
             };
             match value["type"].as_str().unwrap_or("") {
                 "message_start" => {
-                    // Anthropic's prompt-side fields are disjoint; the Usage
-                    // contract wants the inclusive total in `input`.
+                    // Anthropic reports disjoint prompt categories. Older
+                    // responses expose only the creation total; e requests
+                    // ordinary ephemeral caching, so any unclassified write
+                    // belongs to the five-minute bucket.
                     let usage = &value["message"]["usage"];
+                    input_tokens = usage["input_tokens"].as_u64().unwrap_or(0);
                     cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
-                    input_tokens = usage["input_tokens"].as_u64().unwrap_or(0)
-                        + usage["cache_creation_input_tokens"].as_u64().unwrap_or(0)
-                        + cache_read;
+                    let creation = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+                    cache_write_5m = usage["cache_creation"]["ephemeral_5m_input_tokens"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    cache_write_1h = usage["cache_creation"]["ephemeral_1h_input_tokens"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    let classified = cache_write_5m.saturating_add(cache_write_1h);
+                    cache_write_5m =
+                        cache_write_5m.saturating_add(creation.saturating_sub(classified));
                 }
                 "content_block_start" => {
                     let index = value["index"].as_u64().unwrap_or(0) as usize;
@@ -340,11 +371,13 @@ pub async fn run(
                 }
                 "message_stop" => {
                     let _ = tx
-                        .send(Event::Usage {
+                        .send(Event::Usage(Usage {
                             input: input_tokens,
                             output: output_tokens,
                             cache_read,
-                        })
+                            cache_write_5m,
+                            cache_write_1h,
+                        }))
                         .await;
                     return Ok(sse.end(finish));
                 }
@@ -369,7 +402,9 @@ pub async fn run(
                             _ => text_cause.unwrap_or(FailureCause::Rejected),
                         }
                     };
-                    return Err(ProviderError::frame(message, cause));
+                    return Err(ProviderError::frame(message, cause)
+                        .with_response(sse.response.clone())
+                        .with_code(value["error"]["type"].as_str()));
                 }
                 _ => {}
             }

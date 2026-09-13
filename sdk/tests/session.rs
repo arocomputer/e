@@ -108,6 +108,7 @@ fn message_texts(body: &serde_json::Value) -> Vec<String> {
 async fn a_turn_streams_text_and_settles_into_a_reply_without_writing_home() {
     let (port, server) = serve_sse(&[OK]);
     let home = mock_home("stream", &[("mock", port)]);
+    std::fs::write(home.0.join("AGENTS.md"), "HOME_MARKER_7c1e").unwrap();
     let ws = TempDir::new("stream-ws");
     let mut session = Session::builder()
         .home(&home.0)
@@ -136,7 +137,7 @@ async fn a_turn_streams_text_and_settles_into_a_reply_without_writing_home() {
     let expected = Usage {
         input: 5,
         output: 1,
-        cache_read: 0,
+        ..Usage::default()
     };
     assert_eq!(usage, Some(expected));
     assert_eq!(reply.usage, expected);
@@ -150,6 +151,10 @@ async fn a_turn_streams_text_and_settles_into_a_reply_without_writing_home() {
     let body = request_json(&server.join().unwrap()[0]);
     assert_eq!(body["model"], "test");
     let system = &message_texts(&body)[0];
+    assert!(
+        system.contains("HOME_MARKER_7c1e"),
+        "the scoped home's AGENTS.md must reach the prompt, got: {system}"
+    );
     assert!(
         system.ends_with("Answer tersely."),
         "host instructions must close the system prompt, got: {system}"
@@ -319,8 +324,15 @@ async fn steering_lands_before_the_next_request() {
             _ => {}
         }
     }
+    // Past the end nothing is delivered and, more to the point, nothing is
+    // recorded as a stray prompt.
+    assert!(!turn.steer("too late"));
     turn.finish().await.unwrap();
     assert_eq!(steered.as_deref(), Some("and count the words too"));
+    assert!(session
+        .history()
+        .iter()
+        .all(|message| !message.content.contains("too late")));
     let second = request_json(&server.join().unwrap()[1]);
     assert!(
         message_texts(&second)
@@ -410,6 +422,93 @@ async fn the_builder_refuses_what_cannot_work_before_any_request() {
     let empty = TempDir::new("empty-home");
     let error = Session::builder().home(&empty.0).build().await.unwrap_err();
     assert!(matches!(error, e_sdk::Error::NoProvider), "{error}");
+}
+
+/// Install an executable extension script in the home.
+#[cfg(unix)]
+fn install_extension(home: &TempDir, name: &str, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = home.0.join("extensions");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A protocol-speaking extension that records its `initialize` request in
+/// its own working directory, then idles until e closes its stdin.
+#[cfg(unix)]
+const PROBE_EXTENSION: &str = r#"#!/bin/sh
+read line
+printf '%s
+' "$line" > initialize.json
+id=$(printf '%s' "$line" | sed -E 's/^\{"id":([0-9]+).*/\1/')
+printf '{"id":%s,"result":{"name":"probe"}}
+' "$id"
+exec cat >/dev/null
+"#;
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn extensions_run_in_the_session_workspace_not_the_process_directory() {
+    let home = mock_home("ext-cwd", &[("mock", 1)]);
+    install_extension(&home, "probe", PROBE_EXTENSION);
+    let ws = TempDir::new("ext-cwd-ws");
+    let session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .extensions(true)
+        .build()
+        .await
+        .unwrap();
+
+    // The file landed in the workspace: the process ran there. Its content
+    // says so too: `initialize` named the workspace, not the test's cwd.
+    let recorded = std::fs::read_to_string(ws.0.join("initialize.json"))
+        .expect("the extension must start in the session's cwd");
+    let request: serde_json::Value = serde_json::from_str(&recorded).unwrap();
+    assert_eq!(request["method"], "initialize");
+    assert_eq!(request["params"]["cwd"], ws.0.display().to_string());
+    session.close().await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn broken_extensions_are_reported_before_the_first_turn_without_stalling_build() {
+    let (port, _server) = serve_sse(&[OK]);
+    let home = mock_home("ext-broken", &[("mock", port)]);
+    install_extension(
+        &home,
+        "broken",
+        "#!/bin/sh
+exit 1
+",
+    );
+    let mut session = tokio::time::timeout(
+        Duration::from_secs(10),
+        Session::builder()
+            .home(&home.0)
+            .model("mock/test")
+            .extensions(true)
+            .build(),
+    )
+    .await
+    .expect("build must not wait on an unread notice")
+    .unwrap();
+
+    let mut turn = session.prompt("hi");
+    let mut events = Vec::new();
+    while let Some(event) = turn.next().await {
+        events.push(event);
+    }
+    let reply = turn.finish().await.unwrap();
+    assert_eq!(reply.text, "ok");
+    assert!(
+        matches!(&events[0], Event::Notice(notice) if notice.contains("broken")),
+        "the startup diagnostic must lead the first turn, got: {events:?}"
+    );
+    session.close().await;
 }
 
 /// A session and its turns move between tasks: a server can build one per

@@ -61,7 +61,7 @@ mod turn;
 
 pub use error::{Error, TurnError};
 pub use session::{Prompt, Session, SessionBuilder, Tools};
-pub use turn::{Event, Reply, Stop, ToolStats, Turn, Usage};
+pub use turn::{Event, Reply, Stop, ToolStats, Turn};
 
 /// One conversation record, as e persists it. The tagged `kind` separates
 /// user, assistant, tool, and reasoning entries; this is the session file's
@@ -70,6 +70,9 @@ pub use e::core::providers::ChatMessage as Message;
 /// An image attachment: a media type plus base64 data. `Image::from_path`
 /// reads and validates a PNG, JPEG, GIF, or WebP file.
 pub use e::core::providers::ImageInput as Image;
+/// Token counts with disjoint categories: `input` excludes cache reads and
+/// writes; `prompt_tokens()` is their sum.
+pub use e::core::providers::Usage;
 /// A session file on disk, as listed by [`SessionBuilder::saved`].
 pub use e::core::session::SessionInfo as SavedSession;
 pub use e::core::tools::{OutputStream, ToolOutcome};

@@ -21,7 +21,9 @@ built-in's provider and id replaces it — the file wins, like themes.
           "pricing": {
             "input_per_million": 1.0,
             "output_per_million": 4.0,
-            "cache_read_per_million": 0.1
+            "cache_read_per_million": 0.1,
+            "cache_write_5m_per_million": 1.25,
+            "cache_write_1h_per_million": 2.0
           }
         }
       ]
@@ -44,8 +46,10 @@ built-in's provider and id replaces it — the file wins, like themes.
 - `catalog` controls only live model discovery and is independent from
   `api`: `openai` (default, `GET /models` + `data[].id`), `anthropic`
   (`GET /v1/models` + x-api-key), `google` (`models[].name` + x-goog-api-key),
-  or `none`. This separation matters for gateways that accept one inference
-  dialect but expose another provider's catalog shape.
+  `chatgpt` (the ChatGPT backend's picker: `models[].slug` with the `-wm`
+  suffix stripped, work-mode entries only, `max_tokens` as the context
+  window), or `none`. This separation matters for gateways that accept one
+  inference dialect but expose another provider's catalog shape.
 - `context_window` may sit on the provider (default for its models) or on a
   model object; it drives the statusline percentage and auto-compaction, so
   set it truthfully. Default: 200000.
@@ -67,11 +71,13 @@ built-in's provider and id replaces it — the file wins, like themes.
   support is sent no schemas and cannot execute a tool even if it emits one.
   Live-discovered ids inherit the provider-level defaults, never an arbitrary
   declared sibling model's override.
-- `pricing` declares USD rates per million input, output, and optionally
-  cache-read tokens. e shows a turn estimate and includes `cost_usd` in
-  the `e rpc` response. If cache pricing is omitted, cache reads use the normal
-  input rate. Pricing is optional because it changes independently of the
-  wire protocol; use the provider's current published rates.
+- `pricing` declares USD rates per million uncached input and output tokens.
+  Optional cache-read, five-minute cache-write, and one-hour cache-write rates
+  keep prompt caching priced separately. An omitted cache rate falls back to
+  ordinary input rather than dropping those tokens. e shows a turn estimate
+  and includes `cost_usd` in the `e rpc` response. Pricing is optional because
+  it changes independently of the wire protocol; use the provider's current
+  published rates.
 - Credentials: `/login <provider>` stores an API key for any provider name.
 - Only models whose provider has credentials appear in `/models`; scope a
   cycling shortlist with `/scoped-models` (ctrl+p cycles).

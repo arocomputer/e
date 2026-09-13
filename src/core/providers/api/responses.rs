@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, send_request, with_attribution, Event, FailureCause, FinishReason,
-    ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 pub async fn run(
@@ -136,7 +136,8 @@ pub async fn run(
         require_success(send_request(with_attribution(builder, request).json(&body)).await?)
             .await?;
 
-    let mut sse = SseStream::new(response.bytes_stream());
+    let response_context = crate::core::providers::ResponseContext::from_response(&response);
+    let mut sse = SseStream::new(response.bytes_stream()).with_response(response_context);
     // function_call items accumulate argument deltas keyed by item id.
     let mut pending: std::collections::BTreeMap<String, ToolCall> = Default::default();
     let mut streamed_arguments: std::collections::BTreeMap<String, String> = Default::default();
@@ -278,12 +279,14 @@ pub async fn run(
                         let cached = usage["input_tokens_details"]["cached_tokens"]
                             .as_u64()
                             .unwrap_or(0);
+                        let total = usage["input_tokens"].as_u64().unwrap_or(0);
                         let _ = tx
-                            .send(Event::Usage {
-                                input: usage["input_tokens"].as_u64().unwrap_or(0),
+                            .send(Event::Usage(Usage {
+                                input: total.saturating_sub(cached),
                                 output: usage["output_tokens"].as_u64().unwrap_or(0),
                                 cache_read: cached,
-                            })
+                                ..Usage::default()
+                            }))
                             .await;
                     }
                     // `response.incomplete` is a truncated reply the API still
@@ -319,7 +322,9 @@ pub async fn run(
                             _ => text_cause.unwrap_or(FailureCause::Rejected),
                         }
                     };
-                    return Err(ProviderError::frame(message, cause));
+                    return Err(ProviderError::frame(message, cause)
+                        .with_response(sse.response.clone())
+                        .with_code(value["response"]["error"]["code"].as_str()));
                 }
                 _ => {}
             }

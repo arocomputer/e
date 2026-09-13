@@ -25,6 +25,14 @@ fn now_ms() -> u64 {
 /// e processes. Every store shares one lock because all stores live in the
 /// same small home and writes are rare.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
+/// Recoverable load problems collected before the TUI exists to display them.
+static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Drain configuration warnings for the frontend. A corrupt file is already
+/// safe at the returned backup path; this makes that recovery visible.
+pub fn take_warnings() -> Vec<String> {
+    std::mem::take(&mut *WARNINGS.lock().unwrap_or_else(|e| e.into_inner()))
+}
 
 struct WriteGuard {
     _thread: MutexGuard<'static, ()>,
@@ -60,23 +68,28 @@ pub fn read_object(path: &Path) -> io::Result<Map<String, Value>> {
     match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(Value::Object(map)) => Ok(map),
-            _ => {
-                // Corrupt or non-object: preserve it, don't clobber it.
-                quarantine(path)?;
-                Ok(Map::new())
-            }
+            Ok(_) => quarantine(path, "expected a JSON object"),
+            Err(error) => quarantine(path, &error.to_string()),
         },
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
         Err(e) => Err(e),
     }
 }
 
-/// Move an unreadable/corrupt file aside so the next write starts clean while
-/// the user's bytes stay recoverable. Failing to preserve the original aborts
-/// the caller instead of silently proceeding.
-fn quarantine(path: &Path) -> io::Result<()> {
+/// Move a corrupt file aside so the next write starts clean while the user's
+/// bytes stay recoverable. Failing to preserve the original aborts the caller.
+fn quarantine(path: &Path, reason: &str) -> io::Result<Map<String, Value>> {
     let aside = path.with_extension(format!("corrupt-{}", now_ms()));
-    std::fs::rename(path, &aside)
+    std::fs::rename(path, &aside)?;
+    WARNINGS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(format!(
+            "invalid configuration file {}: {reason}; moved it to {} and using defaults",
+            path.display(),
+            aside.display()
+        ));
+    Ok(Map::new())
 }
 
 /// Merge changes into the file, preserving every other key. `mutate` sees the

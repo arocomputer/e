@@ -7,6 +7,7 @@
 //! scope (`config::home::with_home`), never through the process environment:
 //! two sessions with different homes coexist in one process.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -142,8 +143,9 @@ impl SessionBuilder {
 
     /// Start the home's extensions for their tools and hooks. Off by
     /// default: extensions are user-installed executables, and starting
-    /// them is a decision for the host. Startup hooks and extension flags
-    /// are CLI concerns and do not run here.
+    /// them is a decision for the host. They run in the session's `cwd` and
+    /// see it at `initialize`. Startup hooks do not run, and no command-line
+    /// flags are parsed for them: the host process's argv is not e's.
     pub fn extensions(mut self, enabled: bool) -> Self {
         self.extensions = enabled;
         self
@@ -218,6 +220,7 @@ impl SessionBuilder {
             allowed_tools,
         };
         let (mut agent, events) = Agent::with_options(model, options);
+        let cwd = agent.cwd();
 
         if let Some(path) = &self.resume {
             // Ownership first: a file another e is appending to must not be
@@ -234,19 +237,34 @@ impl SessionBuilder {
             agent.load_history(self.history);
         }
 
-        let (host, notices) = if self.extensions {
-            let (sender, receiver) = mpsc::channel(256);
-            let host = home::scope(home.clone(), ExtensionHost::start(sender)).await;
+        let (host, notices, startup_notices) = if self.extensions {
+            let (sender, mut receiver) = mpsc::channel(256);
+            // Startup diagnostics arrive on the bounded channel while the
+            // host is still starting; read them as they come so a home with
+            // many broken extensions cannot fill it and stall startup.
+            let start = home::scope(
+                home.clone(),
+                ExtensionHost::start_in(sender, cwd, Vec::new()),
+            );
+            tokio::pin!(start);
+            let mut startup_notices = VecDeque::new();
+            let host = loop {
+                tokio::select! {
+                    host = &mut start => break host,
+                    Some(notice) = receiver.recv() => startup_notices.push_back(notice),
+                }
+            };
             agent.set_host(host.clone());
-            (Some(host), Some(receiver))
+            (Some(host), Some(receiver), startup_notices)
         } else {
-            (None, None)
+            (None, None, VecDeque::new())
         };
 
         Ok(Session {
             agent,
             events,
             notices,
+            startup_notices,
             host,
             home,
             instructions: self.instructions,
@@ -288,9 +306,12 @@ fn resolve_model(query: Option<&str>) -> Result<Model, Error> {
 pub struct Session {
     pub(crate) agent: Agent,
     pub(crate) events: mpsc::Receiver<SessionEvent>,
-    /// Extension notices, merged into a running turn's stream; None when
-    /// extensions are off.
+    /// Extension notices, delivered between a running turn's core events;
+    /// None when extensions are off.
     pub(crate) notices: Option<mpsc::Receiver<String>>,
+    /// Diagnostics extensions raised while starting, delivered before the
+    /// next turn's first event.
+    pub(crate) startup_notices: VecDeque<String>,
     host: Option<Arc<ExtensionHost>>,
     home: PathBuf,
     instructions: Option<String>,

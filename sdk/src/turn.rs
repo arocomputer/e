@@ -17,7 +17,8 @@ use std::time::Duration;
 use futures::Stream;
 
 use e::core::agent::SessionEvent;
-use e::core::providers::ChatMessage;
+use e::core::providers::catalog::Pricing;
+use e::core::providers::{ChatMessage, Usage};
 use e::core::tools::{OutputStream, ToolOutcome};
 
 use crate::{Session, TurnError};
@@ -81,17 +82,10 @@ pub enum Event {
     /// returned as success, skipped malformed frames, a session that could
     /// not be saved. Also collected into the reply.
     Warning(String),
-    /// An extension's `notify` message. Only with extensions enabled.
+    /// An extension's `notify` message or startup diagnostic. Only with
+    /// extensions enabled; delivered between core events, never ahead of
+    /// one that is already waiting.
     Notice(String),
-}
-
-/// Tokens across the turn's provider requests. `input` counts each
-/// request's full context, cached tokens included.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
-    pub input: u64,
-    pub output: u64,
-    pub cache_read: u64,
 }
 
 /// How many tools the turn ran and how many of those did not complete.
@@ -111,7 +105,8 @@ pub enum Stop {
 }
 
 /// What a finished turn produced. `text` is every assistant fragment of
-/// the turn joined, across tool rounds.
+/// the turn joined, across tool rounds; `usage` sums every provider
+/// request the turn made, compaction included.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Reply {
     pub text: String,
@@ -146,6 +141,9 @@ pub struct Turn<'s> {
     state: State,
     reply: Reply,
     error: Option<String>,
+    /// The cost estimate summed from each request's own captured rates, so
+    /// a mid-turn model switch or compaction request is priced correctly.
+    cost: Option<f64>,
     /// Steering requested before the first poll, delivered right after
     /// the turn starts.
     early_steers: Vec<String>,
@@ -161,6 +159,7 @@ impl<'s> Turn<'s> {
             state: State::Pending(start),
             reply: Reply::default(),
             error: None,
+            cost: None,
             early_steers: Vec::new(),
             pending_events: VecDeque::new(),
         }
@@ -187,18 +186,11 @@ impl<'s> Turn<'s> {
         }
     }
 
-    /// `submit` steers only while the core still counts the turn as running.
-    /// If the turn had ended before we read its `TurnEnd`, the message would
-    /// have started a fresh turn instead — undo that so the session's
-    /// event stream stays one turn at a time.
+    /// The core holds the message only while it still counts the turn as
+    /// running; once the turn has ended — even if its `TurnEnd` is still
+    /// unread here — nothing is recorded and this reports false.
     fn submit_steer(&mut self, text: String) -> bool {
-        let system = self.session.system_prompt();
-        if self.session.agent.submit(text, system) {
-            return true;
-        }
-        self.session.agent.interrupt();
-        self.session.stale = true;
-        false
+        self.session.agent.steer(text)
     }
 
     /// Stop the turn. Like Esc: the current request is abandoned, tools
@@ -224,13 +216,7 @@ impl<'s> Turn<'s> {
     pub async fn finish(mut self) -> Result<Reply, TurnError> {
         while self.next().await.is_some() {}
         let mut reply = std::mem::take(&mut self.reply);
-        reply.cost_usd = self.session.agent.model.pricing.as_ref().map(|rates| {
-            rates.estimate(
-                reply.usage.input,
-                reply.usage.output,
-                reply.usage.cache_read,
-            )
-        });
+        reply.cost_usd = self.cost;
         match self.error.take() {
             Some(message) => Err(TurnError { message, reply }),
             None => Ok(reply),
@@ -255,6 +241,15 @@ impl<'s> Turn<'s> {
             if !self.submit_steer(text) {
                 break;
             }
+        }
+    }
+
+    /// Add one provider request's tokens and, when its model declared
+    /// rates, its cost. An unpriced request leaves the estimate as is.
+    fn account(&mut self, usage: Usage, pricing: Option<&Pricing>) {
+        self.reply.usage.add(usage);
+        if let Some(rates) = pricing {
+            self.cost = Some(self.cost.unwrap_or(0.0) + rates.estimate(usage));
         }
     }
 
@@ -302,30 +297,25 @@ impl<'s> Turn<'s> {
                     content,
                 })
             }
-            SessionEvent::Usage {
-                input,
-                output,
-                cache_read,
-            } => {
-                let usage = Usage {
-                    input,
-                    output,
-                    cache_read,
-                };
-                self.reply.usage.input = self.reply.usage.input.saturating_add(input);
-                self.reply.usage.output = self.reply.usage.output.saturating_add(output);
-                self.reply.usage.cache_read =
-                    self.reply.usage.cache_read.saturating_add(cache_read);
+            SessionEvent::Usage { usage, pricing } => {
+                self.account(usage, pricing.as_ref());
                 Some(Event::Usage(usage))
             }
             SessionEvent::Compacting => Some(Event::Compacting),
             SessionEvent::Compacted {
                 summary,
                 context_tokens,
-            } => Some(Event::Compacted {
-                summary,
-                context_tokens,
-            }),
+                response,
+                pricing,
+            } => {
+                if let Some(usage) = response.usage {
+                    self.account(usage, pricing.as_ref());
+                }
+                Some(Event::Compacted {
+                    summary,
+                    context_tokens,
+                })
+            }
             SessionEvent::Retry {
                 attempt,
                 limit,
@@ -362,6 +352,9 @@ impl<'s> Turn<'s> {
                 self.error = Some(message);
                 None
             }
+            // Structured diagnostics precede the `Error` message and go to
+            // the session's private sidecar; the message is the contract.
+            SessionEvent::ErrorDetails(_) => None,
             SessionEvent::TurnEnd { aborted } => {
                 self.reply.stop = if aborted {
                     Stop::Cancelled
@@ -407,6 +400,11 @@ impl Stream for Turn<'_> {
                         }
                         continue;
                     }
+                    // Extension startup diagnostics predate the turn, so they
+                    // come out before it begins.
+                    if let Some(notice) = self.session.startup_notices.pop_front() {
+                        return Poll::Ready(Some(Event::Notice(notice)));
+                    }
                     let State::Pending(start) = std::mem::replace(&mut self.state, State::Running)
                     else {
                         continue;
@@ -414,13 +412,6 @@ impl Stream for Turn<'_> {
                     self.start(start);
                 }
                 State::Running => {
-                    // Extension notices are out-of-band diagnostics; deliver
-                    // them ahead of model output, never instead of it.
-                    if let Some(notices) = self.session.notices.as_mut() {
-                        if let Poll::Ready(Some(notice)) = notices.poll_recv(cx) {
-                            return Poll::Ready(Some(Event::Notice(notice)));
-                        }
-                    }
                     match self.session.events.poll_recv(cx) {
                         Poll::Ready(Some(event)) => {
                             if let Some(event) = self.observe(event) {
@@ -431,7 +422,17 @@ impl Stream for Turn<'_> {
                             self.error = Some(CLOSED.into());
                             self.state = State::Done;
                         }
-                        Poll::Pending => return Poll::Pending,
+                        // Extension notices fill the gaps between core events,
+                        // never displace one: the core stream keeps its order
+                        // and a chatty extension cannot starve model output.
+                        Poll::Pending => {
+                            if let Some(notices) = self.session.notices.as_mut() {
+                                if let Poll::Ready(Some(notice)) = notices.poll_recv(cx) {
+                                    return Poll::Ready(Some(Event::Notice(notice)));
+                                }
+                            }
+                            return Poll::Pending;
+                        }
                     }
                 }
             }

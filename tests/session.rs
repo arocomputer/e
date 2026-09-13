@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use e::core::agent::Agent;
 use e::core::providers::catalog::{Api, Model};
-use e::core::providers::ChatMessage;
+use e::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
 use e::core::session::{self, SessionLog};
 
 // E_HOME is process-global, so tests that replace it must not overlap.
@@ -15,6 +15,7 @@ fn released_session_fixtures_remain_readable() {
     for (name, expected) in [
         ("v0.jsonl", "legacy session"),
         ("v1.jsonl", "current session"),
+        ("v2.jsonl", "response session"),
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/sessions")
@@ -91,6 +92,55 @@ fn session_round_trips_and_lists() {
 
 // The stable conversation id e sends as the OpenCode session header: a real
 // UUID carried in the filename, unchanged when the log is reopened for resume.
+#[test]
+fn response_provenance_is_outside_model_history_and_survives_copying() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("e-response-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let response = ResponseMeta {
+        id: "response-a".into(),
+        timestamp: 123,
+        provider: "anthropic".into(),
+        model: "claude-sonnet-5".into(),
+        purpose: ResponsePurpose::Turn,
+        usage: Some(Usage {
+            input: 100,
+            output: 20,
+            cache_read: 40,
+            cache_write_5m: 10,
+            cache_write_1h: 5,
+        }),
+    };
+    let mut first = SessionLog::create(&cwd, "anthropic/claude-sonnet-5").unwrap();
+    first.append(&ChatMessage::user("hello")).unwrap();
+    first
+        .append(&ChatMessage::assistant("reply", Vec::new()).with_response(response.clone()))
+        .unwrap();
+    let first_path = first.path().to_path_buf();
+    drop(first);
+
+    let raw = std::fs::read_to_string(&first_path).unwrap();
+    let line: serde_json::Value = serde_json::from_str(raw.lines().nth(2).unwrap()).unwrap();
+    assert_eq!(line["response"]["id"], "response-a");
+    assert!(line["message"].get("response").is_none());
+    assert!(line["message"].get("usage").is_none());
+
+    let loaded = SessionLog::load(&first_path).unwrap();
+    assert_eq!(loaded[1].response(), Some(&response));
+    let mut copied = SessionLog::create(&cwd, "anthropic/claude-sonnet-5").unwrap();
+    copied.append(&loaded[1]).unwrap();
+    let copied_path = copied.path().to_path_buf();
+    drop(copied);
+    let restored = SessionLog::load(&copied_path).unwrap();
+    assert_eq!(restored[0].response().unwrap().id, "response-a");
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
 #[test]
 fn session_id_is_stable_across_reopen() {
     let _lock = ENV_LOCK.lock().unwrap();
@@ -510,6 +560,53 @@ fn a_torn_final_line_costs_the_record_not_the_session() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// The torn tail must not survive a resume either: appending behind it
+/// would fuse the next record onto the torn bytes, and that fused line —
+/// interior from then on — is the corruption `load` rightly refuses.
+/// `reopen` cuts the tail away and chains the new records onto the last
+/// intact one.
+#[test]
+fn reopen_truncates_a_torn_tail_before_appending() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "e-session-torn-reopen-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let mut s = SessionLog::create(&cwd, "test/model").unwrap();
+    s.append(&ChatMessage::user("first")).unwrap();
+    s.append(&ChatMessage::assistant("second", Vec::new()))
+        .unwrap();
+    let path = s.path().to_path_buf();
+    drop(s);
+
+    let mut raw = std::fs::read_to_string(&path).unwrap();
+    raw.push_str("{\"type\":\"message\",\"message\":{\"role\":\"user\",\"con");
+    std::fs::write(&path, raw).unwrap();
+
+    let mut resumed = SessionLog::reopen(&path).unwrap();
+    resumed.append(&ChatMessage::user("third")).unwrap();
+    resumed
+        .append(&ChatMessage::assistant("fourth", Vec::new()))
+        .unwrap();
+    drop(resumed);
+
+    let messages = SessionLog::load(&path).unwrap();
+    let content: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(
+        content,
+        ["first", "second", "third", "fourth"],
+        "the resumed records chain onto the last intact one, not a second root"
+    );
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
 /// A crash between a tool call and its result leaves a dangling tool_use
 /// every dialect rejects on replay; load repairs the tail with an honest
 /// synthetic result instead of handing the agent an unreplayable history.
@@ -546,6 +643,96 @@ fn a_dangling_tool_call_is_repaired_on_load() {
     assert_eq!(last.role(), "tool", "a synthetic result closes the batch");
     assert_eq!(last.tool_call_id().map(String::as_str), Some("call-1"));
     assert!(last.content.contains("not executed"));
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// The first resume repairs the dangling call in memory only; the next
+/// prompt is appended behind the unanswered call, so on the second resume
+/// the hole is interior. The repair must find it there too, or every later
+/// request of that session is rejected.
+#[test]
+fn a_dangling_tool_call_is_still_answered_on_the_second_resume() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "e-session-dangling-twice-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let mut s = SessionLog::create(&cwd, "test/model").unwrap();
+    s.append(&ChatMessage::user("task")).unwrap();
+    s.append(&ChatMessage::assistant(
+        "working",
+        vec![e::core::providers::ToolCall {
+            id: "call-1".into(),
+            name: "bash".into(),
+            arguments: "{}".into(),
+            signature: None,
+        }],
+    ))
+    .unwrap();
+    let path = s.path().to_path_buf();
+    drop(s);
+
+    // First resume: load repairs in memory, the user carries on, quit.
+    let mut resumed = SessionLog::reopen(&path).unwrap();
+    SessionLog::load(&path).unwrap();
+    resumed.append(&ChatMessage::user("hi")).unwrap();
+    resumed
+        .append(&ChatMessage::assistant("hello", Vec::new()))
+        .unwrap();
+    drop(resumed);
+
+    // Second resume: the unanswered call is now interior.
+    let messages = SessionLog::load(&path).unwrap();
+    let roles: Vec<&str> = messages.iter().map(|m| m.role()).collect();
+    assert_eq!(roles, ["user", "assistant", "tool", "user", "assistant"]);
+    assert_eq!(
+        messages[2].tool_call_id().map(String::as_str),
+        Some("call-1"),
+        "the synthetic result closes the batch it belongs to"
+    );
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A crash after reasoning was committed but before its assistant turn
+/// leaves a block that fails replay. After a resume it sits interior,
+/// followed by the user's next prompt, and must still be dropped.
+#[test]
+fn an_orphaned_reasoning_block_is_dropped_wherever_it_sits() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "e-session-orphan-reasoning-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let mut s = SessionLog::create(&cwd, "test/model").unwrap();
+    s.append(&ChatMessage::user("task")).unwrap();
+    s.append(&ChatMessage::reasoning("half a thought")).unwrap();
+    let path = s.path().to_path_buf();
+    drop(s);
+
+    let mut resumed = SessionLog::reopen(&path).unwrap();
+    resumed.append(&ChatMessage::user("hi")).unwrap();
+    resumed
+        .append(&ChatMessage::assistant("hello", Vec::new()))
+        .unwrap();
+    drop(resumed);
+
+    let messages = SessionLog::load(&path).unwrap();
+    let roles: Vec<&str> = messages.iter().map(|m| m.role()).collect();
+    assert_eq!(roles, ["user", "user", "assistant"]);
 
     let _ = std::fs::remove_dir_all(home);
 }
