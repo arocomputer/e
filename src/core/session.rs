@@ -179,7 +179,7 @@ impl SessionLog {
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
-        std::fs::File::create(&probe)?;
+        std::fs::write(&probe, b"\0")?;
         std::fs::remove_file(&probe)
     }
 
