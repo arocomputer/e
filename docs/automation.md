@@ -47,8 +47,11 @@ accumulated output, terminal error/abort state, warnings, token usage,
 optional estimated cost, and tool counts, plus the request's `id`:
 
 ```json
-{"id":"one","output":"...","final_output":"...","model":"provider/model","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{"input_tokens":1200,"output_tokens":80,"cache_read_tokens":900},"cost_usd":null,"tools":{"calls":2,"failures":0},"session":null}
+{"id":"one","output":"...","final_output":"...","model":"provider/model","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{"input_tokens":300,"output_tokens":80,"cache_read_tokens":900,"cache_write_5m_tokens":0,"cache_write_1h_tokens":0,"prompt_tokens":1200},"cost_usd":null,"tools":{"calls":2,"failures":0},"session":null}
 ```
+
+Usage categories are disjoint: `input_tokens` excludes cache reads and writes,
+while `prompt_tokens` is their complete sum. Compaction requests are included.
 
 `session` is the saved turn's JSONL path when `save` was true (the whole
 transcript — every tool call and its output — lives there, so a caller that

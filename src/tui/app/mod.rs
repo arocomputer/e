@@ -3930,6 +3930,46 @@ mod tests {
         tokio::task::yield_now().await;
     }
 
+    #[test]
+    fn compaction_uses_the_request_models_pricing_after_a_model_switch() {
+        let mut app = session_app();
+        app.on_session_event(SessionEvent::TurnStart);
+        app.agent.model.id = "switched".into();
+        app.agent.model.pricing = Some(crate::core::providers::catalog::Pricing {
+            input_per_million: 99.0,
+            output_per_million: 99.0,
+            cache_read_per_million: None,
+            cache_write_5m_per_million: None,
+            cache_write_1h_per_million: None,
+        });
+        let request_pricing = crate::core::providers::catalog::Pricing {
+            input_per_million: 2.0,
+            output_per_million: 10.0,
+            cache_read_per_million: Some(0.2),
+            cache_write_5m_per_million: Some(2.5),
+            cache_write_1h_per_million: Some(4.0),
+        };
+        let usage = crate::core::providers::Usage {
+            input: 1_000_000,
+            ..Default::default()
+        };
+        app.on_session_event(SessionEvent::Compacted {
+            summary: "summary".into(),
+            context_tokens: 10,
+            response: crate::core::providers::ResponseMeta {
+                id: "response".into(),
+                timestamp: 1,
+                provider: "mock".into(),
+                model: "m".into(),
+                purpose: crate::core::providers::ResponsePurpose::Compaction,
+                usage: Some(usage),
+            },
+            pricing: Some(request_pricing),
+        });
+
+        assert_eq!(app.active.unwrap().cost_usd, Some(2.0));
+    }
+
     fn session_app() -> App {
         let (agent, _rx) = Agent::new(Model {
             provider: "mock".into(),

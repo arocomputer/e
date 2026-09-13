@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use e::core::agent::Agent;
 use e::core::providers::catalog::{Api, Model};
-use e::core::providers::ChatMessage;
+use e::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
 use e::core::session::{self, SessionLog};
 
 // E_HOME is process-global, so tests that replace it must not overlap.
@@ -15,6 +15,7 @@ fn released_session_fixtures_remain_readable() {
     for (name, expected) in [
         ("v0.jsonl", "legacy session"),
         ("v1.jsonl", "current session"),
+        ("v2.jsonl", "response session"),
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/sessions")
@@ -93,6 +94,55 @@ fn session_round_trips_and_lists() {
 
 // The stable conversation id e sends as the OpenCode session header: a real
 // UUID carried in the filename, unchanged when the log is reopened for resume.
+#[test]
+fn response_provenance_is_outside_model_history_and_survives_copying() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("e-response-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let response = ResponseMeta {
+        id: "response-a".into(),
+        timestamp: 123,
+        provider: "anthropic".into(),
+        model: "claude-sonnet-5".into(),
+        purpose: ResponsePurpose::Turn,
+        usage: Some(Usage {
+            input: 100,
+            output: 20,
+            cache_read: 40,
+            cache_write_5m: 10,
+            cache_write_1h: 5,
+        }),
+    };
+    let mut first = SessionLog::create(&cwd, "anthropic/claude-sonnet-5").unwrap();
+    first.append(&ChatMessage::user("hello")).unwrap();
+    first
+        .append(&ChatMessage::assistant("reply", Vec::new()).with_response(response.clone()))
+        .unwrap();
+    let first_path = first.path().to_path_buf();
+    drop(first);
+
+    let raw = std::fs::read_to_string(&first_path).unwrap();
+    let line: serde_json::Value = serde_json::from_str(raw.lines().nth(2).unwrap()).unwrap();
+    assert_eq!(line["response"]["id"], "response-a");
+    assert!(line["message"].get("response").is_none());
+    assert!(line["message"].get("usage").is_none());
+
+    let loaded = SessionLog::load(&first_path).unwrap();
+    assert_eq!(loaded[1].response(), Some(&response));
+    let mut copied = SessionLog::create(&cwd, "anthropic/claude-sonnet-5").unwrap();
+    copied.append(&loaded[1]).unwrap();
+    let copied_path = copied.path().to_path_buf();
+    drop(copied);
+    let restored = SessionLog::load(&copied_path).unwrap();
+    assert_eq!(restored[0].response().unwrap().id, "response-a");
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
 #[test]
 fn session_id_is_stable_across_reopen() {
     let _lock = ENV_LOCK.lock().unwrap();

@@ -348,6 +348,20 @@ async fn a_blank_successful_stream_surfaces_an_error_not_silence() {
     }
     assert!(saw_retry, "the first blank success gets one re-request");
     assert!(saw_error, "a second blank success must surface an error");
+
+    let path = agent
+        .session_path()
+        .expect("the user prompt opened a session");
+    let responses = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|row| row["type"] == "response")
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 2, "both billed blank replies are retained");
+    assert!(responses
+        .iter()
+        .all(|row| row["response"]["usage"]["input"] == 9));
 }
 
 /// A zero attempt budget means the unavoidable initial request is the only

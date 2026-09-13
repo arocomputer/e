@@ -8,8 +8,10 @@ against so changes to them are deliberate rather than accidental.
 - **CLI:** documented commands and exit statuses are user-facing. Before 1.0,
   incompatible changes require a changelog entry and migration guidance.
 - **Sessions:** JSONL headers carry `format_version`. Version 0 (the unmarked
-  pre-release format) and version 1 are readable. Readers reject a newer
-  version with an actionable error instead of guessing.
+  pre-release format), version 1, and version 2 are readable. Version 2 keeps
+  response provenance and disjoint usage in an envelope outside replayable
+  message content. Readers reject a newer version with an actionable error
+  instead of guessing.
 - **Configuration:** writes to `settings.json`, `auth.json`, and `trust.json` carry
   `format_version: 1`. Readers accept unversioned files, preserve unknown
   keys, and quarantine corrupt input before creating a replacement. An older
@@ -37,10 +39,10 @@ writers must not open the same session concurrently. Existing JSONL needs
 no migration. Empty `.lock` sidecars are expected and should not be deleted.
 
 Provider failure diagnostics use separate `<session-stem>.errors.jsonl` files,
-leaving version 1 message logs unchanged and readable by older versions. These
-sidecars carry their own `format_version: 1` and link records to message IDs.
-They can be removed without changing conversation history. Headless responses
-add an optional `error_details` object while retaining the `error` string.
+leaving message logs readable across their supported versions. These sidecars
+carry their own `format_version: 1` and link records to message IDs. They can be
+removed without changing conversation history. Headless responses add an
+optional `error_details` object while retaining the `error` string.
 
 On Unix, e creates its state directories with `0700` and session logs with
 `0600`. Configuration writes and session creation or reopening also tighten

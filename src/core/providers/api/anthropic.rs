@@ -13,7 +13,7 @@ use crate::core::providers::catalog::Thinking;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, send_request, with_attribution, Event, FailureCause, FinishReason,
-    ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -218,6 +218,8 @@ pub async fn run(
     let mut open_thinking: Option<(String, String)> = None;
     let mut input_tokens = 0u64;
     let mut cache_read = 0u64;
+    let mut cache_write_5m = 0u64;
+    let mut cache_write_1h = 0u64;
     let mut output_tokens = 0u64;
     let mut finish = FinishReason::Normal;
 
@@ -230,13 +232,23 @@ pub async fn run(
             };
             match value["type"].as_str().unwrap_or("") {
                 "message_start" => {
-                    // Anthropic's prompt-side fields are disjoint; the Usage
-                    // contract wants the inclusive total in `input`.
+                    // Anthropic reports disjoint prompt categories. Older
+                    // responses expose only the creation total; e requests
+                    // ordinary ephemeral caching, so any unclassified write
+                    // belongs to the five-minute bucket.
                     let usage = &value["message"]["usage"];
+                    input_tokens = usage["input_tokens"].as_u64().unwrap_or(0);
                     cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
-                    input_tokens = usage["input_tokens"].as_u64().unwrap_or(0)
-                        + usage["cache_creation_input_tokens"].as_u64().unwrap_or(0)
-                        + cache_read;
+                    let creation = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+                    cache_write_5m = usage["cache_creation"]["ephemeral_5m_input_tokens"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    cache_write_1h = usage["cache_creation"]["ephemeral_1h_input_tokens"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    let classified = cache_write_5m.saturating_add(cache_write_1h);
+                    cache_write_5m =
+                        cache_write_5m.saturating_add(creation.saturating_sub(classified));
                 }
                 "content_block_start" => {
                     let index = value["index"].as_u64().unwrap_or(0) as usize;
@@ -359,11 +371,13 @@ pub async fn run(
                 }
                 "message_stop" => {
                     let _ = tx
-                        .send(Event::Usage {
+                        .send(Event::Usage(Usage {
                             input: input_tokens,
                             output: output_tokens,
                             cache_read,
-                        })
+                            cache_write_5m,
+                            cache_write_1h,
+                        }))
                         .await;
                     return Ok(sse.end(finish));
                 }
