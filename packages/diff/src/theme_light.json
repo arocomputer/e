@@ -1,0 +1,43 @@
+{
+  "vars": {
+    "diffPaneBgColor": "#f6f7f9",
+    "diffAddedBgColor": "#e3f2e5",
+    "diffRemovedBgColor": "#fde4e8",
+    "diffSelectedBgColor": "#c9ddff",
+    "diffAddedWordBgColor": "#b1dcba",
+    "diffRemovedWordBgColor": "#efa5b2",
+    "diffTextColor": "#25262b",
+    "diffLineNumberColor": "#707580",
+    "diffAddedColor": "#246638",
+    "diffRemovedColor": "#a32a3a",
+    "diffSelectionTextColor": "#285b9e",
+    "diffSyntaxFunctionColor": "#2d62aa",
+    "diffSyntaxTypeColor": "#886000",
+    "diffSyntaxKeywordColor": "#a62641",
+    "diffSyntaxStringColor": "#866400",
+    "diffSyntaxNumberColor": "#7544a6",
+    "diffSyntaxCommentColor": "#707580"
+  },
+  "colors": {
+    "diffPaneBg": "diffPaneBgColor",
+    "diffAddedBg": "diffAddedBgColor",
+    "diffRemovedBg": "diffRemovedBgColor",
+    "diffSelectedBg": "diffSelectedBgColor",
+    "diffAddedWordBg": "diffAddedWordBgColor",
+    "diffRemovedWordBg": "diffRemovedWordBgColor",
+    "diffText": "diffTextColor",
+    "diffLineNumber": "diffLineNumberColor",
+    "diffAdded": "diffAddedColor",
+    "diffRemoved": "diffRemovedColor",
+    "diffSelectionText": "diffSelectionTextColor",
+    "diffSyntaxFunction": "diffSyntaxFunctionColor",
+    "diffSyntaxType": "diffSyntaxTypeColor",
+    "diffSyntaxKeyword": "diffSyntaxKeywordColor",
+    "diffSyntaxString": "diffSyntaxStringColor",
+    "diffSyntaxNumber": "diffSyntaxNumberColor",
+    "diffSyntaxComment": "diffSyntaxCommentColor",
+    "dim": 247,
+    "error": 238,
+    "border": 250
+  }
+}

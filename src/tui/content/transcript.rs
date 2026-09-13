@@ -142,6 +142,8 @@ pub struct Block {
     pub done: bool,
     pub is_error: bool,
     pub detail: Option<String>,
+    /// Saved output for a shell block; the live tail remains in `detail`.
+    pub output_id: Option<u64>,
     /// A finished tool's outcome summary ("exit 7", "timeout 5s"); rendered
     /// as a continuation line only on failure — the reference convention.
     pub result: Option<String>,
@@ -181,6 +183,7 @@ impl Block {
             done: false,
             is_error: false,
             detail: None,
+            output_id: None,
             result: None,
             children: Vec::new(),
             tool_children: Vec::new(),
@@ -400,6 +403,12 @@ impl Block {
         theme: &Theme,
         width: usize,
     ) -> Vec<(String, Option<ToolDetail>)> {
+        if self.kind == Kind::Shell {
+            return vec![(
+                theme.fg("dim", &format!("$ {}", self.text)),
+                self.output_id.map(ToolDetail::Stored),
+            )];
+        }
         if self.kind != Kind::ToolGroup {
             // The cached path: the projection pays only for blocks whose
             // content actually changed, sharing the main transcript's cache.
@@ -741,7 +750,7 @@ fn prefix_by_width(text: &str, width: usize) -> String {
 
 /// Clip by display cells the reference way: fits → unchanged; one cell →
 /// a bare ellipsis; otherwise a width-1 prefix plus `…`.
-fn clip_plain(text: &str, width: usize) -> String {
+pub(crate) fn clip_plain(text: &str, width: usize) -> String {
     if display_width(text) <= width {
         return text.to_string();
     }

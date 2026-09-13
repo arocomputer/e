@@ -55,6 +55,11 @@ src/tui/     the frontend (short paths re-export from the groups)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
 sdk/         e-sdk, a second consumer of the library target with its own
              release boundary (docs/sdk.md, decisions/0002); unstable
+packages/    extensions and shared crates, never compiled into the e binary
+  terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
+                  primitives shared by e and its extensions
+  diff/           e-diff, the first packaged extension: Git review over the
+                  line protocol (/diff, /diff <path>); see docs/diff.md
 ```
 
 ## Running one thing, not everything

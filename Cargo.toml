@@ -17,6 +17,7 @@ name = "e"
 path = "src/main.rs"
 
 [dependencies]
+e-terminal = { version = "0.0.1", path = "packages/terminal" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror = "2"
@@ -51,5 +52,6 @@ strip = "symbols"
 # release boundary — see docs/decisions/0002-rust-sdk-package.md. fuzz/ stays
 # its own workspace because cargo-fuzz requires it.
 [workspace]
-members = ["sdk"]
+members = ["sdk", "packages/terminal", "packages/diff"]
+default-members = ["."]
 resolver = "2"
