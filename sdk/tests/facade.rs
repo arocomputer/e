@@ -46,7 +46,6 @@ fn builder_resolves_models_and_reports_a_bad_slug() {
         .build()
     {
         Err(Error::ModelNotFound(slug)) => assert_eq!(slug, "nope/not-a-model"),
-        Err(other) => panic!("wrong error: {other}"),
         Ok(_) => panic!("an unknown slug must not resolve"),
     }
 

@@ -237,6 +237,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "crossterm",
+ "e-terminal",
  "futures",
  "libc",
  "proptest",
@@ -254,12 +255,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "e-diff"
+version = "0.0.1"
+dependencies = [
+ "crossterm",
+ "e-terminal",
+ "rustix",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "unicode-width",
+]
+
+[[package]]
 name = "e-sdk"
 version = "0.0.0"
 dependencies = [
  "e",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "e-terminal"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-width",
 ]
 
 [[package]]

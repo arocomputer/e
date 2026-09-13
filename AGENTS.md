@@ -53,6 +53,11 @@ src/tui/     the frontend (short paths re-export from the groups)
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
+packages/    extensions and shared crates, never compiled into the e binary
+  terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
+                  primitives shared by e and its extensions
+  diff/           e-diff, the first packaged extension: Git review over the
+                  line protocol (/diff, /diff <path>); see docs/diff.md
 ```
 
 ## Running one thing, not everything

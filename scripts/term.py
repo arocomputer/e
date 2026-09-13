@@ -1,6 +1,7 @@
 """Tolerant pyte screen: agents emit private-mode queries pyte does not model."""
 import codecs, json, pathlib, re
 import pyte
+import re
 
 class Screen(pyte.Screen):
     def report_device_status(self, *args, **kwargs):
@@ -14,7 +15,7 @@ def replay(path, cols, rows, on_frame=None):
     The callback receives the live screen. Copy any cells retained beyond it.
     """
     data = pathlib.Path(path).read_bytes()
-    screen = Screen(cols, rows)
+    main = screen = Screen(cols, rows)
     stream = pyte.Stream(screen)
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     sidecar = pathlib.Path(str(path) + ".sizes.json")
@@ -23,7 +24,7 @@ def replay(path, cols, rows, on_frame=None):
     def feed(chunk, final=False):
         # pyte predates the Kitty keyboard push/pop protocol. Its parser
         # otherwise leaks the unsupported parameter into visible text.
-        nonlocal pending
+        nonlocal pending, screen, stream
         text = pending + decoder.decode(chunk, final=final)
         text = re.sub(r"\x1b\[[<>][0-9;]*u", "", text)
         # A Kitty sequence split across a chunk boundary (a resize offset can
@@ -35,7 +36,15 @@ def replay(path, cols, rows, on_frame=None):
             if m:
                 pending = text[m.start():]
                 text = text[: m.start()]
-        stream.feed(text)
+        for part in re.split(r"(\[\?1049[hl])", text):
+            if part == "\x1b[?1049h":
+                screen = Screen(screen.columns, screen.lines)
+                stream = pyte.Stream(screen)
+            elif part == "\x1b[?1049l":
+                screen = main
+                stream = pyte.Stream(screen)
+            else:
+                stream.feed(part)
 
     events = []
     if on_frame is not None:
@@ -51,6 +60,7 @@ def replay(path, cols, rows, on_frame=None):
             on_frame(screen)
         offset = end
     feed(data[offset:], final=True)
+
     return screen
 
 
