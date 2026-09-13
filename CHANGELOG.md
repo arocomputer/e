@@ -7,6 +7,13 @@ the pipeline publishes.
 
 ## Unreleased
 
+- The `e-sdk` package is implemented: `Session::builder()` resolves model,
+  effort, tools, home, and a session file to resume up front; `prompt()`
+  returns a lazy, backpressured `Turn` that streams typed events and
+  settles into a `Reply` (or a `TurnError` carrying the partial reply);
+  `steer()`, `cancel()`, and drop-to-interrupt mirror the terminal. Sessions
+  are memory-only and extension-free unless asked. Tool batch events now
+  carry each call's name and raw arguments.
 - Cancellation skips queued tool waves, and late tool events cannot change a
   newer turn. Rejected-image text stays a literal prompt, even when it starts
   with a command.

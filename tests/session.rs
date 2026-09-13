@@ -41,9 +41,7 @@ fn future_session_format_fails_with_an_actionable_error() {
 "#,
     )
     .unwrap();
-    let error = SessionLog::load(&path)
-        .err()
-        .expect("future format must fail");
+    let error = SessionLog::load(&path).expect_err("future format must fail");
     assert!(error.to_string().contains("newer than this e supports"));
     let _ = std::fs::remove_file(path);
 }

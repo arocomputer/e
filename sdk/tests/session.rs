@@ -1,0 +1,422 @@
+//! The SDK's contract against a mock provider: a session resolves its
+//! model through an explicitly scoped home, a turn streams events and
+//! settles into a reply, failure and cancellation leave the session usable,
+//! tools and steering flow through, and persisted sessions resume.
+//!
+//! The mock provider is the repository's shared one (`tests/common`). Homes
+//! are plain temp directories passed to the builder — never `E_HOME` — so
+//! these tests also prove that configuration injection works without
+//! touching the process environment.
+
+#[path = "../../tests/common/mod.rs"]
+mod common;
+
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use common::{request_json, serve_raw, serve_sse};
+use e_sdk::{Event, Message, Session, Stop, ToolOutcome, Tools, Usage};
+
+/// One plain reply with usage, in the Completions dialect.
+const OK: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+    "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
+    "data: [DONE]\n\n",
+);
+
+/// A tool round: ask to read hello.txt, then (next request) reply.
+const READ_HELLO: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
+    "\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+const AFTER_READ: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"content\":\"the file has two lines\"}}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+/// A throwaway directory, removed on drop.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(label: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "e-sdk-{label}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        TempDir(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// An e home declaring one mock provider per `(name, port)`, each signed
+/// in with an API key and serving a model called `test`.
+fn mock_home(label: &str, providers: &[(&str, u16)]) -> TempDir {
+    let home = TempDir::new(label);
+    let mut auth = serde_json::Map::new();
+    let mut declared = serde_json::Map::new();
+    for (name, port) in providers {
+        auth.insert(name.to_string(), serde_json::json!({"key": "k"}));
+        declared.insert(
+            name.to_string(),
+            serde_json::json!({
+                "base_url": format!("http://127.0.0.1:{port}"),
+                "api": "completions",
+                "models": ["test"],
+            }),
+        );
+    }
+    std::fs::write(
+        home.0.join("auth.json"),
+        serde_json::Value::Object(auth).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        home.0.join("models.json"),
+        serde_json::json!({"providers": declared}).to_string(),
+    )
+    .unwrap();
+    home
+}
+
+/// A workspace holding the file the tool-round fixture reads.
+fn workspace_with_hello(label: &str) -> TempDir {
+    let ws = TempDir::new(label);
+    std::fs::write(ws.0.join("hello.txt"), "line one\nline two\n").unwrap();
+    ws
+}
+
+fn message_texts(body: &serde_json::Value) -> Vec<String> {
+    body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["content"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_streams_text_and_settles_into_a_reply_without_writing_home() {
+    let (port, server) = serve_sse(&[OK]);
+    let home = mock_home("stream", &[("mock", port)]);
+    let ws = TempDir::new("stream-ws");
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .instructions("Answer tersely.")
+        .build()
+        .await
+        .unwrap();
+    assert_eq!(session.model(), "mock/test");
+
+    let mut turn = session.prompt("hi");
+    let mut streamed = String::new();
+    let mut usage = None;
+    while let Some(event) = turn.next().await {
+        match event {
+            Event::Text(delta) => streamed.push_str(&delta),
+            Event::Usage(u) => usage = Some(u),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+    let reply = turn.finish().await.unwrap();
+    assert_eq!(streamed, "ok");
+    assert_eq!(reply.text, "ok");
+    assert_eq!(reply.stop, Stop::Complete);
+    let expected = Usage {
+        input: 5,
+        output: 1,
+        cache_read: 0,
+    };
+    assert_eq!(usage, Some(expected));
+    assert_eq!(reply.usage, expected);
+    assert_eq!(session.history().len(), 2);
+    assert_eq!(session.path(), None);
+    assert!(
+        !home.0.join("sessions").exists(),
+        "a memory-only session must leave no files in the home"
+    );
+
+    let body = request_json(&server.join().unwrap()[0]);
+    assert_eq!(body["model"], "test");
+    let system = &message_texts(&body)[0];
+    assert!(
+        system.ends_with("Answer tersely."),
+        "host instructions must close the system prompt, got: {system}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_failure_is_an_error_carrying_the_partial_reply() {
+    let (port, _server) = serve_raw(vec![
+        "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".into(),
+    ]);
+    let home = mock_home("failure", &[("mock", port)]);
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let error = session.prompt("hi").await.unwrap_err();
+    assert!(!error.message.is_empty());
+    assert_eq!(error.reply.text, "");
+    assert_eq!(error.reply.stop, Stop::Complete);
+    // The failed turn's user message is still in history, so a retry
+    // does not need to resend it.
+    assert_eq!(session.history().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_a_running_turn_interrupts_it_and_the_session_recovers() {
+    // A provider that sends headers and then never speaks again.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let stalled_port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buffer = [0u8; 8192];
+        let _ = sock.read(&mut buffer);
+        let _ = sock.write_all(
+            b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+        );
+        std::thread::sleep(Duration::from_secs(30));
+    });
+    let (good_port, _server) = serve_sse(&[OK]);
+    let home = mock_home("drop", &[("stalled", stalled_port), ("mock", good_port)]);
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("stalled/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("hi");
+    let first = tokio::time::timeout(Duration::from_millis(300), turn.next()).await;
+    assert!(first.is_err(), "the stalled provider must yield nothing");
+    drop(turn);
+
+    session.set_model("mock/test").unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(3), session.prompt("again"))
+        .await
+        .expect("the next turn must not wait on the stalled one")
+        .unwrap();
+    assert_eq!(reply.text, "ok");
+    // Both prompts were committed; only the second got an answer.
+    let roles: Vec<&str> = session.history().iter().map(Message::role).collect();
+    assert_eq!(roles, vec!["user", "user", "assistant"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_turn_stops_it_and_reports_cancelled() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buffer = [0u8; 8192];
+        let _ = sock.read(&mut buffer);
+        std::thread::sleep(Duration::from_secs(30));
+    });
+    let home = mock_home("cancel", &[("mock", port)]);
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("hi");
+    let _ = tokio::time::timeout(Duration::from_millis(300), turn.next()).await;
+    turn.cancel();
+    let reply = tokio::time::timeout(Duration::from_secs(3), turn.finish())
+        .await
+        .expect("cancel must end a stalled turn promptly")
+        .unwrap();
+    assert_eq!(reply.stop, Stop::Cancelled);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_calls_are_announced_with_name_and_arguments_and_run_for_real() {
+    let (port, server) = serve_sse(&[READ_HELLO, AFTER_READ]);
+    let home = mock_home("tools", &[("mock", port)]);
+    let ws = workspace_with_hello("tools-ws");
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("how many lines in hello.txt?");
+    let mut order = Vec::new();
+    while let Some(event) = turn.next().await {
+        match event {
+            Event::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                assert_eq!(name, "read");
+                assert_eq!(arguments, r#"{"path":"hello.txt"}"#);
+                order.push(("call", id));
+            }
+            Event::ToolStart { id } => order.push(("start", id)),
+            Event::ToolEnd {
+                id,
+                outcome,
+                content,
+                ..
+            } => {
+                assert_eq!(outcome, ToolOutcome::Completed);
+                assert!(content.contains("line two"), "tool output: {content}");
+                order.push(("end", id));
+            }
+            _ => {}
+        }
+    }
+    let reply = turn.finish().await.unwrap();
+    assert_eq!(reply.text, "the file has two lines");
+    assert_eq!((reply.tools.calls, reply.tools.failures), (1, 0));
+    let id = order[0].1;
+    assert_eq!(order, vec![("call", id), ("start", id), ("end", id)]);
+    let requests = server.join().unwrap();
+    assert!(
+        requests[1].contains("line one"),
+        "tool result not sent back"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn steering_lands_before_the_next_request() {
+    let (port, server) = serve_sse(&[READ_HELLO, AFTER_READ]);
+    let home = mock_home("steer", &[("mock", port)]);
+    let ws = workspace_with_hello("steer-ws");
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd(&ws.0)
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let mut turn = session.prompt("how many lines in hello.txt?");
+    let mut steered = None;
+    while let Some(event) = turn.next().await {
+        match event {
+            Event::ToolCall { .. } => assert!(turn.steer("and count the words too")),
+            Event::Steered(text) => steered = Some(text),
+            _ => {}
+        }
+    }
+    turn.finish().await.unwrap();
+    assert_eq!(steered.as_deref(), Some("and count the words too"));
+    let second = request_json(&server.join().unwrap()[1]);
+    assert!(
+        message_texts(&second)
+            .iter()
+            .any(|m| m.contains("and count the words too")),
+        "the steer must reach the model on the next request"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tools_none_advertises_nothing_and_says_so() {
+    let (port, server) = serve_sse(&[OK]);
+    let home = mock_home("notools", &[("mock", port)]);
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .tools(Tools::None)
+        .build()
+        .await
+        .unwrap();
+    session.prompt("hi").await.unwrap();
+    let body = request_json(&server.join().unwrap()[0]);
+    assert!(body.get("tools").is_none(), "no schemas: {body}");
+    assert!(message_texts(&body)[0].contains("no tools"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persisted_session_is_listed_and_resumes_from_its_file() {
+    let (port, server) = serve_sse(&[OK, OK]);
+    let home = mock_home("persist", &[("mock", port)]);
+    let ws = TempDir::new("persist-ws");
+    let builder = || {
+        Session::builder()
+            .home(&home.0)
+            .cwd(&ws.0)
+            .model("mock/test")
+    };
+
+    let mut session = builder().persist(true).build().await.unwrap();
+    session.prompt("first").await.unwrap();
+    let path = session.path().expect("a persisted session has a file");
+    assert!(path.starts_with(home.0.join("sessions")));
+    drop(session);
+
+    let saved = builder().saved();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].path, path);
+    assert_eq!(saved[0].user_turns, 1);
+
+    let mut resumed = builder().resume(&path).build().await.unwrap();
+    assert_eq!(resumed.history().len(), 2);
+    resumed.prompt("second").await.unwrap();
+    assert_eq!(resumed.path(), Some(path.clone()));
+    assert_eq!(e_sdk::transcript(&path).unwrap().len(), 4);
+
+    let second = request_json(&server.join().unwrap()[1]);
+    let texts = message_texts(&second);
+    assert_eq!(&texts[1..], ["first", "ok", "second"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_builder_refuses_what_cannot_work_before_any_request() {
+    let home = mock_home("refuse", &[("mock", 1)]);
+    let base = || Session::builder().home(&home.0).model("mock/test");
+
+    let error = base()
+        .tools(Tools::Only(vec!["read".into(), "teleport".into()]))
+        .build()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, e_sdk::Error::UnknownTool(name) if name == "teleport"));
+
+    let error = base().effort("max").build().await.unwrap_err();
+    assert!(matches!(error, e_sdk::Error::Effort { .. }), "{error}");
+
+    let error = Session::builder()
+        .home(&home.0)
+        .model("nobody/test")
+        .build()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, e_sdk::Error::ModelUnavailable(_)),
+        "{error}"
+    );
+
+    let empty = TempDir::new("empty-home");
+    let error = Session::builder().home(&empty.0).build().await.unwrap_err();
+    assert!(matches!(error, e_sdk::Error::NoProvider), "{error}");
+}
+
+/// A session and its turns move between tasks: a server can build one per
+/// request and drive it from wherever the request is handled.
+#[test]
+fn sessions_and_turns_are_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Session>();
+    assert_send::<e_sdk::Turn<'static>>();
+}

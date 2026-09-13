@@ -381,10 +381,13 @@ where
     }
 }
 
-/// Presentation contract for one call in a provider-issued tool batch.
+/// One call in a provider-issued tool batch: the call as the model made it
+/// (`name`, raw JSON `arguments`) plus the labels a transcript shows for it.
 #[derive(Clone, Debug)]
 pub struct ToolCallPresentation {
     pub id: u64,
+    pub name: String,
+    pub arguments: String,
     pub category: String,
     pub running: String,
     pub completed: String,
