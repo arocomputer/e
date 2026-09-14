@@ -202,6 +202,123 @@ fn lcs_ops(old: &[DiffLine<'_>], new: &[DiffLine<'_>], offset: usize, ops: &mut 
     }
 }
 
+/// Convert a unified diff (what `git diff` prints) into the row grammar
+/// above, so an extension's diff paints like a built-in edit's: `-` rows
+/// carry old-file numbers, `+` and context rows new-file numbers, hunks
+/// are separated by `⋯`, and each file opens with its path on a plain
+/// row. Lines that are not part of a hunk (`diff --git`, `index`, mode
+/// changes, `Binary files … differ`) survive as plain rows only where they
+/// say something a reader needs: the path and a binary note.
+pub fn from_unified(diff: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut old_no: usize = 0;
+    let mut new_no: usize = 0;
+    let mut in_hunk = false;
+    let mut hunks_in_file = 0usize;
+    for raw in diff.lines() {
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
+        if let Some(rest) = line.strip_prefix("+++ ") {
+            let path = rest.strip_prefix("b/").unwrap_or(rest);
+            if !out.is_empty() {
+                out.push(String::new());
+            }
+            out.push(path.to_string());
+            in_hunk = false;
+            hunks_in_file = 0;
+            continue;
+        }
+        if line.starts_with("--- ") && !in_hunk {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("@@ ") {
+            // `-a[,b] +c[,d] @@…`
+            let mut parts = rest.split_whitespace();
+            let old = parts.next().unwrap_or("-1").trim_start_matches('-');
+            let new = parts.next().unwrap_or("+1").trim_start_matches('+');
+            old_no = old
+                .split(',')
+                .next()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(1);
+            new_no = new
+                .split(',')
+                .next()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(1);
+            if hunks_in_file > 0 {
+                out.push("      ⋯".to_string());
+            }
+            hunks_in_file += 1;
+            in_hunk = true;
+            continue;
+        }
+        if !in_hunk {
+            if line.starts_with("Binary files") {
+                if !out.is_empty() {
+                    out.push(String::new());
+                }
+                out.push(line.to_string());
+            }
+            continue;
+        }
+        if line.starts_with('\\') {
+            // "\ No newline at end of file" — a fact about the last row,
+            // not a row of its own.
+            continue;
+        }
+        let (op, text) = match line.chars().next() {
+            Some('+') => ('+', &line[1..]),
+            Some('-') => ('-', &line[1..]),
+            Some(' ') => (' ', &line[1..]),
+            None => (' ', ""),
+            // A stray line ends the hunk (git's own header for the next
+            // file starts with `diff`).
+            Some(_) => {
+                in_hunk = false;
+                continue;
+            }
+        };
+        match op {
+            '+' => {
+                out.push(format!("{:>5} + {}", new_no, text));
+                new_no += 1;
+            }
+            '-' => {
+                out.push(format!("{:>5} - {}", old_no, text));
+                old_no += 1;
+            }
+            _ => {
+                out.push(format!("{:>5}   {}", new_no, text));
+                new_no += 1;
+                old_no += 1;
+            }
+        }
+    }
+    out.join("\n")
+}
+
+#[cfg(test)]
+mod unified_tests {
+    use super::from_unified;
+
+    #[test]
+    fn unified_hunks_become_numbered_rows_with_elisions_between_them() {
+        let diff = "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n\
+@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n@@ -10,2 +10,3 @@\n x\n+y\n z\n\\ No newline at end of file\n\
+diff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n";
+        let rows = from_unified(diff);
+        assert_eq!(
+            rows,
+            "f.txt\n    1   a\n    2 - b\n    2 + B\n    3   c\n      ⋯\n   10   x\n   11 + y\n   12   z\n\nBinary files a/img.png and b/img.png differ"
+        );
+    }
+
+    #[test]
+    fn text_that_is_not_a_diff_yields_nothing() {
+        assert_eq!(from_unified("hello\nworld\n"), "");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::render;

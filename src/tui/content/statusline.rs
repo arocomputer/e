@@ -20,6 +20,8 @@ pub enum TurnPhase {
     ToolCall,
     /// Backing off after a retryable failure before another attempt.
     Retrying,
+    /// The core is summarizing older context before the next request.
+    Compacting,
     Tool,
     AssistantText,
 }
@@ -131,10 +133,12 @@ impl Turn {
         } else {
             format!(" {tokens}")
         };
-        Some(format!(
-            "Thinking ({}){suffix}",
-            format_elapsed(elapsed_secs)
-        ))
+        let verb = if self.phase == TurnPhase::Compacting {
+            "Compacting context"
+        } else {
+            "Thinking"
+        };
+        Some(format!("{verb} ({}){suffix}", format_elapsed(elapsed_secs)))
     }
 
     /// A recovered flash overrides everything else until it expires.
@@ -147,6 +151,7 @@ impl Turn {
             | TurnPhase::Thinking
             | TurnPhase::ToolCall
             | TurnPhase::Tool
+            | TurnPhase::Compacting
             | TurnPhase::AssistantText => self.activity_label(elapsed_secs),
             TurnPhase::Retrying => {
                 let r = self.retry.as_ref()?;

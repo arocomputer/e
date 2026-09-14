@@ -34,34 +34,38 @@ src/core/    the harness, terminal-free
   config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·
                   keybindings.rs (composer chord overrides)
-  resources/      skills.rs · prompts.rs (/name templates) · docs.rs (the
+  resources/      skills.rs · prompts.rs (/name templates) · packages.rs
+                  (`e install`: git clones under ~/.e/packages that every
+                  loader reads after ~/.e's own dirs) · docs.rs (the
                   embedded guides behind `e docs`)
   extensions/     the extension host: subprocesses over a JSONL line
-                  protocol (docs/extensions.md) — tools, commands, hooks
+                  protocol (docs/extensions.md) — tools, commands, hooks,
+                  events, and the extensions' own ui.*/session.* requests
+                  (HostRequest, answered by the frontend; decision 0005)
   tools/          read · write · edit · grep (optional `glob` filter) · bash
-                  (optional `background`/`handle` for long-lived processes)
-                  — the whole surface; directory listing and file-finding go
-                  through bash, and skills load through read (the catalog
-                  carries their paths)
+                  (optional `background`/`handle` for long-lived processes) ·
+                  read_result (page into a truncated result by id; the
+                  runtime keeps the whole text) — the whole surface;
+                  directory listing and file-finding go through bash, and
+                  skills load through read (the catalog carries their paths)
   session.rs · output.rs · workspace.rs — SessionLog is a tree, not just a
-                  line: id/parent per message, `/tree` branches in place
+                  line: id/parent per message, `/tree` branches in place,
+                  `create_with` seeds a `/fork`; `responses_in` feeds usage.rs
+                  (the /usage fold) · export.rs (a branch as one HTML page)
 src/tui/     the frontend (short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
-  content/        markdown · transcript · composer · statusline
+  content/        markdown · transcript · composer · statusline · history
+                  (prompts across sessions, ~/.e/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state, keys, the frame loop) · events.rs
                   (session-event handling) · menus.rs (footer menus) ·
-                  login.rs (sign-in flows)
+                  login.rs (sign-in flows) · extui.rs (answering
+                  extensions: modals, panels, status slots, session control)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
 sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a consumer of the library target with its own release boundary
              (decisions/0002), never a fourth layer
-packages/    extensions and shared crates, never compiled into the e binary
-  terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
-                  primitives shared by e and its extensions
-  diff/           e-diff, the first packaged extension: Git review over the
-                  line protocol (/diff, /diff <path>); see docs/diff.md
 ```
 
 ## Running one thing, not everything
@@ -117,13 +121,19 @@ surface? Route it through `panel.rs` so it can't diverge.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - `~/.e/` is the only home e reads. Never reach into another tool's directory.
+- A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/
+  themes/`), no manifest. New resource kinds join that list; package
+  discovery stays convention, not configuration.
 - **Don't hardcode what a user might change.** Looks, wordings, and behaviours a
   person could sensibly prefer are read from `~/.e/` with a built-in default —
   themes from `~/.e/themes/`, and skills, prompts, instructions, the system
   prompt the same way. When you add something user-facing, make it a file-backed
   override, not a constant. When data isn't enough there is the extension API
   (`core/extensions/`, docs/extensions.md) — grow its protocol by need, never by
-  symmetry, and keep hooks fail-open.
+  symmetry, and keep hooks fail-open. What crosses the line is data, never code
+  or terminal bytes: an extension describes (`show`, `panel`, a `label`), e
+  paints through the theme. A new rendering need is a new `format` or token, not
+  a way for extensions to emit escape sequences.
 - Verify UI changes with a real frame, not by reasoning about bytes. `./x ui`
   runs checked PTY scenarios under `tests/ui/`, sharing the capture/replay
   helpers in `scripts/`. See `tests/ui/README.md` for setup and retained frames.

@@ -13,6 +13,7 @@ OVERVIEW:
  - Small, fast coding agent for the terminal.
  - One Rust binary with tools, commands, themes, prompts, and skills.
  - Executable JSONL extensions add tools, commands, hooks, and startup behavior.
+ - Packages share extensions, skills, prompts, and themes: e install git:<host>/<user>/<repo>
 
 ///
 
@@ -38,6 +39,7 @@ REFERENCE:
  - [Extensions](https://github.com/intuitums/e/blob/main/docs/extensions.md)
  - [SDK](https://github.com/intuitums/e/blob/main/docs/sdk.md)
  - [Skills](https://github.com/intuitums/e/blob/main/docs/skills.md)
+ - [Packages](https://github.com/intuitums/e/blob/main/docs/packages.md)
  - [Themes](https://github.com/intuitums/e/blob/main/docs/themes.md)
  - [Releases](https://github.com/intuitums/e/blob/main/docs/releases.md)
  - [Security](https://github.com/intuitums/e/blob/main/SECURITY.md)

@@ -282,9 +282,13 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
             return err(format!("write {path}: {error}"), "write", path);
         }
     }
+    let change = state.snapshot_change(&full, format!("write {path}"));
     match super::staged_write(&full, content.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);
+            if let Some(change) = change {
+                state.keep_change(change);
+            }
             let additions = content.lines().count();
             let deletions = before_lines;
             // The model wrote this content one message ago — echoing it back
@@ -390,7 +394,7 @@ pub fn grep_schema() -> Value {
     )
 }
 
-pub fn grep(args: &Value, cwd: &Path, _state: &super::ToolRuntime) -> ToolOutput {
+pub fn grep(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     let Some(pattern) = args["pattern"].as_str() else {
         return err("grep: missing pattern".into(), "grep", "");
     };
@@ -447,7 +451,7 @@ pub fn grep(args: &Value, cwd: &Path, _state: &super::ToolRuntime) -> ToolOutput
             format!("{count}+ matches"),
         )
     } else {
-        (truncate(body), format!("{count} matches"))
+        (state.cap(body), format!("{count} matches"))
     };
     ok(content, summary)
 }

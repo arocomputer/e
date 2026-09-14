@@ -1,8 +1,9 @@
 # Extensions
 
-An extension is an executable in `~/.e/extensions/`. It can be a top-level
-file such as `foo.mjs`, or the entry point of a directory such as `foo/` that
-also contains helper files. Directory entry-point selection checks `index.*`,
+An extension is an executable in `~/.e/extensions/`, or in the
+`extensions/` directory of an installed [package](packages.md). It can be a
+top-level file such as `foo.mjs`, or the entry point of a directory such as
+`foo/` that also contains helper files. Directory entry-point selection checks `index.*`,
 a file matching the directory name, then a sole executable. Path order breaks
 a tie within one rule.
 
@@ -13,33 +14,53 @@ stdout.
 Extensions can:
 
 - **add tools** the model calls — and override a built-in by using its name
-- **add slash commands** that show up in the `/` picker
+- **add slash commands** that show up in the `/` picker, and **shortcuts**
 - **rewrite or swallow a submitted line** with the `input` hook
 - **name the session** from a command or tool result (shown in `/resume`)
 - **gate tool calls** with the `tool_call` hook (return a block + reason)
-- **observe events** (`turn_end`) and **notify** the transcript at any time
+- **shape a turn** with the `before_turn`, `tool_result`, and
+  `compact_summary` hooks
+- **subscribe to the lifecycle**: session, turn, tool, compaction, model
+- **show things**: a notice, a block of text, markdown, or a real diff, a
+  tool row with its own verbs, a panel, a status slot
+- **ask the user**: a pick list, a yes/no, a line of input
+- **steer the session**: inject a message, narrow the toolset, switch the
+  model or effort, interrupt, compact
 - **handle startup arguments** and request a same-binary relaunch in another directory
+
+Everything an extension shows is data that e paints through the user's
+theme. An extension never emits terminal bytes and never runs inside e —
+that is the difference from pi's in-process API, and the reason a crashed
+or hostile extension is a notice rather than a broken terminal. The design
+and its limits are recorded in
+[decisions/0005](decisions/0005-extension-surface.md).
 
 ## Wire protocol (version 1 + capabilities)
 
 e → extension, requests (each carries an `id` to answer with):
 
 ```
-{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update"],"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
+{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
 {"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--project","../app"],"flags":{"project":"../app"}}}
 {"id":3,"method":"tool_call","params":{"name":"greet","arguments":{...}}}
 {"id":4,"method":"command","params":{"name":"ping","args":"rest of the line"}}
 {"id":5,"method":"hook.tool_call","params":{"name":"bash","arguments":{...}}}
 {"id":6,"method":"hook.input","params":{"text":"a submitted line"}}
+{"id":7,"method":"hook.before_turn","params":{"prompt":"the user's message"}}
+{"id":8,"method":"hook.tool_result","params":{"name":"bash","content":"…","is_error":false}}
+{"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
+{"id":10,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 ```
 
 e → extension, notifications (no `id`, no reply):
 
 ```
 {"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
+{"method":"flags","params":{"flags":{…}}}
+{"method":"ui.key","params":{"key":"down"}}          while your interactive panel is open
+{"method":"ui.panel_closed","params":{}}             the user closed it
 {"method":"shutdown"}
 ```
-
 
 extension → e:
 
@@ -48,24 +69,41 @@ extension → e:
 {"id":2,"error":"what went wrong"}             or fail it
 {"method":"notify","params":{"message":"hi"}}  a transcript notice, any time
 {"method":"tool.update","params":{"id":3,"stream":"stdout","chunk":"working\n"}}
+{"id":"q1","method":"ui.select","params":{…}}  ask e something (see below)
 ```
+
+A request from the extension carries the extension's own `id` — any JSON
+value — and is answered with it: `{"id":"q1","result":{…}}` or
+`{"id":"q1","error":"…"}`. The two id spaces never meet; direction tells
+them apart. `capabilities` lists the families this e speaks; `ui` says
+whether a person can answer `ui.*` requests (false under `e rpc`, where
+every one is answered `{"error":"no ui"}` at once).
 
 ## Results by method
 
-**initialize** → the manifest. `tools`, `commands`, `flags`, and `hooks` are
-all optional; `parameters` is a JSON Schema object. `extensions_config` in
-initialize params carries every `~/.e/settings.json` entry under
-`"extensions"`, namespaced by extension name — your config, without
-squatting on a top-level key:
+**initialize** → the manifest. Everything but `name` is optional;
+`parameters` is a JSON Schema object. `extensions_config` in initialize
+params carries every `~/.e/settings.json` entry under `"extensions"`,
+namespaced by extension name — your config, without squatting on a
+top-level key:
 
 ```json
 {"name":"my-ext","version":"1.0",
- "tools":[{"name":"greet","description":"say hi","parameters":{"type":"object","properties":{}}}],
+ "tools":[{"name":"greet","description":"say hi","parameters":{"type":"object","properties":{}},
+           "label":{"category":"greet","running":"Greeting","completed":"Greeted","target":"who"}}],
  "commands":[{"name":"ping","description":"check the extension"}],
  "flags":[{"name":"project","type":"string","description":"relaunch in this directory"},
            {"name":"plan","type":"boolean","description":"plan mode"}],
- "hooks":["tool_call","input"]}
+ "hooks":["tool_call","input","before_turn","tool_result","compact_summary"],
+ "events":["session_start","turn_start","tool_end"],
+ "shortcuts":[{"key":"ctrl+alt+g","description":"greet"}]}
 ```
+
+A tool's `label` gives its transcript row the built-in grammar
+(`Greeting bob` while running, `Greeted bob` after): `category` is the
+batch tally's noun, the verbs are shown as given, and `target` names the
+argument whose value the row shows. Without a label the row reads
+`Running greet` / `Ran greet`.
 
 `flags` are **declared** for discoverability and useful so e can *parse*
 them. A flag with `"type":"boolean"` (the default) or `"type":"string"`
@@ -93,8 +131,14 @@ command line, regardless of default. The raw protocol gets
 `{"method":"flags","params":{"flags":{…}}}`.
 
 **tool_call** → `{"content":"text the model sees","is_error":false,
-"session_name":"optional new session name"}`. Before that final response,
-an extension may emit any number of `tool.update` notifications. Their `id`
+"session_name":"optional new session name","summary":"+12 -3",
+"display":"…","format":"diff"}`. `content` is all the model reads.
+`summary` is the row's suffix; `display` is what the ctrl+o viewer shows
+instead of `content` (a built-in edit does the same with its full diff);
+`format` is `text` (default), `markdown`, or `diff` — a unified diff, what
+`git diff` prints, is converted to the viewer's row grammar with real line
+numbers and coloured markers. Before that final response, an extension may
+emit any number of `tool.update` notifications. Their `id`
 must be the active tool-call request id, `stream` is `stdout` or `stderr`, and
 `chunk` is displayed through the same ordered tool-output stream as built-in
 commands. Version-1 extensions remain compatible; they simply never emit an
@@ -108,9 +152,38 @@ async tool({ arguments }, { update }) {
 }
 ```
 
-**command** → `{"notice":"line for the transcript"}` and/or
-`{"prompt":"text submitted as the user"}`, and optionally
-`{"session_name":"name shown in /resume"}`.
+A command may declare `"arguments":"<env>"` — shown in the `/` picker, and
+picking the command then leaves `/name ` in the composer for the user to
+finish — and `"completions":true`, after which typing `/name pre` sends
+`{"id":…,"method":"command.complete","params":{"name":"name","prefix":"pre"}}`
+and the answer `{"items":[{"value":"prefix-match","label"?,"description"?}]}`
+opens a picker whose choice replaces the prefix. Completions have three
+seconds; a slow or empty answer shows nothing.
+
+**command** → `{"notice":"line for the transcript"}`, `{"show":{"title":
+"diff src/main.rs","body":"…","format":"diff"}}` (a block in the
+transcript — see `ui.show`), and/or `{"prompt":"text submitted as the
+user"}`, and optionally `{"session_name":"name shown in /resume"}`.
+
+**shortcut** → the same result shape as a command. Sent to the extension
+that declared the chord; see [Shortcuts](#shortcuts).
+
+**hook.before_turn** → `{"system_suffix":"a paragraph appended to the
+system prompt for this turn","message":{"content":"…","internal":true}}`.
+The suffix is appended, never a replacement: the system prompt is the
+user's file-backed contract with the model. The message is added to the
+conversation before the request; `internal` (the default) keeps it out of
+the transcript. Runs once per turn, before the first request, with the
+prompt that started it.
+
+**hook.tool_result** → `{"content":"what the model should read instead"}`
+or `{}` to keep it. Runs after every tool, before the result is shown,
+stored, or sent — redaction and trimming live here. Extensions see each
+other's rewrites in declaration order. A rewrite also drops the tool's
+richer `display` text, so the viewer shows exactly what you let through.
+
+**hook.compact_summary** → `{"summary":"…"}` or `{}`. The generated summary
+is about to replace the older conversation; this is the last word on it.
 
 **hook.tool_call** → `{"block":true,"reason":"why"}` to stop the call
 (the model sees the reason as an error result), `{"block":false}` to allow.
@@ -146,13 +219,120 @@ the current process. `relaunch` replaces the current process with the same e
 binary in `cwd`; extensions cannot choose another executable. The first
 relaunch ends the chain.
 
+## Events
+
+List the events you want in the manifest's `events`; e sends only those,
+as notifications: `{"method":"event","params":{"name":"…","extra":{…}}}`.
+A manifest without an `events` field is a version-1 extension and receives
+`turn_end` alone.
+
+```
+session_start     {reason, path}       reason: startup | reload | new | resume | fork
+session_shutdown  {reason}             reason: quit | reload | new | resume | fork
+turn_start        {prompt}
+turn_end          {aborted}
+tool_start        {id, name, arguments}
+tool_end          {id, name, outcome, content}
+compact_start     {}
+compact_end       {summary}
+model_change      {model}
+effort_change     {effort}
+```
+
+There are no per-token events. A pipe per delta is a cost with no
+consumer; `tool_end` carries the finished text.
+
+## Asking e: `ui.*` and `session.*`
+
+The extension sends `{"id":<yours>,"method":"…","params":{…}}` and reads
+the answer with the same id. Every request is bounded: at most 32
+unanswered per extension (more are answered with an error), one modal at
+a time across all extensions, text sanitized before paint, and sizes
+clipped rather than refused (a long diff still shows, it ends early).
+
+```
+ui.notify   {message, tone?}                     → {}            tone: info | warning | error
+ui.show     {title?, body, format}               → {}            a transcript block
+ui.select   {title, options:[…]}                 → {value, label} | {cancelled:true}
+ui.confirm  {title, message?}                    → {confirmed}
+ui.input    {title, placeholder?, prefill?, secret?} → {text} | {cancelled:true}
+ui.status   {text | null}                        → {}            your slot on the status row (40 columns)
+ui.compose  {text}                               → {}            put text in the composer
+ui.panel    {title, lines, interactive?} | null  → {}            a footer panel; null closes yours
+```
+
+`select` options are strings or `{label, description?, value?}` objects;
+the picker is the same one `/` opens. `confirm` is a Yes/No picker.
+`input` takes over the composer until Enter or Esc; `secret` masks it and
+the text never reaches input hooks or the model.
+
+`panel` lines are strings, or arrays of `{text, token}` spans painted with
+the theme's colour for `token` (`dim`, `accent`, `success`, `warning`,
+`error`, `userMessageText`, …; unknown tokens paint plain). At most 200
+lines; one panel at a time — another extension's panel replaces yours,
+and yours is told with `ui.panel_closed`. An `interactive` panel receives
+the keyboard: every key arrives as `{"method":"ui.key","params":{"key":
+"down"}}` (chords like `ctrl+x`, `shift+tab`, `escape` never — Esc closes
+the panel and ctrl+c stays e's) and you redraw by sending `ui.panel`
+again. That is pi's custom component, declaratively: you own the state
+and the keys, e owns the frame.
+
+```
+session.send      {content, internal?, run?, when?} → {}  internal: model sees it, transcript does not;
+                                                         run: start (or steer) a turn — default true
+                                                         for visible messages, false for internal;
+                                                         when: "next_turn" holds an internal message
+                                                         until the user's next prompt and sends it
+                                                         just ahead of it. While a turn runs only
+                                                         run: true (a steer) or when: "next_turn"
+                                                         is accepted; run: false is an error then
+session.info      {}                          → {path, id, name, cwd, model, effort, running,
+                                                  tools, context_tokens, context_window}
+session.name      {name}                      → {}
+session.model     {model}                     → {} | error   the same path /model takes
+session.effort    {effort}                    → {} | error   one of the model's levels
+session.tools     {names | null}              → {}           narrow the toolset; null restores
+session.interrupt {}                          → {}
+session.compact   {focus?}                    → {}
+```
+
+`session.tools` is how a plan mode works: `["read","grep"]` and the model
+can neither see nor call anything else until `null`. It covers built-in
+and extension tools alike and is enforced at execution, not only in what
+the request advertises. It resets on `/new` and resume.
+
+Not offered, on purpose: rewriting the provider request or its headers,
+replacing the system prompt, custom providers, replacing the session
+(`/new`, `/resume`, `/tree` are the user's), and per-token streams. Each
+is explained in [decisions/0005](decisions/0005-extension-surface.md).
+
+## Shortcuts
+
+Declare `shortcuts` in the manifest; a chord the user presses arrives as
+`{"id":…,"method":"shortcut","params":{"key":"ctrl+alt+g"}}` and is answered
+like a command. Chords need `ctrl` or `alt`; bare keys and shift-only
+chords are how text gets typed and are refused at the manifest. e keeps
+`ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`, `ctrl+j`, `ctrl+l`, `ctrl+m`,
+`ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+s`, `ctrl+v`, `ctrl+shift+v`,
+`ctrl+x`, and `ctrl+z`. A chord the composer binds (`ctrl+k`, say — see
+`docs/keybindings.md`) stays the composer's: a shortcut fires only when the
+key would otherwise do nothing, so a user frees a chord for your extension
+by unbinding it in `keybindings.json`. First declaration wins between
+extensions, with a notice.
+
 ## Rules of the road
 
 - The initialize answer must arrive within 5 s or the extension is skipped.
 - Runtime hooks have 5 s and **fail open**: a slow or broken tool gate never
-  blocks the agent. Startup hooks are different: an advertised startup hook
-  that errors or times out stops launch, rather than leaking a consumed flag
-  or branch name into the initial prompt.
+  blocks the agent, a silent `before_turn` adds nothing, a silent
+  `tool_result` changes nothing. (pi's `tool_call` is fail-closed; e's is
+  not, by design — answer `{"block":true}` yourself when unsure.) Startup
+  hooks are different: an advertised startup hook that errors or times out
+  stops launch, rather than leaking a consumed flag or branch name into the
+  initial prompt.
+- Your `ui.*` / `session.*` requests have no timeout — a person answers
+  them — but a reload, a session switch, or shutdown answers every open one
+  with an error rather than leaving you waiting.
 - Tool calls have 300 s, commands 60 s.
 - On quit e sends `shutdown`, waits a beat, then kills the process.
 - A crashed or missing extension is reported in the transcript and skipped;
@@ -170,23 +350,24 @@ docs/extensions/
   project.mjs    a startup-hook directory router (e --project <path>)
   mcp.mjs        one MCP stdio server's tools as extension tools
   scaffold.mjs   an optional wire-protocol helper (not required, never installed)
+  plan.mjs       a plan mode on the new surface: session.tools, a shortcut,
+                 ui.select, a status slot, and a panel
 ```
 
 An extension speaks the protocol directly — `subagent.mjs` and the shell
 `ping.sh` below are single self-contained files, reading a JSON request per
 line and writing a response per line. e installs nothing beside an extension.
 
-## Packaged extensions
+## Compiled extensions
 
 Extensions are programs, not scripts only: anything that speaks the line
-protocol qualifies, including a compiled Rust binary. The first packaged
-extension lives at `packages/diff` — the Git review surface, `e-diff`. It is
-a workspace member, not an `e` dependency: the release binary never ships it,
-and building it is opt-in (`cargo build --release -p e-diff`, then copy the
-executable into `~/.e/extensions/`). `packages/terminal` (`e-terminal`) holds
-the palette/text primitives both e and e-diff render with, so the extension's
-output looks like the host's without the host compiling it for anyone who
-never installs the extension.
+protocol qualifies, including a compiled binary. A compiled extension lives
+in its own repository, like every package, and reaches users as a release
+package (`e install release:<owner>/<repo>/<name>`, see
+[packages.md](packages.md)); the e repository ships no extensions of its own.
+What an extension sends still crosses the line as data: notices are sanitized before paint, so an
+extension that wants colour returns a `show` with a `format` rather than
+styled bytes.
 
 **`scaffold.mjs`** is an *optional* convenience: the same stdin/stdout framing,
 id routing, and a `connect({ manifest, handlers })` wrapper, so you write
@@ -221,6 +402,9 @@ never installed for you, and it is not a thing you have to think about.
 
 To use one, put it in `~/.e/extensions/` (a top-level executable file, or a
 subdirectory bundling it and its helpers), make it executable, and restart e.
+To share one, put it in a repository's `extensions/` directory and others
+install it with `e install git:<host>/<user>/<repo>` — see
+[packages.md](packages.md).
 An example that uses the optional scaffold helper needs `scaffold.mjs` beside
 it in its bundle; the self-contained ones (`subagent.mjs`, `ping.sh`) need
 nothing.

@@ -5,11 +5,10 @@
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
+    Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
-use futures::StreamExt;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -33,6 +32,7 @@ use crate::tui::trustpanel::{self, TrustStage};
 mod clipboard;
 
 mod events;
+mod extui;
 mod login;
 mod menus;
 mod viewer;
@@ -78,10 +78,6 @@ struct QueueReview {
 
 /// Asynchronous work landing back in the frame loop.
 enum AppJob {
-    /// A line for the transcript (login progress, extension notify…).
-    Notice(String),
-    /// A prompt an extension command asked to submit as the user.
-    Prompt { text: String, epoch: u64 },
     /// An input hook's verdict on a submitted line: consume/replace/notice.
     /// Images from `-i` or the composer clipboard ride through the text hook;
     /// the hook never sees their bytes, but they still attach to whatever text
@@ -92,15 +88,25 @@ enum AppJob {
         images: Option<Vec<crate::core::providers::ImageInput>>,
         verdict: crate::core::extensions::InputVerdict,
     },
-    /// An extension named the session (command result). Tagged with the
-    /// session epoch the command started in.
-    Rename { name: String, epoch: u64 },
     /// A finished `!` shell command: what ran and what it printed. Tagged
     /// with the session epoch it started in.
     Shell {
         cmd: String,
         output: crate::core::tools::ToolOutput,
         epoch: u64,
+    },
+    /// An extension command or shortcut finished. Tagged with the session
+    /// epoch it started in.
+    Command {
+        result: crate::core::extensions::CommandResult,
+        epoch: u64,
+    },
+    /// Argument completions for `/command prefix` arrived; shown only if the
+    /// composer still says exactly that.
+    Completions {
+        command: String,
+        prefix: String,
+        items: Vec<crate::core::extensions::Completion>,
     },
     /// A /reload finished: the restarted extension host.
     Reloaded(std::sync::Arc<crate::core::extensions::ExtensionHost>),
@@ -300,6 +306,20 @@ struct App {
     tool_label_rows: usize,
     signed_in: bool,
     status_effort: Option<String>,
+    /// Where extensions' `ui.*` / `session.*` requests arrive; handed to
+    /// every host this session starts (launch, /reload).
+    requests: tokio::sync::mpsc::Sender<crate::core::extensions::HostRequest>,
+    /// Modal requests waiting for the footer to be free, first-come.
+    ui_queue: extui::UiQueue,
+    /// The open modal request, if any.
+    ui_prompt: Option<extui::UiPrompt>,
+    /// Each extension's `ui.status` text, by extension name.
+    ext_status: std::collections::BTreeMap<String, String>,
+    /// The extension panel below the composer, one slot.
+    ext_panel: Option<extui::ExtPanel>,
+    /// ctrl+g was pressed: the frame loop hands the terminal to the
+    /// external editor before its next select.
+    external_edit: bool,
 }
 
 impl App {
@@ -308,34 +328,12 @@ impl App {
     /// `⋯` elision rows dim, anything else passes through untouched — the
     /// reference keeps the changed text itself neutral.
     fn diff_row_color(theme: &Theme, line: &str) -> Option<String> {
-        if line.trim() == "⋯" && line.starts_with("      ") {
-            return Some(theme.fg("dim", line));
-        }
-        let field = line.get(..5)?;
-        let number = field.trim_start();
-        if number.is_empty()
-            || !number.bytes().all(|b| b.is_ascii_digit())
-            || *field != format!("{number:>5}")
-        {
-            return None;
-        }
-        let rest = &line[5..];
-        if rest.is_empty() || rest.starts_with("   ") {
-            return Some(theme.fg("dim", line));
-        }
-        let added = if rest == " +" || rest.starts_with(" + ") {
-            true
-        } else if rest == " -" || rest.starts_with(" - ") {
-            false
-        } else {
-            return None;
-        };
-        let token = crate::tui::theme::Theme::diff_marker_token(added);
-        Some(format!("{}{}", theme.fg(token, &line[..7]), &line[7..]))
+        crate::tui::transcript::diff_row_style(theme, line)
     }
 
     /// Ordinary chat joins the transcript and composer into one frame.
     fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        self.pump_ui_queue();
         let mut lines = self.transcript_frame(width);
         let dock_start = lines.len();
         lines.extend(self.composer_frame(width, height));
@@ -494,24 +492,49 @@ impl App {
             lines.extend(panel.render(&self.theme, width));
         } else if let Some(menu) = &self.menu {
             lines.extend(menu.render(&self.theme, width));
+        } else if self.ui_input_open() {
+            lines.extend(self.render_ui_input(width));
+        } else if let Some(panel) = &self.ext_panel {
+            lines.extend(panel.render(&self.theme, width));
         }
         let data = self.status_data();
+        let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
+            if p.interactive {
+                extui::HINT_PANEL_INTERACTIVE
+            } else {
+                extui::HINT_PANEL
+            }
+        });
         let hint = self
             .settings
             .as_ref()
             .map(|_| crate::tui::settingspanel::HINT)
             .or_else(|| self.menu.as_ref().map(|m| m.hint))
+            .or_else(|| self.ui_input_open().then_some(extui::HINT_INPUT))
+            .or(ext_panel_hint)
             .map(|h| crate::tui::menu::degrade_hint(h, width));
         // A framed surface's bottom divider sits directly above the hint
         // row — the blank spacer belongs only to the bare-composer layout.
         let panel_open = self.trust.is_some()
             || self.auth.is_some()
             || self.settings.is_some()
-            || self.menu.is_some();
+            || self.menu.is_some()
+            || self.ui_input_open()
+            || self.ext_panel.is_some();
+        // Extensions' status slots share the right-hand overlay spot; a
+        // transient app overlay (copied, clipboard) takes precedence while shown.
+        let ext_status = (!self.ext_status.is_empty()).then(|| {
+            self.ext_status
+                .values()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ")
+        });
         let overlay = self
             .overlay
             .as_deref()
-            .or(self.clipboard_reading.then_some("reading clipboard…"));
+            .or(self.clipboard_reading.then_some("reading clipboard…"))
+            .or(ext_status.as_deref());
         let footer = statusline(&self.theme, &data, overlay, hint, panel_open, width);
         lines.extend(footer);
 
@@ -572,6 +595,10 @@ impl App {
         }
         self.agent.model = pool[next].clone();
         self.refresh_status_cache();
+        self.emit(
+            "model_change",
+            serde_json::json!({"model": self.agent.model_slug()}),
+        );
     }
 
     /// Queued-prompt review keys, the reference's grammar: ↑ on an empty
@@ -769,12 +796,14 @@ impl App {
             return;
         }
         self.menu = Some(
-            Menu::new(MenuKind::Sessions, "Sessions", HINT_SESSIONS, items).with_tabs(
-                vec!["Current workspace".into(), "All workspaces".into()],
-                Some(1),
-                0,
-                "",
-            ),
+            Menu::new(MenuKind::Sessions, "Sessions", HINT_SESSIONS, items)
+                .without_trigger()
+                .with_tabs(
+                    vec!["Current workspace".into(), "All workspaces".into()],
+                    Some(1),
+                    0,
+                    "",
+                ),
         );
     }
 
@@ -958,6 +987,7 @@ impl App {
         self.agent
             .adopt_session_name(crate::core::session::name_of(&path));
         self.session_epoch += 1;
+        extui::shutdown_then_start(self, "resume");
         self.notice(format!(
             "resumed {}",
             path.file_name()
@@ -1012,7 +1042,7 @@ impl App {
             self.notice("nothing to rewind to yet".into());
             return;
         }
-        self.menu = Some(Menu::new(MenuKind::Tree, "Rewind to", HINT_USE, items));
+        self.menu = Some(Menu::new(MenuKind::Tree, "Rewind to", HINT_USE, items).without_trigger());
     }
 
     /// Apply a /tree choice: rewind to just before the chosen user message,
@@ -1084,6 +1114,10 @@ impl App {
             self.agent.interrupt();
         }
         self.cancel_login();
+        // An extension's modal is answered "cancelled", never left waiting
+        // behind a surface that is gone.
+        self.cancel_ui_prompt();
+        self.close_ext_panel(true);
         self.auth = None;
         self.trust = None;
         self.queue_review = None;
@@ -1337,6 +1371,12 @@ impl App {
 
     fn submit(&mut self, text: String) {
         let trimmed = text.trim().to_string();
+        // An extension's question takes the line whole — even an empty one
+        // is an answer — and it never reaches input hooks or the model.
+        if self.ui_input_open() {
+            self.answer_ui_input(&text);
+            return;
+        }
         if trimmed.is_empty() {
             return;
         }
@@ -1417,13 +1457,13 @@ impl App {
                 // stopping the turn would swallow the typed message along
                 // with the attachment.
                 if prompt.is_empty() {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!(
                         "{} does not accept image input",
                         model::slug(&self.agent.model)
                     ));
                 } else {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!(
                         "{} does not accept image input — sending the text without the screenshot",
                         model::slug(&self.agent.model)
@@ -1442,14 +1482,14 @@ impl App {
                     self.submit_with_images(prompt, vec![image]);
                 }
                 Err(error) => {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!("could not attach image: {error}"));
                 }
             }
             return;
         }
 
-        self.editor.push_history(text);
+        self.remember_prompt(text);
 
         // `!cmd` runs in the shell directly; the output lands in the
         // transcript and in history, so the model sees what the user did.
@@ -1573,12 +1613,29 @@ impl App {
                 self.transcript
                     .push(Block::new(Kind::Banner, crate::VERSION));
                 set_tab_title(&tab_title(&title_path(), None));
+                extui::shutdown_then_start(self, "new");
             }
             "/resume" => self.open_resume_menu(),
             "/tree" => self.open_tree_menu(),
             "/settings" => self.open_settings(),
             "/copy" => self.copy_last(),
-            "/compact" => self.compact_now(),
+            "/undo" => self.undo_change(),
+            "/usage" => self.show_usage(""),
+            _ if trimmed.starts_with("/usage ") => {
+                self.show_usage(trimmed["/usage ".len()..].trim())
+            }
+            "/fork" => self.fork_session(None),
+            _ if trimmed.starts_with("/fork ") => {
+                self.fork_session(Some(trimmed["/fork ".len()..].trim().to_string()))
+            }
+            "/export" => self.export_session(None),
+            _ if trimmed.starts_with("/export ") => {
+                self.export_session(Some(trimmed["/export ".len()..].trim().to_string()))
+            }
+            "/compact" => self.compact_now(None),
+            _ if trimmed.starts_with("/compact ") => {
+                self.compact_now(Some(trimmed["/compact ".len()..].trim().to_string()))
+            }
             "/reload" => self.reload(),
             "/trust" => match crate::core::config::trust::set(&self.agent.cwd(), true) {
                 Ok(()) => self.notice(
@@ -1600,16 +1657,8 @@ impl App {
                     let (name, args) = (name.to_string(), args.to_string());
                     let epoch = self.session_epoch;
                     crate::core::config::home::spawn(async move {
-                        let out = host.run_command(&name, &args).await;
-                        if let Some(notice) = out.notice {
-                            let _ = results.send(AppJob::Notice(notice)).await;
-                        }
-                        if let Some(text) = out.prompt {
-                            let _ = results.send(AppJob::Prompt { text, epoch }).await;
-                        }
-                        if let Some(name) = out.session_name.filter(|n| !n.trim().is_empty()) {
-                            let _ = results.send(AppJob::Rename { name, epoch }).await;
-                        }
+                        let result = host.run_command(&name, &args).await;
+                        let _ = results.send(AppJob::Command { result, epoch }).await;
                     });
                 } else if is_literal_slash_prompt(&trimmed) {
                     // Absolute paths and a literal leading slash are prompt
@@ -1675,7 +1724,7 @@ impl App {
         text: String,
         images: Vec<crate::core::providers::ImageInput>,
     ) {
-        self.editor.push_history(text.clone());
+        self.remember_prompt(text.clone());
         let count = images.len();
         let held = self.agent.submit_message(
             crate::core::providers::ChatMessage::user_with_images(text.clone(), images),
@@ -1708,12 +1757,146 @@ impl App {
     }
 
     /// Ask the core to checkpoint at its next safe provider boundary.
-    fn compact_now(&mut self) {
+    /// `/usage [24h|7d|30d|all]`: tokens and estimated cost by model over a
+    /// period, from the sessions on disk.
+    fn show_usage(&mut self, period: &str) {
+        let Some(report) = crate::core::usage::report_for(period) else {
+            self.notice("usage periods: 24h, 7d (default), 30d, all".into());
+            return;
+        };
+        let label = match period.trim() {
+            "24h" | "day" | "today" => "last 24 hours",
+            "30d" | "month" => "last 30 days",
+            "all" => "whole history",
+            _ => "last 7 days",
+        };
+        self.transcript
+            .push(Block::show(crate::core::extensions::Show {
+                title: format!("Usage · {label}"),
+                body: crate::core::usage::markdown(&report, label),
+                format: crate::core::extensions::Format::Markdown,
+            }));
+    }
+
+    /// `/undo`: put back what the last write or edit replaced.
+    fn undo_change(&mut self) {
+        if self.active.is_some() || self.agent.is_streaming() {
+            self.notice("a turn is running — press Esc to stop it, then /undo".into());
+            return;
+        }
+        match self.agent.undo_last_change() {
+            Ok(Some(label)) => {
+                let left = self.agent.undo_depth();
+                self.notice(format!(
+                    "undid {label}{}",
+                    if left > 0 {
+                        format!(" — {left} more to undo")
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            Ok(None) => self.notice("nothing to undo".into()),
+            Err(error) => self.notice(error),
+        }
+    }
+
+    /// `/fork [name]`: continue in a new session file seeded with the
+    /// current branch. The transcript and history stay as they are; only
+    /// where the next messages land changes. The original file is untouched.
+    fn fork_session(&mut self, name: Option<String>) {
+        if self.active.is_some() || self.agent.is_streaming() {
+            self.notice("a turn is running — press Esc to stop it, then /fork".into());
+            return;
+        }
+        let messages = self.agent.history_snapshot();
+        if messages.is_empty() {
+            self.notice("nothing to fork yet — send a message first".into());
+            return;
+        }
+        let model = self.agent.model_slug();
+        let mut log = match crate::core::session::SessionLog::create_with(
+            &self.agent.cwd(),
+            &model,
+            &messages,
+        ) {
+            Ok(log) => log,
+            Err(error) => {
+                self.notice(format!("could not fork: {error}"));
+                return;
+            }
+        };
+        let name = name
+            .filter(|n| !n.is_empty())
+            .or_else(|| self.agent.session_name().map(|n| format!("{n} (fork)")));
+        if let Some(name) = &name {
+            if let Err(error) = log.set_name(name) {
+                self.notice(format!("could not name the fork: {error}"));
+            }
+        }
+        let file = log
+            .path()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.agent.set_session(Some(log));
+        self.agent.adopt_session_name(name.clone());
+        self.session_epoch += 1;
+        set_tab_title(&tab_title(&title_path(), name.as_deref()));
+        extui::shutdown_then_start(self, "fork");
+        self.notice(format!(
+            "forked into {file} — the original session is unchanged"
+        ));
+    }
+
+    /// `/export [path]`: write the current branch as a self-contained HTML
+    /// page. Default: `e-session-<id>.html` in the working directory.
+    fn export_session(&mut self, path: Option<String>) {
+        let messages = self.agent.history_snapshot();
+        if messages.is_empty() {
+            self.notice("nothing to export yet".into());
+            return;
+        }
+        let title = self
+            .agent
+            .session_name()
+            .or_else(|| {
+                self.agent
+                    .session_path()
+                    .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            })
+            .unwrap_or_else(|| "e session".into());
+        let target = match path.filter(|p| !p.is_empty()) {
+            Some(path) => {
+                let path = std::path::PathBuf::from(path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.agent.cwd().join(path)
+                }
+            }
+            None => {
+                let id = self
+                    .agent
+                    .session_id()
+                    .map(|id| id.chars().take(8).collect::<String>())
+                    .unwrap_or_else(|| "unsaved".into());
+                self.agent.cwd().join(format!("e-session-{id}.html"))
+            }
+        };
+        let page = crate::core::export::html(&title, &self.agent.model_slug(), &messages);
+        match std::fs::write(&target, page) {
+            Ok(()) => self.notice(format!("exported to {}", target.display())),
+            Err(error) => self.notice(format!("could not export: {error}")),
+        }
+    }
+
+    fn compact_now(&mut self, focus: Option<String>) {
         if self.shell_block.is_some() {
             self.notice("a shell command is running — compact after it finishes".into());
             return;
         }
-        self.agent.request_compaction(system_prompt());
+        self.agent.request_compaction_with(system_prompt(), focus);
     }
 
     /// `!cmd`: run it through the bash tool off-task; the result arrives as
@@ -1800,12 +1983,34 @@ impl App {
         }
         self.reloading = true;
         self.reload_block = Some(self.transcript.push(Block::new(Kind::Notice, "reloading…")));
+        // The old host's surfaces die with it; a modal it was waiting on is
+        // answered "cancelled" by the drop.
+        self.ui_queue.clear();
+        self.cancel_ui_prompt();
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Extension)
+        {
+            self.menu = None;
+        }
+        self.ext_panel = None;
+        self.ext_status.clear();
         let old = self.host.clone();
         let jobs = self.jobs.clone();
         let results = self.results.clone();
+        let requests = self.requests.clone();
+        let path = self.agent.session_path().map(|p| p.display().to_string());
         crate::core::config::home::spawn(async move {
+            old.event("session_shutdown", serde_json::json!({"reason": "reload"}))
+                .await;
             old.shutdown().await;
-            let host = crate::core::extensions::ExtensionHost::start(jobs).await;
+            let host = crate::core::extensions::ExtensionHost::start(jobs, Some(requests)).await;
+            host.event(
+                "session_start",
+                serde_json::json!({"reason": "reload", "path": path}),
+            )
+            .await;
             let _ = results.send(AppJob::Reloaded(host)).await;
         });
     }
@@ -1879,6 +2084,17 @@ impl App {
 
     fn notice(&mut self, text: String) {
         self.transcript.push(Block::new(Kind::Notice, text));
+    }
+
+    /// A submitted prompt joins up-arrow recall for this session and the
+    /// history file for the next. API keys never come through here.
+    fn remember_prompt(&mut self, text: String) {
+        // A memory-only run (`--no-save`) leaves no trace on disk, prompts
+        // included; recall still works within the session.
+        if self.agent.saves_session() {
+            crate::tui::history::append(&text);
+        }
+        self.editor.push_history(text);
     }
 }
 
@@ -2086,6 +2302,10 @@ fn is_builtin_command(name: &str) -> bool {
             | "clear"
             | "copy"
             | "compact"
+            | "fork"
+            | "export"
+            | "undo"
+            | "usage"
             | "trust"
             | "settings"
             | "help"
@@ -2102,8 +2322,8 @@ fn builtin_category(value: &str) -> &'static str {
     match value {
         "/login" => "Account",
         "/models" | "/effort" | "/scoped-models" => "Model",
-        "/resume" | "/new" | "/tree" | "/compact" => "Session",
-        "/trust" => "Workspace",
+        "/resume" | "/new" | "/tree" | "/compact" | "/fork" | "/export" => "Session",
+        "/trust" | "/undo" => "Workspace",
         _ => "General",
     }
 }
@@ -2316,18 +2536,27 @@ pub struct RunOptions {
     pub images: Vec<crate::core::providers::ImageInput>,
 }
 
+/// The channel extensions' own requests travel on: created by the caller
+/// before the host starts (so `initialize` can promise a UI), consumed here.
+pub type Requests = (
+    tokio::sync::mpsc::Sender<crate::core::extensions::HostRequest>,
+    tokio::sync::mpsc::Receiver<crate::core::extensions::HostRequest>,
+);
+
 pub async fn run(
     options: RunOptions,
     host: std::sync::Arc<crate::core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     jobs_rx: tokio::sync::mpsc::Receiver<String>,
+    requests: Requests,
 ) -> std::io::Result<()> {
     let home = options
         .agent
         .home
         .clone()
         .unwrap_or_else(crate::core::config::home::home);
-    crate::core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx)).await
+    crate::core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests))
+        .await
 }
 
 /// Run the terminal and its configuration reads within the selected home.
@@ -2336,7 +2565,9 @@ async fn run_scoped(
     host: std::sync::Arc<crate::core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     mut jobs_rx: tokio::sync::mpsc::Receiver<String>,
+    requests: Requests,
 ) -> std::io::Result<()> {
+    let (requests_tx, mut requests_rx) = requests;
     let RunOptions {
         initial,
         continue_session,
@@ -2453,8 +2684,23 @@ async fn run_scoped(
         tool_label_rows: 2,
         signed_in: false,
         status_effort: None,
+        requests: requests_tx,
+        ui_queue: extui::UiQueue::new(),
+        ui_prompt: None,
+        ext_status: std::collections::BTreeMap::new(),
+        ext_panel: None,
+        external_edit: false,
     };
+    app.editor
+        .seed_history(crate::tui::history::load(crate::tui::history::RECALL));
     app.refresh_status_cache();
+    app.emit(
+        "session_start",
+        serde_json::json!({
+            "reason": "startup",
+            "path": app.agent.session_path().map(|p| p.display().to_string()),
+        }),
+    );
     app.transcript
         .push(Block::new(Kind::Banner, crate::VERSION));
     for warning in model::config_warnings() {
@@ -2522,7 +2768,11 @@ async fn run_scoped(
         &title_path(),
         app.agent.session_name().as_deref(),
     ));
-    let mut events = EventStream::new();
+    // Terminal input is read on its own thread and can be paused: while an
+    // external editor owns the terminal (ctrl+g), nothing here may read
+    // it, or the editor's keystrokes land in e instead.
+    let input_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut input_rx = spawn_input_reader(input_paused.clone());
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     // SIGTERM/SIGHUP (a kill, a closed tab) exit through the same cleanup as
     // /quit — the terminal is restored, the extension host shut down.
@@ -2547,8 +2797,12 @@ async fn run_scoped(
     let mut mouse_enabled = false;
 
     loop {
+        if app.external_edit {
+            app.external_edit = false;
+            edit_externally(&mut app, &mut painter, &input_paused, cols, rows, anchor).await;
+        }
         tokio::select! {
-            maybe = events.next() => {
+            maybe = input_rx.recv() => {
                 let Some(Ok(event)) = maybe else { break };
                 match event {
                     TermEvent::Paste(text) if app.viewer.is_none() => {
@@ -2586,6 +2840,32 @@ async fn run_scoped(
 
                         } else if ctrl && k.code == KeyCode::Char('o') {
                             app.viewer = Some(Viewer::new());
+                        } else if app.ext_panel.as_ref().is_some_and(|p| p.interactive)
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !(ctrl && k.code == KeyCode::Char('c'))
+                        {
+                            // The panel owns the keyboard: Esc closes it
+                            // here, every other chord goes to its owner.
+                            // ctrl+c stays e's.
+                            if k.code == KeyCode::Esc {
+                                app.close_ext_panel(true);
+                            } else {
+                                app.forward_panel_key(&k);
+                            }
+                        } else if k.code == KeyCode::Esc
+                            && app.ext_panel.is_some()
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                        {
+                            app.close_ext_panel(true);
+                        } else if k.code == KeyCode::Esc && app.ui_input_open() {
+                            app.cancel_ui_prompt();
                         } else if let Some(stage) = &mut app.trust {
                             match k.code {
                                 KeyCode::Up => stage.step(-1),
@@ -2812,6 +3092,12 @@ async fn run_scoped(
                                 }
                                 KeyCode::Enter => { app.select_menu(); }
                                 KeyCode::Esc => {
+                                    if app.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Extension) {
+                                        app.cancel_ui_prompt();
+                                    }
+                                    if app.menu.as_ref().is_some_and(|m| m.filter_without_trigger && m.kind != MenuKind::Commands) {
+                                        app.editor.set_text("");
+                                    }
                                     app.menu = None;
                                     // Closing the scoped picker without
                                     // Ctrl+S discards its staged edits.
@@ -2831,6 +3117,19 @@ async fn run_scoped(
                             app.notice("login cancelled".into());
                         } else if k.code == KeyCode::Esc && app.agent.is_streaming() {
                             app.agent.interrupt();
+                        } else if ctrl
+                            && k.code == KeyCode::Char('g')
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                            && app.pending_key.is_none()
+                        {
+                            // Deferred to the top of the loop: the terminal
+                            // hand-off needs the painter and the reader,
+                            // which the key handler does not own.
+                            app.external_edit = true;
                         } else if ctrl && matches!(k.code, KeyCode::Char('p') | KeyCode::Char('P')) {
                             let backward = k.code == KeyCode::Char('P')
                                 || k.modifiers.contains(KeyModifiers::SHIFT);
@@ -2851,7 +3150,10 @@ async fn run_scoped(
                             // beneath it. The statusline confirms the
                             // change; nothing lands in the transcript.
                             match app.agent.cycle_effort() {
-                                Ok(Some(_)) => app.refresh_status_cache(),
+                                Ok(Some(level)) => {
+                                    app.refresh_status_cache();
+                                    app.emit("effort_change", serde_json::json!({"effort": level}));
+                                }
                                 Ok(None) => {}
                                 Err(error) => app.notice(format!("could not save reasoning effort: {error}")),
                             }
@@ -2862,6 +3164,23 @@ async fn run_scoped(
                                 app.submit_composer(text);
                             }
                             app.sync_menu();
+                        } else if let Some(chord) = extui::chord_of(&k)
+                            .filter(|chord| app.host.has_shortcut(chord))
+                            .filter(|_| !app.ui_input_open() && app.pending_key.is_none())
+                        {
+                            // A declared extension shortcut, answered like
+                            // a command. Only a chord neither e nor the
+                            // composer (built in, or the user's
+                            // keybindings.json) took reaches this branch —
+                            // so unbinding a chord there frees it for an
+                            // extension.
+                            let host = app.host.clone();
+                            let results = app.results.clone();
+                            let epoch = app.session_epoch;
+                            crate::core::config::home::spawn(async move {
+                                let result = host.run_shortcut(&chord).await;
+                                let _ = results.send(AppJob::Command { result, epoch }).await;
+                            });
                         }
                     }
                     _ => {}
@@ -2877,20 +3196,18 @@ async fn run_scoped(
                     app.on_session_event(e);
                 }
             }
+            request = requests_rx.recv() => {
+                if let Some(request) = request {
+                    app.on_host_request(request);
+                }
+            }
             job = results_rx.recv() => {
                 match job {
-                    Some(AppJob::Notice(notice)) => app.notice(notice),
-                    Some(AppJob::Prompt { text, epoch }) => {
-                        // A prompt from a command that started in an earlier
-                        // session must not start a turn in its replacement.
-                        if epoch == app.session_epoch {
-                            app.prompt(text);
-                        } else {
-                            app.notice(
-                                "an extension command finished after the session changed — its prompt was discarded"
-                                    .into(),
-                            );
-                        }
+                    Some(AppJob::Command { result, epoch }) => {
+                        app.deliver_command_result(result, epoch);
+                    }
+                    Some(AppJob::Completions { command, prefix, items }) => {
+                        app.show_completions(&command, &prefix, items);
                     }
                     Some(AppJob::InputVerdict { sequence, text, images, verdict }) => {
                         // A later hook may finish first; hold it until every
@@ -2900,15 +3217,6 @@ async fn run_scoped(
                             app.input_verdicts.complete(sequence, text, images, verdict)
                         {
                             app.apply_input_verdict(text, images, verdict);
-                        }
-                    }
-                    Some(AppJob::Rename { name, epoch }) => {
-                        // A rename from a command that started in an earlier
-                        // session must not rename its replacement.
-                        if epoch == app.session_epoch {
-                            app.agent.set_session_name(name.clone());
-                            app.notice(format!("session: {name}"));
-                            set_tab_title(&tab_title(&title_path(), Some(&name)));
                         }
                     }
                     Some(AppJob::CatalogRefreshed) => {
@@ -2942,6 +3250,9 @@ async fn run_scoped(
                         app.reloading = false;
                         app.host = host.clone();
                         app.agent.set_host(host);
+                        // A narrowing the old host's extension installed
+                        // has no owner left to lift it.
+                        app.agent.set_active_tools(None);
                         app.apply_theme();
                         app.apply_keymap();
                         app.refresh_status_cache();
@@ -3121,6 +3432,9 @@ async fn run_scoped(
     // gives extensions their shutdown notification.
     painter.shutdown();
     crate::core::tools::kill_tracked_processes();
+    app.host
+        .event("session_shutdown", serde_json::json!({"reason": "quit"}))
+        .await;
     app.host.shutdown().await;
     drop(_guard);
     // The tab title we set at launch (or from a session name) is ours to
@@ -3144,6 +3458,127 @@ async fn run_scoped(
 fn arm(app: &mut App) {
     app.armed_at = Some(Instant::now());
     app.overlay = Some("press ctrl+c again to exit".into());
+}
+
+/// Read terminal events on a thread the frame loop can pause. Each poll
+/// waits at most 100 ms, so a pause takes effect within that; the thread
+/// ends when the receiver is dropped.
+fn spawn_input_reader(
+    paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> tokio::sync::mpsc::Receiver<std::io::Result<TermEvent>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    std::thread::spawn(move || loop {
+        if paused.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        match crossterm::event::poll(Duration::from_millis(100)) {
+            Ok(true) => {
+                let event = crossterm::event::read();
+                if tx.blocking_send(event).is_err() {
+                    break;
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let _ = tx.blocking_send(Err(error));
+                break;
+            }
+        }
+    });
+    rx
+}
+
+/// ctrl+g: hand the terminal to `$VISUAL` / `$EDITOR` (or the `editor`
+/// setting) with the draft in a private temp file, then take it back and
+/// load what was saved. The painter is stopped and respawned around the
+/// hand-off so the next frame repaints from a known-blank screen; the input
+/// reader is paused so the editor gets every keystroke.
+async fn edit_externally(
+    app: &mut App,
+    painter: &mut Painter,
+    input_paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cols: u16,
+    rows: u16,
+    anchor: usize,
+) {
+    let command = crate::core::config::settings::external_editor();
+    let Some(program) = command.first().cloned() else {
+        app.notice("no editor: set `editor` in ~/.e/settings.json or $EDITOR".into());
+        return;
+    };
+    let draft = app.editor.expanded_text();
+    // An unguessable name and create_new: a pre-placed symlink in the shared
+    // temp directory is refused rather than followed.
+    let path = std::env::temp_dir().join(format!(
+        "e-draft-{}-{}.md",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    {
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let written = options
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, draft.as_bytes()));
+        if let Err(error) = written {
+            app.notice(format!("could not stage the draft: {error}"));
+            return;
+        }
+    }
+    input_paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    // The reader's poll in flight ends within its 100 ms window.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    painter.shutdown();
+    let _ = execute!(
+        std::io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste
+    );
+    let _ = terminal::disable_raw_mode();
+    {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b[?25h");
+        let _ = out.flush();
+    }
+    let args: Vec<String> = command.iter().skip(1).cloned().collect();
+    let edit_path = path.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(&program)
+            .args(&args)
+            .arg(&edit_path)
+            .status()
+    })
+    .await;
+    let _ = terminal::enable_raw_mode();
+    let _ = execute!(
+        std::io::stdout(),
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    *painter = Painter::spawn(cols, rows, anchor);
+    input_paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    match status {
+        Ok(Ok(status)) if status.success() => match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let text = text.trim_end_matches('\n').to_string();
+                app.editor.set_text(&text);
+                app.sync_menu();
+            }
+            Err(error) => app.notice(format!("could not read the edited draft: {error}")),
+        },
+        Ok(Ok(status)) => app.notice(format!("editor exited with {status}; draft unchanged")),
+        Ok(Err(error)) => app.notice(format!("could not start the editor: {error}")),
+        Err(_) => app.notice("the editor task failed; draft unchanged".into()),
+    }
+    let _ = std::fs::remove_file(&path);
+    painter.frame(app.frame(cols as usize, rows as usize));
 }
 
 /// Restores every terminal mode the TUI enables — keyboard enhancement
@@ -3879,7 +4314,244 @@ mod tests {
             tool_label_rows: 2,
             signed_in: false,
             status_effort: None,
+            requests: tokio::sync::mpsc::channel(1).0,
+            ui_queue: extui::UiQueue::new(),
+            ui_prompt: None,
+            ext_status: std::collections::BTreeMap::new(),
+            ext_panel: None,
+            external_edit: false,
         }
+    }
+
+    /// A request as the host would deliver it, with a receiver for the
+    /// reply an extension would read.
+    fn fake_request(
+        extension: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> (
+        crate::core::extensions::HostRequest,
+        tokio::sync::oneshot::Receiver<Result<serde_json::Value, String>>,
+    ) {
+        crate::core::extensions::HostRequest::fake(extension, method, params)
+    }
+
+    #[test]
+    fn show_requests_become_transcript_blocks_and_status_is_bounded() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "diff",
+            "ui.show",
+            serde_json::json!({"title": "diff f.txt", "body": "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n", "format": "diff"}),
+        );
+        app.on_host_request(request);
+        assert_eq!(reply.blocking_recv().unwrap(), Ok(serde_json::json!({})));
+        let block = app.transcript.blocks.last().unwrap();
+        assert_eq!(block.kind, Kind::Show);
+        assert_eq!(block.text, "diff f.txt");
+        assert_eq!(
+            block.detail.as_deref(),
+            Some("f.txt\n    1   a\n    2 - b\n    2 + B")
+        );
+
+        let (request, reply) = fake_request(
+            "diff",
+            "ui.status",
+            serde_json::json!({"text": "x".repeat(100) + "\x1b[31m"}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        let status = app.ext_status.get("diff").unwrap();
+        assert_eq!(status.chars().count(), 40);
+        assert!(status.ends_with('…') && !status.contains('\x1b'));
+
+        let (request, reply) = fake_request("diff", "ui.bogus", serde_json::json!({}));
+        app.on_host_request(request);
+        assert!(reply
+            .blocking_recv()
+            .unwrap()
+            .unwrap_err()
+            .contains("unknown method"));
+    }
+
+    #[test]
+    fn select_opens_the_picker_and_enter_answers_with_the_value() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.select",
+            serde_json::json!({"title": "Mode", "options": [
+                {"label": "Plan", "description": "read only", "value": "plan"},
+                "Build"
+            ]}),
+        );
+        app.on_host_request(request);
+        let menu = app.menu.as_ref().expect("picker opened");
+        assert_eq!(menu.kind, MenuKind::Extension);
+        assert_eq!(menu.title, "Mode");
+        assert!(app.select_menu());
+        assert_eq!(
+            reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"value": "plan", "label": "Plan"}))
+        );
+        assert!(app.menu.is_none() && app.ui_prompt.is_none());
+
+        // A long plain option answers with the string that was offered,
+        // whatever the row showed.
+        let long = "/Users/me/projects/very/long/path/to/some/deeply/nested/file_name.rs";
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.select",
+            serde_json::json!({"title": "File", "options": [long]}),
+        );
+        app.on_host_request(request);
+        assert!(app.select_menu());
+        assert_eq!(reply.blocking_recv().unwrap().unwrap()["value"], long);
+
+        // A second modal while one is open waits its turn; Esc cancels
+        // the open one and the next takes the surface on the next frame.
+        let (first, first_reply) =
+            fake_request("a", "ui.confirm", serde_json::json!({"title": "Sure?"}));
+        let (second, second_reply) =
+            fake_request("b", "ui.input", serde_json::json!({"title": "Name"}));
+        app.on_host_request(first);
+        app.on_host_request(second);
+        assert_eq!(app.ui_queue.len(), 1);
+        app.cancel_ui_prompt();
+        app.menu = None;
+        assert_eq!(
+            first_reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"confirmed": false}))
+        );
+        app.pump_ui_queue();
+        assert!(app.ui_input_open());
+        app.editor.set_text("world");
+        app.submit("world".into());
+        assert_eq!(
+            second_reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"text": "world"}))
+        );
+        assert!(!app.ui_input_open() && app.editor.is_empty());
+    }
+
+    #[test]
+    fn session_tools_narrows_the_agent_and_info_reports_it() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "session.tools",
+            serde_json::json!({"names": ["read", "grep"]}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        assert_eq!(
+            app.agent.active_tools(),
+            Some(vec!["read".to_string(), "grep".to_string()])
+        );
+        let (request, reply) = fake_request("plan", "session.info", serde_json::json!({}));
+        app.on_host_request(request);
+        let info = reply.blocking_recv().unwrap().unwrap();
+        assert_eq!(info["tools"], serde_json::json!(["read", "grep"]));
+        assert_eq!(info["running"], false);
+        let (request, _) =
+            fake_request("plan", "session.tools", serde_json::json!({"names": null}));
+        app.on_host_request(request);
+        assert_eq!(app.agent.active_tools(), None);
+    }
+
+    #[test]
+    fn a_command_opened_picker_filters_on_typed_text_and_clears_it_on_close() {
+        use crate::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+        let mut app = session_app();
+        let items = vec![
+            MenuItem::new("fix the parser", "", "/a.jsonl"),
+            MenuItem::new("write docs", "", "/b.jsonl"),
+        ];
+        app.menu =
+            Some(Menu::new(MenuKind::Sessions, "Sessions", HINT_USE, items).without_trigger());
+        app.editor.set_text("pars");
+        app.sync_menu();
+        let menu = app.menu.as_ref().unwrap();
+        assert_eq!(menu.len(), 1, "typed text is the filter");
+        assert_eq!(menu.current().unwrap().value, "/a.jsonl");
+        // Esc path: the filter text was never a draft.
+        app.menu = None;
+        // (the key loop clears the editor for a filtered picker; the
+        // selection path does the same through select_menu)
+        app.menu = Some(
+            Menu::new(
+                MenuKind::Tree,
+                "Rewind to",
+                HINT_USE,
+                vec![MenuItem::new("x", "", "n1")],
+            )
+            .without_trigger(),
+        );
+        app.editor.set_text("x");
+        app.sync_menu();
+        assert!(app.select_menu());
+        assert!(
+            app.editor.is_empty(),
+            "the filter does not linger as a draft"
+        );
+    }
+
+    #[test]
+    fn picking_an_argument_completion_replaces_the_typed_prefix() {
+        use crate::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+        let mut app = session_app();
+        app.editor.set_text("/deploy eu st");
+        app.menu = Some(Menu::new(
+            MenuKind::Arguments,
+            "/deploy",
+            HINT_USE,
+            vec![MenuItem::new("staging", "pre-prod", "staging")],
+        ));
+        assert!(app.select_menu());
+        assert_eq!(app.editor.text(), "/deploy eu staging ");
+        assert!(
+            app.menu.is_none(),
+            "an empty host offers no further completions"
+        );
+    }
+
+    #[test]
+    fn panels_keep_span_spacing_strip_control_bytes_and_paint_tokens() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.panel",
+            serde_json::json!({"title": "Plan", "interactive": true, "lines": [
+                [{"text": "› ", "token": "accent"}, {"text": "[ ] ", "token": "dim"}, {"text": "step\x1b[31m one"}],
+                "plain\nrow"
+            ]}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        let panel = app.ext_panel.as_ref().unwrap();
+        assert!(panel.interactive && panel.extension == "plan");
+        let rows = panel.render(&app.theme, 80);
+        // divider, header, blank, two rows, divider
+        assert_eq!(rows.len(), 6);
+        assert_eq!(
+            rows[3],
+            format!(
+                "  {}{}step one",
+                app.theme.fg("accent", "› "),
+                app.theme.fg("dim", "[ ] ")
+            )
+        );
+        assert_eq!(rows[4], "  plain row");
+        // Another extension's panel replaces it; a null from the owner closes.
+        let (request, _) = fake_request("other", "ui.panel", serde_json::json!({"lines": ["x"]}));
+        app.on_host_request(request);
+        assert_eq!(app.ext_panel.as_ref().unwrap().title, "other");
+        let (request, _) = fake_request("plan", "ui.panel", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.ext_panel.is_some(), "only the owner closes a panel");
+        let (request, _) = fake_request("other", "ui.panel", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.ext_panel.is_none());
     }
 
     #[test]

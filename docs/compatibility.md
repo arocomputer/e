@@ -16,10 +16,20 @@ against so changes to them are deliberate rather than accidental.
   `format_version: 1`. Readers accept unversioned files, preserve unknown
   keys, and quarantine corrupt input before creating a replacement. An older
   e will not write over a file carrying a newer or invalid format version.
+- **Packages:** the `packages` list in `settings.json` holds source strings
+  as typed (`git:host/user/repo[@ref]`, a git URL, or a directory path), and
+  git packages live under `~/.e/packages/<host>/<path>`. Both are documented
+  in [packages.md](packages.md); a reader that meets an entry it cannot
+  parse reports it and loads the rest.
 - **Extensions:** the JSONL protocol is versioned independently. e sends its
   protocol number during `initialize`; additive fields do not change the
   number, while incompatible wire changes require a new protocol version.
-  Version 1 is documented in [extensions.md](extensions.md).
+  Version 1 is documented in [extensions.md](extensions.md). The families
+  beyond it (`events`, `hooks`, `display`, `ui`, `session`, `shortcuts`)
+  are additive: each is advertised in `capabilities`, declared in the
+  manifest, or initiated by the extension, so a version-1 extension is never
+  sent a message it did not ask for. A method name, event name, field, or
+  result shape in those families is a supported contract once documented.
 
 CLI one-shot commands return 0 after completing their requested operation, 1
 for an operational/provider failure, and 2 for invalid arguments or an unknown

@@ -283,6 +283,8 @@ async fn compact_log(
     log: &TurnLog,
     system: &str,
     cancel: &Arc<AtomicBool>,
+    host: Option<&Arc<crate::core::extensions::ExtensionHost>>,
+    focus: Option<String>,
 ) -> Result<bool, String> {
     let history = log
         .history
@@ -312,10 +314,40 @@ async fn compact_log(
         .as_ref()
         .map(|session| session.id().to_string())
         .unwrap_or_default();
+    if let Some(h) = host {
+        h.event("compact_start", serde_json::json!({})).await;
+    }
     let summary = tokio::select! {
-        result = compact::summarize(log.model.clone(), &older, session_id) => result?,
+        result = compact::summarize(log.model.clone(), &older, session_id, focus.as_deref()) => result?,
         _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
     };
+    // Extensions get the last word on the summary, not the history: the
+    // hook is bounded and fails open, so a silent one changes nothing.
+    let mut summary = summary;
+    if let Some(h) = host.filter(|h| h.has_hook("compact_summary")) {
+        let rewritten = {
+            let hook = h.hook_compact_summary(&summary.text);
+            tokio::pin!(hook);
+            tokio::select! {
+                text = &mut hook => text,
+                _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+            }
+        };
+        if let Some(text) = rewritten {
+            summary.text = text;
+        }
+    }
+    // Judged after the hook: the sections that matter are the stored ones.
+    let missing = compact::missing_sections(&summary.text);
+    if !missing.is_empty() {
+        let _ = log
+            .events
+            .send(SessionEvent::Warning(format!(
+                "compaction summary is missing {}; it was kept as written",
+                missing.join(", ")
+            )))
+            .await;
+    }
     let mut projected = vec![ChatMessage::user(compact::seed(&summary.text))];
     projected.extend(kept.iter().cloned());
     let tokens = compact::estimate_request_tokens(system, &projected);
@@ -347,6 +379,10 @@ async fn compact_log(
             return Err("compaction cancelled; history was preserved".into());
         }
         return Err("compaction could not be installed; history changed or could not be saved; history was preserved".into());
+    }
+    if let Some(h) = host {
+        h.event("compact_end", serde_json::json!({"summary": summary.text}))
+            .await;
     }
     completion.send(SessionEvent::Compacted {
         summary: summary.text,
@@ -449,6 +485,99 @@ pub struct ToolCallPresentation {
     pub target: String,
 }
 
+impl SessionEvent {
+    /// The event as one JSON object for the `-p --json` stream and other
+    /// machine consumers: a `type` tag plus the event's fields. Liveness
+    /// ticks (`ToolCallAssembly`) are not events a consumer acts on, so
+    /// they serialize to None.
+    pub fn to_json(&self) -> Option<serde_json::Value> {
+        use serde_json::json;
+        Some(match self {
+            SessionEvent::TurnStart => json!({"type": "turn_start"}),
+            SessionEvent::Discarded(prompts) => json!({"type": "discarded", "prompts": prompts}),
+            SessionEvent::Compacting => json!({"type": "compacting"}),
+            SessionEvent::Compacted {
+                summary,
+                context_tokens,
+                ..
+            } => json!({"type": "compacted", "summary": summary, "context_tokens": context_tokens}),
+            SessionEvent::TextDelta(delta) => json!({"type": "text", "delta": delta}),
+            SessionEvent::ReasoningDelta(delta) => json!({"type": "reasoning", "delta": delta}),
+            SessionEvent::ToolBatchStart { calls } => json!({
+                "type": "tool_batch",
+                "calls": calls.iter().map(|call| json!({
+                    "id": call.id,
+                    "name": call.name,
+                    "arguments": serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .unwrap_or_else(|_| serde_json::Value::String(call.arguments.clone())),
+                    "category": call.category,
+                    "target": call.target,
+                })).collect::<Vec<_>>(),
+            }),
+            SessionEvent::ToolStart { id } => json!({"type": "tool_start", "id": id}),
+            SessionEvent::ToolOutput { id, stream, chunk } => json!({
+                "type": "tool_output",
+                "id": id,
+                "stream": format!("{stream:?}").to_lowercase(),
+                "chunk": chunk,
+            }),
+            SessionEvent::ToolEnd {
+                id,
+                outcome,
+                summary,
+                content,
+            } => json!({
+                "type": "tool_end",
+                "id": id,
+                "outcome": format!("{outcome:?}").to_lowercase(),
+                "summary": summary,
+                "content": content,
+            }),
+            SessionEvent::ToolCallAssembly { .. } => return None,
+            SessionEvent::Named(name) => json!({"type": "session_name", "name": name}),
+            SessionEvent::Instructions { path } => json!({"type": "instructions", "path": path}),
+            SessionEvent::Usage { usage, .. } => json!({
+                "type": "usage",
+                "input_tokens": usage.input,
+                "output_tokens": usage.output,
+                "cache_read_tokens": usage.cache_read,
+                "cache_write_5m_tokens": usage.cache_write_5m,
+                "cache_write_1h_tokens": usage.cache_write_1h,
+            }),
+            SessionEvent::ErrorDetails(details) => {
+                json!({"type": "error_details", "details": details.as_ref()})
+            }
+            SessionEvent::Error(message) => json!({"type": "error", "message": message}),
+            SessionEvent::Warning(message) => json!({"type": "warning", "message": message}),
+            SessionEvent::Retry {
+                attempt,
+                limit,
+                delay_secs,
+                cause,
+                reason,
+            } => json!({
+                "type": "retry",
+                "attempt": attempt,
+                "limit": limit,
+                "delay_secs": delay_secs,
+                "cause": cause.label(),
+                "reason": reason,
+            }),
+            SessionEvent::Recovered { attempt, limit } => {
+                json!({"type": "recovered", "attempt": attempt, "limit": limit})
+            }
+            SessionEvent::Steered(text) => json!({"type": "steered", "text": text}),
+            SessionEvent::Slept { duration_secs } => {
+                json!({"type": "slept", "duration_secs": duration_secs})
+            }
+            SessionEvent::SleepStopped { duration_secs } => {
+                json!({"type": "sleep_stopped", "duration_secs": duration_secs})
+            }
+            SessionEvent::TurnEnd { aborted } => json!({"type": "turn_end", "aborted": aborted}),
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum SessionEvent {
     TurnStart,
@@ -494,6 +623,11 @@ pub enum SessionEvent {
     },
     /// An extension tool named the session.
     Named(String),
+    /// A nested `AGENTS.md` under a path a tool touched was added to the
+    /// conversation (docs/instructions.md).
+    Instructions {
+        path: String,
+    },
     Usage {
         usage: providers::Usage,
         /// Rates captured from the model that made the request.
@@ -613,6 +747,14 @@ pub struct Agent {
     pending: Arc<Mutex<PendingQueue>>,
     cancel: Arc<AtomicBool>,
     compact_requested: Arc<AtomicBool>,
+    /// What the next requested compaction should focus on (`/compact <focus>`),
+    /// taken by the turn that performs it.
+    compact_focus: Arc<Mutex<Option<String>>>,
+    /// Nested `AGENTS.md` directories already loaded this session.
+    instructions_loaded: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
+    /// Messages an extension attached to the next prompt (`session.send`
+    /// with `when: "next_turn"`): committed just before it, never alone.
+    next_turn: Mutex<Vec<ChatMessage>>,
     /// The supervisor owns the worker's terminal event. Keeping its handle
     /// prevents the turn from becoming unobserved background work.
     turn_task: Option<tokio::task::JoinHandle<()>>,
@@ -628,6 +770,10 @@ pub struct Agent {
     /// events sender, and a per-turn counter would let its stale ToolEnd
     /// collide with (and corrupt) a later turn's row.
     tool_seq: Arc<AtomicU64>,
+    /// The tools the model may see and call right now, when an extension
+    /// narrowed them (`session.tools`); None is everything. Built-in and
+    /// extension names alike, checked at advertisement and at execution.
+    active_tools: Arc<Mutex<Option<Vec<String>>>>,
     /// The latest observed system-sleep gap. Written by the turn's
     /// heartbeat task; tests write it through [`Agent::inject_sleep_gap`].
     wake: wake::Shared,
@@ -671,11 +817,15 @@ impl Agent {
             pending: Arc::new(Mutex::new(PendingQueue::default())),
             cancel: Arc::new(AtomicBool::new(false)),
             compact_requested: Arc::new(AtomicBool::new(false)),
+            compact_focus: Arc::new(Mutex::new(None)),
+            instructions_loaded: Arc::new(Mutex::new(Default::default())),
+            next_turn: Mutex::new(Vec::new()),
             turn_task: None,
             session: Arc::new(Mutex::new(None)),
             session_name: Arc::new(Mutex::new(None)),
             persist_warned: Arc::new(AtomicBool::new(false)),
             tool_seq: Arc::new(AtomicU64::new(0)),
+            active_tools: Arc::new(Mutex::new(None)),
             wake: wake::shared(),
             options,
         };
@@ -769,10 +919,22 @@ impl Agent {
     }
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
         self.tools = Arc::new(tools::ToolRuntime::default());
+        self.reset_session_scoped();
+        self.remember_instructions(&messages);
         *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
+    }
+
+    /// The nested `AGENTS.md` a history already carries count as loaded:
+    /// a resumed or rewound session must neither repeat them nor lose them.
+    fn remember_instructions(&self, messages: &[ChatMessage]) {
+        *self
+            .instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = turn::instruction_dirs(messages);
     }
     pub fn clear(&mut self) {
         self.tools = Arc::new(tools::ToolRuntime::default());
+        self.reset_session_scoped();
         self.history
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -800,6 +962,75 @@ impl Agent {
     /// so the model sees what the user ran.
     pub fn record_user(&self, text: String) {
         self.log().commit(ChatMessage::user(text));
+    }
+
+    /// Add a user-role message the model sees but the transcript does not,
+    /// without starting a turn — an extension's `session.send` with
+    /// `internal: true`.
+    pub fn record_internal(&self, text: String) {
+        let mut message = ChatMessage::user(text);
+        message.mark_internal();
+        self.log().commit(message);
+    }
+
+    /// Hold an internal message until the next prompt, then commit it just
+    /// ahead of that prompt — context that should ride with what the user
+    /// says next rather than sit alone in the conversation.
+    pub fn attach_to_next_turn(&self, text: String) {
+        let mut message = ChatMessage::user(text);
+        message.mark_internal();
+        self.next_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(message);
+    }
+
+    fn take_next_turn(&self) -> Vec<ChatMessage> {
+        std::mem::take(&mut *self.next_turn.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// State that belongs to one session's run and must not outlive it: the
+    /// nested instructions already loaded, an extension's tool narrowing,
+    /// and messages attached to the next turn.
+    fn reset_session_scoped(&self) {
+        self.instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.set_active_tools(None);
+        self.next_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
+    /// Whether this agent writes a session log — and, by the same token,
+    /// whether anything it does should persist to disk.
+    pub fn saves_session(&self) -> bool {
+        self.options.save_session
+    }
+
+    /// `/undo`: revert the newest write or edit this session made. Idle
+    /// only — mid-turn the files belong to the running tools.
+    pub fn undo_last_change(&self) -> Result<Option<String>, String> {
+        self.tools.undo_last()
+    }
+
+    pub fn undo_depth(&self) -> usize {
+        self.tools.undo_depth()
+    }
+
+    /// Narrow (or with None, restore) the tools advertised and executable
+    /// from the next request on. Names are built-in or extension tools.
+    pub fn set_active_tools(&self, names: Option<Vec<String>>) {
+        *self.active_tools.lock().unwrap_or_else(|e| e.into_inner()) = names;
+    }
+
+    pub fn active_tools(&self) -> Option<Vec<String>> {
+        self.active_tools
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Replace the history with the compaction seed plus the kept recent
@@ -869,6 +1100,10 @@ impl Agent {
         if let Some(session) = session_guard.as_mut() {
             session.set_head(head);
         }
+        // Only the nested AGENTS.md the kept branch carries stay loaded:
+        // one past the new head loads again on the next touch, one before
+        // it is not repeated.
+        self.remember_instructions(&messages);
         *history_guard = messages;
     }
 
@@ -919,6 +1154,7 @@ impl Agent {
             .unwrap_or_else(|e| e.into_inner())
             .items
             .iter()
+            .filter(|(_, message)| !message.is_internal())
             .map(|(id, message)| (*id, message.content.clone()))
             .collect()
     }
@@ -984,17 +1220,24 @@ impl Agent {
     /// Steering remains text-only because a running request cannot safely
     /// acquire a new binary payload halfway through its provider stream.
     pub fn submit_message(&mut self, message: ChatMessage, system: String) -> bool {
+        let attached = self.take_next_turn();
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         if pending.running {
-            pending.next_id += 1;
-            let key = pending.next_id;
-            pending.items.push((key, message));
+            for held in attached.into_iter().chain(std::iter::once(message)) {
+                pending.next_id += 1;
+                let key = pending.next_id;
+                pending.items.push((key, held));
+            }
             drop(pending);
             return true;
         }
         pending.running = true;
         drop(pending);
-        self.log().commit(message);
+        let log = self.log();
+        for held in attached {
+            log.commit(held);
+        }
+        log.commit(message);
         self.start(system, false);
         false
     }
@@ -1054,6 +1297,15 @@ impl Agent {
     /// Request a checkpoint at the next provider boundary, or immediately
     /// when idle. No frontend needs to summarize or replace history.
     pub fn request_compaction(&mut self, system: String) {
+        self.request_compaction_with(system, None);
+    }
+
+    /// `request_compaction` with what the summary should focus on.
+    pub fn request_compaction_with(&mut self, system: String, focus: Option<String>) {
+        *self
+            .compact_focus
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = focus.filter(|f| !f.trim().is_empty());
         let mut queue = self
             .pending
             .lock()
@@ -1081,8 +1333,11 @@ impl Agent {
         let pending = self.pending.clone();
         let host = self.host.clone();
         let tool_seq = self.tool_seq.clone();
+        let active_tools = self.active_tools.clone();
         let wake = self.wake.clone();
         let compact_requested = self.compact_requested.clone();
+        let compact_focus = self.compact_focus.clone();
+        let instructions_loaded = self.instructions_loaded.clone();
         let tool_runtime = self.tools.clone();
         let tool_mode = if model.supports_tools {
             self.options.tool_mode
@@ -1127,10 +1382,13 @@ impl Agent {
             pending,
             host,
             tool_seq,
+            active_tools,
             wake,
             system,
             allowed_tools,
             compact_requested,
+            compact_focus,
+            instructions_loaded,
             tool_runtime,
             tool_mode,
         };
@@ -1189,6 +1447,10 @@ struct ToolRunContext {
     host: Option<std::sync::Arc<crate::core::extensions::ExtensionHost>>,
     tool_mode: ToolMode,
     allowed_tools: Option<Arc<Vec<String>>>,
+    /// An extension's narrowing for this turn (`session.tools`), enforced
+    /// at execution like the request allowlist: a provider can still emit
+    /// any name.
+    active_tools: Option<Arc<Vec<String>>>,
     cwd: PathBuf,
     cancel: Arc<AtomicBool>,
     id: u64,
@@ -1201,11 +1463,24 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
         host,
         tool_mode,
         allowed_tools,
+        active_tools,
         cwd,
         cancel,
         id,
         events,
     } = context;
+    if let Some(active) = &active_tools {
+        if !active.iter().any(|a| a == name) && !tools::always_available(name) {
+            return tools::ToolOutput {
+                content: format!(
+                    "tool {name} is not active right now — an extension narrowed the toolset"
+                ),
+                outcome: tools::ToolOutcome::Blocked,
+                summary: "blocked".into(),
+                display: None,
+            };
+        }
+    }
     if cancel.load(Ordering::SeqCst) {
         return tools::ToolOutput {
             content: "tool cancelled before execution".into(),
@@ -1225,7 +1500,7 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
     // Enforce the request's list at execution too. The advertised schemas are
     // not a security boundary because a provider can still emit any tool name.
     if let Some(allowed) = &allowed_tools {
-        if !allowed.iter().any(|a| a == name) {
+        if !allowed.iter().any(|a| a == name) && !tools::always_available(name) {
             return tools::ToolOutput {
                 content: format!("tool blocked by the request's tool allowlist: {name}"),
                 outcome: tools::ToolOutcome::Blocked,
@@ -1300,15 +1575,38 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
             } else {
                 tools::ToolOutcome::Completed
             };
+            // The row and the viewer take the extension's shape when it
+            // gives one; the model still reads `content` alone. A diff
+            // body is converted to the reference row grammar here so the
+            // viewer paints it like a built-in edit's.
+            let summary = result
+                .summary
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| tools::sanitize_display(&s))
+                .unwrap_or_else(|| {
+                    if outcome.is_error() {
+                        "error".into()
+                    } else {
+                        "done".into()
+                    }
+                });
+            // `display` is the extension's text for the viewer: sanitized
+            // like the summary, so a control sequence paints as characters.
+            let display = match (result.format, result.display) {
+                (crate::core::extensions::Format::Diff, body) => {
+                    let rows = tools::diffview::from_unified(&tools::sanitize_display(
+                        body.as_deref().unwrap_or(&result.content),
+                    ));
+                    (!rows.is_empty()).then(|| tools::truncate(rows))
+                }
+                (_, Some(body)) => Some(tools::truncate(tools::sanitize_display(&body))),
+                (_, None) => None,
+            };
             return tools::ToolOutput {
-                content: result.content,
+                content: tool_runtime.cap(result.content),
                 outcome,
-                summary: if outcome.is_error() {
-                    "error".into()
-                } else {
-                    "done".into()
-                },
-                display: None,
+                summary,
+                display,
             };
         }
     }
@@ -1380,7 +1678,7 @@ mod option_tests {
             }
             log.events = events;
             let cancel = Arc::new(AtomicBool::new(false));
-            let compaction = compact_log(&log, "system", &cancel);
+            let compaction = compact_log(&log, "system", &cancel, None, None);
             tokio::pin!(compaction);
             assert!(
                 tokio::time::timeout(Duration::from_millis(20), &mut compaction)
@@ -1625,6 +1923,7 @@ mod option_tests {
                 host: None,
                 tool_mode: ToolMode::None,
                 allowed_tools: None,
+                active_tools: None,
                 cwd: std::path::PathBuf::from("."),
                 cancel: Arc::new(AtomicBool::new(false)),
                 id: 1,
@@ -1648,6 +1947,7 @@ mod option_tests {
                 host: None,
                 tool_mode: ToolMode::All,
                 allowed_tools: Some(Arc::new(vec!["read".into(), "grep".into()])),
+                active_tools: None,
                 cwd: std::path::PathBuf::from("."),
                 cancel: Arc::new(AtomicBool::new(false)),
                 id: 1,

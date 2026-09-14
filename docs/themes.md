@@ -1,8 +1,9 @@
 # Themes
 
-A theme is a JSON file: `~/.e/themes/<name>.json`. Every name in
-`/settings` → Theme comes from this directory plus the two built-ins
-(`dark`, `light`) — a file named like a built-in replaces it.
+A theme is a JSON file: `~/.e/themes/<name>.json`, or `themes/<name>.json`
+in an installed [package](packages.md). Every name in `/settings` → Theme
+comes from these directories plus the two built-ins (`dark`, `light`) — a
+file named like a built-in replaces it, the home's file first.
 
 ## Format
 
@@ -30,15 +31,6 @@ Apply instantly with `/reload` (or pick it in `/settings`).
 The full transcript reader rails tool details with a `│` in the theme's
 `muted` tone and dim output text. Its footer uses `userMessageText` for `┃`
 and `muted` for navigation.
-
-## Diff review
-
-The `/diff` command is the `packages/diff` extension, and its palette ships
-inside the extension rather than in the host themes: the `diffPaneBg`,
-`diffText`, `diffAddedBg`/`diffRemovedBg`, `diffSelectedBg`, `diffLineNumber`,
-and `diffSyntax*` tokens live in `packages/diff/src/theme_{dark,light}.json`.
-`~/.e/themes/` cannot recolor the extension's output today; the host's
-`theme` setting selects which embedded palette `/diff` renders with.
 
 Edit/write summary counts use `toolDiffAddedMarker` and `toolDiffRemovedMarker`
 for truecolor terminals, or `toolDiffAddedMarkerFallback` and

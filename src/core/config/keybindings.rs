@@ -120,7 +120,7 @@ pub fn chord_string(ctrl: bool, alt: bool, shift: bool, base: &str) -> String {
 /// and case in the file never matter. Modifiers are peeled off the front one
 /// `name+` (or `name-`) at a time and the remainder is the key verbatim,
 /// which is what lets `ctrl+-` and `ctrl++` name the `-` and `+` keys.
-fn normalize_chord(raw: &str) -> String {
+pub fn normalize_chord(raw: &str) -> String {
     let mut ctrl = false;
     let mut alt = false;
     let mut shift = false;
@@ -129,7 +129,7 @@ fn normalize_chord(raw: &str) -> String {
     while let Some((head, tail)) = rest.split_once(['+', '-']) {
         match head.trim() {
             "ctrl" | "control" => ctrl = true,
-            "alt" | "option" => alt = true,
+            "alt" | "option" | "meta" => alt = true,
             "shift" => shift = true,
             _ => break,
         }

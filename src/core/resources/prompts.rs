@@ -1,6 +1,7 @@
 //! Prompt templates: `~/.e/prompts/<name>.md` becomes the `/name` command,
-//! and a trusted repo's `.e/prompts/<name>.md` adds `/name` too — shadowing a
-//! global template of the same name, the closer context wins.
+//! an installed package's `prompts/<name>.md` adds `/name` unless the home
+//! has one, and a trusted repo's `.e/prompts/<name>.md` shadows both — the
+//! closer context wins.
 //!
 //! Frontmatter (optional): `description:` for the picker, `argument-hint:`
 //! shown after the name. The body is submitted as the prompt after bash-style
@@ -10,6 +11,7 @@
 use std::path::Path;
 
 use crate::core::config::{home, trust};
+use crate::core::resources::packages;
 
 pub struct Template {
     pub name: String,
@@ -18,10 +20,18 @@ pub struct Template {
     pub content: String,
 }
 
-/// Global templates plus, when `cwd` is trusted, its own `.e/prompts/`; on
-/// a name clash the repo's template wins.
+/// Global templates, package templates not shadowed by a global name, plus,
+/// when `cwd` is trusted, its own `.e/prompts/`; on a name clash the repo's
+/// template wins.
 pub fn list(cwd: &Path) -> Vec<Template> {
     let mut templates = read_dir(&home::prompts_dir());
+    for dir in packages::dirs("prompts") {
+        for template in read_dir(&dir) {
+            if !templates.iter().any(|t| t.name == template.name) {
+                templates.push(template);
+            }
+        }
+    }
     if trust::trusted(cwd) {
         let local = read_dir(&cwd.join(".e").join("prompts"));
         templates.retain(|g| !local.iter().any(|l| l.name == g.name));

@@ -35,10 +35,13 @@ pub(super) struct Context {
     pub(super) pending: Arc<Mutex<PendingQueue>>,
     pub(super) host: Option<Arc<crate::core::extensions::ExtensionHost>>,
     pub(super) tool_seq: Arc<AtomicU64>,
+    pub(super) active_tools: Arc<Mutex<Option<Vec<String>>>>,
     pub(super) wake: wake::Shared,
     pub(super) system: String,
     pub(super) allowed_tools: Option<Arc<Vec<String>>>,
     pub(super) compact_requested: Arc<AtomicBool>,
+    pub(super) compact_focus: Arc<Mutex<Option<String>>>,
+    pub(super) instructions_loaded: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
     pub(super) tool_runtime: Arc<tools::ToolRuntime>,
     pub(super) tool_mode: ToolMode,
 }
@@ -57,13 +60,18 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         pending,
         host,
         tool_seq,
+        active_tools,
         wake,
         system,
         allowed_tools,
         compact_requested,
+        compact_focus,
+        instructions_loaded,
         tool_runtime,
         tool_mode,
     } = context;
+    // Extensions may append to the system prompt for this turn.
+    let mut system = system;
     let window_secs = wake::policy::window_secs();
     let max_continuations = wake::policy::max_continuations();
     let mut sleep_continuations = 0u32;
@@ -81,7 +89,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             break Outcome::Cancelled;
         }
         if compact_requested.swap(false, Ordering::SeqCst) {
-            match compact_log(&log, &system, &cancel).await {
+            let focus = take_focus(&compact_focus);
+            match compact_log(&log, &system, &cancel, host.as_ref(), focus).await {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events
@@ -120,15 +129,62 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 .collect()
         };
         for message in steered {
-            let _ = events
-                .send(SessionEvent::Steered(message.content.clone()))
-                .await;
+            // An extension's internal message rides the queue too; the
+            // transcript never sees it, the model does.
+            if !message.is_internal() {
+                let _ = events
+                    .send(SessionEvent::Steered(message.content.clone()))
+                    .await;
+            }
             // Queued whole, images included: a steering message is the
             // user's intent, not a text-only echo.
             let mut recorded = message;
             recorded.mark_internal();
             log.commit_async(recorded).await;
         }
+
+        // The first request of a run is the extensions' moment: the
+        // `before_turn` hook may add a system paragraph and a message,
+        // and `turn_start` carries the prompt. Continuations (later
+        // steps) and compaction-only runs are not turns.
+        if steps == 1 && !compact_only {
+            if let Some(h) = &host {
+                let prompt = history
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        matches!(m.kind, crate::core::providers::MessageKind::User { .. })
+                            && !m.is_internal()
+                    })
+                    .map(|m| m.content.clone())
+                    .unwrap_or_default();
+                if h.has_hook("before_turn") {
+                    let added = h.hook_before_turn(&prompt).await;
+                    for suffix in added.system_suffixes {
+                        system.push_str("\n\n");
+                        system.push_str(&suffix);
+                    }
+                    for message in added.messages {
+                        let mut recorded = ChatMessage::user(message.content.clone());
+                        if message.internal {
+                            recorded.mark_internal();
+                        } else {
+                            let _ = events.send(SessionEvent::Steered(message.content)).await;
+                        }
+                        log.commit_async(recorded).await;
+                    }
+                }
+                h.event("turn_start", serde_json::json!({"prompt": prompt}))
+                    .await;
+            }
+        }
+        let active_now: Option<Arc<Vec<String>>> = active_tools
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .map(Arc::new);
 
         let mut messages = { history.lock().unwrap_or_else(|e| e.into_inner()).clone() };
         // Some compatible gateways omit usage entirely. Keep a local,
@@ -138,7 +194,15 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // the conservative side of what's actually sent.
         let mut last_context = compact::estimate_request_tokens(&system, &messages);
         if compact::should_compact(last_context, model.context_window) {
-            match compact_log(&log, &system, &cancel).await {
+            match compact_log(
+                &log,
+                &system,
+                &cancel,
+                host.as_ref(),
+                take_focus(&compact_focus),
+            )
+            .await
+            {
                 Ok(true) => {
                     messages = history
                         .lock()
@@ -182,16 +246,19 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             effort: effort.clone(),
             session_id,
             tools: tools::restrict_to(
-                tools::filter_schemas(
-                    match (&host, tool_mode, allowed_tools.is_some()) {
-                        // A request allowlist names built-ins. Extension
-                        // tools and overrides stay outside that contract.
-                        (Some(h), ToolMode::All, false) => h.merged_tool_schemas(),
-                        _ => tools::schemas(),
-                    },
-                    tool_mode,
+                tools::restrict_to(
+                    tools::filter_schemas(
+                        match (&host, tool_mode, allowed_tools.is_some()) {
+                            // A request allowlist names built-ins. Extension
+                            // tools and overrides stay outside that contract.
+                            (Some(h), ToolMode::All, false) => h.merged_tool_schemas(),
+                            _ => tools::schemas(),
+                        },
+                        tool_mode,
+                    ),
+                    allowed_tools.as_deref().map(Vec::as_slice),
                 ),
-                allowed_tools.as_deref().map(Vec::as_slice),
+                active_now.as_deref().map(Vec::as_slice),
             ),
         };
 
@@ -686,7 +753,17 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         for call in &calls {
             let args: serde_json::Value =
                 serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-            let presentation = tools::present(&call.name, &args);
+            let presentation = match host.as_ref().and_then(|h| h.tool_label(&call.name)) {
+                Some(label) => tools::present_labeled(
+                    &call.name,
+                    &label.category,
+                    &label.running,
+                    &label.completed,
+                    &label.target,
+                    &args,
+                ),
+                None => tools::present(&call.name, &args),
+            };
             let id = tool_seq.fetch_add(1, Ordering::SeqCst) + 1;
             batch.push((
                 id,
@@ -750,17 +827,28 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 let events = events.clone();
                 let cwd = cwd.clone();
                 let allowed_tools = allowed_tools.clone();
+                let active_tools = active_now.clone();
                 let tool_runtime = tool_runtime.clone();
                 handles.push((
                     call.clone(),
                     tokio::spawn(async move {
                         let _ = events.send(SessionEvent::ToolStart { id }).await;
-                        let output = run_tool(
+                        let args: serde_json::Value = serde_json::from_str(&call.arguments)
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Some(h) = &host {
+                            h.event(
+                                "tool_start",
+                                serde_json::json!({"id": id, "name": call.name, "arguments": args}),
+                            )
+                            .await;
+                        }
+                        let mut output = run_tool(
                             ToolRunContext {
                                 tools: tool_runtime,
-                                host,
+                                host: host.clone(),
                                 tool_mode,
                                 allowed_tools,
+                                active_tools,
                                 cwd,
                                 cancel,
                                 id,
@@ -770,6 +858,39 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                             &call.arguments,
                         )
                         .await;
+                        if let Some(h) = &host {
+                            // Redaction and trimming happen before the
+                            // result is shown, stored, or sent anywhere.
+                            // The hook sees `content` only, so a rewrite
+                            // also retires the richer `display` text: what
+                            // the viewer shows must never say more than
+                            // what the hook let through.
+                            if h.has_hook("tool_result") {
+                                if let Some(content) = h
+                                    .hook_tool_result(
+                                        &call.name,
+                                        &output.content,
+                                        output.is_error(),
+                                    )
+                                    .await
+                                {
+                                    if content != output.content {
+                                        output.display = None;
+                                    }
+                                    output.content = content;
+                                }
+                            }
+                            h.event(
+                                "tool_end",
+                                serde_json::json!({
+                                    "id": id,
+                                    "name": call.name,
+                                    "outcome": format!("{:?}", output.outcome).to_lowercase(),
+                                    "content": output.content,
+                                }),
+                            )
+                            .await;
+                        }
                         let _ = events
                             .send(SessionEvent::ToolEnd {
                                 id,
@@ -828,6 +949,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         if cancel.load(Ordering::SeqCst) {
             break 'turn Outcome::Cancelled;
         }
+        // Nested instructions for the paths this batch touched join the
+        // conversation now — after the batch's results, so the provider's
+        // call/result pairing holds — and shape the next request.
+        load_nested_instructions(&calls, &cwd, &instructions_loaded, &log, &events).await;
         // Compact after committing the complete tool batch. The next
         // request continues this run through the same event stream.
         if last_context > 0 && compact::should_compact(last_context, model.context_window) {
@@ -836,7 +961,15 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     "context nearly full — compacting before continuing".into(),
                 ))
                 .await;
-            match compact_log(&log, &system, &cancel).await {
+            match compact_log(
+                &log,
+                &system,
+                &cancel,
+                host.as_ref(),
+                take_focus(&compact_focus),
+            )
+            .await
+            {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events
@@ -854,6 +987,160 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         }
     };
     outcome
+}
+
+/// The focus a `/compact <focus>` left for the next compaction, whichever
+/// path performs it: an automatic one that lands first honours it rather
+/// than racing it, and the manual one then finds nothing left to do.
+fn take_focus(focus: &Arc<Mutex<Option<String>>>) -> Option<String> {
+    focus.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Largest nested `AGENTS.md` that is read in full; the rest of a longer
+/// file is never read at all.
+const NESTED_INSTRUCTIONS_CAP: usize = 32 * 1024;
+
+/// The first line of a nested-instructions message; the directory it names
+/// is what [`instruction_dirs`] recovers from a history.
+const INSTRUCTIONS_HEAD: &str = "Instructions for files under ";
+
+/// The directories whose nested `AGENTS.md` a history already carries, so a
+/// resumed, rewound, or forked session neither reloads them nor forgets
+/// them. The set is the loader's own key: the lexical directory the message
+/// names.
+pub(super) fn instruction_dirs(messages: &[ChatMessage]) -> std::collections::HashSet<PathBuf> {
+    messages
+        .iter()
+        .filter(|m| m.is_internal() && m.role() == "user")
+        .filter_map(|m| {
+            let head = m.content.lines().next()?;
+            let dir = head.strip_prefix(INSTRUCTIONS_HEAD)?.strip_suffix(':')?;
+            Some(PathBuf::from(dir))
+        })
+        .collect()
+}
+
+/// Read at most the cap plus one byte of a regular file, off the async
+/// worker: a FIFO or a multi-gigabyte `AGENTS.md` must neither hang the
+/// turn nor be read whole. `None` for anything that is not a regular file
+/// inside `root` once links are resolved.
+async fn read_instructions(file: PathBuf, root: PathBuf) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read as _;
+        let real = file.canonicalize().ok()?;
+        if !real.starts_with(&root) || !std::fs::metadata(&real).ok()?.is_file() {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&real)
+            .ok()?
+            .take(NESTED_INSTRUCTIONS_CAP as u64 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// For every path a batch's calls named, walk from its directory up to (not
+/// including) the workspace and add each `AGENTS.md` not yet loaded this
+/// session as an internal user message, outermost first so the nearest
+/// reads as the most specific. Only in a trusted workspace, only for paths
+/// inside it — lexically, and again after resolving links, so a symlink
+/// under the checkout cannot reach instructions outside it
+/// (docs/instructions.md).
+async fn load_nested_instructions(
+    calls: &[ToolCall],
+    cwd: &std::path::Path,
+    loaded: &Arc<Mutex<std::collections::HashSet<PathBuf>>>,
+    log: &TurnLog,
+    events: &mpsc::Sender<SessionEvent>,
+) {
+    if !crate::core::config::trust::trusted(cwd) {
+        return;
+    }
+    let Ok(root) = cwd.canonicalize() else {
+        return;
+    };
+    let mut pending: Vec<PathBuf> = Vec::new();
+    for call in calls {
+        if !matches!(call.name.as_str(), "read" | "write" | "edit" | "grep") {
+            continue;
+        }
+        let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.arguments) else {
+            continue;
+        };
+        let Some(path) = args.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let target = std::path::Path::new(path);
+        if target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            continue;
+        }
+        let full = if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            cwd.join(target)
+        };
+        if !full.starts_with(cwd) {
+            continue;
+        }
+        let mut chain: Vec<PathBuf> = Vec::new();
+        let mut dir = full.parent();
+        while let Some(d) = dir {
+            if d == cwd || !d.starts_with(cwd) {
+                break;
+            }
+            chain.push(d.to_path_buf());
+            dir = d.parent();
+        }
+        for d in chain.into_iter().rev() {
+            if !pending.contains(&d) {
+                pending.push(d);
+            }
+        }
+    }
+    for dir in pending {
+        let fresh = loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(dir.clone());
+        if !fresh {
+            continue;
+        }
+        let file = dir.join("AGENTS.md");
+        let Some(text) = read_instructions(file.clone(), root.clone()).await else {
+            continue;
+        };
+        let mut text = text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        if text.len() > NESTED_INSTRUCTIONS_CAP {
+            let mut cut = NESTED_INSTRUCTIONS_CAP;
+            while !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
+            text.push_str("\n… [instructions clipped at 32 KiB]");
+        }
+        let shown = file.display().to_string();
+        let mut message = ChatMessage::user(format!(
+            "{INSTRUCTIONS_HEAD}{}:\n<project_instructions path=\"{}\">\n{text}\n</project_instructions>",
+            dir.display(),
+            context::xml_escape(&shown)
+        ));
+        message.mark_internal();
+        log.commit_async(message).await;
+        let _ = events
+            .send(SessionEvent::Instructions { path: shown })
+            .await;
+    }
 }
 
 /// Identify explicit filesystem targets, including aliases and new paths.

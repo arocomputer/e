@@ -2,10 +2,17 @@
 
 ## Unreleased
 
-**Git review arrives as e's first packaged extension, `/diff`, and Ctrl+O now reads full tool output in a two-depth reviewer. Pasted text is easier to identify and remove. Cancellation, compaction, and session saving have also been hardened.**
+**Packages and an extension surface at pi's reach, plus the core features that could not be extensions: a headless print mode, tool-result paging, session fork and export, undo, prompt history across sessions, a usage dashboard, and nested instructions. Ctrl+O reads full tool output in a two-depth reviewer; pasted text is easier to identify and remove; cancellation, compaction, and session saving have been hardened. The `/diff` review is now the `e-diff` package, outside this repository.**
 
 ### Breaking changes
 
+- `/diff` is no longer in this repository. The `packages/diff` crate left
+  with its docs and scripts; the Git review is the
+  [e-diff](https://github.com/fschrhunt/e-diff) package
+  (`e install git:github.com/fschrhunt/e-diff`), which speaks the same
+  display surface. The `packages/` directory is gone with it: the palette,
+  highlighter, and text sanitizers it held are back inside e, and the
+  repository ships nothing but e and its SDK — packages are the community's.
 - `e ask` is removed. Use `e rpc` for headless automation, with one JSON request and response per line. Piped stdin without `e rpc` now reports a usage error.
 - Read-only tool mode is removed, including `--read-only`, `--ro`, the `read_only` RPC mode, and `read_only_notice`. Use `--no-tools` to disable tools, or the RPC `tools` allowlist to select built-ins.
 - The `ask` tool and its question panel are removed. Extensions should read required input from configuration or report what is missing.
@@ -15,6 +22,83 @@
 
 ### New features
 
+- Extension commands can declare `arguments` (a hint shown in the `/`
+  picker; picking the command leaves `/name ` to finish) and
+  `completions` (typing `/name pre` asks the extension and offers its
+  answers in a picker). Prompt templates with an argument hint start the
+  same way.
+- `e --package <source>` (`-P`) loads a package for one run without
+  recording it; a trusted repository's `.e/packages` lists packages the
+  team shares. `session.send` takes `when: "next_turn"` to attach an
+  internal message to the user's next prompt.
+- Release packages: `e install release:<owner>/<repo>/<name>[@tag]` fetches
+  a compiled extension published as `<name>-<target>.tar.gz` on a GitHub
+  release, verifies it against the release's `checksums.txt`, and installs
+  it like any other package.
+- Nested `AGENTS.md` files load on demand: the first time a tool touches a
+  path under a directory that has one, its instructions join the
+  conversation, nearest last. Trusted workspaces only, once per directory
+  per session. `e docs instructions` covers the three levels.
+- `/usage [24h|7d|30d|all]` shows requests, tokens, and estimated cost by
+  model from the sessions on disk, as a table in the transcript.
+- `/undo` puts back what the last write or edit replaced, up to a hundred
+  changes back in the session; a file the tool created is removed.
+- The activity row says `Compacting context` while a mid-turn compaction
+  runs instead of `Thinking`.
+- Typing while `/resume` or `/tree` is open filters the list; Enter or Esc
+  clears the filter from the composer.
+- `/fork [name]` continues in a new session file seeded with the current
+  branch; the original stays as it was. Extensions see `session_start` with
+  reason `fork`.
+- `/export [path]` writes the session as a self-contained HTML page:
+  prompts, replies rendered from markdown, tool calls and results folded.
+  Default `e-session-<id>.html` in the working directory.
+- `/compact <focus>` tells the checkpoint what to keep the most of; the
+  summary keeps its fixed sections (goal, constraints, progress, decisions,
+  next steps, critical context), and a summary that lost one is kept but
+  reported as a warning. Extensions pass `focus` to `session.compact`.
+- Truncated tool results can be paged. Bash keeps up to 4 MiB of a
+  command's output and grep and extension results are kept whole; the
+  model sees the usual 32 KiB with a notice naming a result id, and the
+  new built-in `read_result` reads the rest by byte window or by query.
+  Results are kept for the session, bounded to 32 entries and 16 MiB.
+- Prompt history persists across sessions (`~/.e/history.jsonl`, newest
+  thousand, private): ↑ on an empty composer recalls prompts from earlier
+  sessions too.
+- ctrl+g opens the composer draft in an external editor (`editor` setting,
+  `$VISUAL`, `$EDITOR`, then `vi`) and loads what was saved back into the
+  composer.
+- `e -p "prompt"` runs one turn headless and streams the reply to stdout;
+  the prompt can come from stdin. `e -p --json` streams every session event
+  as a JSON line and ends with the same result object `e rpc` returns. See
+  `docs/automation.md`.
+- The extension surface grows to pi's reach, across the process boundary
+  (decision 0005). Extensions can subscribe to lifecycle events
+  (`session_start`, `turn_start`, `tool_end`, `compact_end`, `model_change`,
+  …), shape a turn with `before_turn` (a system-prompt paragraph and a
+  message), `tool_result` (redaction), and `compact_summary` hooks, give
+  their tools built-in-style rows (`label`) and results a summary, viewer
+  detail, and a format (`text`, `markdown`, `diff` — a unified diff paints
+  with line numbers and coloured markers, like an edit's), show blocks in
+  the transcript, and declare shortcuts. A new direction: extensions ask e
+  things and get answers — `ui.notify`, `ui.show`, `ui.select`,
+  `ui.confirm`, `ui.input`, `ui.status`, `ui.compose`, `ui.panel` (an
+  interactive panel receives keys and redraws), `session.send`, `.info`,
+  `.name`, `.model`, `.effort`, `.tools` (narrow the toolset: plan mode),
+  `.interrupt`, `.compact`. Everything shown is data painted through the
+  theme; requests are bounded and answered "no ui" under `e rpc`. Version-1
+  extensions are unchanged. `docs/extensions/plan.mjs` shows the surface;
+  the scaffold gains promise-returning `ui` and `session` helpers.
+- Packages: `e install <source>` clones a git repository (or references a
+  local directory) shaped like `~/.e/` — `extensions/`, `skills/`,
+  `prompts/`, `themes/` — under `~/.e/packages/<host>/<path>`, records it in
+  the `packages` list of `settings.json`, and every loader reads it after the
+  home's own resources. `e packages` lists them, `e remove` forgets one and
+  deletes its clone, and `e install` alone makes disk match settings (clone
+  what is missing, re-check pinned refs, fast-forward unpinned ones). A
+  listed package missing on disk is reported at startup; startup itself never
+  touches the network. The `$` picker labels package skills `Package`.
+  `e docs packages` carries the guide.
 - `/diff` ships as an optional extension (`packages/diff`), not part of the e binary. Build `e-diff`, drop it in `~/.e/extensions/`, and the command prints the continuous Git review — file summaries, per-file patches, syntax colors, and word-level changes — into the transcript. `/diff <path>` reviews one file. See `docs/diff.md`.
 - Ctrl+O adopts fx's full-output reader layout: spliced tool details, vertical rails, and a navigation footer. Review folds each detail to three lines; `→` expands to Full. Scroll with the keyboard or mouse; returning to the bottom resumes following new output.
 - Extensions can live in directories under `~/.e/extensions/`, keeping their entry point and helper files together.

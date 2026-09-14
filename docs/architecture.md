@@ -42,6 +42,9 @@ extract a module, not a crate.
   process boundary. e does not embed a scripting runtime or daemon.
 - `~/.e/` is e's only home. Store writes merge unknown keys and replace files
   atomically.
+- Packages are data: git repositories shaped like `~/.e/`, cloned by the
+  user's own `git` on `e install` and read by the same loaders as the home.
+  Startup reads disk only; nothing a package carries runs at install time.
 - Trust gates repository-provided context. It is not an execution sandbox.
   The complete threat model is in [../SECURITY.md](../SECURITY.md).
 

@@ -138,11 +138,17 @@ impl Setting {
     }
 }
 
-/// Theme names selectable today: `auto`, the built-ins, and any file in
-/// `~/.e/themes/`. Editable — drop a `<name>.json` in and it appears here.
+/// Theme names selectable today: `auto`, the built-ins, any file in
+/// `~/.e/themes/`, and any installed package's `themes/`. Editable — drop a
+/// `<name>.json` in and it appears here.
 pub fn theme_names() -> Vec<String> {
     let mut names = vec!["auto".to_string(), "light".to_string(), "dark".to_string()];
-    if let Ok(entries) = std::fs::read_dir(home::themes_dir()) {
+    let mut dirs = vec![home::themes_dir()];
+    dirs.extend(crate::core::resources::packages::dirs("themes"));
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map(|x| x == "json").unwrap_or(false) {
@@ -223,6 +229,26 @@ pub fn tui_mode() -> String {
     } else {
         "inline".into()
     }
+}
+
+/// The command that opens the composer draft externally (ctrl+g): the
+/// `editor` setting split on whitespace, else `$VISUAL`, else `$EDITOR`,
+/// else `vi`. The draft's path is appended as the last argument.
+pub fn external_editor() -> Vec<String> {
+    let configured = get_string("editor")
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("VISUAL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or_else(|| "vi".into());
+    configured.split_whitespace().map(str::to_string).collect()
 }
 
 pub fn theme() -> String {

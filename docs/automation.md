@@ -1,6 +1,42 @@
 # Automation
 
-For headless use, `e rpc` speaks sequential JSONL over stdin and stdout: one
+## One turn: `e -p`
+
+`e -p "prompt"` runs one turn without a terminal and prints the reply as it
+streams. The prompt is the argument, or piped stdin when there is none.
+Warnings and the error, if any, go to stderr. Exit status is 0 for a
+completed turn, 1 for an error or an interrupted turn, 2 for a usage
+problem. `--no-save` keeps it memory-only; every other run option
+(`--model`, `--effort`, `--no-tools`, `--image`, `--no-extensions`) applies.
+
+```sh
+e -p "what does this repo do"
+git diff | e -p "review this diff"
+```
+
+`e -p --json` streams every session event as one JSON line, then a final
+`{"type":"result", …}` line with the same fields as an `e rpc` response:
+
+```json
+{"type":"turn_start"}
+{"type":"text","delta":"The repo"}
+{"type":"tool_batch","calls":[{"id":1,"name":"read","arguments":{"path":"README"},"category":"read","target":"README"}]}
+{"type":"tool_start","id":1}
+{"type":"tool_end","id":1,"outcome":"completed","summary":"12 lines","content":"…"}
+{"type":"usage","input_tokens":1200,"output_tokens":80,"cache_read_tokens":0,"cache_write_5m_tokens":0,"cache_write_1h_tokens":0}
+{"type":"turn_end","aborted":false}
+{"type":"result","output":"…","final_output":"…","model":"provider/model","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{…},"cost_usd":null,"tools":{"calls":1,"failures":0},"session":null}
+```
+
+Event types: `turn_start`, `text`, `reasoning`, `tool_batch`, `tool_start`,
+`tool_output`, `tool_end`, `compacting`, `compacted`, `usage`, `warning`,
+`error`, `error_details`, `retry`, `recovered`, `session_name`, `steered`,
+`slept`, `sleep_stopped`, `discarded`, `turn_end`. Consumers should ignore
+types they do not know; new ones are additive.
+
+## Many turns: `e rpc`
+
+For long-lived headless use, `e rpc` speaks sequential JSONL over stdin and stdout: one
 request object per input line, exactly one response object per line out.
 Extensions are initialized once and reused; each request line gets a fresh
 agent. Requests are memory-only unless `save` is explicitly true. Add
@@ -34,9 +70,10 @@ Fields:
 - `model` and `effort` override process defaults from `-m` / `--ef`.
 - `tool_mode` is `all` or `none`.
 - `tools` is a positive built-in allowlist. `null` is the full built-in and
-  extension set. A list advertises and executes only those built-ins, and an
-  unknown name makes the request fail. The system prompt gets a generic policy
-  suffix naming the allowed tools. `tool_mode: "none"` still takes precedence.
+  extension set. A list advertises and executes only those built-ins (plus
+  `read_result`, so a truncated output stays readable), and an unknown name
+  makes the request fail. The system prompt gets a generic policy suffix
+  naming the allowed tools. `tool_mode: "none"` still takes precedence.
 - `save` defaults to false.
 - `images` is a list of PNG, JPEG, GIF, or WebP paths, up to ten files,
   20 MiB each, and 40 MiB total. The selected model must declare image input

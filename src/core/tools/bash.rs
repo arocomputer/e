@@ -604,18 +604,38 @@ where
     let exit_code = status.as_ref().and_then(|s| s.code());
     // The model's copy: decoded, stripped of colour codes and progress-bar
     // rewrites — token noise it should never pay for.
-    let mut combined =
+    let full =
         super::resolve_carriage_returns(&super::strip_ansi(&String::from_utf8_lossy(&retained)))
             .trim_end()
             .to_string();
-    if total_bytes > retained.len() {
-        // The marker leads: a reader of a truncated log needs to know it is
-        // mid-stream before line one, not after 32KB.
-        combined = format!(
-            "… [truncated: {total_bytes} bytes total, showing the last {} — earlier output dropped]\n{combined}",
+    // The model's copy is the tail: test runners put the verdict at the
+    // end of a long log. The marker leads, so a reader knows it is
+    // mid-stream before line one, and names the kept result to page into.
+    let mut combined = if full.len() > super::MAX_BYTES {
+        let mut start = full.len() - super::MAX_BYTES;
+        while !full.is_char_boundary(start) {
+            start += 1;
+        }
+        let tail = full[start..].to_string();
+        let kept = full.len();
+        let id = state.retain_result(full);
+        let dropped = if total_bytes > kept {
+            format!("; the first {} bytes were not kept", total_bytes - kept)
+        } else {
+            String::new()
+        };
+        format!(
+            "… [truncated: {total_bytes} bytes total, showing the last {}; earlier output: read_result {{\"id\": {id}}}{dropped}]\n{tail}",
+            tail.len()
+        )
+    } else if total_bytes > retained.len() {
+        format!(
+            "… [truncated: {total_bytes} bytes total, showing the last {} — earlier output dropped]\n{full}",
             retained.len()
-        );
-    }
+        )
+    } else {
+        full
+    };
     let (outcome, summary) = if cancelled {
         (ToolOutcome::Cancelled, "cancelled".to_string())
     } else if timed_out {
@@ -752,10 +772,15 @@ fn retain_and_publish<F>(
 ) where
     F: FnMut(OutputStream, &str),
 {
-    const RETAIN_LIMIT: usize = 32 * 1024;
+    // Far more than the model's copy (the last 32 KiB): the rest is kept
+    // for `read_result`, so a long log's beginning is deferred, not lost.
+    const RETAIN_LIMIT: usize = 4 * 1024 * 1024;
+    // Trim in slabs: draining a few bytes off the front of a 4 MiB buffer
+    // on every chunk would make a long stream quadratic.
+    const RETAIN_SLACK: usize = 512 * 1024;
     *total_bytes = total_bytes.saturating_add(bytes.len());
     retained.extend_from_slice(bytes);
-    if retained.len() > RETAIN_LIMIT {
+    if retained.len() > RETAIN_LIMIT + RETAIN_SLACK {
         let excess = retained.len() - RETAIN_LIMIT;
         retained.drain(..excess);
         // The raw byte cut may land inside a UTF-8 code point. Discard only

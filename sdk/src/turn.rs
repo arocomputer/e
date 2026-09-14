@@ -420,7 +420,8 @@ impl<'s> Turn<'s> {
             SessionEvent::TurnStart
             | SessionEvent::ToolCallAssembly { .. }
             | SessionEvent::Recovered { .. }
-            | SessionEvent::Slept { .. } => None,
+            | SessionEvent::Slept { .. }
+            | SessionEvent::Instructions { .. } => None,
         }
     }
 }

@@ -237,7 +237,6 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "crossterm",
- "e-terminal",
  "futures",
  "libc",
  "proptest",
@@ -255,19 +254,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "e-diff"
-version = "0.0.1"
-dependencies = [
- "crossterm",
- "e-terminal",
- "rustix",
- "serde_json",
- "tempfile",
- "tokio",
- "unicode-width",
-]
-
-[[package]]
 name = "e-sdk"
 version = "0.0.0"
 dependencies = [
@@ -277,15 +263,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "e-terminal"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "unicode-width",
 ]
 
 [[package]]
@@ -853,8 +830,15 @@ checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
 dependencies = [
  "bitflags",
  "memchr",
+ "pulldown-cmark-escape",
  "unicase",
 ]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "quick-error"
@@ -1126,9 +1110,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",
