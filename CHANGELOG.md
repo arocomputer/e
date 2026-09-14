@@ -15,6 +15,10 @@
 
 ### New features
 
+- `e -p "prompt"` runs one turn headless and streams the reply to stdout;
+  the prompt can come from stdin. `e -p --json` streams every session event
+  as a JSON line and ends with the same result object `e rpc` returns. See
+  `docs/automation.md`.
 - The extension surface grows to pi's reach, across the process boundary
   (decision 0005). Extensions can subscribe to lifecycle events
   (`session_start`, `turn_start`, `tool_end`, `compact_end`, `model_change`,

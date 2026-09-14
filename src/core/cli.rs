@@ -49,6 +49,8 @@ const ALL_FLAGS: &[&str] = &[
     "--no-network",
     "--json",
     "-j",
+    "--print",
+    "-p",
     "--model",
     "-m",
     "--effort",
@@ -175,6 +177,9 @@ pub struct Options {
     pub no_save: bool,
     pub tool_mode: ToolMode,
     pub json: bool,
+    /// `-p`: run one turn headless, print the reply, exit. With `--json`,
+    /// every session event streams as one JSON line, then a result line.
+    pub print: bool,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub images: Vec<String>,
@@ -253,6 +258,7 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
             "--no-save" | "--ns" => out.no_save = true,
             "--no-tools" | "--nt" => out.tool_mode = ToolMode::None,
             "--json" | "-j" => out.json = true,
+            "--print" | "-p" => out.print = true,
             "--model" | "-m" => out.model = Some(take_value(&args, &mut index, inline, "--model")?),
             "--effort" | "--ef" => {
                 out.effort = Some(take_value(&args, &mut index, inline, "--effort")?)
@@ -285,6 +291,11 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
     }
     if out.continue_session && out.resume_session {
         return Err("--continue and --resume cannot be used together".into());
+    }
+    if out.print && (out.continue_session || out.resume_session) {
+        return Err(
+            "--print runs a fresh turn; it cannot be combined with --continue or --resume".into(),
+        );
     }
     Ok(out)
 }

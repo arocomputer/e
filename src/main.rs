@@ -25,7 +25,8 @@ use e::tui::app;
 fn print_help(host: &e::core::extensions::ExtensionHost) {
     println!(
         "e — a coding agent for your terminal\n\n\
-usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use `e rpc` headless)\n  \
+usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use -p or `e rpc` headless)\n  \
+e -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
 e -c, --continue      continue this directory's most recent session\n  \
 e -r, --resume        pick a session to resume\n  \
 e rpc                 JSONL request/response protocol on stdin/stdout\n  \
@@ -48,7 +49,7 @@ e -v, --version"
 --model, -m <model>    select a model for this process\n  \
 --effort, --ef <level> select reasoning effort for this process\n  \
 --image, -i <path>     attach an image to the first prompt (repeatable)\n  \
---json, -j             machine output (doctor, providers)"
+--json, -j             machine output (doctor, providers, --print)"
     );
     let flags = host.flags();
     let commands = host.commands();
@@ -427,8 +428,17 @@ async fn main() -> std::io::Result<()> {
     if args.first().map(String::as_str) == Some("rpc") {
         return rpc(host, &options).await;
     }
+    if options.print {
+        let status = print_turn(host.clone(), &options, args).await;
+        e::core::tools::kill_tracked_processes();
+        host.shutdown().await;
+        if status != 0 {
+            std::process::exit(status);
+        }
+        return Ok(());
+    }
     if options.json {
-        eprintln!("--json is supported by `e doctor` and `e providers`");
+        eprintln!("--json is supported by `e doctor`, `e providers`, and `-p`");
         host.shutdown().await;
         std::process::exit(2);
     }
@@ -714,6 +724,115 @@ impl TurnAccumulator {
             "tools": {"calls": self.tool_calls, "failures": self.tool_failures},
         })
     }
+}
+
+/// `e -p [prompt]`: one headless turn. The prompt is the positional text,
+/// or piped stdin when there is none. Plain mode streams the reply's text
+/// to stdout as it arrives and puts warnings and errors on stderr; `--json`
+/// streams every session event as one JSON line and ends with the same
+/// result object `e rpc` returns. Exit status: 0 for a completed turn, 1
+/// for an error or an interrupted turn, 2 for a usage problem.
+async fn print_turn(
+    host: std::sync::Arc<e::core::extensions::ExtensionHost>,
+    options: &Options,
+    args: &[String],
+) -> i32 {
+    use std::io::Write as _;
+    let json = options.json;
+    let fail = |message: String| -> i32 {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"type": "result", "error": message})
+            );
+        } else {
+            eprintln!("{message}");
+        }
+        2
+    };
+    let mut prompt = args.join(" ");
+    if prompt.trim().is_empty() && !std::io::stdin().is_terminal() {
+        let mut piped = String::new();
+        if let Err(error) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut piped) {
+            return fail(format!("could not read stdin: {error}"));
+        }
+        prompt = piped;
+    }
+    if prompt.trim().is_empty() {
+        return fail("-p needs a prompt: an argument, or text on stdin".into());
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let selected = match resolve_model(options) {
+        Ok(selected) => selected,
+        Err(error) => return fail(error),
+    };
+    let images = match load_images(options, &selected) {
+        Ok(images) => images,
+        Err(error) => return fail(error),
+    };
+    let slug = model::slug(&selected);
+    let pricing = selected.pricing.clone();
+    let system = e::core::agent::context::system_prompt(&cwd);
+    let (mut agent, mut events) = Agent::with_options(selected, agent_options(options));
+    let effort = agent.effort();
+    agent.set_host(host);
+    agent.submit_message(
+        e::core::providers::ChatMessage::user_with_images(prompt, images),
+        system,
+    );
+
+    let mut result = TurnAccumulator::with_warnings(model::config_warnings());
+    let mut stdout = std::io::stdout();
+    let mut printed_any = false;
+    while let Some(event) = events.recv().await {
+        result.observe(&event);
+        if json {
+            if let Some(line) = event.to_json() {
+                println!("{line}");
+            }
+        } else {
+            match &event {
+                SessionEvent::TextDelta(delta) => {
+                    let _ = stdout.write_all(delta.as_bytes());
+                    let _ = stdout.flush();
+                    printed_any = true;
+                }
+                SessionEvent::Warning(message) => eprintln!("warning: {message}"),
+                SessionEvent::Retry {
+                    attempt,
+                    limit,
+                    delay_secs,
+                    reason,
+                    ..
+                } => eprintln!("retrying ({attempt}/{limit}) in {delay_secs}s: {reason}"),
+                _ => {}
+            }
+        }
+        if result.terminal {
+            break;
+        }
+    }
+    result.finish();
+    let failed = result.error.is_some() || result.aborted;
+    if json {
+        let mut body = result.json(&slug, effort.as_deref(), pricing.as_ref());
+        body["type"] = serde_json::Value::from("result");
+        body["session"] = agent
+            .session_path()
+            .map(|p| serde_json::Value::from(p.display().to_string()))
+            .unwrap_or(serde_json::Value::Null);
+        println!("{body}");
+    } else {
+        if printed_any && !result.output.ends_with('\n') {
+            println!();
+        }
+        if let Some(error) = &result.error {
+            eprintln!("error: {error}");
+        } else if result.aborted {
+            eprintln!("turn interrupted");
+        }
+    }
+    i32::from(failed)
 }
 
 /// Bound on one RPC request line — generous for pasted prompt text (images
