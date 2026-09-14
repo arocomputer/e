@@ -2,5 +2,8 @@
   "binary_size_bytes": 10485760,
   "cold_start_ms": 50,
   "first_frame_ms": 250,
+  "loaded_first_frame_ms": 500,
+  "cold_launch_ms": 500,
+  "resume_first_frame_ms": 750,
   "long_session_frame_ms": 10
 }
