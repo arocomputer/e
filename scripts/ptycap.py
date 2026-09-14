@@ -112,7 +112,10 @@ def reap():
 def stop_group(sig):
     try:
         os.killpg(pid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        # Gone, or (macOS) a group whose leader is already a zombie: either
+        # way there is nothing left to stop, and the capture on disk is the
+        # evidence the caller judges.
         pass
 
 
