@@ -153,7 +153,7 @@ surface? Route it through `panel.rs` so it can't diverge.
 - Conventional commit titles, plain language: `fix(tui): tool trees stay
   connected after compaction`. The type is `fix`, `feat`, `perf`, `refactor`,
   `docs`, `test`, or `chore`; the scope is the area triage labels by path —
-  `core`, `tui`, `sdk`, `infra`, `docs` — or omitted when the change spans
+  `core`, `tui`, `sdk`, `bench`, `infra`, `docs` — or omitted when the change spans
   them. The title becomes the squash commit on `main`, so write it as the
   one line someone reads in `git log`.
 - Body: the problem in a sentence or two, then how you fixed it. End with

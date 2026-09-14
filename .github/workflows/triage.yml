@@ -40,6 +40,8 @@ jobs:
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
           echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md)' && \
             add_label documentation 0075ca 'Documentation changes' || true
+          echo "$files" | grep -q '^benchmarks/' && \
+            add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true
           echo "$files" | grep -Eq '^(\.github/|scripts/|x$|rust-toolchain.toml)' && \
             add_label area:infra 6f42c1 'Build, CI, release, or repository automation' || true
           echo "$files" | grep -Eq '^(Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \

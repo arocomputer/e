@@ -59,7 +59,7 @@ in [CODEOWNERS](.github/CODEOWNERS) and cannot merge on green checks alone.
 
 Title the PR as a conventional commit in plain language, scoped by area:
 `fix(tui): tool trees stay connected after compaction`. Scopes are the ones
-triage labels by path — `core`, `tui`, `sdk`, `infra`, `docs` — and the
+triage labels by path — `core`, `tui`, `sdk`, `bench`, `infra`, `docs` — and the
 title becomes the squash commit on `main`. In the body, state the problem in
 a sentence or two, then how you fixed it; the template only carries the
 checklist CI and review expect. One concern per PR — if the description
