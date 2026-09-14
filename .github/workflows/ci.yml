@@ -19,7 +19,7 @@ jobs:
     # skip the heavy jobs — but the required checks must still report green,
     # so Build & Test and Performance stay running and short-circuit their
     # steps instead of skipping themselves.
-    name: Decide what needs building
+    name: CI / Decide
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -71,7 +71,7 @@ jobs:
 
   guard:
     # Audit the security surface before running the repository contract.
-    name: Guard (security surface)
+    name: CI / Guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -83,7 +83,7 @@ jobs:
 
   test:
     # Run the repository contract on fresh GitHub-hosted Linux and macOS VMs.
-    name: Build & Test (${{ matrix.os }})
+    name: CI / Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     needs: changes
@@ -122,7 +122,7 @@ jobs:
           retention-days: 7
 
   performance:
-    name: Performance budgets
+    name: CI / Budgets
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
