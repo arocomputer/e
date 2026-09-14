@@ -218,8 +218,8 @@ A manifest without an `events` field is a version-1 extension and receives
 `turn_end` alone.
 
 ```
-session_start     {reason, path}       reason: startup | reload | new | resume
-session_shutdown  {reason}             reason: quit | reload | new | resume
+session_start     {reason, path}       reason: startup | reload | new | resume | fork
+session_shutdown  {reason}             reason: quit | reload | new | resume | fork
 turn_start        {prompt}
 turn_end          {aborted}
 tool_start        {id, name, arguments}
@@ -279,7 +279,7 @@ session.model     {model}                     → {} | error   the same path /mo
 session.effort    {effort}                    → {} | error   one of the model's levels
 session.tools     {names | null}              → {}           narrow the toolset; null restores
 session.interrupt {}                          → {}
-session.compact   {}                          → {}
+session.compact   {focus?}                    → {}
 ```
 
 `session.tools` is how a plan mode works: `["read","grep"]` and the model

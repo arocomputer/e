@@ -1608,7 +1608,18 @@ impl App {
             "/tree" => self.open_tree_menu(),
             "/settings" => self.open_settings(),
             "/copy" => self.copy_last(),
-            "/compact" => self.compact_now(),
+            "/fork" => self.fork_session(None),
+            _ if trimmed.starts_with("/fork ") => {
+                self.fork_session(Some(trimmed["/fork ".len()..].trim().to_string()))
+            }
+            "/export" => self.export_session(None),
+            _ if trimmed.starts_with("/export ") => {
+                self.export_session(Some(trimmed["/export ".len()..].trim().to_string()))
+            }
+            "/compact" => self.compact_now(None),
+            _ if trimmed.starts_with("/compact ") => {
+                self.compact_now(Some(trimmed["/compact ".len()..].trim().to_string()))
+            }
             "/reload" => self.reload(),
             "/trust" => match crate::core::config::trust::set(&self.agent.cwd(), true) {
                 Ok(()) => self.notice(
@@ -1730,12 +1741,102 @@ impl App {
     }
 
     /// Ask the core to checkpoint at its next safe provider boundary.
-    fn compact_now(&mut self) {
+    /// `/fork [name]`: continue in a new session file seeded with the
+    /// current branch. The transcript and history stay as they are; only
+    /// where the next messages land changes. The original file is untouched.
+    fn fork_session(&mut self, name: Option<String>) {
+        if self.active.is_some() || self.agent.is_streaming() {
+            self.notice("a turn is running — press Esc to stop it, then /fork".into());
+            return;
+        }
+        let messages = self.agent.history_snapshot();
+        if messages.is_empty() {
+            self.notice("nothing to fork yet — send a message first".into());
+            return;
+        }
+        let model = self.agent.model_slug();
+        let mut log = match crate::core::session::SessionLog::create_with(
+            &self.agent.cwd(),
+            &model,
+            &messages,
+        ) {
+            Ok(log) => log,
+            Err(error) => {
+                self.notice(format!("could not fork: {error}"));
+                return;
+            }
+        };
+        let name = name
+            .filter(|n| !n.is_empty())
+            .or_else(|| self.agent.session_name().map(|n| format!("{n} (fork)")));
+        if let Some(name) = &name {
+            if let Err(error) = log.set_name(name) {
+                self.notice(format!("could not name the fork: {error}"));
+            }
+        }
+        let file = log
+            .path()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.agent.set_session(Some(log));
+        self.agent.adopt_session_name(name.clone());
+        self.session_epoch += 1;
+        set_tab_title(&tab_title(&title_path(), name.as_deref()));
+        extui::shutdown_then_start(self, "fork");
+        self.notice(format!(
+            "forked into {file} — the original session is unchanged"
+        ));
+    }
+
+    /// `/export [path]`: write the current branch as a self-contained HTML
+    /// page. Default: `e-session-<id>.html` in the working directory.
+    fn export_session(&mut self, path: Option<String>) {
+        let messages = self.agent.history_snapshot();
+        if messages.is_empty() {
+            self.notice("nothing to export yet".into());
+            return;
+        }
+        let title = self
+            .agent
+            .session_name()
+            .or_else(|| {
+                self.agent
+                    .session_path()
+                    .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            })
+            .unwrap_or_else(|| "e session".into());
+        let target = match path.filter(|p| !p.is_empty()) {
+            Some(path) => {
+                let path = std::path::PathBuf::from(path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.agent.cwd().join(path)
+                }
+            }
+            None => {
+                let id = self
+                    .agent
+                    .session_id()
+                    .map(|id| id.chars().take(8).collect::<String>())
+                    .unwrap_or_else(|| "unsaved".into());
+                self.agent.cwd().join(format!("e-session-{id}.html"))
+            }
+        };
+        let page = crate::core::export::html(&title, &self.agent.model_slug(), &messages);
+        match std::fs::write(&target, page) {
+            Ok(()) => self.notice(format!("exported to {}", target.display())),
+            Err(error) => self.notice(format!("could not export: {error}")),
+        }
+    }
+
+    fn compact_now(&mut self, focus: Option<String>) {
         if self.shell_block.is_some() {
             self.notice("a shell command is running — compact after it finishes".into());
             return;
         }
-        self.agent.request_compaction(system_prompt());
+        self.agent.request_compaction_with(system_prompt(), focus);
     }
 
     /// `!cmd`: run it through the bash tool off-task; the result arrives as
@@ -2137,6 +2238,8 @@ fn is_builtin_command(name: &str) -> bool {
             | "clear"
             | "copy"
             | "compact"
+            | "fork"
+            | "export"
             | "trust"
             | "settings"
             | "help"
@@ -2153,7 +2256,7 @@ fn builtin_category(value: &str) -> &'static str {
     match value {
         "/login" => "Account",
         "/models" | "/effort" | "/scoped-models" => "Model",
-        "/resume" | "/new" | "/tree" | "/compact" => "Session",
+        "/resume" | "/new" | "/tree" | "/compact" | "/fork" | "/export" => "Session",
         "/trust" => "Workspace",
         _ => "General",
     }

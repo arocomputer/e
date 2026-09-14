@@ -30,8 +30,22 @@ impl App {
                 "/tree",
             ),
             MenuItem::new("/new", "start a fresh session", "/new"),
+            MenuItem::new(
+                "/fork",
+                "continue in a new session file seeded with this one — /fork <name>",
+                "/fork",
+            ),
+            MenuItem::new(
+                "/export",
+                "write this session as a self-contained HTML page — /export <path>",
+                "/export",
+            ),
             MenuItem::new("/copy", "copy the last reply", "/copy"),
-            MenuItem::new("/compact", "summarize into a fresh session", "/compact"),
+            MenuItem::new(
+                "/compact",
+                "summarize into a fresh session — /compact <focus> steers what it keeps",
+                "/compact",
+            ),
             MenuItem::new(
                 "/trust",
                 "trust this directory (loads its AGENTS.md, .e resources)",

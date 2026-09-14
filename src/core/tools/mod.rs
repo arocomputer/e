@@ -13,6 +13,7 @@ mod bash;
 pub mod diffview;
 mod edit;
 mod fs;
+mod results;
 
 /// The clipboard reader terminates its helpers the same way the bash tool
 /// does: the whole process group, so descendants holding a pipe die too.
@@ -24,6 +25,68 @@ pub(crate) use bash::kill_group;
 pub struct ToolRuntime {
     seen: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::time::SystemTime, u64)>>,
     background: std::sync::Arc<bash::BackgroundRegistry>,
+    /// Full tool outputs the model saw truncated, for `read_result`.
+    results: std::sync::Mutex<ResultStore>,
+}
+
+/// The whole text behind each truncated result, newest last, bounded by
+/// entries and bytes: a session that produces many long outputs keeps the
+/// recent ones and forgets the oldest, and `read_result` says so.
+#[derive(Default)]
+struct ResultStore {
+    next_id: u64,
+    entries: std::collections::VecDeque<(u64, String)>,
+    bytes: usize,
+}
+
+const STORE_MAX_ENTRIES: usize = 32;
+const STORE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+impl ToolRuntime {
+    /// Keep a full result and return the id a truncation notice names.
+    pub fn retain_result(&self, full: String) -> u64 {
+        let mut store = self.results.lock().unwrap_or_else(|e| e.into_inner());
+        store.next_id += 1;
+        let id = store.next_id;
+        store.bytes += full.len();
+        store.entries.push_back((id, full));
+        while store.entries.len() > STORE_MAX_ENTRIES || store.bytes > STORE_MAX_BYTES {
+            match store.entries.pop_front() {
+                Some((_, evicted)) => store.bytes -= evicted.len(),
+                None => break,
+            }
+        }
+        id
+    }
+
+    /// The kept text for `id`, if it is still held.
+    pub fn result(&self, id: u64) -> Option<String> {
+        self.results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entries
+            .iter()
+            .find(|(kept, _)| *kept == id)
+            .map(|(_, text)| text.clone())
+    }
+
+    /// Cap a result the model reads at `MAX_BYTES`. A cut keeps the whole
+    /// text for `read_result` and says which id continues it.
+    pub fn cap(&self, text: String) -> String {
+        if text.len() <= MAX_BYTES {
+            return text;
+        }
+        let total = text.len();
+        let mut cut = MAX_BYTES;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let head = text[..cut].to_string();
+        let id = self.retain_result(text);
+        format!(
+            "{head}\n… [truncated: {total} bytes total, showing the first {cut}; read the rest with read_result {{\"id\": {id}, \"offset\": {cut}}}]"
+        )
+    }
 }
 
 fn default_runtime() -> &'static ToolRuntime {
@@ -242,6 +305,12 @@ fn target_command(args: &Value) -> String {
     // losing the full command in review or restored sessions.
     sanitize_display(value)
 }
+fn target_result(args: &Value) -> String {
+    args["id"]
+        .as_u64()
+        .map(|id| format!("#{id}"))
+        .unwrap_or_default()
+}
 fn target_pattern(args: &Value) -> String {
     sanitize_inline(args["pattern"].as_str().unwrap_or(""))
 }
@@ -316,6 +385,16 @@ static SPECS: &[Spec] = &[
         target: target_pattern,
         schema: fs::grep_schema,
         run: fs::grep,
+    },
+    Spec {
+        name: "read_result",
+        snippet: "Read more of a truncated tool result by id: a byte window, or the lines matching a query.",
+        category: "read",
+        running: "Reading result",
+        completed: "Read result",
+        target: target_result,
+        schema: results::read_result_schema,
+        run: results::read_result,
     },
     Spec {
         name: "bash",

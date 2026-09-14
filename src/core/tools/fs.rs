@@ -390,7 +390,7 @@ pub fn grep_schema() -> Value {
     )
 }
 
-pub fn grep(args: &Value, cwd: &Path, _state: &super::ToolRuntime) -> ToolOutput {
+pub fn grep(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     let Some(pattern) = args["pattern"].as_str() else {
         return err("grep: missing pattern".into(), "grep", "");
     };
@@ -447,7 +447,7 @@ pub fn grep(args: &Value, cwd: &Path, _state: &super::ToolRuntime) -> ToolOutput
             format!("{count}+ matches"),
         )
     } else {
-        (truncate(body), format!("{count} matches"))
+        (state.cap(body), format!("{count} matches"))
     };
     ok(content, summary)
 }

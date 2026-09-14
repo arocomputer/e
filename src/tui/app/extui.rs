@@ -640,7 +640,8 @@ impl App {
                 request.ok();
             }
             "session.compact" => {
-                self.compact_now();
+                let focus = text_of(&params, "focus");
+                self.compact_now((!focus.trim().is_empty()).then_some(focus));
                 request.ok();
             }
             other => request.respond(Err(format!("unknown method {other}"))),

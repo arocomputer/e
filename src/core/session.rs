@@ -219,6 +219,21 @@ impl SessionLog {
         })
     }
 
+    /// A fresh log already carrying `messages` as its trunk: `/fork` copies
+    /// the current branch into a file of its own, so the two sessions grow
+    /// apart from here while the original stays exactly as it was.
+    pub fn create_with(
+        cwd: &Path,
+        model: &str,
+        messages: &[ChatMessage],
+    ) -> std::io::Result<SessionLog> {
+        let mut log = Self::create(cwd, model)?;
+        for message in messages {
+            log.append(message)?;
+        }
+        Ok(log)
+    }
+
     /// One serialized record per write call, newline included — even under
     /// an unexpected second writer, records never share a line. A failed
     /// write is lost history: callers must surface the error, not shrug.

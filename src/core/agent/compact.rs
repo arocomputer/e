@@ -142,13 +142,22 @@ pub async fn summarize(
     model: Model,
     history: &[ChatMessage],
     session_id: String,
+    focus: Option<&str>,
 ) -> Result<Summary, String> {
     let flattened = budget_transcript(history, model.context_window)?;
     let response_model = model.clone();
+    // A `/compact <focus>` steers what the summary keeps; the sections
+    // stay the same so the next agent can rely on their shape.
+    let instruction = match focus.map(str::trim).filter(|f| !f.is_empty()) {
+        Some(focus) => format!(
+            "{INSTRUCTION}\n\nThe user asked this checkpoint to focus on: {focus}. Give that the most room without dropping the sections."
+        ),
+        None => INSTRUCTION.to_string(),
+    };
     let request = Request {
         model,
         system: SYSTEM.into(),
-        messages: vec![ChatMessage::user(format!("{flattened}\n\n{INSTRUCTION}"))],
+        messages: vec![ChatMessage::user(format!("{flattened}\n\n{instruction}"))],
         effort: None,
         session_id,
         tools: Vec::new(),
@@ -238,6 +247,27 @@ fn budget_transcript(history: &[ChatMessage], window: u64) -> Result<String, Str
         }
     }
     Ok(out)
+}
+
+/// The section headings the checkpoint prompt asks for. A summary missing
+/// them still compacts — the model answered — but the turn is warned, since
+/// a free-form summary is what the structure exists to prevent.
+pub const SECTIONS: &[&str] = &[
+    "## Goal",
+    "## Constraints & Preferences",
+    "## Progress",
+    "## Key Decisions",
+    "## Next Steps",
+    "## Critical Context",
+];
+
+/// Which required sections a summary lacks, in prompt order.
+pub fn missing_sections(summary: &str) -> Vec<&'static str> {
+    SECTIONS
+        .iter()
+        .copied()
+        .filter(|section| !summary.contains(section))
+        .collect()
 }
 
 /// The first message of the fresh session, carrying the summary forward.

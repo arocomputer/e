@@ -15,6 +15,21 @@
 
 ### New features
 
+- `/fork [name]` continues in a new session file seeded with the current
+  branch; the original stays as it was. Extensions see `session_start` with
+  reason `fork`.
+- `/export [path]` writes the session as a self-contained HTML page:
+  prompts, replies rendered from markdown, tool calls and results folded.
+  Default `e-session-<id>.html` in the working directory.
+- `/compact <focus>` tells the checkpoint what to keep the most of; the
+  summary keeps its fixed sections (goal, constraints, progress, decisions,
+  next steps, critical context), and a summary that lost one is kept but
+  reported as a warning. Extensions pass `focus` to `session.compact`.
+- Truncated tool results can be paged. Bash keeps up to 4 MiB of a
+  command's output and grep and extension results are kept whole; the
+  model sees the usual 32 KiB with a notice naming a result id, and the
+  new built-in `read_result` reads the rest by byte window or by query.
+  Results are kept for the session, bounded to 32 entries and 16 MiB.
 - Prompt history persists across sessions (`~/.e/history.jsonl`, newest
   thousand, private): ↑ on an empty composer recalls prompts from earlier
   sessions too.

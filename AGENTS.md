@@ -43,10 +43,11 @@ src/core/    the harness, terminal-free
                   events, and the extensions' own ui.*/session.* requests
                   (HostRequest, answered by the frontend; decision 0005)
   tools/          read · write · edit · grep (optional `glob` filter) · bash
-                  (optional `background`/`handle` for long-lived processes)
-                  — the whole surface; directory listing and file-finding go
-                  through bash, and skills load through read (the catalog
-                  carries their paths)
+                  (optional `background`/`handle` for long-lived processes) ·
+                  read_result (page into a truncated result by id; the
+                  runtime keeps the whole text) — the whole surface;
+                  directory listing and file-finding go through bash, and
+                  skills load through read (the catalog carries their paths)
   session.rs · output.rs · workspace.rs — SessionLog is a tree, not just a
                   line: id/parent per message, `/tree` branches in place
 src/tui/     the frontend (short paths re-export from the groups)

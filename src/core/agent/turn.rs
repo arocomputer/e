@@ -40,6 +40,7 @@ pub(super) struct Context {
     pub(super) system: String,
     pub(super) allowed_tools: Option<Arc<Vec<String>>>,
     pub(super) compact_requested: Arc<AtomicBool>,
+    pub(super) compact_focus: Arc<Mutex<Option<String>>>,
     pub(super) tool_runtime: Arc<tools::ToolRuntime>,
     pub(super) tool_mode: ToolMode,
 }
@@ -63,6 +64,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         system,
         allowed_tools,
         compact_requested,
+        compact_focus,
         tool_runtime,
         tool_mode,
     } = context;
@@ -85,7 +87,11 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             break Outcome::Cancelled;
         }
         if compact_requested.swap(false, Ordering::SeqCst) {
-            match compact_log(&log, &system, &cancel, host.as_ref()).await {
+            let focus = compact_focus
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            match compact_log(&log, &system, &cancel, host.as_ref(), focus).await {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events
@@ -185,7 +191,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // the conservative side of what's actually sent.
         let mut last_context = compact::estimate_request_tokens(&system, &messages);
         if compact::should_compact(last_context, model.context_window) {
-            match compact_log(&log, &system, &cancel, host.as_ref()).await {
+            match compact_log(&log, &system, &cancel, host.as_ref(), None).await {
                 Ok(true) => {
                     messages = history
                         .lock()
@@ -933,7 +939,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     "context nearly full — compacting before continuing".into(),
                 ))
                 .await;
-            match compact_log(&log, &system, &cancel, host.as_ref()).await {
+            match compact_log(&log, &system, &cancel, host.as_ref(), None).await {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events

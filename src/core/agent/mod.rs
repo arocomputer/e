@@ -284,6 +284,7 @@ async fn compact_log(
     system: &str,
     cancel: &Arc<AtomicBool>,
     host: Option<&Arc<crate::core::extensions::ExtensionHost>>,
+    focus: Option<String>,
 ) -> Result<bool, String> {
     let history = log
         .history
@@ -317,9 +318,19 @@ async fn compact_log(
         h.event("compact_start", serde_json::json!({})).await;
     }
     let summary = tokio::select! {
-        result = compact::summarize(log.model.clone(), &older, session_id) => result?,
+        result = compact::summarize(log.model.clone(), &older, session_id, focus.as_deref()) => result?,
         _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
     };
+    let missing = compact::missing_sections(&summary.text);
+    if !missing.is_empty() {
+        let _ = log
+            .events
+            .send(SessionEvent::Warning(format!(
+                "compaction summary is missing {}; it was kept as written",
+                missing.join(", ")
+            )))
+            .await;
+    }
     // Extensions get the last word on the summary, not the history: the
     // hook is bounded and fails open, so a silent one changes nothing.
     let mut summary = summary;
@@ -721,6 +732,9 @@ pub struct Agent {
     pending: Arc<Mutex<PendingQueue>>,
     cancel: Arc<AtomicBool>,
     compact_requested: Arc<AtomicBool>,
+    /// What the next requested compaction should focus on (`/compact <focus>`),
+    /// taken by the turn that performs it.
+    compact_focus: Arc<Mutex<Option<String>>>,
     /// The supervisor owns the worker's terminal event. Keeping its handle
     /// prevents the turn from becoming unobserved background work.
     turn_task: Option<tokio::task::JoinHandle<()>>,
@@ -783,6 +797,7 @@ impl Agent {
             pending: Arc::new(Mutex::new(PendingQueue::default())),
             cancel: Arc::new(AtomicBool::new(false)),
             compact_requested: Arc::new(AtomicBool::new(false)),
+            compact_focus: Arc::new(Mutex::new(None)),
             turn_task: None,
             session: Arc::new(Mutex::new(None)),
             session_name: Arc::new(Mutex::new(None)),
@@ -1189,6 +1204,15 @@ impl Agent {
     /// Request a checkpoint at the next provider boundary, or immediately
     /// when idle. No frontend needs to summarize or replace history.
     pub fn request_compaction(&mut self, system: String) {
+        self.request_compaction_with(system, None);
+    }
+
+    /// `request_compaction` with what the summary should focus on.
+    pub fn request_compaction_with(&mut self, system: String, focus: Option<String>) {
+        *self
+            .compact_focus
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = focus.filter(|f| !f.trim().is_empty());
         let mut queue = self
             .pending
             .lock()
@@ -1219,6 +1243,7 @@ impl Agent {
         let active_tools = self.active_tools.clone();
         let wake = self.wake.clone();
         let compact_requested = self.compact_requested.clone();
+        let compact_focus = self.compact_focus.clone();
         let tool_runtime = self.tools.clone();
         let tool_mode = if model.supports_tools {
             self.options.tool_mode
@@ -1268,6 +1293,7 @@ impl Agent {
             system,
             allowed_tools,
             compact_requested,
+            compact_focus,
             tool_runtime,
             tool_mode,
         };
@@ -1479,7 +1505,7 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
                 (_, None) => None,
             };
             return tools::ToolOutput {
-                content: result.content,
+                content: tool_runtime.cap(result.content),
                 outcome,
                 summary,
                 display,
@@ -1554,7 +1580,7 @@ mod option_tests {
             }
             log.events = events;
             let cancel = Arc::new(AtomicBool::new(false));
-            let compaction = compact_log(&log, "system", &cancel, None);
+            let compaction = compact_log(&log, "system", &cancel, None, None);
             tokio::pin!(compaction);
             assert!(
                 tokio::time::timeout(Duration::from_millis(20), &mut compaction)

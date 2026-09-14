@@ -50,9 +50,10 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
         ChatMessage::assistant("the bug is in line 3", Vec::new()),
     ];
 
-    let summary = e::core::agent::compact::summarize(model.clone(), &history[..3], String::new())
-        .await
-        .unwrap();
+    let summary =
+        e::core::agent::compact::summarize(model.clone(), &history[..3], String::new(), None)
+            .await
+            .unwrap();
     assert_eq!(summary.text, "Goal: fix the parser. Next: run tests.");
     assert_eq!(
         summary.response.purpose,
@@ -308,7 +309,7 @@ async fn one_huge_tool_call_cannot_bypass_the_summary_budget() {
         }],
     )];
 
-    let summary = e::core::agent::compact::summarize(model, &history, String::new())
+    let summary = e::core::agent::compact::summarize(model, &history, String::new(), None)
         .await
         .unwrap();
     assert_eq!(summary.text, "summary");
@@ -335,6 +336,7 @@ async fn a_truncated_summary_is_rejected() {
         test_model("mock", port, Api::Completions),
         &[ChatMessage::user("original task")],
         String::new(),
+        None,
     )
     .await;
     assert!(result.unwrap_err().contains("complete, valid response"));
@@ -353,4 +355,52 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_focus_reaches_the_checkpoint_prompt_and_missing_sections_are_named() {
+    let _env = env_lock();
+    let reply = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"## Goal\\nship\\n## Next Steps\\ntest\"}}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (port, server) = serve_sse(&[reply]);
+    let home = Home::new("compact-focus");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let model = test_model("mock", port, Api::Completions);
+    let history = [ChatMessage::user("fix the parser")];
+    let summary = e::core::agent::compact::summarize(
+        model,
+        &history,
+        String::new(),
+        Some("the failing test names"),
+    )
+    .await
+    .unwrap();
+    let sent = server.join().unwrap().remove(0);
+    assert!(
+        sent.contains("focus on: the failing test names"),
+        "the focus rides the checkpoint instruction"
+    );
+    assert!(
+        sent.contains("## Critical Context"),
+        "the sections are still required"
+    );
+    // The model kept two of six sections; compaction proceeds and reports
+    // exactly which are missing.
+    assert_eq!(
+        e::core::agent::compact::missing_sections(&summary.text),
+        vec![
+            "## Constraints & Preferences",
+            "## Progress",
+            "## Key Decisions",
+            "## Critical Context"
+        ]
+    );
+    assert!(e::core::agent::compact::missing_sections(
+        "## Goal\n## Constraints & Preferences\n## Progress\n## Key Decisions\n## Next Steps\n## Critical Context"
+    )
+    .is_empty());
 }

@@ -972,3 +972,50 @@ fn the_latest_persisted_name_is_readable_for_resume() {
     assert_eq!(session::name_of(&path).as_deref(), Some("beta"));
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("e-session-fork-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("ws");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let mut original = SessionLog::create(&cwd, "test/model").unwrap();
+    original
+        .append(&e::core::providers::ChatMessage::user("one"))
+        .unwrap();
+    original
+        .append(&e::core::providers::ChatMessage::assistant(
+            "two",
+            Vec::new(),
+        ))
+        .unwrap();
+    let branch = SessionLog::load(original.path()).unwrap();
+    let before = std::fs::read_to_string(original.path()).unwrap();
+
+    let mut fork = SessionLog::create_with(&cwd, "test/model", &branch).unwrap();
+    assert_ne!(fork.path(), original.path());
+    assert_ne!(fork.id(), original.id());
+    fork.append(&e::core::providers::ChatMessage::user("three"))
+        .unwrap();
+
+    let forked = SessionLog::load(fork.path()).unwrap();
+    assert_eq!(
+        forked
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>(),
+        ["one", "two", "three"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(original.path()).unwrap(),
+        before,
+        "the original file did not change"
+    );
+    // The fork's nodes chain from its own root, not the original's ids.
+    let nodes = SessionLog::nodes(fork.path()).unwrap();
+    assert!(nodes[0].parent.is_none());
+    assert_eq!(nodes[2].parent.as_deref(), Some(nodes[1].id.as_str()));
+}
