@@ -22,12 +22,51 @@ fn escape(text: &str) -> String {
     out
 }
 
+/// Whether a link or image destination may reach the page: web and mail
+/// schemes, or a relative reference. `javascript:`, `data:`, and the rest
+/// are dropped so a model-written link cannot run in the viewer.
+fn safe_destination(url: &str) -> bool {
+    let trimmed = url.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:")
+        || lower.starts_with('#')
+        || !lower
+            .split(['/', '?', '#'])
+            .next()
+            .is_some_and(|head| head.contains(':'))
+}
+
 /// Assistant markdown as HTML. Raw HTML in the source is demoted to text so
-/// a model-written `<script>` renders as its characters, never runs.
+/// a model-written `<script>` renders as its characters, never runs, and a
+/// link to an unsafe scheme loses its destination.
 fn markdown(text: &str) -> String {
-    use pulldown_cmark::Event;
+    use pulldown_cmark::{Event, Tag};
     let parser = pulldown_cmark::Parser::new(text).map(|event| match event {
         Event::Html(raw) | Event::InlineHtml(raw) => Event::Text(raw),
+        Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) if !safe_destination(&dest_url) => Event::Start(Tag::Link {
+            link_type,
+            dest_url: "".into(),
+            title,
+            id,
+        }),
+        Event::Start(Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) if !safe_destination(&dest_url) => Event::Start(Tag::Image {
+            link_type,
+            dest_url: "".into(),
+            title,
+            id,
+        }),
         other => other,
     });
     let mut html = String::new();

@@ -52,7 +52,7 @@
  *   ext.ui.panel({title, lines, interactive}) / ext.ui.panel(null)
  *   ext.session.send(content, {internal, run}?)   ext.session.info()
  *   ext.session.name(name)   .model(m)   .effort(l)   .tools(names | null)
- *   ext.session.interrupt()  .compact()
+ *   ext.session.interrupt()  .compact(focus?)
  *   ext.hasUI                              true once initialize said so
  *
  * `flag(name)` (pi's getFlag) reads a parsed flag from any handler, any
@@ -152,7 +152,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
       effort: (effort) => ask("session.effort", { effort }),
       tools: (names) => ask("session.tools", { names }),
       interrupt: () => ask("session.interrupt"),
-      compact: () => ask("session.compact"),
+      compact: (focus) => ask("session.compact", focus === undefined ? {} : { focus }),
     },
     /** pi's getFlag: the parsed value of a typed flag in any handler —
      *  the passed value, else the manifest default, else undefined. Works
@@ -177,6 +177,17 @@ export function connect({ manifest = {}, ...handlers } = {}) {
       });
     },
   };
+
+  /** Run a notification handler; a notification has no reply, so a
+   *  throwing or rejecting observer is its own problem, never a crash. */
+  function observe(handler, params) {
+    if (typeof handler !== "function") return;
+    try {
+      Promise.resolve(handler(params)).catch(() => {});
+    } catch {
+      // as above
+    }
+  }
 
   function route(message) {
     const { id, method, params } = message;
@@ -203,31 +214,13 @@ export function connect({ manifest = {}, ...handlers } = {}) {
         process.exit(0);
         return;
       case "event":
-        if (typeof handlers.event === "function") {
-          try {
-            handlers.event(params || {});
-          } catch {
-            // A notification has no reply; a throwing observer is its own problem.
-          }
-        }
+        observe(handlers.event, params || {});
         return;
       case "ui.key":
-        if (typeof handlers.key === "function") {
-          try {
-            handlers.key(params || {});
-          } catch {
-            // as above
-          }
-        }
+        observe(handlers.key, params || {});
         return;
       case "ui.panel_closed":
-        if (typeof handlers.panelClosed === "function") {
-          try {
-            handlers.panelClosed();
-          } catch {
-            // as above
-          }
-        }
+        observe(handlers.panelClosed);
         return;
       default:
         break;

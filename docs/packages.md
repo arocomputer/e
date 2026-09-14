@@ -73,10 +73,13 @@ private hosts, SSH config, credential helpers included. Set
 ## How package resources load
 
 Every loader reads `~/.e/<kind>/` first, then each installed package's
-`<kind>/` in settings order, then — after `/trust` — the repository's own
-`.e/<kind>/`. On a name clash the closer context wins: a repo skill shadows a
-global one, and a global one shadows a package's. A package theme can name a
-built-in (`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
+`<kind>/` in settings order. Skills and prompts go one step further: after
+`/trust`, the repository's own `.e/skills/` and `.e/prompts/` too. Extensions
+and themes never load from a repository — trusting a checkout must not run
+its code or restyle your terminal; install it as a package if you mean it.
+On a name clash the closer context wins: a repo skill shadows a global one,
+and a global one shadows a package's. A package theme can name a built-in
+(`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
 
 - **Extensions** launch like any in `~/.e/extensions/`; their config lives
   under their own name in `settings.json` → `"extensions"`.

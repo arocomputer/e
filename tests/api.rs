@@ -326,6 +326,70 @@ done
     host.shutdown().await;
 }
 
+/// An extension's `display` text is for the viewer: a control sequence in
+/// it paints as characters, never reaches the terminal.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_display_text_is_sanitized_before_it_is_shown() {
+    const SHOWY: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*) printf '{"id":%s,"result":{"name":"showy","tools":[{"name":"show","parameters":{"type":"object"}}]}}\n' "$id" ;;
+    *'"tool_call"'*) printf '{"id":%s,"result":{"content":"plain","display":"before \\u001b]52;c;aGk=\\u0007after"}}\n' "$id" ;;
+    *'"shutdown"'*) exit 0 ;;
+  esac
+done
+"#;
+    let first = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"show\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let second = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let _lock = env_lock();
+    let home = tempdir::TempHome::with_extension("showy.sh", SHOWY);
+    std::fs::write(home.dir.join("auth.json"), r#"{"mock":{"key":"test"}}"#).unwrap();
+    let (port, server) = common::serve_sse(&[first, second]);
+    let (notices, _rx) = tokio::sync::mpsc::channel(4);
+    let host = start_host(notices).await;
+    assert!(!host.is_empty());
+    let options = e::core::agent::AgentOptions {
+        save_session: false,
+        ..e::core::agent::AgentOptions::default()
+    };
+    let (mut agent, mut events) = e::core::agent::Agent::with_options(
+        common::test_model("mock", port, e::core::providers::catalog::Api::Completions),
+        options,
+    );
+    agent.set_host(host.clone());
+    agent.submit("show it".into(), "system".into());
+    let mut shown = None;
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while let Some(event) = events.recv().await {
+            match event {
+                e::core::agent::SessionEvent::ToolEnd { content, .. } => shown = Some(content),
+                e::core::agent::SessionEvent::TurnEnd { .. } => break,
+                e::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("agent turn completes");
+    let shown = shown.expect("the tool ended");
+    assert!(!shown.contains('\u{1b}'), "{shown:?}");
+    assert!(
+        shown.starts_with("before ") && shown.ends_with("after"),
+        "{shown:?}"
+    );
+    server.join().unwrap();
+    host.shutdown().await;
+}
+
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_policy_and_ownership_apply_to_read() {

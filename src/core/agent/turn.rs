@@ -89,10 +89,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             break Outcome::Cancelled;
         }
         if compact_requested.swap(false, Ordering::SeqCst) {
-            let focus = compact_focus
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            let focus = take_focus(&compact_focus);
             match compact_log(&log, &system, &cancel, host.as_ref(), focus).await {
                 Ok(true) => {}
                 Ok(false) => {
@@ -197,7 +194,15 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // the conservative side of what's actually sent.
         let mut last_context = compact::estimate_request_tokens(&system, &messages);
         if compact::should_compact(last_context, model.context_window) {
-            match compact_log(&log, &system, &cancel, host.as_ref(), None).await {
+            match compact_log(
+                &log,
+                &system,
+                &cancel,
+                host.as_ref(),
+                take_focus(&compact_focus),
+            )
+            .await
+            {
                 Ok(true) => {
                     messages = history
                         .lock()
@@ -956,7 +961,15 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     "context nearly full — compacting before continuing".into(),
                 ))
                 .await;
-            match compact_log(&log, &system, &cancel, host.as_ref(), None).await {
+            match compact_log(
+                &log,
+                &system,
+                &cancel,
+                host.as_ref(),
+                take_focus(&compact_focus),
+            )
+            .await
+            {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events
@@ -976,14 +989,68 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
     outcome
 }
 
-/// Largest nested `AGENTS.md` that is read in full.
+/// The focus a `/compact <focus>` left for the next compaction, whichever
+/// path performs it: an automatic one that lands first honours it rather
+/// than racing it, and the manual one then finds nothing left to do.
+fn take_focus(focus: &Arc<Mutex<Option<String>>>) -> Option<String> {
+    focus.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Largest nested `AGENTS.md` that is read in full; the rest of a longer
+/// file is never read at all.
 const NESTED_INSTRUCTIONS_CAP: usize = 32 * 1024;
+
+/// The first line of a nested-instructions message; the directory it names
+/// is what [`instruction_dirs`] recovers from a history.
+const INSTRUCTIONS_HEAD: &str = "Instructions for files under ";
+
+/// The directories whose nested `AGENTS.md` a history already carries, so a
+/// resumed, rewound, or forked session neither reloads them nor forgets
+/// them. The set is the loader's own key: the lexical directory the message
+/// names.
+pub(super) fn instruction_dirs(messages: &[ChatMessage]) -> std::collections::HashSet<PathBuf> {
+    messages
+        .iter()
+        .filter(|m| m.is_internal() && m.role() == "user")
+        .filter_map(|m| {
+            let head = m.content.lines().next()?;
+            let dir = head.strip_prefix(INSTRUCTIONS_HEAD)?.strip_suffix(':')?;
+            Some(PathBuf::from(dir))
+        })
+        .collect()
+}
+
+/// Read at most the cap plus one byte of a regular file, off the async
+/// worker: a FIFO or a multi-gigabyte `AGENTS.md` must neither hang the
+/// turn nor be read whole. `None` for anything that is not a regular file
+/// inside `root` once links are resolved.
+async fn read_instructions(file: PathBuf, root: PathBuf) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read as _;
+        let real = file.canonicalize().ok()?;
+        if !real.starts_with(&root) || !std::fs::metadata(&real).ok()?.is_file() {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&real)
+            .ok()?
+            .take(NESTED_INSTRUCTIONS_CAP as u64 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    })
+    .await
+    .ok()
+    .flatten()
+}
 
 /// For every path a batch's calls named, walk from its directory up to (not
 /// including) the workspace and add each `AGENTS.md` not yet loaded this
 /// session as an internal user message, outermost first so the nearest
 /// reads as the most specific. Only in a trusted workspace, only for paths
-/// inside it (docs/instructions.md).
+/// inside it — lexically, and again after resolving links, so a symlink
+/// under the checkout cannot reach instructions outside it
+/// (docs/instructions.md).
 async fn load_nested_instructions(
     calls: &[ToolCall],
     cwd: &std::path::Path,
@@ -994,6 +1061,9 @@ async fn load_nested_instructions(
     if !crate::core::config::trust::trusted(cwd) {
         return;
     }
+    let Ok(root) = cwd.canonicalize() else {
+        return;
+    };
     let mut pending: Vec<PathBuf> = Vec::new();
     for call in calls {
         if !matches!(call.name.as_str(), "read" | "write" | "edit" | "grep") {
@@ -1044,7 +1114,7 @@ async fn load_nested_instructions(
             continue;
         }
         let file = dir.join("AGENTS.md");
-        let Ok(text) = std::fs::read_to_string(&file) else {
+        let Some(text) = read_instructions(file.clone(), root.clone()).await else {
             continue;
         };
         let mut text = text.trim().to_string();
@@ -1061,7 +1131,7 @@ async fn load_nested_instructions(
         }
         let shown = file.display().to_string();
         let mut message = ChatMessage::user(format!(
-            "Instructions for files under {}:\n<project_instructions path=\"{}\">\n{text}\n</project_instructions>",
+            "{INSTRUCTIONS_HEAD}{}:\n<project_instructions path=\"{}\">\n{text}\n</project_instructions>",
             dir.display(),
             context::xml_escape(&shown)
         ));

@@ -325,7 +325,15 @@ async fn compact_log(
     // hook is bounded and fails open, so a silent one changes nothing.
     let mut summary = summary;
     if let Some(h) = host.filter(|h| h.has_hook("compact_summary")) {
-        if let Some(text) = h.hook_compact_summary(&summary.text).await {
+        let rewritten = {
+            let hook = h.hook_compact_summary(&summary.text);
+            tokio::pin!(hook);
+            tokio::select! {
+                text = &mut hook => text,
+                _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+            }
+        };
+        if let Some(text) = rewritten {
             summary.text = text;
         }
     }
@@ -912,7 +920,17 @@ impl Agent {
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
         self.tools = Arc::new(tools::ToolRuntime::default());
         self.reset_session_scoped();
+        self.remember_instructions(&messages);
         *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
+    }
+
+    /// The nested `AGENTS.md` a history already carries count as loaded:
+    /// a resumed or rewound session must neither repeat them nor lose them.
+    fn remember_instructions(&self, messages: &[ChatMessage]) {
+        *self
+            .instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = turn::instruction_dirs(messages);
     }
     pub fn clear(&mut self) {
         self.tools = Arc::new(tools::ToolRuntime::default());
@@ -1082,13 +1100,11 @@ impl Agent {
         if let Some(session) = session_guard.as_mut() {
             session.set_head(head);
         }
+        // Only the nested AGENTS.md the kept branch carries stay loaded:
+        // one past the new head loads again on the next touch, one before
+        // it is not repeated.
+        self.remember_instructions(&messages);
         *history_guard = messages;
-        // A nested AGENTS.md loaded past the new head is gone from the
-        // history; forgetting it lets the next touch load it again.
-        self.instructions_loaded
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
     }
 
     /// Name this session: applies immediately when a log exists, otherwise
@@ -1574,13 +1590,16 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
                         "done".into()
                     }
                 });
+            // `display` is the extension's text for the viewer: sanitized
+            // like the summary, so a control sequence paints as characters.
             let display = match (result.format, result.display) {
                 (crate::core::extensions::Format::Diff, body) => {
-                    let rows =
-                        tools::diffview::from_unified(body.as_deref().unwrap_or(&result.content));
+                    let rows = tools::diffview::from_unified(&tools::sanitize_display(
+                        body.as_deref().unwrap_or(&result.content),
+                    ));
                     (!rows.is_empty()).then(|| tools::truncate(rows))
                 }
-                (_, Some(body)) => Some(tools::truncate(body)),
+                (_, Some(body)) => Some(tools::truncate(tools::sanitize_display(&body))),
                 (_, None) => None,
             };
             return tools::ToolOutput {

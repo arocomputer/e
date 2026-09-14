@@ -1319,17 +1319,26 @@ fn forward(
         }
         .to_string()
     }
+    // An immediate error is still a reply the extension waits for: it
+    // queues for the writer like any other rather than being dropped when
+    // the channel is momentarily full.
+    fn refuse(writer: &mpsc::Sender<String>, id: &Value, error: String) {
+        let line = answer(id, Err(error));
+        let writer = writer.clone();
+        tokio::spawn(async move {
+            let _ = writer.send(line).await;
+        });
+    }
     let Some(requests) = requests else {
-        let _ = writer.try_send(answer(&id, Err("no ui".into())));
+        refuse(writer, &id, "no ui".into());
         return;
     };
     if inflight.load(Ordering::SeqCst) >= MAX_INFLIGHT_REQUESTS {
-        let _ = writer.try_send(answer(
+        refuse(
+            writer,
             &id,
-            Err(format!(
-                "too many requests in flight (limit {MAX_INFLIGHT_REQUESTS})"
-            )),
-        ));
+            format!("too many requests in flight (limit {MAX_INFLIGHT_REQUESTS})"),
+        );
         return;
     }
     let (tx, rx) = oneshot::channel();
@@ -1340,7 +1349,7 @@ fn forward(
         reply: Some(tx),
     };
     if requests.try_send(request).is_err() {
-        let _ = writer.try_send(answer(&id, Err("ui unavailable".into())));
+        refuse(writer, &id, "ui unavailable".into());
         return;
     }
     inflight.fetch_add(1, Ordering::SeqCst);

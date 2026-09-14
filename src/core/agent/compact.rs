@@ -147,10 +147,13 @@ pub async fn summarize(
     let flattened = budget_transcript(history, model.context_window)?;
     let response_model = model.clone();
     // A `/compact <focus>` steers what the summary keeps; the sections
-    // stay the same so the next agent can rely on their shape.
+    // stay the same so the next agent can rely on their shape. The focus
+    // is a phrase, not a document: it is clipped to the room the budget
+    // reserved for it.
     let instruction = match focus.map(str::trim).filter(|f| !f.is_empty()) {
         Some(focus) => format!(
-            "{INSTRUCTION}\n\nThe user asked this checkpoint to focus on: {focus}. Give that the most room without dropping the sections."
+            "{INSTRUCTION}\n\nThe user asked this checkpoint to focus on: {}. Give that the most room without dropping the sections.",
+            clip(focus, FOCUS_CAP)
         ),
         None => INSTRUCTION.to_string(),
     };
@@ -202,13 +205,26 @@ impl Drop for StreamGuard {
     }
 }
 
+/// Most of a `/compact <focus>` that reaches the checkpoint prompt; the
+/// transcript budget reserves this much for it.
+const FOCUS_CAP: usize = 1024;
+
+/// `text` cut to at most `max` bytes on a character boundary.
+fn clip(text: &str, max: usize) -> &str {
+    let mut cut = text.len().min(max);
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &text[..cut]
+}
+
 /// Preserve every user instruction and previous checkpoint before spending
 /// remaining space on recent execution details. Refuse to compact when the
 /// protected text alone cannot fit; silently deleting instructions is worse.
 fn budget_transcript(history: &[ChatMessage], window: u64) -> Result<String, String> {
     let budget = usize::try_from(window.saturating_mul(2))
         .unwrap_or(usize::MAX)
-        .saturating_sub(SYSTEM.len() + INSTRUCTION.len() + 512);
+        .saturating_sub(SYSTEM.len() + INSTRUCTION.len() + FOCUS_CAP + 512);
     let segments: Vec<(bool, String)> = history
         .iter()
         .flat_map(|message| {

@@ -359,6 +359,28 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
+async fn an_overlong_focus_is_clipped_to_its_reserved_room() {
+    let _env = env_lock();
+    let reply = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"## Goal\\nship\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (port, server) = serve_sse(&[reply]);
+    let home = Home::new("compact-focus-clip");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let model = test_model("mock", port, Api::Completions);
+    let history = [ChatMessage::user("fix the parser")];
+    let focus = "f".repeat(5000);
+    e::core::agent::compact::summarize(model, &history, String::new(), Some(&focus))
+        .await
+        .unwrap();
+    let sent = server.join().unwrap().remove(0);
+    let longest = sent.split(|c| c != 'f').map(str::len).max().unwrap_or(0);
+    assert_eq!(longest, 1024, "the focus is a phrase, not a document");
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_focus_reaches_the_checkpoint_prompt_and_missing_sections_are_named() {
     let _env = env_lock();
     let reply = concat!(

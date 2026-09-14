@@ -91,6 +91,91 @@ async fn a_trusted_workspace_loads_nested_instructions_once_nearest_last() {
     let _ = std::fs::remove_dir_all(&ws);
 }
 
+/// A symlink under the checkout must not reach instructions outside it,
+/// and a FIFO named `AGENTS.md` must not hang the turn.
+#[cfg(unix)]
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn linked_and_irregular_instruction_files_are_not_loaded() {
+    const READ_LINKED: &str = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
+        "\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"linked/file.txt\\\"}\"}},",
+        "{\"index\":1,\"id\":\"c2\",",
+        "\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"fifo/file.txt\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let _lock = env_lock();
+    let (port, server) = serve_sse(&[READ_LINKED, REPLY]);
+    let home = Home::new("nested-links");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let ws = workspace("links");
+    // An outside directory with instructions, reachable through a link.
+    let outside = std::env::temp_dir().join(format!("e-nested-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("AGENTS.md"), "OUTSIDE RULES\n").unwrap();
+    std::fs::write(outside.join("file.txt"), "x\n").unwrap();
+    std::os::unix::fs::symlink(&outside, ws.join("linked")).unwrap();
+    // A FIFO where instructions would be.
+    std::fs::create_dir_all(ws.join("fifo")).unwrap();
+    std::fs::write(ws.join("fifo/file.txt"), "x\n").unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(ws.join("fifo/AGENTS.md"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::env::set_current_dir(&ws).unwrap();
+    e::core::config::trust::set(&ws, true).unwrap();
+
+    let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    agent.submit("read both".into(), "sys".into());
+    let loaded = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_turn(&mut agent, &mut rx),
+    )
+    .await
+    .expect("a FIFO must not hang the turn");
+    assert!(loaded.is_empty(), "{loaded:?}");
+    let requests = server.join().unwrap();
+    assert!(!requests[1].contains("OUTSIDE RULES"));
+    let _ = std::fs::remove_dir_all(&ws);
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+/// A resumed history already carrying a directory's instructions is not
+/// given them again.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_history_does_not_repeat_its_instructions() {
+    let _lock = env_lock();
+    let (port, server) = serve_sse(&[READ_SUB, REPLY, READ_SUB, REPLY]);
+    let home = Home::new("nested-resume");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let ws = workspace("resume");
+    std::env::set_current_dir(&ws).unwrap();
+    e::core::config::trust::set(&ws, true).unwrap();
+
+    let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    agent.submit("read the file".into(), "sys".into());
+    assert_eq!(run_turn(&mut agent, &mut rx).await.len(), 2);
+    let history = agent.history_snapshot();
+
+    // A fresh agent resuming that history: the instructions it carries
+    // count as loaded.
+    let (mut resumed, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    resumed.load_history(history);
+    resumed.submit("again".into(), "sys".into());
+    assert!(run_turn(&mut resumed, &mut rx).await.is_empty());
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[3].matches("Be gentle").count(),
+        1,
+        "once, not twice"
+    );
+    let _ = std::fs::remove_dir_all(&ws);
+}
+
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_untrusted_workspace_loads_nothing() {
