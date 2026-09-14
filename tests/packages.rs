@@ -12,8 +12,18 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use common::{env_lock, Home};
-use e::core::resources::packages::{self, Status};
+use common::{env_lock, serve_raw_bytes, Home};
+use e::core::resources::packages::{self, Source, Status};
+
+/// Package installs are async (release downloads); the git paths are
+/// synchronous underneath, so a current-thread runtime is enough.
+fn block<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
 
 /// A committed package repository with one resource of every kind, tagged
 /// `v1`, plus a second commit adding `prompts/more.md` on `main`.
@@ -124,7 +134,7 @@ fn install_clones_under_the_managed_root_and_every_loader_sees_the_package() {
     let repo = Repo::new("install");
     let cwd = std::env::temp_dir();
 
-    let (root, counts) = packages::install(&repo.source(Some("v1"))).unwrap();
+    let (root, counts) = block(packages::install(&repo.source(Some("v1")))).unwrap();
     assert!(root.starts_with(home.dir.join("packages").join("file")));
     assert_eq!(counts, [1, 1, 1, 1]);
     assert_eq!(settings_packages(&home), vec![repo.source(Some("v1"))]);
@@ -164,7 +174,7 @@ fn the_home_shadows_a_package_resource_of_the_same_name() {
     let home = Home::new("pkg-shadow");
     let repo = Repo::new("shadow");
     let cwd = std::env::temp_dir();
-    packages::install(&repo.source(Some("v1"))).unwrap();
+    block(packages::install(&repo.source(Some("v1")))).unwrap();
     write(
         &home.dir.join("skills/hello/SKILL.md"),
         "---\nname: hello\ndescription: from the home\n---\nbody\n",
@@ -188,7 +198,7 @@ fn a_missing_clone_is_reported_at_startup_and_restored_by_install_all() {
     let _lock = env_lock();
     let home = Home::new("pkg-missing");
     let repo = Repo::new("missing");
-    let (root, _) = packages::install(&repo.source(Some("v1"))).unwrap();
+    let (root, _) = block(packages::install(&repo.source(Some("v1")))).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
 
     assert_eq!(packages::missing(), vec![repo.source(Some("v1"))]);
@@ -209,7 +219,7 @@ fn a_missing_clone_is_reported_at_startup_and_restored_by_install_all() {
 
     // Startup never cloned; `e install` with no source does.
     assert!(!root.exists());
-    let results = packages::install_all();
+    let results = block(packages::install_all());
     assert_eq!(results.len(), 1);
     assert!(results[0].as_ref().unwrap().ends_with(": installed"));
     assert!(root.join("skills/hello/SKILL.md").is_file());
@@ -225,11 +235,11 @@ fn reinstalling_moves_the_pin_and_unpinning_follows_the_default_branch() {
     let _lock = env_lock();
     let home = Home::new("pkg-pin");
     let repo = Repo::new("pin");
-    let (root, _) = packages::install(&repo.source(Some("v1"))).unwrap();
+    let (root, _) = block(packages::install(&repo.source(Some("v1")))).unwrap();
     assert!(!root.join("prompts/more.md").exists());
 
     // Same package, new ref: one entry, moved — not a duplicate.
-    let (same_root, counts) = packages::install(&repo.source(None)).unwrap();
+    let (same_root, counts) = block(packages::install(&repo.source(None))).unwrap();
     assert_eq!(same_root, root);
     assert_eq!(settings_packages(&home), vec![repo.source(None)]);
     assert_eq!(counts[2], 2, "the tip of main carries both prompts");
@@ -237,7 +247,7 @@ fn reinstalling_moves_the_pin_and_unpinning_follows_the_default_branch() {
     // Unpinned, `e install` fast-forwards to new commits.
     write(&repo.dir.join("prompts/third.md"), "third\n");
     repo.commit("third");
-    let results = packages::install_all();
+    let results = block(packages::install_all());
     assert!(results[0].as_ref().unwrap().ends_with(": up to date"));
     assert!(root.join("prompts/third.md").is_file());
 }
@@ -247,7 +257,7 @@ fn remove_deletes_a_managed_clone_but_leaves_a_local_directory_alone() {
     let _lock = env_lock();
     let home = Home::new("pkg-remove");
     let repo = Repo::new("remove");
-    let (root, _) = packages::install(&repo.source(Some("v1"))).unwrap();
+    let (root, _) = block(packages::install(&repo.source(Some("v1")))).unwrap();
     // Identity ignores the ref: removing by the bare source finds the entry.
     packages::remove(&repo.source(None)).unwrap();
     assert!(!root.exists());
@@ -266,7 +276,7 @@ fn remove_deletes_a_managed_clone_but_leaves_a_local_directory_alone() {
 
     // A local path is referenced in place, so removal only forgets it.
     let local = repo.dir.to_string_lossy().into_owned();
-    let (root, counts) = packages::install(&local).unwrap();
+    let (root, counts) = block(packages::install(&local)).unwrap();
     assert_eq!(root, repo.dir);
     assert_eq!(counts, [1, 1, 2, 1]);
     packages::remove(&local).unwrap();
@@ -278,9 +288,102 @@ fn remove_deletes_a_managed_clone_but_leaves_a_local_directory_alone() {
 fn a_source_that_is_not_a_package_is_refused_before_anything_is_written() {
     let _lock = env_lock();
     let home = Home::new("pkg-refuse");
-    assert!(packages::install("intuitums/e-diff").is_err());
-    assert!(packages::install("--upload-pack=touch").is_err());
-    assert!(packages::install("/definitely/not/a/directory").is_err());
+    assert!(block(packages::install("intuitums/e-diff")).is_err());
+    assert!(block(packages::install("--upload-pack=touch")).is_err());
+    assert!(block(packages::install("/definitely/not/a/directory")).is_err());
     assert!(!home.dir.join("settings.json").exists());
     assert!(!home.dir.join("packages").exists());
+}
+
+/// A release asset served locally: the gzip tarball the workflow publishes
+/// plus a matching checksums.txt.
+fn release_server(name: &str) -> (u16, std::thread::JoinHandle<Vec<String>>, String) {
+    let target = e::core::update::target().expect("a release target for this machine");
+    let dir = std::env::temp_dir().join(format!("e-release-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(name),
+        "#!/bin/sh\nread -r line; printf '{\"id\":1000000,\"result\":{\"name\":\"tool\"}}\n'\n",
+    )
+    .unwrap();
+    let status = std::process::Command::new("tar")
+        .args(["czf", "asset.tar.gz", name])
+        .current_dir(&dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let tar = std::fs::read(dir.join("asset.tar.gz")).unwrap();
+    let sum = {
+        use sha2::Digest;
+        sha2::Sha256::digest(&tar)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    let asset = format!("{name}-{target}.tar.gz");
+    let http = |body: &[u8]| {
+        let mut out = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    };
+    let sums = format!("{sum}  {asset}\n");
+    let (port, server) = serve_raw_bytes(vec![http(&tar), http(sums.as_bytes())]);
+    let _ = std::fs::remove_dir_all(&dir);
+    (port, server, asset)
+}
+
+#[test]
+fn a_release_package_installs_its_executable_under_extensions() {
+    let _lock = env_lock();
+    let home = Home::new("pkg-release");
+    let (port, server, asset) = release_server("tool");
+    let source = Source::parse("release:intuitums/e/tool@v9").unwrap();
+    let base = format!("http://127.0.0.1:{port}");
+    block(packages::install_release_from(&source, &base, &base)).unwrap();
+    let requests = server.join().unwrap();
+    assert!(requests[0].contains(&format!("GET /download/v9/{asset}")));
+    assert!(requests[1].contains("GET /download/v9/checksums.txt"));
+
+    let root = home.dir.join("packages/releases/intuitums/e/tool");
+    assert_eq!(source.root(), root);
+    let binary = root.join("extensions/tool");
+    assert!(binary.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            std::fs::metadata(&binary).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+    assert_eq!(
+        e::core::update::installed_release_tag(&root).as_deref(),
+        Some("v9")
+    );
+    assert!(!root.join(".staging-v9").exists(), "staging is cleaned up");
+    // Pinned at the installed tag: a second install touches no network.
+    block(packages::install_release_from(
+        &source,
+        "http://127.0.0.1:1",
+        "http://127.0.0.1:1",
+    ))
+    .unwrap();
+
+    // The parse grammar and identity.
+    assert_eq!(
+        Source::parse("release:Intuitums/E/tool@v9")
+            .unwrap()
+            .identity(),
+        Source::parse("release:intuitums/e/tool")
+            .unwrap()
+            .identity()
+    );
+    assert!(Source::parse("release:intuitums/e").is_err());
+    assert!(Source::parse("release:intuitums/../e/tool").is_err());
+    assert!(Source::parse("release:intuitums/e/tool@-x").is_err());
 }

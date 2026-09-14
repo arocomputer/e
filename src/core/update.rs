@@ -145,29 +145,7 @@ pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
 /// parameter so tests can serve a fake release.
 pub async fn install_from(base: &str, tag: &str, dest: &Path) -> Result<String, String> {
     let target = target().ok_or(NO_RELEASE)?;
-    let tarball_url = format!("{base}/download/{tag}/e-{target}.tar.gz");
-    let sums_url = format!("{base}/download/{tag}/checksums.txt");
-
-    let tarball = fetch(&tarball_url).await?;
-    let sums = String::from_utf8(fetch(&sums_url).await?).map_err(|e| e.to_string())?;
-    let expected = sums
-        .lines()
-        .find(|l| l.ends_with(&format!(" e-{target}.tar.gz")))
-        .and_then(|l| l.split_whitespace().next())
-        .ok_or("no checksum for this platform")?;
-    let actual = {
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(&tarball);
-        hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    };
-    if actual != expected {
-        return Err("checksum mismatch — refusing to install".into());
-    }
+    let tarball = fetch_verified(base, tag, &format!("e-{target}.tar.gz")).await?;
 
     // Unpack next to the destination so the final rename stays on one
     // filesystem; the system tar does the extraction (no archive deps).
@@ -195,6 +173,100 @@ pub async fn install_from(base: &str, tag: &str, dest: &Path) -> Result<String, 
     std::fs::rename(&new_binary, dest).map_err(|e| format!("install failed: {e}"))?;
     let _ = std::fs::remove_dir_all(&staging);
     Ok(tag.trim_start_matches('v').to_string())
+}
+
+/// Download one asset of a release and check it against the release's
+/// `checksums.txt`; a missing or mismatched sum refuses the bytes.
+async fn fetch_verified(base: &str, tag: &str, asset: &str) -> Result<Vec<u8>, String> {
+    let tarball = fetch(&format!("{base}/download/{tag}/{asset}")).await?;
+    let sums = String::from_utf8(fetch(&format!("{base}/download/{tag}/checksums.txt")).await?)
+        .map_err(|e| e.to_string())?;
+    let expected = sums
+        .lines()
+        .find(|l| l.ends_with(&format!(" {asset}")))
+        .and_then(|l| l.split_whitespace().next())
+        .ok_or("no checksum for this platform")?;
+    let actual = {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&tarball);
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    if actual != expected {
+        return Err("checksum mismatch — refusing to install".into());
+    }
+    Ok(tarball)
+}
+
+/// The release base URL and latest-release API URL for a GitHub repository.
+pub fn github_release_urls(owner: &str, repo: &str) -> (String, String) {
+    (
+        format!("https://github.com/{owner}/{repo}/releases"),
+        format!("https://api.github.com/repos/{owner}/{repo}/releases/latest"),
+    )
+}
+
+/// Install a release package (`e install release:<owner>/<repo>/<name>`):
+/// fetch `<name>-<target>.tar.gz` for this platform from `base` at `tag`,
+/// verify it, and place the `<name>` executable at
+/// `<root>/extensions/<name>`, where the extension host finds it. `<root>/.tag`
+/// records what is installed so an unpinned package can follow releases.
+pub async fn install_release_package(
+    base: &str,
+    tag: &str,
+    name: &str,
+    root: &Path,
+) -> Result<(), String> {
+    let target = target().ok_or(NO_RELEASE)?;
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        return Err(format!("`{name}` is not a release asset name"));
+    }
+    let tarball = fetch_verified(base, tag, &format!("{name}-{target}.tar.gz")).await?;
+    let extensions = root.join("extensions");
+    std::fs::create_dir_all(&extensions).map_err(|e| e.to_string())?;
+    let staging = root.join(format!(".staging-{tag}"));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let archive = staging.join("asset.tar.gz");
+    std::fs::write(&archive, &tarball).map_err(|e| e.to_string())?;
+    // `xf`, not `xzf`: the system tar detects gzip itself, and a plain tar
+    // published under the same name still installs.
+    let unpacked = std::process::Command::new("tar")
+        .arg("xf")
+        .arg(&archive)
+        .current_dir(&staging)
+        .status()
+        .map_err(|e| format!("tar failed: {e}"))?;
+    if !unpacked.success() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("tar failed to unpack the release asset".into());
+    }
+    let binary = staging.join(name);
+    if !binary.is_file() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("the release asset does not contain `{name}`"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755));
+    }
+    std::fs::rename(&binary, extensions.join(name)).map_err(|e| format!("install failed: {e}"))?;
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::write(root.join(".tag"), tag).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The tag a release package was installed at, from its `.tag` file.
+pub fn installed_release_tag(root: &Path) -> Option<String> {
+    std::fs::read_to_string(root.join(".tag"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
 }
 
 async fn fetch(url: &str) -> Result<Vec<u8>, String> {

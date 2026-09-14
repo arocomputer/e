@@ -526,6 +526,7 @@ impl SessionEvent {
             }),
             SessionEvent::ToolCallAssembly { .. } => return None,
             SessionEvent::Named(name) => json!({"type": "session_name", "name": name}),
+            SessionEvent::Instructions { path } => json!({"type": "instructions", "path": path}),
             SessionEvent::Usage { usage, .. } => json!({
                 "type": "usage",
                 "input_tokens": usage.input,
@@ -613,6 +614,11 @@ pub enum SessionEvent {
     },
     /// An extension tool named the session.
     Named(String),
+    /// A nested `AGENTS.md` under a path a tool touched was added to the
+    /// conversation (docs/instructions.md).
+    Instructions {
+        path: String,
+    },
     Usage {
         usage: providers::Usage,
         /// Rates captured from the model that made the request.
@@ -735,6 +741,8 @@ pub struct Agent {
     /// What the next requested compaction should focus on (`/compact <focus>`),
     /// taken by the turn that performs it.
     compact_focus: Arc<Mutex<Option<String>>>,
+    /// Nested `AGENTS.md` directories already loaded this session.
+    instructions_loaded: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
     /// The supervisor owns the worker's terminal event. Keeping its handle
     /// prevents the turn from becoming unobserved background work.
     turn_task: Option<tokio::task::JoinHandle<()>>,
@@ -798,6 +806,7 @@ impl Agent {
             cancel: Arc::new(AtomicBool::new(false)),
             compact_requested: Arc::new(AtomicBool::new(false)),
             compact_focus: Arc::new(Mutex::new(None)),
+            instructions_loaded: Arc::new(Mutex::new(Default::default())),
             turn_task: None,
             session: Arc::new(Mutex::new(None)),
             session_name: Arc::new(Mutex::new(None)),
@@ -897,10 +906,18 @@ impl Agent {
     }
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
         self.tools = Arc::new(tools::ToolRuntime::default());
+        self.instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
     }
     pub fn clear(&mut self) {
         self.tools = Arc::new(tools::ToolRuntime::default());
+        self.instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         self.history
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -937,6 +954,16 @@ impl Agent {
         let mut message = ChatMessage::user(text);
         message.mark_internal();
         self.log().commit(message);
+    }
+
+    /// `/undo`: revert the newest write or edit this session made. Idle
+    /// only — mid-turn the files belong to the running tools.
+    pub fn undo_last_change(&self) -> Result<Option<String>, String> {
+        self.tools.undo_last()
+    }
+
+    pub fn undo_depth(&self) -> usize {
+        self.tools.undo_depth()
     }
 
     /// Narrow (or with None, restore) the tools advertised and executable
@@ -1244,6 +1271,7 @@ impl Agent {
         let wake = self.wake.clone();
         let compact_requested = self.compact_requested.clone();
         let compact_focus = self.compact_focus.clone();
+        let instructions_loaded = self.instructions_loaded.clone();
         let tool_runtime = self.tools.clone();
         let tool_mode = if model.supports_tools {
             self.options.tool_mode
@@ -1294,6 +1322,7 @@ impl Agent {
             allowed_tools,
             compact_requested,
             compact_focus,
+            instructions_loaded,
             tool_runtime,
             tool_mode,
         };

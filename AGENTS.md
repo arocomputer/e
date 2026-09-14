@@ -49,10 +49,13 @@ src/core/    the harness, terminal-free
                   directory listing and file-finding go through bash, and
                   skills load through read (the catalog carries their paths)
   session.rs · output.rs · workspace.rs — SessionLog is a tree, not just a
-                  line: id/parent per message, `/tree` branches in place
+                  line: id/parent per message, `/tree` branches in place,
+                  `create_with` seeds a `/fork`; `responses_in` feeds usage.rs
+                  (the /usage fold) · export.rs (a branch as one HTML page)
 src/tui/     the frontend (short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
-  content/        markdown · transcript · composer · statusline
+  content/        markdown · transcript · composer · statusline · history
+                  (prompts across sessions, ~/.e/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state, keys, the frame loop) · events.rs
                   (session-event handling) · menus.rs (footer menus) ·

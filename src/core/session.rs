@@ -615,6 +615,28 @@ pub fn repair_history(messages: &mut Vec<ChatMessage>) {
     messages.extend(unanswered.into_iter().map(synthetic));
 }
 
+/// Every provider response recorded in a session file, in order: the ones
+/// attached to messages and the ones written on their own. Unreadable
+/// lines are skipped — usage reporting must not fail on one bad record.
+pub fn responses_in(path: &Path) -> Vec<ResponseMeta> {
+    let Ok(file) = File::open(path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else { break };
+        match serde_json::from_str::<Entry>(&line) {
+            Ok(Entry::Message {
+                response: Some(response),
+                ..
+            })
+            | Ok(Entry::Response { response }) => out.push(response),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The latest persisted display name in a session file, if any — the name a
 /// resume must adopt so the session doesn't drift from its log.
 pub fn name_of(path: &Path) -> Option<String> {

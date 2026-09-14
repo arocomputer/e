@@ -47,6 +47,16 @@ impl App {
                 "/compact",
             ),
             MenuItem::new(
+                "/usage",
+                "tokens and estimated cost by model — /usage 24h|7d|30d|all",
+                "/usage",
+            ),
+            MenuItem::new(
+                "/undo",
+                "put back what the last write or edit replaced",
+                "/undo",
+            ),
+            MenuItem::new(
                 "/trust",
                 "trust this directory (loads its AGENTS.md, .e resources)",
                 "/trust",
@@ -355,14 +365,20 @@ impl App {
         if self.pending_key.is_some() || self.ui_input_open() {
             return;
         }
-        // /help opens this picker after its slash command has already left the
-        // composer. In that mode all later composer input is the query.
+        // A picker a command opened (/help, /resume, /tree, an extension's
+        // select) has no trigger text in the composer: everything typed
+        // from here is its filter.
         if let Some(menu) = self
             .menu
             .as_mut()
-            .filter(|menu| menu.kind == MenuKind::Commands && menu.filter_without_trigger)
+            .filter(|menu| menu.filter_without_trigger)
         {
-            menu.set_query(text.strip_prefix('/').unwrap_or(&text));
+            let query = if menu.kind == MenuKind::Commands {
+                text.strip_prefix('/').unwrap_or(&text)
+            } else {
+                text.as_str()
+            };
+            menu.set_query(query);
             return;
         }
         // Slash picker: leading '/', no space yet.
@@ -426,6 +442,11 @@ impl App {
             return true;
         };
         let kind = menu.kind;
+        // Whatever was typed to filter a command-opened picker was the
+        // filter, not a draft.
+        if menu.filter_without_trigger && kind != MenuKind::Commands {
+            self.editor.set_text("");
+        }
         self.menu = None;
         match kind {
             MenuKind::Commands => {

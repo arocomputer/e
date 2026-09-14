@@ -7,22 +7,19 @@
 //! time, sequentially — the review scan is bounded to five seconds, well
 //! inside the host's sixty-second command budget.
 //!
-//! `/diff` prints the whole continuous review (file summaries plus every
-//! patch) as styled transcript rows; `/diff <path>` prints one file's patch.
-//! Layout, syntax coloring, and palette come from this crate — the same
-//! `e-terminal` primitives the host renders with, so the review looks like
-//! e without being part of e.
+//! `/diff` answers with a `show` block: the whole review as a unified diff
+//! that e paints in its own row grammar through the user's theme;
+//! `/diff <path>` shows one file's patch. The host sanitizes notices, so
+//! rows this crate styled itself would arrive plain; the display surface
+//! is how the review gets colour.
 
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Transcript rows are rendered at a fixed width and re-wrapped by the
-/// host; user-overridable through `diff_text_width` in `~/.e/settings.json`.
-const DEFAULT_WIDTH: u64 = 78;
 /// Stay under the host's one-megabyte line budget with room for JSON
 /// escaping; an over-long review reports its own truncation.
-const MAX_NOTICE_BYTES: usize = 600_000;
+const MAX_SHOW_BYTES: usize = 600_000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Builder::new_current_thread()
@@ -37,9 +34,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    // Initialized state: where to review, and what the user configured.
+    // Initialized state: where to review.
     let mut cwd = std::env::current_dir().unwrap_or_default();
-    let mut config = json!({});
 
     while let Some(line) = lines.next_line().await? {
         // Events and flags carry no id and want no answer; malformed lines
@@ -55,7 +51,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(dir) = request["params"]["cwd"].as_str() {
                     cwd = PathBuf::from(dir);
                 }
-                config = request["params"]["extensions_config"].clone();
                 ok(
                     id,
                     json!({
@@ -72,8 +67,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "command" => {
                 let name = request["params"]["name"].as_str().unwrap_or("");
                 let args = request["params"]["args"].as_str().unwrap_or("");
-                match review(&cwd, &config, name, args).await {
-                    Ok(notice) => ok(id, json!({ "notice": notice })),
+                match review(&cwd, name, args).await {
+                    Ok(show) => ok(id, json!({ "show": show })),
                     Err(reason) => error(id, reason),
                 }
             }
@@ -87,8 +82,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Build one review document: the full workspace, or one file's patch.
-async fn review(cwd: &Path, config: &Value, name: &str, args: &str) -> Result<String, String> {
+/// Build one review: the full workspace, or one file's patch, as a `show`.
+async fn review(cwd: &Path, name: &str, args: &str) -> Result<Value, String> {
     if name != "diff" {
         return Err(format!("e-diff only owns /diff, not /{name}"));
     }
@@ -114,35 +109,21 @@ async fn review(cwd: &Path, config: &Value, name: &str, args: &str) -> Result<St
             truncated: false,
         }
     };
-    // Respect the host's theme selection (a file-backed setting; user theme
-    // directories stay the host's own privilege until extensions can ask).
-    let light = config.get("theme").and_then(Value::as_str) == Some("light");
-    let theme = e_diff::style::theme(light, &Value::Null);
-    let width = config
-        .get("diff_text_width")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_WIDTH)
-        .clamp(40, 120) as usize;
-    let mut panel = e_diff::diffpanel::DiffPanel::new(config);
-    panel.apply(Ok(document));
-    let mut notice = String::new();
-    let mut dropped = 0usize;
-    for row in panel.document(&theme, width) {
-        if notice.len() + row.len() > MAX_NOTICE_BYTES {
-            dropped += 1;
-        } else {
-            if !notice.is_empty() {
-                notice.push('\n');
+    let mut shown = e_diff::command::show(&document);
+    if let Some(body) = shown["body"].as_str() {
+        if body.len() > MAX_SHOW_BYTES {
+            // The host clips long bodies itself; ending on a whole line here
+            // keeps the last hunk the host paints a real one.
+            let cut = body[..MAX_SHOW_BYTES].rfind('\n').unwrap_or(MAX_SHOW_BYTES);
+            let clipped = body[..cut].to_string();
+            shown["body"] = Value::String(clipped);
+            if let Some(title) = shown["title"].as_str() {
+                shown["title"] =
+                    Value::String(format!("{title} — clipped; /diff <path> reviews one file"));
             }
-            notice.push_str(&row);
         }
     }
-    if dropped > 0 {
-        notice.push_str(&format!(
-            "\n… {dropped} more rows omitted — /diff <path> reviews one file"
-        ));
-    }
-    Ok(notice)
+    Ok(shown)
 }
 
 fn ok(id: Value, result: Value) -> String {

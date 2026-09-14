@@ -41,6 +41,7 @@ pub(super) struct Context {
     pub(super) allowed_tools: Option<Arc<Vec<String>>>,
     pub(super) compact_requested: Arc<AtomicBool>,
     pub(super) compact_focus: Arc<Mutex<Option<String>>>,
+    pub(super) instructions_loaded: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
     pub(super) tool_runtime: Arc<tools::ToolRuntime>,
     pub(super) tool_mode: ToolMode,
 }
@@ -65,6 +66,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         allowed_tools,
         compact_requested,
         compact_focus,
+        instructions_loaded,
         tool_runtime,
         tool_mode,
     } = context;
@@ -931,6 +933,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         if cancel.load(Ordering::SeqCst) {
             break 'turn Outcome::Cancelled;
         }
+        // Nested instructions for the paths this batch touched join the
+        // conversation now — after the batch's results, so the provider's
+        // call/result pairing holds — and shape the next request.
+        load_nested_instructions(&calls, &cwd, &instructions_loaded, &log, &events).await;
         // Compact after committing the complete tool batch. The next
         // request continues this run through the same event stream.
         if last_context > 0 && compact::should_compact(last_context, model.context_window) {
@@ -957,6 +963,103 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         }
     };
     outcome
+}
+
+/// Largest nested `AGENTS.md` that is read in full.
+const NESTED_INSTRUCTIONS_CAP: usize = 32 * 1024;
+
+/// For every path a batch's calls named, walk from its directory up to (not
+/// including) the workspace and add each `AGENTS.md` not yet loaded this
+/// session as an internal user message, outermost first so the nearest
+/// reads as the most specific. Only in a trusted workspace, only for paths
+/// inside it (docs/instructions.md).
+async fn load_nested_instructions(
+    calls: &[ToolCall],
+    cwd: &std::path::Path,
+    loaded: &Arc<Mutex<std::collections::HashSet<PathBuf>>>,
+    log: &TurnLog,
+    events: &mpsc::Sender<SessionEvent>,
+) {
+    if !crate::core::config::trust::trusted(cwd) {
+        return;
+    }
+    let mut pending: Vec<PathBuf> = Vec::new();
+    for call in calls {
+        if !matches!(call.name.as_str(), "read" | "write" | "edit" | "grep") {
+            continue;
+        }
+        let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.arguments) else {
+            continue;
+        };
+        let Some(path) = args.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let target = std::path::Path::new(path);
+        if target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            continue;
+        }
+        let full = if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            cwd.join(target)
+        };
+        if !full.starts_with(cwd) {
+            continue;
+        }
+        let mut chain: Vec<PathBuf> = Vec::new();
+        let mut dir = full.parent();
+        while let Some(d) = dir {
+            if d == cwd || !d.starts_with(cwd) {
+                break;
+            }
+            chain.push(d.to_path_buf());
+            dir = d.parent();
+        }
+        for d in chain.into_iter().rev() {
+            if !pending.contains(&d) {
+                pending.push(d);
+            }
+        }
+    }
+    for dir in pending {
+        let fresh = loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(dir.clone());
+        if !fresh {
+            continue;
+        }
+        let file = dir.join("AGENTS.md");
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let mut text = text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        if text.len() > NESTED_INSTRUCTIONS_CAP {
+            let mut cut = NESTED_INSTRUCTIONS_CAP;
+            while !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
+            text.push_str("\n… [instructions clipped at 32 KiB]");
+        }
+        let shown = file.display().to_string();
+        let mut message = ChatMessage::user(format!(
+            "Instructions for files under {}:\n<project_instructions path=\"{}\">\n{text}\n</project_instructions>",
+            dir.display(),
+            shown.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
+        ));
+        message.mark_internal();
+        log.commit_async(message).await;
+        let _ = events
+            .send(SessionEvent::Instructions { path: shown })
+            .await;
+    }
 }
 
 /// Identify explicit filesystem targets, including aliases and new paths.

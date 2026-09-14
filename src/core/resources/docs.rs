@@ -37,6 +37,10 @@ pub const TOPICS: &[(&str, &str)] = &[
         "SKILL.md directories and how the model pages them in",
     ),
     (
+        "instructions",
+        "AGENTS.md: global, project, and nested per directory",
+    ),
+    (
         "keybindings",
         "keybindings.json: override the composer's editing keys",
     ),
@@ -58,6 +62,7 @@ pub fn body(topic: &str) -> Option<&'static str> {
         "sdk" => include_str!("../../../docs/sdk.md"),
         "prompt-templates" => include_str!("../../../docs/prompt-templates.md"),
         "skills" => include_str!("../../../docs/skills.md"),
+        "instructions" => include_str!("../../../docs/instructions.md"),
         "keybindings" => include_str!("../../../docs/keybindings.md"),
         "sandboxing" => include_str!("../../../docs/sandboxing.md"),
         "theme-dark" => crate::tui::theme::DARK_JSON,

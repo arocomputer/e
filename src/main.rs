@@ -132,7 +132,7 @@ async fn usage_error(host: &e::core::extensions::ExtensionHost, json: bool, mess
 /// `e install [source]`, `e remove <source>`, `e packages`: the package
 /// commands, extension-free one-shots (a package's own broken extension must
 /// never stand between the user and `e remove`). Returns the exit status.
-fn package_command(sub: &str, rest: &[String]) -> i32 {
+async fn package_command(sub: &str, rest: &[String]) -> i32 {
     use e::core::resources::packages::{self, Status, KINDS};
     let plural = |n: usize, kind: &str| {
         let noun = kind.trim_end_matches('s');
@@ -157,7 +157,7 @@ fn package_command(sub: &str, rest: &[String]) -> i32 {
     };
     match (sub, rest) {
         ("install", []) => {
-            let results = packages::install_all();
+            let results = packages::install_all().await;
             if results.is_empty() {
                 println!(
                     "no packages listed — `e install <source>` adds one (see `e docs packages`)"
@@ -176,7 +176,7 @@ fn package_command(sub: &str, rest: &[String]) -> i32 {
             }
             i32::from(failed)
         }
-        ("install", [spec]) => match packages::install(spec) {
+        ("install", [spec]) => match packages::install(spec).await {
             Ok((root, counts)) => {
                 println!(
                     "installed {spec} → {} ({}) — restart or /reload to use it",
@@ -289,7 +289,7 @@ async fn main() -> std::io::Result<()> {
                 eprintln!("--json is supported by `e doctor` and `e providers`");
                 std::process::exit(2);
             }
-            let status = package_command(sub, &diagnostic_args[1..]);
+            let status = package_command(sub, &diagnostic_args[1..]).await;
             if status != 0 {
                 std::process::exit(status);
             }

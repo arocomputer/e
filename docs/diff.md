@@ -14,20 +14,23 @@ and reverting are not offered.
 
 ## Usage
 
-- `/diff` prints the continuous review document into the transcript: a
-  file-count header with `+added/-removed` totals, one summary row per changed
-  file, then each file's heading and patch — line numbers, syntax colors,
-  word-level change backgrounds, and wrapped long rows, with hunk headers
-  hidden.
-- `/diff <path>` prints one file's patch alone.
-- Rows are plain text once they reach the transcript: e strips terminal
-  control sequences from every extension notice before painting, so the
-  extension's own palette never reaches the screen. The way to a coloured
-  review is the `show` result with `format: "diff"` (docs/extensions.md,
-  Display), which e paints with line numbers and diff-marker tokens through
-  the user's theme; moving the command's output to it is the open follow-up.
+- `/diff` shows the whole review as one block in the transcript: a title
+  with the file count and `+added -removed` totals, then every file's patch
+  in e's own diff grammar — file path, real line numbers, `+`/`-` markers in
+  the theme's diff colours, `⋯` between hunks.
+- `/diff <path>` shows one file's patch alone.
+- The extension sends the review as a unified diff in a `show` result with
+  `format: "diff"` (docs/extensions.md, Display); e converts and paints it.
+  Nothing styled crosses the line — the host sanitizes every extension
+  notice, so colour is the host's job.
 
-## Build and install
+## Install
+
+```sh
+e install release:intuitums/e/e-diff
+```
+
+Or from source:
 
 ```sh
 cargo build --release -p e-diff
@@ -45,8 +48,6 @@ Keys in `~/.e/settings.json` reach the extension through the protocol's
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `theme` | host default | `"light"` selects the extension's light palette |
-| `diff_text_width` | `78` | Transcript row width, 40 to 120 columns |
 | `diff_min_width` | `110` | Split width for the live pane design (library only) |
 | `diff_width_percent` | `40` | Pane share (library only) |
 | `diff_refresh_ms` | `1000` | Pane refresh interval (library only) |

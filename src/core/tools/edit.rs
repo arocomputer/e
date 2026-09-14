@@ -76,6 +76,7 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     if normalized {
         updated = updated.replace('\n', "\r\n");
     }
+    state.record_change(&full, format!("edit {path}"));
     match super::staged_write(&full, updated.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);

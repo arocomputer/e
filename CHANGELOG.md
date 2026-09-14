@@ -15,6 +15,24 @@
 
 ### New features
 
+- Release packages: `e install release:<owner>/<repo>/<name>[@tag]` fetches
+  a compiled extension published as `<name>-<target>.tar.gz` on a GitHub
+  release, verifies it against the release's `checksums.txt`, and installs
+  it like any other package. Releases now build and upload `e-diff` for
+  every target, so `e install release:intuitums/e/e-diff` is how the Git
+  review installs.
+- Nested `AGENTS.md` files load on demand: the first time a tool touches a
+  path under a directory that has one, its instructions join the
+  conversation, nearest last. Trusted workspaces only, once per directory
+  per session. `e docs instructions` covers the three levels.
+- `/usage [24h|7d|30d|all]` shows requests, tokens, and estimated cost by
+  model from the sessions on disk, as a table in the transcript.
+- `/undo` puts back what the last write or edit replaced, up to a hundred
+  changes back in the session; a file the tool created is removed.
+- The activity row says `Compacting context` while a mid-turn compaction
+  runs instead of `Thinking`.
+- Typing while `/resume` or `/tree` is open filters the list; Enter or Esc
+  clears the filter from the composer.
 - `/fork [name]` continues in a new session file seeded with the current
   branch; the original stays as it was. Extensions see `session_start` with
   reason `fork`.

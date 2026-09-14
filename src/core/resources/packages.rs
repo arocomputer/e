@@ -14,6 +14,12 @@
 //! network — a listed package missing on disk is reported in the transcript.
 //! Git runs as a subprocess, so installing needs `git` on `PATH` and speaks
 //! whatever protocols and credentials the user's git does.
+//!
+//! A release package (`release:<owner>/<repo>/<name>[@tag]`) is a compiled
+//! extension published as a GitHub release asset, `<name>-<target>.tar.gz`
+//! beside a `checksums.txt` — how e's own `packages/` crates reach users.
+//! It installs under `~/.e/packages/releases/<owner>/<repo>/<name>` with the
+//! executable in `extensions/`, the same shape as every other package.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,6 +47,14 @@ pub enum Source {
     },
     /// A directory on this machine, loaded in place — never copied.
     Local(PathBuf),
+    /// A compiled extension from a GitHub release.
+    Release {
+        owner: String,
+        repo: String,
+        name: String,
+        /// A release tag to pin; `None` follows the latest release.
+        tag: Option<String>,
+    },
 }
 
 impl Source {
@@ -61,6 +75,9 @@ impl Source {
         }
         if let Some(rest) = spec.strip_prefix("git:") {
             return parse_git(rest, spec);
+        }
+        if let Some(rest) = spec.strip_prefix("release:") {
+            return parse_release(rest, spec);
         }
         if spec.contains("://") {
             return parse_git(spec, spec);
@@ -85,6 +102,13 @@ impl Source {
         match self {
             Source::Git { host, path, .. } => home::packages_dir().join(host).join(path),
             Source::Local(path) => path.clone(),
+            Source::Release {
+                owner, repo, name, ..
+            } => home::packages_dir()
+                .join("releases")
+                .join(owner)
+                .join(repo)
+                .join(name),
         }
     }
 
@@ -98,8 +122,87 @@ impl Source {
                 .unwrap_or_else(|_| path.clone())
                 .to_string_lossy()
                 .into_owned(),
+            Source::Release {
+                owner, repo, name, ..
+            } => format!(
+                "release:{}/{}/{}",
+                owner.to_lowercase(),
+                repo.to_lowercase(),
+                name
+            ),
         }
     }
+}
+
+/// `release:<owner>/<repo>/<name>[@tag]`.
+fn parse_release(rest: &str, spec: &str) -> Result<Source, String> {
+    let (path, tag) = match rest.rsplit_once('@') {
+        Some((path, tag)) if !tag.is_empty() => (path, Some(tag.to_string())),
+        Some((path, _)) => (path, None),
+        None => (rest, None),
+    };
+    let parts: Vec<&str> = path.split('/').collect();
+    let [owner, repo, name] = parts.as_slice() else {
+        return Err(format!(
+            "`{spec}` is not a release source — use release:<owner>/<repo>/<name>[@tag]"
+        ));
+    };
+    let clean = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            && s != "."
+            && s != ".."
+    };
+    if !clean(owner) || !clean(repo) || !clean(name) {
+        return Err(format!("`{spec}` has an unsafe release path"));
+    }
+    if tag.as_deref().is_some_and(|t| {
+        t.starts_with('-') || t.contains(['/', '\\']) || t.contains(char::is_whitespace)
+    }) {
+        return Err(format!("`{spec}` has an unsafe tag"));
+    }
+    Ok(Source::Release {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        name: name.to_string(),
+        tag,
+    })
+}
+
+/// Install or update a release package from `base` (the releases URL) and
+/// `api` (the latest-release endpoint), separated from the GitHub URLs so a
+/// test can serve a release. An unpinned package that is already at the
+/// latest tag is left alone.
+pub async fn install_release_from(source: &Source, base: &str, api: &str) -> Result<(), String> {
+    let Source::Release { name, tag, .. } = source else {
+        return Ok(());
+    };
+    let root = source.root();
+    let managed = home::packages_dir();
+    if !root.starts_with(&managed) || root == managed {
+        return Err(format!("refusing to write outside {}", managed.display()));
+    }
+    let wanted = match tag {
+        Some(tag) => tag.clone(),
+        None => crate::core::update::latest_tag_from(api)
+            .await?
+            .ok_or("the repository has no releases")?,
+    };
+    if crate::core::update::installed_release_tag(&root).as_deref() == Some(wanted.as_str())
+        && root.join("extensions").join(name).is_file()
+    {
+        return Ok(());
+    }
+    crate::core::update::install_release_package(base, &wanted, name, &root).await
+}
+
+async fn install_release(source: &Source) -> Result<(), String> {
+    let Source::Release { owner, repo, .. } = source else {
+        return Ok(());
+    };
+    let (base, api) = crate::core::update::github_release_urls(owner, repo);
+    install_release_from(source, &base, &api).await
 }
 
 fn expand_local(spec: &str) -> PathBuf {
@@ -330,7 +433,7 @@ fn is_executable(path: &Path) -> bool {
 /// Install one source: clone (or sync an existing clone to its ref) and
 /// record it in settings, replacing an entry for the same package at another
 /// ref. Returns the root and its resource counts.
-pub fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
+pub async fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
     let source = Source::parse(spec)?;
     match &source {
         Source::Local(path) => {
@@ -339,6 +442,7 @@ pub fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
             }
         }
         Source::Git { .. } => sync(&source)?,
+        Source::Release { .. } => install_release(&source).await?,
     }
     let root = source.root();
     if counts(&root).iter().all(|n| *n == 0) {
@@ -355,27 +459,45 @@ pub fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
 /// Make disk match settings: clone what is missing, sync every git package
 /// to its ref (or the tip of its default branch when unpinned). Returns one
 /// line per package for the report; the first failure stops nothing else.
-pub fn install_all() -> Vec<Result<String, String>> {
-    configured()
-        .iter()
-        .map(|spec| {
-            let source = Source::parse(spec)?;
-            match &source {
-                Source::Local(path) if !path.is_dir() => {
-                    Err(format!("{spec}: {} is not a directory", path.display()))
+pub async fn install_all() -> Vec<Result<String, String>> {
+    let mut results = Vec::new();
+    for spec in configured() {
+        results.push(install_one(&spec).await);
+    }
+    results
+}
+
+async fn install_one(spec: &str) -> Result<String, String> {
+    let source = Source::parse(spec)?;
+    match &source {
+        Source::Local(path) if !path.is_dir() => {
+            Err(format!("{spec}: {} is not a directory", path.display()))
+        }
+        Source::Local(_) => Ok(format!("{spec}: in place")),
+        Source::Git { .. } => {
+            let fresh = !source.root().is_dir();
+            sync(&source).map_err(|e| format!("{spec}: {e}"))?;
+            Ok(format!(
+                "{spec}: {}",
+                if fresh { "installed" } else { "up to date" }
+            ))
+        }
+        Source::Release { .. } => {
+            let before = crate::core::update::installed_release_tag(&source.root());
+            install_release(&source)
+                .await
+                .map_err(|e| format!("{spec}: {e}"))?;
+            let after = crate::core::update::installed_release_tag(&source.root());
+            Ok(format!(
+                "{spec}: {}",
+                match (before, after) {
+                    (None, Some(tag)) => format!("installed {tag}"),
+                    (Some(old), Some(new)) if old != new => format!("updated {old} → {new}"),
+                    _ => "up to date".to_string(),
                 }
-                Source::Local(_) => Ok(format!("{spec}: in place")),
-                Source::Git { .. } => {
-                    let fresh = !source.root().is_dir();
-                    sync(&source).map_err(|e| format!("{spec}: {e}"))?;
-                    Ok(format!(
-                        "{spec}: {}",
-                        if fresh { "installed" } else { "up to date" }
-                    ))
-                }
-            }
-        })
-        .collect()
+            ))
+        }
+    }
 }
 
 /// Forget a package: drop its settings entry and delete a managed clone. A
@@ -396,7 +518,7 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
     settings::set_strings(SETTINGS_KEY, &entries)
         .map_err(|e| format!("could not update settings.json: {e}"))?;
     let root = source.root();
-    if let Source::Git { .. } = source {
+    if matches!(source, Source::Git { .. } | Source::Release { .. }) {
         let managed = home::packages_dir();
         if root.starts_with(&managed) && root != managed && root.exists() {
             std::fs::remove_dir_all(&root)
@@ -538,7 +660,7 @@ mod tests {
                 path,
                 rev,
             } => (url, host, path, rev),
-            Source::Local(_) => panic!("{spec} parsed as local"),
+            Source::Local(_) | Source::Release { .. } => panic!("{spec} parsed as another kind"),
         }
     }
 

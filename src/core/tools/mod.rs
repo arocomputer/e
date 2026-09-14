@@ -27,6 +27,82 @@ pub struct ToolRuntime {
     background: std::sync::Arc<bash::BackgroundRegistry>,
     /// Full tool outputs the model saw truncated, for `read_result`.
     results: std::sync::Mutex<ResultStore>,
+    /// What write and edit replaced, newest last, for `/undo`.
+    changes: std::sync::Mutex<Vec<Change>>,
+}
+
+/// One reversible file change: the bytes the path held before a write or
+/// edit (None when the file did not exist), and how to name it.
+struct Change {
+    path: PathBuf,
+    before: Option<Vec<u8>>,
+    label: String,
+}
+
+/// Changes kept for `/undo`; the oldest fall off past this.
+const UNDO_DEPTH: usize = 100;
+/// A file larger than this is not snapshotted: its change stays, unrevertable.
+const UNDO_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+impl ToolRuntime {
+    /// Snapshot `path` before a write or edit, so `/undo` can put it back.
+    /// Oversized files are skipped rather than held in memory.
+    pub(crate) fn record_change(&self, path: &Path, label: String) {
+        let before = match std::fs::metadata(path) {
+            Ok(meta) if meta.len() > UNDO_MAX_BYTES => return,
+            Ok(_) => std::fs::read(path).ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return,
+        };
+        let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        changes.push(Change {
+            path: path.to_path_buf(),
+            before,
+            label,
+        });
+        let excess = changes.len().saturating_sub(UNDO_DEPTH);
+        changes.drain(..excess);
+    }
+
+    /// Revert the newest recorded change: restore the previous bytes, or
+    /// remove a file that did not exist. Returns its label, or None when
+    /// nothing is left to undo. A failed restore keeps the change so a
+    /// second attempt is possible.
+    pub fn undo_last(&self) -> Result<Option<String>, String> {
+        let change = {
+            let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+            match changes.pop() {
+                Some(change) => change,
+                None => return Ok(None),
+            }
+        };
+        let result = match &change.before {
+            Some(bytes) => staged_write(&change.path, bytes),
+            None => match std::fs::remove_file(&change.path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+        };
+        match result {
+            Ok(()) => {
+                note_seen(self, &change.path);
+                Ok(Some(change.label))
+            }
+            Err(error) => {
+                let label = change.label.clone();
+                self.changes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(change);
+                Err(format!("could not undo {label}: {error}"))
+            }
+        }
+    }
+
+    /// How many changes `/undo` can still revert.
+    pub fn undo_depth(&self) -> usize {
+        self.changes.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
 }
 
 /// The whole text behind each truncated result, newest last, bounded by

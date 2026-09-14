@@ -6,10 +6,10 @@ binary that speaks [e's extension line protocol](../../docs/extensions.md)
 dependency of the `e` binary — people who want `/diff` build and install it;
 everyone else ships nothing extra.
 
-`/diff` prints the continuous workspace review into the transcript: a file
-header with `+added/-removed` totals, one summary row per changed file, then
-each file's patch with line numbers, syntax colors, and word-level changes.
-`/diff <path>` prints one file's patch. Reads are bounded and fail closed: no
+`/diff` shows the workspace review as one block in the transcript: a title
+with the file count and `+added/-removed` totals, then every patch painted by
+e in its own diff grammar (the extension sends a unified diff through the
+`show` surface; the host colours it). `/diff <path>` shows one file's patch. Reads are bounded and fail closed: no
 Git index writes, no external diff/textconv/clean-process filters, no symlink
 traversal toward files outside the repository, and no spawning of a `git`
 that resolves through a relative PATH entry or lives inside the workspace.
@@ -27,8 +27,7 @@ extension command. Remove the file to remove the feature.
 ## Configuration
 
 `~/.e/settings.json` reaches the extension as `extensions_config`; see
-[docs/diff.md](../../docs/diff.md) for the keys (`diff_text_width`,
-`diff_title`, `theme`) and the full comparison rules.
+[docs/diff.md](../../docs/diff.md) for the keys and the full comparison rules.
 
 ## Layout
 
@@ -37,6 +36,7 @@ extension command. Remove the file to remove the feature.
 - `src/diffpanel.rs` (+ `diffpanel/patch.rs`) — the review document: layout,
   word-level change marks, the mouse-driven pane renderer, and `document()` —
   the whole review as styled rows, which is what the command prints.
+- `src/command.rs` — the review as a `show` object for the host.
 - `src/main.rs` — the line protocol loop: manifest on `initialize`, review on
   `command`.
 - `src/style.rs`, `src/frame.rs`, `src/theme_*.json` — the extension's own

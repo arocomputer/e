@@ -21,15 +21,15 @@ describe it; e reads the directories.
 ## Install and manage
 
 ```sh
-e install git:github.com/intuitums/diff       # follow the default branch
-e install git:github.com/intuitums/diff@v2    # pin a tag, branch, or commit
-e install https://github.com/user/repo        # any git URL works
-e install git:git@github.com:user/repo@main   # SSH, with your keys
-e install ~/src/my-package                    # a local directory, in place
+e install git:github.com/fschrhunt/e-diff       # follow the default branch
+e install git:github.com/fschrhunt/e-diff@v2    # pin a tag, branch, or commit
+e install https://github.com/user/repo          # any git URL works
+e install git:git@github.com:user/repo@main     # SSH, with your keys
+e install ~/src/my-package                      # a local directory, in place
 
-e packages                                    # what is listed, and its state
-e remove git:github.com/intuitums/diff        # forget it, delete the clone
-e install                                     # make disk match settings
+e packages                                      # what is listed, and its state
+e remove git:github.com/fschrhunt/e-diff        # forget it, delete the clone
+e install                                       # make disk match settings
 ```
 
 Installing clones the repository under `~/.e/packages/<host>/<path>` and
@@ -68,16 +68,30 @@ built-in (`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
 - **Prompts** become `/name` commands.
 - **Themes** appear in `/settings` → Theme.
 
-## First-party packages
+## Release packages
+
+A compiled extension installs from a GitHub release:
+
+```sh
+e install release:intuitums/e/e-diff        # the latest release's e-diff
+e install release:intuitums/e/e-diff@v0.1.0 # pinned
+```
+
+e downloads `<name>-<target>.tar.gz` for this machine's platform from the
+release, checks it against the release's `checksums.txt`, and places the
+`<name>` executable under `~/.e/packages/releases/<owner>/<repo>/<name>/extensions/`,
+the same shape as every other package. An unpinned release package follows
+the latest release on `e install`; `e remove` deletes it. Platforms are the
+ones e itself is released for.
 
 e's own packages are Rust crates under `packages/` in the e repository
 (`packages/diff` is the first; `packages/terminal` holds primitives they
-share). They are workspace members, never compiled into the e binary, and
-today they install by building and copying the executable into
-`~/.e/extensions/` — see [diff.md](diff.md). A git package (above) and a
-workspace crate are the same thing to e at runtime: an executable speaking
-the line protocol. The two meet when releases ship the crates' binaries, at
-which point `e install` can fetch them like any other package.
+share). They are workspace members, never compiled into the e binary; each
+release builds them per target and uploads them as the assets above. To
+publish your own, name the asset `<name>-<target>.tar.gz` with the
+executable at its top level, and list it in `checksums.txt` (`sha256sum`).
+Building from source still works: `cargo build --release -p e-diff` and
+copy the binary into `~/.e/extensions/` — see [diff.md](diff.md).
 
 ## Publishing a package
 
@@ -90,7 +104,7 @@ which point `e install` can fetch them like any other package.
    gh search repos --topic e-package
    ```
 
-[intuitums/diff](https://github.com/intuitums/diff) shows the shape: one
+[fschrhunt/e-diff](https://github.com/fschrhunt/e-diff) shows the shape: one
 extension file and one prompt template, installable with a single `e
 install`. It is the git-package counterpart of `packages/diff`; the crate is
 the one that carries e's own Git review.

@@ -789,12 +789,14 @@ impl App {
             return;
         }
         self.menu = Some(
-            Menu::new(MenuKind::Sessions, "Sessions", HINT_SESSIONS, items).with_tabs(
-                vec!["Current workspace".into(), "All workspaces".into()],
-                Some(1),
-                0,
-                "",
-            ),
+            Menu::new(MenuKind::Sessions, "Sessions", HINT_SESSIONS, items)
+                .without_trigger()
+                .with_tabs(
+                    vec!["Current workspace".into(), "All workspaces".into()],
+                    Some(1),
+                    0,
+                    "",
+                ),
         );
     }
 
@@ -1034,7 +1036,7 @@ impl App {
             self.notice("nothing to rewind to yet".into());
             return;
         }
-        self.menu = Some(Menu::new(MenuKind::Tree, "Rewind to", HINT_USE, items));
+        self.menu = Some(Menu::new(MenuKind::Tree, "Rewind to", HINT_USE, items).without_trigger());
     }
 
     /// Apply a /tree choice: rewind to just before the chosen user message,
@@ -1608,6 +1610,11 @@ impl App {
             "/tree" => self.open_tree_menu(),
             "/settings" => self.open_settings(),
             "/copy" => self.copy_last(),
+            "/undo" => self.undo_change(),
+            "/usage" => self.show_usage(""),
+            _ if trimmed.starts_with("/usage ") => {
+                self.show_usage(trimmed["/usage ".len()..].trim())
+            }
             "/fork" => self.fork_session(None),
             _ if trimmed.starts_with("/fork ") => {
                 self.fork_session(Some(trimmed["/fork ".len()..].trim().to_string()))
@@ -1741,6 +1748,50 @@ impl App {
     }
 
     /// Ask the core to checkpoint at its next safe provider boundary.
+    /// `/usage [24h|7d|30d|all]`: tokens and estimated cost by model over a
+    /// period, from the sessions on disk.
+    fn show_usage(&mut self, period: &str) {
+        let Some(report) = crate::core::usage::report_for(period) else {
+            self.notice("usage periods: 24h, 7d (default), 30d, all".into());
+            return;
+        };
+        let label = match period.trim() {
+            "24h" | "day" | "today" => "last 24 hours",
+            "30d" | "month" => "last 30 days",
+            "all" => "whole history",
+            _ => "last 7 days",
+        };
+        self.transcript
+            .push(Block::show(crate::core::extensions::Show {
+                title: format!("Usage · {label}"),
+                body: crate::core::usage::markdown(&report, label),
+                format: crate::core::extensions::Format::Markdown,
+            }));
+    }
+
+    /// `/undo`: put back what the last write or edit replaced.
+    fn undo_change(&mut self) {
+        if self.active.is_some() || self.agent.is_streaming() {
+            self.notice("a turn is running — press Esc to stop it, then /undo".into());
+            return;
+        }
+        match self.agent.undo_last_change() {
+            Ok(Some(label)) => {
+                let left = self.agent.undo_depth();
+                self.notice(format!(
+                    "undid {label}{}",
+                    if left > 0 {
+                        format!(" — {left} more to undo")
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            Ok(None) => self.notice("nothing to undo".into()),
+            Err(error) => self.notice(error),
+        }
+    }
+
     /// `/fork [name]`: continue in a new session file seeded with the
     /// current branch. The transcript and history stay as they are; only
     /// where the next messages land changes. The original file is untouched.
@@ -2240,6 +2291,8 @@ fn is_builtin_command(name: &str) -> bool {
             | "compact"
             | "fork"
             | "export"
+            | "undo"
+            | "usage"
             | "trust"
             | "settings"
             | "help"
@@ -2257,7 +2310,7 @@ fn builtin_category(value: &str) -> &'static str {
         "/login" => "Account",
         "/models" | "/effort" | "/scoped-models" => "Model",
         "/resume" | "/new" | "/tree" | "/compact" | "/fork" | "/export" => "Session",
-        "/trust" => "Workspace",
+        "/trust" | "/undo" => "Workspace",
         _ => "General",
     }
 }
@@ -3028,6 +3081,9 @@ async fn run_scoped(
                                 KeyCode::Esc => {
                                     if app.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Extension) {
                                         app.cancel_ui_prompt();
+                                    }
+                                    if app.menu.as_ref().is_some_and(|m| m.filter_without_trigger && m.kind != MenuKind::Commands) {
+                                        app.editor.set_text("");
                                     }
                                     app.menu = None;
                                     // Closing the scoped picker without
@@ -4361,6 +4417,43 @@ mod tests {
             fake_request("plan", "session.tools", serde_json::json!({"names": null}));
         app.on_host_request(request);
         assert_eq!(app.agent.active_tools(), None);
+    }
+
+    #[test]
+    fn a_command_opened_picker_filters_on_typed_text_and_clears_it_on_close() {
+        use crate::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+        let mut app = session_app();
+        let items = vec![
+            MenuItem::new("fix the parser", "", "/a.jsonl"),
+            MenuItem::new("write docs", "", "/b.jsonl"),
+        ];
+        app.menu =
+            Some(Menu::new(MenuKind::Sessions, "Sessions", HINT_USE, items).without_trigger());
+        app.editor.set_text("pars");
+        app.sync_menu();
+        let menu = app.menu.as_ref().unwrap();
+        assert_eq!(menu.len(), 1, "typed text is the filter");
+        assert_eq!(menu.current().unwrap().value, "/a.jsonl");
+        // Esc path: the filter text was never a draft.
+        app.menu = None;
+        // (the key loop clears the editor for a filtered picker; the
+        // selection path does the same through select_menu)
+        app.menu = Some(
+            Menu::new(
+                MenuKind::Tree,
+                "Rewind to",
+                HINT_USE,
+                vec![MenuItem::new("x", "", "n1")],
+            )
+            .without_trigger(),
+        );
+        app.editor.set_text("x");
+        app.sync_menu();
+        assert!(app.select_menu());
+        assert!(
+            app.editor.is_empty(),
+            "the filter does not linger as a draft"
+        );
     }
 
     #[test]
