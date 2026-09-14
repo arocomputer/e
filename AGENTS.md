@@ -117,7 +117,8 @@ surface? Route it through `panel.rs` so it can't diverge.
   per dialect, even when the decision is "no change here". Persisted and
   user-facing contracts (CLI, sessions, configuration, the extension protocol)
   follow `docs/compatibility.md`: fixtures under `tests/fixtures/` are release
-  artifacts, so a contract change adds or updates one in the same PR.
+  artifacts, so a contract change adds or updates one in the same PR, and
+  labels it `breaking` — the one label no path can apply for you.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - `~/.e/` is the only home e reads. Never reach into another tool's directory.

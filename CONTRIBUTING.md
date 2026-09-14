@@ -63,7 +63,9 @@ triage labels by path — `core`, `tui`, `sdk`, `infra`, `docs` — and the
 title becomes the squash commit on `main`. In the body, state the problem in
 a sentence or two, then how you fixed it; the template only carries the
 checklist CI and review expect. One concern per PR — if the description
-says "also", split it.
+says "also", split it. When a change alters a persisted or wire contract
+(`docs/compatibility.md`), add the `breaking` label yourself: the triage
+workflow can label paths, but no path tells it a contract changed.
 
 ## AI/LLM assistance
 
