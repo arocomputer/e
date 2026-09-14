@@ -79,11 +79,6 @@ jobs:
             cargo build --release --locked --target "$target"
             tar czf "e-$target.tar.gz" -C "target/$target/release" e
             gh release upload "$TAG" "e-$target.tar.gz" --clobber
-            # Packaged extensions ship beside the binary as release packages
-            # (`e install release:intuitums/e/e-diff`); same target, same sums.
-            cargo build --release --locked --target "$target" -p e-diff
-            tar czf "e-diff-$target.tar.gz" -C "target/$target/release" e-diff
-            gh release upload "$TAG" "e-diff-$target.tar.gz" --clobber
           done
 
           host=$(rustc -vV | sed -n 's/^host: //p')

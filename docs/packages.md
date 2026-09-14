@@ -73,8 +73,8 @@ built-in (`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
 A compiled extension installs from a GitHub release:
 
 ```sh
-e install release:intuitums/e/e-diff        # the latest release's e-diff
-e install release:intuitums/e/e-diff@v0.1.0 # pinned
+e install release:<owner>/<repo>/<name>        # the latest release
+e install release:<owner>/<repo>/<name>@v1.2.0 # pinned
 ```
 
 e downloads `<name>-<target>.tar.gz` for this machine's platform from the
@@ -84,14 +84,12 @@ the same shape as every other package. An unpinned release package follows
 the latest release on `e install`; `e remove` deletes it. Platforms are the
 ones e itself is released for.
 
-e's own packages are Rust crates under `packages/` in the e repository
-(`packages/diff` is the first; `packages/terminal` holds primitives they
-share). They are workspace members, never compiled into the e binary; each
-release builds them per target and uploads them as the assets above. To
-publish your own, name the asset `<name>-<target>.tar.gz` with the
-executable at its top level, and list it in `checksums.txt` (`sha256sum`).
-Building from source still works: `cargo build --release -p e-diff` and
-copy the binary into `~/.e/extensions/` — see [diff.md](diff.md).
+To publish one, name the asset `<name>-<target>.tar.gz` with the executable
+at its top level, list it in the release's `checksums.txt` (`sha256sum`), and
+build one per target e is released for (`e update` names them). A Rust
+extension may depend on the `e-terminal` crate from the e repository for
+the host's palette and text primitives; the e repository itself ships no
+extensions, so nothing about a package needs a change to e.
 
 ## Publishing a package
 
@@ -106,8 +104,7 @@ copy the binary into `~/.e/extensions/` — see [diff.md](diff.md).
 
 [fschrhunt/e-diff](https://github.com/fschrhunt/e-diff) shows the shape: one
 extension file and one prompt template, installable with a single `e
-install`. It is the git-package counterpart of `packages/diff`; the crate is
-the one that carries e's own Git review.
+install`. It is how `/diff` reaches e — a package, not a part of it.
 
 Try a package before publishing it with a local install:
 

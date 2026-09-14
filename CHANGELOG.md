@@ -6,6 +6,11 @@
 
 ### Breaking changes
 
+- `/diff` is no longer in this repository. The `packages/diff` crate left
+  with its docs and scripts; the Git review is the
+  [e-diff](https://github.com/fschrhunt/e-diff) package
+  (`e install git:github.com/fschrhunt/e-diff`), which speaks the same
+  display surface. `packages/terminal` stays as e's own rendering crate.
 - `e ask` is removed. Use `e rpc` for headless automation, with one JSON request and response per line. Piped stdin without `e rpc` now reports a usage error.
 - Read-only tool mode is removed, including `--read-only`, `--ro`, the `read_only` RPC mode, and `read_only_notice`. Use `--no-tools` to disable tools, or the RPC `tools` allowlist to select built-ins.
 - The `ask` tool and its question panel are removed. Extensions should read required input from configuration or report what is missing.
@@ -18,9 +23,7 @@
 - Release packages: `e install release:<owner>/<repo>/<name>[@tag]` fetches
   a compiled extension published as `<name>-<target>.tar.gz` on a GitHub
   release, verifies it against the release's `checksums.txt`, and installs
-  it like any other package. Releases now build and upload `e-diff` for
-  every target, so `e install release:intuitums/e/e-diff` is how the Git
-  review installs.
+  it like any other package.
 - Nested `AGENTS.md` files load on demand: the first time a tool touches a
   path under a directory that has one, its instructions join the
   conversation, nearest last. Trusted workspaces only, once per directory

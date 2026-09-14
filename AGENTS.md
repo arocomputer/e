@@ -66,11 +66,10 @@ sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a consumer of the library target with its own release boundary
              (decisions/0002), never a fourth layer
-packages/    extensions and shared crates, never compiled into the e binary
+packages/    shared crates, never a place for extensions: an extension is a
+             package of its own repository (docs/packages.md), like pi's
   terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
-                  primitives shared by e and its extensions
-  diff/           e-diff, the first packaged extension: Git review over the
-                  line protocol (/diff, /diff <path>); see docs/diff.md
+                  primitives e renders with and an extension may reuse
 ```
 
 ## Running one thing, not everything

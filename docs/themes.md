@@ -32,15 +32,6 @@ The full transcript reader rails tool details with a `│` in the theme's
 `muted` tone and dim output text. Its footer uses `userMessageText` for `┃`
 and `muted` for navigation.
 
-## Diff review
-
-The `/diff` command is the `packages/diff` extension, and its palette ships
-inside the extension rather than in the host themes: the `diffPaneBg`,
-`diffText`, `diffAddedBg`/`diffRemovedBg`, `diffSelectedBg`, `diffLineNumber`,
-and `diffSyntax*` tokens live in `packages/diff/src/theme_{dark,light}.json`.
-`~/.e/themes/` cannot recolor the extension's output today; the host's
-`theme` setting selects which embedded palette `/diff` renders with.
-
 Edit/write summary counts use `toolDiffAddedMarker` and `toolDiffRemovedMarker`
 for truecolor terminals, or `toolDiffAddedMarkerFallback` and
 `toolDiffRemovedMarkerFallback` otherwise. These also color the review's diff

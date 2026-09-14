@@ -68,17 +68,6 @@ if out=$(prod_rs $(find src/core -name '*.rs' 2>/dev/null) | grep -E 'fs::write|
   say "$out"
 fi
 
-# The diff extension reads with O_NOFOLLOW, never for writes; and it spawns
-# only a git binary resolved from absolute, workspace-outside PATH entries.
-if out=$(prod_rs packages/diff/src/diff.rs | grep -E '\.(write|append|create|create_new)\(|\.truncate\((true|false)\)|O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)'); then
-  bad "write-capable file options in the read-only diff reader:"
-  say "$out"
-fi
-if out=$(prod_rs packages/diff/src/diff.rs | grep -E 'Command::new\(' | grep -v 'Command::new(program)'); then
-  bad "diff extension spawns a program it did not resolve through the trusted git path:"
-  say "$out"
-fi
-
 # 5. Unsafe code stays where it is audited: the libc terminal poll and the
 #    bash tool's process-group kill (setsid + SIGKILL at the timeout).
 if out=$(grep -rnE 'unsafe (fn|impl|\{)' src/ --include='*.rs' | grep -v '^src/tui/paint/background.rs:' | grep -v '^src/core/tools/bash.rs:'); then

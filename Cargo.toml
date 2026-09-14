@@ -52,6 +52,6 @@ strip = "symbols"
 # release boundary — see docs/decisions/0002-rust-sdk-package.md. fuzz/ stays
 # its own workspace because cargo-fuzz requires it.
 [workspace]
-members = ["sdk", "packages/terminal", "packages/diff"]
+members = ["sdk", "packages/terminal"]
 default-members = ["."]
 resolver = "2"

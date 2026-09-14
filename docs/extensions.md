@@ -341,19 +341,18 @@ An extension speaks the protocol directly — `subagent.mjs` and the shell
 `ping.sh` below are single self-contained files, reading a JSON request per
 line and writing a response per line. e installs nothing beside an extension.
 
-## Packaged extensions
+## Compiled extensions
 
 Extensions are programs, not scripts only: anything that speaks the line
-protocol qualifies, including a compiled Rust binary. The first packaged
-extension lives at `packages/diff` — the Git review surface, `e-diff`. It is
-a workspace member, not an `e` dependency: the release binary never ships it,
-and building it is opt-in (`cargo build --release -p e-diff`, then copy the
-executable into `~/.e/extensions/`). `packages/terminal` (`e-terminal`) holds
-the palette/text primitives both e and e-diff render with. Note that what an
-extension sends still crosses the line as data: notices are sanitized before
-paint, so an extension that wants colour returns a `show` with a `format`
-rather than styled bytes. Packages users install from git, and how the two
-relate, are in [packages.md](packages.md).
+protocol qualifies, including a compiled binary. A compiled extension lives
+in its own repository, like every package, and reaches users as a release
+package (`e install release:<owner>/<repo>/<name>`, see
+[packages.md](packages.md)); the e repository ships no extensions of its own.
+`packages/terminal` (`e-terminal`) is the palette and text crate e renders
+with, which a Rust extension may depend on. What an extension sends still
+crosses the line as data: notices are sanitized before paint, so an
+extension that wants colour returns a `show` with a `format` rather than
+styled bytes.
 
 **`scaffold.mjs`** is an *optional* convenience: the same stdin/stdout framing,
 id routing, and a `connect({ manifest, handlers })` wrapper, so you write

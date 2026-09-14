@@ -95,15 +95,6 @@ These preferences in `~/.e/settings.json` take effect in a new editor:
   empty for one line and `s` otherwise. An empty label inserts
   the full text rather than creating an invisible attachment.
 
-## Diff review
-
-`/diff` is not built in. It ships as the `packages/diff` extension: install
-the `e-diff` binary into `~/.e/extensions/` and the command prints the
-current Git review — file summaries and patches — into the transcript.
-`/diff <path>` prints one file's patch. Keyboard and mouse behavior are
-unchanged while it reads; see `docs/diff.md` for comparison rules,
-limits, and preferences.
-
   (ctrl+c, ctrl+p, ctrl+v or Command+V for clipboard image/text paste, tab,
   shift+tab, menu navigation) reach this keymap — binding one of those here has no effect,
   since the app-level handler runs first.
