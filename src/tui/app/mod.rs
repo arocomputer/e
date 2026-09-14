@@ -5,11 +5,10 @@
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
+    Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
-use futures::StreamExt;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -311,6 +310,9 @@ struct App {
     ext_status: std::collections::BTreeMap<String, String>,
     /// The extension panel below the composer, one slot.
     ext_panel: Option<extui::ExtPanel>,
+    /// ctrl+g was pressed: the frame loop hands the terminal to the
+    /// external editor before its next select.
+    external_edit: bool,
 }
 
 impl App {
@@ -1443,13 +1445,13 @@ impl App {
                 // stopping the turn would swallow the typed message along
                 // with the attachment.
                 if prompt.is_empty() {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!(
                         "{} does not accept image input",
                         model::slug(&self.agent.model)
                     ));
                 } else {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!(
                         "{} does not accept image input — sending the text without the screenshot",
                         model::slug(&self.agent.model)
@@ -1468,14 +1470,14 @@ impl App {
                     self.submit_with_images(prompt, vec![image]);
                 }
                 Err(error) => {
-                    self.editor.push_history(text);
+                    self.remember_prompt(text);
                     self.notice(format!("could not attach image: {error}"));
                 }
             }
             return;
         }
 
-        self.editor.push_history(text);
+        self.remember_prompt(text);
 
         // `!cmd` runs in the shell directly; the output lands in the
         // transcript and in history, so the model sees what the user did.
@@ -1695,7 +1697,7 @@ impl App {
         text: String,
         images: Vec<crate::core::providers::ImageInput>,
     ) {
-        self.editor.push_history(text.clone());
+        self.remember_prompt(text.clone());
         let count = images.len();
         let held = self.agent.submit_message(
             crate::core::providers::ChatMessage::user_with_images(text.clone(), images),
@@ -1921,6 +1923,13 @@ impl App {
 
     fn notice(&mut self, text: String) {
         self.transcript.push(Block::new(Kind::Notice, text));
+    }
+
+    /// A submitted prompt joins up-arrow recall for this session and the
+    /// history file for the next. API keys never come through here.
+    fn remember_prompt(&mut self, text: String) {
+        crate::tui::history::append(&text);
+        self.editor.push_history(text);
     }
 }
 
@@ -2511,7 +2520,10 @@ async fn run_scoped(
         ui_prompt: None,
         ext_status: std::collections::BTreeMap::new(),
         ext_panel: None,
+        external_edit: false,
     };
+    app.editor
+        .seed_history(crate::tui::history::load(crate::tui::history::RECALL));
     app.refresh_status_cache();
     app.emit(
         "session_start",
@@ -2587,7 +2599,11 @@ async fn run_scoped(
         &title_path(),
         app.agent.session_name().as_deref(),
     ));
-    let mut events = EventStream::new();
+    // Terminal input is read on its own thread and can be paused: while an
+    // external editor owns the terminal (ctrl+g), nothing here may read
+    // it, or the editor's keystrokes land in e instead.
+    let input_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut input_rx = spawn_input_reader(input_paused.clone());
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     // SIGTERM/SIGHUP (a kill, a closed tab) exit through the same cleanup as
     // /quit — the terminal is restored, the extension host shut down.
@@ -2612,8 +2628,12 @@ async fn run_scoped(
     let mut mouse_enabled = false;
 
     loop {
+        if app.external_edit {
+            app.external_edit = false;
+            edit_externally(&mut app, &mut painter, &input_paused, cols, rows, anchor).await;
+        }
         tokio::select! {
-            maybe = events.next() => {
+            maybe = input_rx.recv() => {
                 let Some(Ok(event)) = maybe else { break };
                 match event {
                     TermEvent::Paste(text) if app.viewer.is_none() => {
@@ -2925,6 +2945,19 @@ async fn run_scoped(
                             app.notice("login cancelled".into());
                         } else if k.code == KeyCode::Esc && app.agent.is_streaming() {
                             app.agent.interrupt();
+                        } else if ctrl
+                            && k.code == KeyCode::Char('g')
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                            && app.pending_key.is_none()
+                        {
+                            // Deferred to the top of the loop: the terminal
+                            // hand-off needs the painter and the reader,
+                            // which the key handler does not own.
+                            app.external_edit = true;
                         } else if ctrl && matches!(k.code, KeyCode::Char('p') | KeyCode::Char('P')) {
                             let backward = k.code == KeyCode::Char('P')
                                 || k.modifiers.contains(KeyModifiers::SHIFT);
@@ -3250,6 +3283,121 @@ fn arm(app: &mut App) {
 /// flags, bracketed paste, raw mode, cursor visibility — on every exit
 /// path, `?` returns and unwinds included. Popping a mode that never got
 /// enabled is harmless; leaving one enabled corrupts the user's shell.
+/// Read terminal events on a thread the frame loop can pause. Each poll
+/// waits at most 100 ms, so a pause takes effect within that; the thread
+/// ends when the receiver is dropped.
+fn spawn_input_reader(
+    paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> tokio::sync::mpsc::Receiver<std::io::Result<TermEvent>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    std::thread::spawn(move || loop {
+        if paused.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        match crossterm::event::poll(Duration::from_millis(100)) {
+            Ok(true) => {
+                let event = crossterm::event::read();
+                if tx.blocking_send(event).is_err() {
+                    break;
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let _ = tx.blocking_send(Err(error));
+                break;
+            }
+        }
+    });
+    rx
+}
+
+/// ctrl+g: hand the terminal to `$VISUAL` / `$EDITOR` (or the `editor`
+/// setting) with the draft in a private temp file, then take it back and
+/// load what was saved. The painter is stopped and respawned around the
+/// hand-off so the next frame repaints from a known-blank screen; the input
+/// reader is paused so the editor gets every keystroke.
+async fn edit_externally(
+    app: &mut App,
+    painter: &mut Painter,
+    input_paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cols: u16,
+    rows: u16,
+    anchor: usize,
+) {
+    let command = crate::core::config::settings::external_editor();
+    let Some(program) = command.first().cloned() else {
+        app.notice("no editor: set `editor` in ~/.e/settings.json or $EDITOR".into());
+        return;
+    };
+    let draft = app.editor.expanded_text();
+    let path = std::env::temp_dir().join(format!("e-draft-{}.md", std::process::id()));
+    {
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let written = options
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, draft.as_bytes()));
+        if let Err(error) = written {
+            app.notice(format!("could not stage the draft: {error}"));
+            return;
+        }
+    }
+    input_paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    // The reader's poll in flight ends within its 100 ms window.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    painter.shutdown();
+    let _ = execute!(
+        std::io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste
+    );
+    let _ = terminal::disable_raw_mode();
+    {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b[?25h");
+        let _ = out.flush();
+    }
+    let args: Vec<String> = command.iter().skip(1).cloned().collect();
+    let edit_path = path.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(&program)
+            .args(&args)
+            .arg(&edit_path)
+            .status()
+    })
+    .await;
+    let _ = terminal::enable_raw_mode();
+    let _ = execute!(
+        std::io::stdout(),
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    *painter = Painter::spawn(cols, rows, anchor);
+    input_paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    match status {
+        Ok(Ok(status)) if status.success() => match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let text = text.trim_end_matches('\n').to_string();
+                app.editor.set_text(&text);
+                app.sync_menu();
+            }
+            Err(error) => app.notice(format!("could not read the edited draft: {error}")),
+        },
+        Ok(Ok(status)) => app.notice(format!("editor exited with {status}; draft unchanged")),
+        Ok(Err(error)) => app.notice(format!("could not start the editor: {error}")),
+        Err(_) => app.notice("the editor task failed; draft unchanged".into()),
+    }
+    let _ = std::fs::remove_file(&path);
+    painter.frame(app.frame(cols as usize, rows as usize));
+}
+
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
@@ -3984,6 +4132,7 @@ mod tests {
             ui_prompt: None,
             ext_status: std::collections::BTreeMap::new(),
             ext_panel: None,
+            external_edit: false,
         }
     }
 

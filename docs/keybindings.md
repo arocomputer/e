@@ -21,6 +21,13 @@ falls back to e's built-in bindings untouched.
   `left`, `right`, `up`, `down`, `word_left`, `word_right`, `home`, `end`,
   `kill_to_end`, `kill_to_start`, `kill_word` — or `"none"` to unbind a
   built-in chord (the key is swallowed, not typed as a literal character).
+- ctrl+g opens the draft in an external editor: the `editor` setting in
+  `~/.e/settings.json` (`"editor": "code --wait"`), else `$VISUAL`, else
+  `$EDITOR`, else `vi`. Save and quit to bring the text back; a non-zero
+  exit leaves the draft unchanged.
+- ↑ on an empty composer recalls earlier prompts, including those from
+  previous sessions: the newest thousand are kept in `~/.e/history.jsonl`,
+  private to your user. A prompt identical to the last one is not repeated.
 - Only chords not already claimed by e's application-level shortcuts
   (ctrl+c, ctrl+o, ctrl+p, tab, shift+tab, menu navigation) reach this
   keymap — binding one of those here has no effect, since the app-level

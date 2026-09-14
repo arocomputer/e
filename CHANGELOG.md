@@ -15,6 +15,12 @@
 
 ### New features
 
+- Prompt history persists across sessions (`~/.e/history.jsonl`, newest
+  thousand, private): ↑ on an empty composer recalls prompts from earlier
+  sessions too.
+- ctrl+g opens the composer draft in an external editor (`editor` setting,
+  `$VISUAL`, `$EDITOR`, then `vi`) and loads what was saved back into the
+  composer.
 - `e -p "prompt"` runs one turn headless and streams the reply to stdout;
   the prompt can come from stdin. `e -p --json` streams every session event
   as a JSON line and ends with the same result object `e rpc` returns. See

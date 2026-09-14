@@ -231,6 +231,26 @@ pub fn tui_mode() -> String {
     }
 }
 
+/// The command that opens the composer draft externally (ctrl+g): the
+/// `editor` setting split on whitespace, else `$VISUAL`, else `$EDITOR`,
+/// else `vi`. The draft's path is appended as the last argument.
+pub fn external_editor() -> Vec<String> {
+    let configured = get_string("editor")
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("VISUAL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or_else(|| "vi".into());
+    configured.split_whitespace().map(str::to_string).collect()
+}
+
 pub fn theme() -> String {
     get_string("theme").unwrap_or_else(|| "auto".into())
 }
