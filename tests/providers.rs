@@ -11,7 +11,7 @@ use common::{clear_env_keys, env_lock, read_tool, request_json, serve_sse, test_
 use e::core::providers::catalog::{self, Api, Model, Thinking};
 use e::core::providers::{
     self, ChatMessage, Event, FailureCause, FinishReason, ImageInput, Request, SseSplitter,
-    SseStream, ToolCall, MAX_SSE_EVENT_BYTES,
+    SseStream, ToolCall, Usage, MAX_SSE_EVENT_BYTES,
 };
 
 // ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ struct DialectCase {
     sse: &'static str,
     text: &'static str,
     reasoning: &'static str,
-    usage: Option<(u64, u64, u64)>,
+    usage: Option<Usage>,
     tool: ToolExpect,
     finish: Option<FinishReason>,
 }
@@ -137,7 +137,12 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "Hello",
             reasoning: "hmm",
-            usage: Some((12, 3, 4)),
+            usage: Some(Usage {
+                input: 8,
+                output: 3,
+                cache_read: 4,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Exact {
                 id: "c1",
                 args: "{\"path\":\"a.txt\"}",
@@ -154,7 +159,7 @@ fn dialects() -> Vec<DialectCase> {
             history: History::AnthropicToolLoop,
             sse: concat!(
                 "event: message_start\n",
-                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":40}}}\n\n",
+                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":60,\"cache_creation\":{\"ephemeral_5m_input_tokens\":50,\"ephemeral_1h_input_tokens\":10}}}}\n\n",
                 "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
                 "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n",
                 "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
@@ -171,9 +176,13 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "hello world",
             reasoning: "hmm",
-            // Anthropic's prompt fields are disjoint: input is the inclusive
-            // total (100 uncached + 40 cache-read), cache_read the subset.
-            usage: Some((140, 25, 40)),
+            usage: Some(Usage {
+                input: 100,
+                output: 25,
+                cache_read: 40,
+                cache_write_5m: 50,
+                cache_write_1h: 10,
+            }),
             tool: ToolExpect::Exact {
                 id: "tu_1",
                 args: "{\"path\":\"a.txt\"}",
@@ -198,7 +207,11 @@ fn dialects() -> Vec<DialectCase> {
             ),
             text: "hi",
             reasoning: "planning\n\ntesting",
-            usage: Some((10, 2, 0)),
+            usage: Some(Usage {
+                input: 10,
+                output: 2,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Exact {
                 id: "c1",
                 args: "{\"path\":\"a.txt\"}",
@@ -221,7 +234,12 @@ fn dialects() -> Vec<DialectCase> {
             text: "hello world",
             reasoning: "planning",
             // Thought tokens count as output.
-            usage: Some((90, 25, 30)),
+            usage: Some(Usage {
+                input: 60,
+                output: 25,
+                cache_read: 30,
+                ..Usage::default()
+            }),
             tool: ToolExpect::Synthesized {
                 name: "read",
                 id_prefix: "g-call-1",
@@ -390,7 +408,7 @@ async fn collect_stream(
     String,
     String,
     Vec<ToolCall>,
-    Option<(u64, u64, u64)>,
+    Option<Usage>,
     Option<FinishReason>,
 ) {
     let (mut rx, _handle) = providers::stream(request);
@@ -408,11 +426,7 @@ async fn collect_stream(
             Event::TextDelta(d) => text.push_str(&d),
             Event::ReasoningDelta(d) => reasoning.push_str(&d),
             Event::ToolCall(c) => calls.push(c),
-            Event::Usage {
-                input,
-                output,
-                cache_read,
-            } => usage = Some((input, output, cache_read)),
+            Event::Usage(observed) => usage = Some(observed),
             Event::Error(err) => panic!("stream errored: {}", err.message),
             Event::Done(end) => {
                 finish = Some(end.finish);
@@ -496,6 +510,59 @@ async fn streaming_rate_limit_codes_respect_quota_messages() {
         .await;
         assert_eq!(error.cause, FailureCause::QuotaExhausted, "{provider}");
         assert!(!error.cause.is_retryable(), "{provider}");
+    }
+}
+
+/// A 200 stream can still fail: OpenAI-style gateways send a bare
+/// `{"error":…}` frame before `[DONE]`, Gemini a `google.rpc.Status` frame
+/// and then nothing. Both must surface the provider's message and classify
+/// by its numeric code, not end as a clean turn or a stall.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn mid_stream_error_frames_fail_completions_and_google_streams() {
+    let _lock = env_lock();
+    let completions = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+        "data: {\"error\":{\"message\":\"upstream provider overloaded\",\"code\":503},",
+        "\"choices\":[{\"delta\":{},\"finish_reason\":\"error\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let google = concat!(
+        "data: {\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",",
+        "\"message\":\"Resource has been exhausted\"}}\n\n",
+    );
+    let (completions_port, _completions_server) = serve_sse(&[completions]);
+    let (google_port, _google_server) = serve_sse(&[google]);
+    let home = Home::new("mid-stream-error-frame");
+    home.auth(r#"{"openai":{"key":"k"},"google":{"key":"k"}}"#);
+
+    for (provider, port, api, message, cause) in [
+        (
+            "openai",
+            completions_port,
+            Api::Completions,
+            "upstream provider overloaded",
+            FailureCause::ProviderUnavailable,
+        ),
+        (
+            "google",
+            google_port,
+            Api::Google,
+            "Resource has been exhausted",
+            FailureCause::RateLimited,
+        ),
+    ] {
+        let error = collect_error(Request {
+            model: test_model(provider, port, api),
+            system: "sys".into(),
+            messages: vec![ChatMessage::user("hi")],
+            effort: None,
+            session_id: String::new(),
+            tools: Vec::new(),
+        })
+        .await;
+        assert_eq!(error.message, message, "{provider}");
+        assert_eq!(error.cause, cause, "{provider}");
     }
 }
 
@@ -1032,6 +1099,60 @@ async fn signed_thinking_blocks_are_captured_and_replayed() {
     assert_eq!(content[0]["signature"], "sig-abc");
     assert_eq!(content[0]["thinking"], "let me look");
     assert_eq!(content[1]["type"], "tool_use");
+}
+
+/// The results of one step's parallel tool calls go back to Anthropic in a
+/// single user message — one message per `tool_result` is accepted on the
+/// wire but trains the model out of parallel calls. The moving cache
+/// breakpoint still lands on the last block of that merged turn.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn anthropic_replays_parallel_tool_results_in_one_user_turn() {
+    let _lock = env_lock();
+    let sse = concat!(
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+    let (port, server) = serve_sse(&[sse]);
+    let home = Home::new("anthropic-parallel-results");
+    home.auth(r#"{"anthropic":{"key":"k"}}"#);
+    let call = |id: &str, path: &str| ToolCall {
+        id: id.into(),
+        name: "read".into(),
+        arguments: format!(r#"{{"path":"{path}"}}"#),
+        signature: None,
+    };
+    let request = Request {
+        model: test_model("anthropic", port, Api::Anthropic),
+        system: "sys".into(),
+        messages: vec![
+            ChatMessage::user("read both"),
+            ChatMessage::assistant("", vec![call("tu_a", "a.txt"), call("tu_b", "b.txt")]),
+            ChatMessage::tool_result("tu_a", "contents a"),
+            ChatMessage::tool_result("tu_b", "contents b"),
+        ],
+        effort: None,
+        session_id: String::new(),
+        tools: Vec::new(),
+    };
+    let _ = collect_stream(request).await;
+
+    let sent = server.join().unwrap();
+    let messages = request_json(&sent[0])["messages"].clone();
+    let roles: Vec<&str> = messages
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["user", "assistant", "user"]);
+    let results = messages[2]["content"].as_array().unwrap();
+    assert_eq!(results[0]["tool_use_id"], "tu_a");
+    assert_eq!(results[1]["tool_use_id"], "tu_b");
+    assert_eq!(results[1]["cache_control"]["type"], "ephemeral");
+    assert!(results[0].get("cache_control").is_none());
 }
 
 /// Gemini verifies a function call's thoughtSignature against the thought
@@ -1679,6 +1800,29 @@ fn partial_override_inherits_the_builtin() {
     assert_eq!(sonnet.thinking, Thinking::Adaptive);
 }
 
+/// Provider-level defaults reach the built-in seed models without
+/// re-listing them, and a provider-level window is the user's final value —
+/// the live overlay must not put the gateway's report back.
+#[test]
+fn provider_level_defaults_apply_to_builtin_seed_models() {
+    let _lock = env_lock();
+    let home = Home::new("provider-level");
+    home.write(
+        "models.json",
+        r#"{"providers":{"anthropic":{"context_window":100000,"max_output":4096}}}"#,
+    );
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-opus-5","context_window":1000000}]}}"#,
+    );
+    let opus = catalog::catalog()
+        .into_iter()
+        .find(|m| m.provider == "anthropic" && m.id == "claude-opus-5")
+        .unwrap();
+    assert_eq!(opus.context_window, 100_000);
+    assert_eq!(opus.max_output, Some(4096));
+}
+
 #[test]
 fn a_custom_provider_without_base_url_is_rejected_with_a_warning() {
     let _lock = env_lock();
@@ -1855,7 +1999,8 @@ async fn provider_reported_models_appear_without_a_release() {
             {"id":"text-embedding-large"},
             {"id":"brand-new-model-20260101"},
             {"id":"fine-looking-embed","type":"embedding","context_length":8192},
-            {"id":"typed-chat","type":"language","context_window":8000}
+            {"id":"typed-chat","type":"language","context_window":8000},
+            {"id":"typed-instruct","type":"chat","context_window":9000}
         ]}"#;
         let _ = a.write_all(
             format!(
@@ -1905,11 +2050,95 @@ async fn provider_reported_models_appear_without_a_release() {
         .find(|m| m.provider == "mock" && m.id == "typed-chat")
         .expect("language type is kept");
     assert_eq!(typed.context_window, 8_000);
+    assert!(
+        catalog
+            .iter()
+            .any(|m| m.provider == "mock" && m.id == "typed-instruct"),
+        "`type` is a deny-list: Together's `chat` kind is a chat model"
+    );
     assert!(catalog::available()
         .iter()
         .any(|m| m.id == "brand-new-model"));
 
     catalog::refresh_remote().await;
+}
+
+/// The ChatGPT backend's /models is the ChatGPT model-picker payload, not
+/// an OpenAI `data` list: codex-usable models are the work-mode entries,
+/// their `-wm` slug suffix is the picker's marker, and `max_tokens` is the
+/// lane's context window. The request must name a client (originator), or
+/// the backend refuses it.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn chatgpt_backends_picklist_becomes_codex_models() {
+    use std::io::{Read, Write};
+    let _lock = env_lock();
+    clear_env_keys();
+    let home = Home::new("chatgpt-picklist");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut a, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 8192];
+        let n = a.read(&mut buf).unwrap();
+        let sent = String::from_utf8_lossy(&buf[..n]).to_string();
+        let body = r#"{"models":[
+            {"slug":"gpt-6-astra-wm","is_work_mode_model":true,"max_tokens":262144,"title":"GPT-6 Astra"},
+            {"slug":"gpt-5.6-sol-wm","is_work_mode_model":true,"max_tokens":262144,"title":"GPT-5.6 Sol"},
+            {"slug":"brand-new-wm","is_work_mode_model":true,"title":"Brand New"},
+            {"slug":"gpt-6-pro","is_work_mode_model":false,"max_tokens":410000},
+            {"slug":"gpt-5-6-thinking","is_work_mode_model":false,"max_tokens":262144}
+        ]}"#;
+        let _ = a.write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        );
+        sent
+    });
+
+    home.auth(r#"{"mock":{"key":"sk-live"}}"#);
+    home.write(
+        "models.json",
+        format!(
+            r#"{{"providers":{{"mock":{{"base_url":"http://127.0.0.1:{port}/backend-api","api":"openai-responses","catalog":"chatgpt","models":["gpt-5.6-sol"]}}}}}}"#
+        ),
+    );
+
+    catalog::refresh_remote().await;
+    let sent = server.join().unwrap();
+    assert!(sent.contains("GET /backend-api/models"));
+    assert!(sent.contains("originator: e"));
+    assert!(sent.to_lowercase().contains("openai-beta"));
+
+    let catalog = catalog::catalog();
+    let astra = catalog
+        .iter()
+        .find(|m| m.provider == "mock" && m.id == "gpt-6-astra")
+        .expect("work-mode entry becomes a codex model");
+    assert_eq!(astra.context_window, 262_144, "max_tokens is the window");
+    assert_eq!(
+        astra.base_url,
+        format!("http://127.0.0.1:{port}/backend-api")
+    );
+    let seeded = catalog
+        .iter()
+        .find(|m| m.provider == "mock" && m.id == "gpt-5.6-sol")
+        .expect("the seeded model stays listed");
+    assert_eq!(
+        seeded.context_window, 262_144,
+        "a gateway report corrects a seed"
+    );
+    let brand_new = catalog
+        .iter()
+        .find(|m| m.provider == "mock" && m.id == "brand-new")
+        .expect("suffix-less work-mode slugs keep their id");
+    assert_eq!(brand_new.id, "brand-new");
+    assert!(!catalog.iter().any(|m| m.id == "gpt-6-pro"));
+    assert!(!catalog.iter().any(|m| m.id == "gpt-5-6-thinking"));
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -2033,8 +2262,8 @@ async fn anthropic_model_refresh_speaks_the_messages_dialect() {
         let n = a.read(&mut buf).unwrap();
         let sent = String::from_utf8_lossy(&buf[..n]).to_string();
         let body = r#"{"data":[
-            {"id":"claude-fresh-large","type":"language","context_length":1000000},
-            {"id":"claude-fresh","type":"language","context_length":200000},
+            {"id":"claude-fresh-large","type":"model","context_length":1000000},
+            {"id":"claude-fresh","type":"model","context_length":200000},
             {"id":"claude-embed-fresh","type":"embedding","context_length":1000}
         ]}"#;
         let _ = a.write_all(

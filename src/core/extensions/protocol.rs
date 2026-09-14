@@ -2,10 +2,10 @@
 //! extension process's stdin/stdout.
 //!
 //! e → extension requests (each expects a response with the same `id`):
-//!   {"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update"],"e_version":"…","cwd":"…","config":{…}}}
+//!   {"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update"],"e_version":"…","cwd":"…","extensions_config":{…}}}
 //!   {"id":7,"method":"tool_call","params":{"name":"…","arguments":{…}}}
 //!   {"id":9,"method":"command","params":{"name":"…","args":"…"}}
-//!   {"id":2,"method":"hook.startup","params":{"cwd":"…","argv":[…]}}
+//!   {"id":2,"method":"hook.startup","params":{"cwd":"…","argv":[…],"flags":{…}}}
 //!   {"id":4,"method":"hook.tool_call","params":{"name":"…","arguments":{…}}}
 //!   {"id":5,"method":"hook.input","params":{"text":"…"}}
 //!   {"id":6,"method":"hook.before_turn","params":{"prompt":"…"}}
@@ -13,6 +13,7 @@
 //!   {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
 //!   {"id":3,"method":"shortcut","params":{"key":"ctrl+g"}}
 //! e → extension notifications (no response):
+//!   {"method":"flags","params":{"flags":{…}}}              (at start, to extensions declaring typed flags)
 //!   {"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
 //!   {"method":"ui.key","params":{"key":"down"}}          (interactive panel)
 //!   {"method":"shutdown"}
@@ -28,7 +29,7 @@
 //!    "tools":[{"name","description","parameters":{JSON Schema},
 //!              "label":{"category","running","completed","target"}}…],
 //!    "commands":[{"name","description"}…],
-//!    "flags":[{"name","description"}…],   (shown in --help /help)
+//!    "flags":[{"name","description","type"?,"default"?}…],   (shown in --help /help; typed ones are parsed)
 //!    "hooks":["startup","tool_call","input","before_turn","tool_result","compact_summary"],
 //!    "events":["session_start","turn_start","tool_end"…],
 //!    "shortcuts":[{"key":"ctrl+g","description":"…"}]}

@@ -4,9 +4,9 @@
 //! hands off here once a session should open.
 
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, Event as TermEvent, EventStream, KeyCode,
-    KeyEvent, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 use futures::StreamExt;
@@ -30,10 +30,14 @@ use crate::tui::theme::Theme;
 use crate::tui::transcript::{Block, Kind, Transcript};
 use crate::tui::trustpanel::{self, TrustStage};
 
+mod clipboard;
+
 mod events;
 mod extui;
 mod login;
 mod menus;
+mod viewer;
+use viewer::Viewer;
 
 /// Per-turn frontend bookkeeping; the engine state lives in the Agent.
 struct ActiveTurn {
@@ -47,6 +51,7 @@ struct ActiveTurn {
     turn: Turn,
     started: Instant,
     error: Option<String>,
+    error_summary: Option<String>,
     /// tool id → stable group block, so lifecycle events update in place.
     tool_blocks: std::collections::HashMap<u64, usize>,
     /// Batch members not yet terminal, including pending calls.
@@ -58,17 +63,6 @@ struct ActiveTurn {
     /// Accumulated provider-billed estimate for this turn, when the model
     /// declares rates. Unlike the context gauge, every request step counts.
     cost_usd: Option<f64>,
-}
-
-/// The ctrl+o full-detail screen: one stored output at a time, scrollable,
-/// ←/→ switching between outputs — the reference surface, e-sized.
-/// The ctrl+o review screen: the whole transcript with tool details
-/// spliced in, at one of the reference's two depths — Review folds each
-/// detail to three lines behind a `→ to expand` hint, Full shows all.
-#[derive(Clone, Copy)]
-struct Viewer {
-    full: bool,
-    scroll: usize,
 }
 
 /// The queued-prompt review's working state: a keyed snapshot of the
@@ -86,9 +80,9 @@ struct QueueReview {
 /// Asynchronous work landing back in the frame loop.
 enum AppJob {
     /// An input hook's verdict on a submitted line: consume/replace/notice.
-    /// `images` rides along only for the initial launch prompt (`-i`); a
-    /// hook never sees or handles them, but they still attach once the
-    /// verdict lands on whatever text is actually submitted.
+    /// Images from `-i` or the composer clipboard ride through the text hook;
+    /// the hook never sees their bytes, but they still attach to whatever text
+    /// its verdict submits.
     InputVerdict {
         sequence: u64,
         text: String,
@@ -112,6 +106,14 @@ enum AppJob {
     Reloaded(std::sync::Arc<crate::core::extensions::ExtensionHost>),
     /// The background updater installed a new version.
     Updated(String),
+    /// Clipboard content read asynchronously, tied to the draft that requested it.
+    ClipboardPaste {
+        generation: u64,
+        paste: Result<clipboard::Paste, String>,
+        /// The pasted text to restore when a path attachment cannot load —
+        /// a clipboard read has nothing to restore, a paste does.
+        fallback: Option<String>,
+    },
     /// A provider model-list refresh finished; rebuild an open picker.
     CatalogRefreshed,
 }
@@ -196,6 +198,14 @@ struct App {
     keymap: crate::core::config::keybindings::Keymap,
     transcript: Transcript,
     editor: Editor,
+    /// Images attached to the current composer draft by ctrl+v.
+    composer_images: Vec<crate::core::providers::ImageInput>,
+    /// Invalidates a clipboard read when its draft was submitted or cleared.
+    composer_generation: u64,
+    /// One clipboard read at a time; cleared when its result lands.
+    clipboard_reading: bool,
+    /// Enter pressed during a clipboard read submits after its payload lands.
+    clipboard_submit_pending: bool,
     agent: Agent,
     active: Option<ActiveTurn>,
     overlay: Option<String>,
@@ -207,6 +217,10 @@ struct App {
     pending_key: Option<String>,
     /// The open picker, if any — commands, files, models.
     menu: Option<Menu>,
+    /// The scoped-models picker's staged scope: what Space has toggled but
+    /// Ctrl+S has not yet committed. None when not staging (the picker shows
+    /// the saved scope); Some when the picker is open with edits pending.
+    staged_scope: Option<Vec<String>>,
     /// The sign-in panel, when /login is active.
     auth: Option<AuthStage>,
     /// The settings panel, when /settings is active.
@@ -281,6 +295,9 @@ struct App {
     /// Cached statusline inputs. Deriving them reads `~/.e/auth.json` and
     /// `~/.e/settings.json`; doing that per frame stalls streaming, so
     /// they refresh only via `refresh_status_cache`.
+    bottom_pinned: bool,
+    live_preview_rows: usize,
+    tool_label_rows: usize,
     signed_in: bool,
     status_effort: Option<String>,
     /// Where extensions' `ui.*` / `session.*` requests arrive; handed to
@@ -297,127 +314,6 @@ struct App {
 }
 
 impl App {
-    /// The review screen's cached body: the projected transcript rows,
-    /// rebuilt only when the cache's fingerprint no longer matches. The
-    /// fingerprint covers everything the projection reads — block state
-    /// (each block's generation, bumped on every touch), the block count,
-    /// and the output store's seq (new details and eviction).
-    fn viewer_rows(&mut self, width: usize, full: bool) -> &[String] {
-        let fingerprint = self.viewer_fingerprint();
-        let current = match &self.viewer_cache {
-            Some((cached_fp, cached_width, cached_full, _)) => {
-                *cached_fp == fingerprint && *cached_width == width && *cached_full == full
-            }
-            None => false,
-        };
-        if !current {
-            let rows = self.project_rows(width, full);
-            self.viewer_cache = Some((fingerprint, width, full, rows));
-        }
-        match &self.viewer_cache {
-            Some((_, _, _, rows)) => rows,
-            // Unreachable: the cache was just filled above. An empty slice
-            // renders as nothing rather than panicking if that ever breaks.
-            None => &[],
-        }
-    }
-
-    /// Everything the review projection reads, as one number.
-    fn viewer_fingerprint(&self) -> u64 {
-        self.transcript.fingerprint() ^ self.output_seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-    }
-
-    /// The projection itself, pure over the current transcript: the whole
-    /// transcript with each child row's stored detail railed beneath it —
-    /// folded to three lines behind the reference's `→ to expand` hint at
-    /// Review depth, whole at Full. Non-tool blocks render through the
-    /// per-block cache, so a rebuild pays only for blocks that changed.
-    fn project_rows(&mut self, width: usize, full: bool) -> Vec<String> {
-        const REVIEW_DETAIL_LINES: usize = 3;
-        let mut rows: Vec<String> = Vec::new();
-        for block in &mut self.transcript.blocks {
-            let lines = block.review_lines(&self.theme, width);
-            if lines.is_empty() {
-                continue;
-            }
-            if !rows.is_empty() {
-                rows.push(String::new());
-            }
-            for (row, detail) in lines {
-                rows.push(crate::tui::markdown::clip_styled(&row, width));
-                let Some(id) = detail else { continue };
-                let Some(body) = Self::output_body(&self.outputs, id) else {
-                    rows.push(self.theme.fg("dim", "│  Full saved result unavailable."));
-                    continue;
-                };
-                let body_lines: Vec<&str> = body.lines().collect();
-                let shown = if full {
-                    body_lines.len()
-                } else {
-                    body_lines.len().min(REVIEW_DETAIL_LINES)
-                };
-                let mut clipped_any = false;
-                for line in &body_lines[..shown] {
-                    let railed = match Self::diff_row_color(&self.theme, line) {
-                        Some(colored) => {
-                            format!("{} {colored}", self.theme.fg("dim", "│"))
-                        }
-                        None => self.theme.fg("dim", &format!("│ {line}")),
-                    };
-                    if crate::tui::markdown::visible_width(&railed) > width {
-                        clipped_any = true;
-                    }
-                    rows.push(crate::tui::markdown::clip_styled(&railed, width));
-                }
-                let hidden = body_lines.len() - shown;
-                if hidden > 0 {
-                    let noun = if hidden == 1 { "line" } else { "lines" };
-                    rows.push(
-                        self.theme
-                            .fg("dim", &format!("│  {hidden} more {noun} · → to expand")),
-                    );
-                } else if !full && clipped_any {
-                    rows.push(self.theme.fg("dim", "│  line clipped · → to expand"));
-                }
-            }
-        }
-        rows
-    }
-
-    /// The ctrl+o review screen: a scroll window over the projected
-    /// transcript, the `┃ Review …` navigation row at the bottom — the
-    /// reference's own wording per depth.
-    fn viewer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
-        let Some(viewer) = self.viewer else {
-            return Vec::new();
-        };
-        let body = self.viewer_rows(width, viewer.full);
-        let window = height.saturating_sub(1).max(1);
-        // The body can shrink under a deep scroll (the output store evicts;
-        // details disappear) — clamp so the screen never renders blank.
-        let scroll = viewer.scroll.min(body.len().saturating_sub(1));
-        let mut rows: Vec<String> = body.iter().skip(scroll).take(window).cloned().collect();
-        while rows.len() < window {
-            rows.push(String::new());
-        }
-        let nav = if viewer.full {
-            "Full detail · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close"
-        } else {
-            "Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close"
-        };
-        rows.push(format!(
-            "{} {}",
-            self.theme.fg("userMessageText", "┃"),
-            self.theme.fg("muted", nav)
-        ));
-        // Persist the clamp once `body`'s borrow is done, so ↑/↓ arithmetic
-        // starts from a scroll the body can actually show.
-        if let Some(viewer) = self.viewer.as_mut() {
-            viewer.scroll = scroll;
-        }
-        rows
-    }
-
     /// Color a detail-viewer row shaped like a diff row: the number-and-sign
     /// column takes the diff-marker hue (`+` green, `-` red), context and
     /// `⋯` elision rows dim, anything else passes through untouched — the
@@ -426,8 +322,23 @@ impl App {
         crate::tui::transcript::diff_row_style(theme, line)
     }
 
+    /// Ordinary chat joins the transcript and composer into one frame.
     fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
         self.pump_ui_queue();
+        let mut lines = self.transcript_frame(width);
+        let dock_start = lines.len();
+        lines.extend(self.composer_frame(width, height));
+        if self.bottom_pinned && lines.len() < height {
+            lines.splice(
+                dock_start..dock_start,
+                vec![String::new(); height - lines.len()],
+            );
+        }
+        lines
+    }
+
+    /// Transcript and live activity only, without editor or footer chrome.
+    fn transcript_frame(&mut self, width: usize) -> Vec<String> {
         let blink_on = self
             .active
             .as_ref()
@@ -436,20 +347,7 @@ impl App {
         let mut lines = self
             .transcript
             .render_animated(&self.theme, width, blink_on);
-        // The transient running-tool row: the focused call leaves its tree
-        // and paints directly below the transcript (no gap), its marker
-        // steady; the activity row follows one blank further down.
-        if self.active.is_some() {
-            if let Some(group) = self
-                .transcript
-                .blocks
-                .iter()
-                .rev()
-                .find(|b| b.kind == Kind::ToolGroup && !b.done)
-            {
-                lines.extend(group.overlay_rows(&self.theme, width));
-            }
-        }
+        let dock_start = lines.len();
         if let Some(s) = &self.active {
             if self.rendering_delayed {
                 lines.push(String::new());
@@ -496,12 +394,31 @@ impl App {
                 }
             }
         }
+        if self.active.is_some() {
+            lines.resize(lines.len().max(dock_start + 2), String::new());
+        }
+        lines
+    }
+
+    /// One full-width editor and status band, shared beneath both review panes.
+    fn composer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+
         let entering_key = matches!(self.auth, Some(AuthStage::ApiKey { .. }));
         if !entering_key {
             // The reference caps the composer at half the frame plus one
             // row; a longer draft scrolls behind the ┃↑ marker.
             let cap = (height / 2 + 1).max(3);
             let mut composer = self.editor.render(&self.theme, width, cap);
+            if !self.composer_images.is_empty() {
+                // Attachment labels are chrome, not editable prompt text.
+                // The existing dim token is the palette's light gray.
+                lines.push(
+                    self.theme
+                        .fg("dim", &image_labels(self.composer_images.len())),
+                );
+            }
+
             // The queued banner band: the collapsed summary (ink-bright),
             // the review's hint line while it edits the queue, a gap row —
             // and with chrome above it the composer trades its leading
@@ -546,9 +463,15 @@ impl App {
             }
             lines.extend(composer);
         }
-        if let Some(stage) = &self.trust {
+        if let Some(stage) = &mut self.trust {
             let dir = self.agent.cwd().to_string_lossy().into_owned();
-            lines.extend(trustpanel::render(stage, &self.theme, width, &dir));
+            lines.extend(trustpanel::render_view(
+                stage,
+                &self.theme,
+                width,
+                height.saturating_sub(1),
+                &dir,
+            ));
         } else if let Some(stage) = &self.auth {
             lines.extend(authpanel::render(
                 stage,
@@ -565,19 +488,7 @@ impl App {
         } else if let Some(panel) = &self.ext_panel {
             lines.extend(panel.render(&self.theme, width));
         }
-        let window = self.agent.model.context_window.max(1);
-        // Nothing is signed in for the current model — it's a bootstrap
-        // placeholder, not something the user chose, so don't show it.
-        let data = StatusData {
-            model: self.signed_in.then(|| self.agent.model_slug()),
-            effort: if self.signed_in {
-                self.status_effort.clone()
-            } else {
-                None
-            },
-            context_used: self.context_tokens,
-            context_total: Some(window),
-        };
+        let data = self.status_data();
         let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
             if p.interactive {
                 extui::HINT_PANEL_INTERACTIVE
@@ -602,7 +513,7 @@ impl App {
             || self.ui_input_open()
             || self.ext_panel.is_some();
         // Extensions' status slots share the right-hand overlay spot; a
-        // transient app overlay (copied, etc.) takes precedence while shown.
+        // transient app overlay (copied, clipboard) takes precedence while shown.
         let ext_status = (!self.ext_status.is_empty()).then(|| {
             self.ext_status
                 .values()
@@ -610,15 +521,32 @@ impl App {
                 .collect::<Vec<_>>()
                 .join(" · ")
         });
-        lines.extend(statusline(
-            &self.theme,
-            &data,
-            self.overlay.as_deref().or(ext_status.as_deref()),
-            hint,
-            panel_open,
-            width,
-        ));
+        let overlay = self
+            .overlay
+            .as_deref()
+            .or(self.clipboard_reading.then_some("reading clipboard…"))
+            .or(ext_status.as_deref());
+        let footer = statusline(&self.theme, &data, overlay, hint, panel_open, width);
+        lines.extend(footer);
+
         lines
+    }
+
+    /// Shared model and context inputs for the composer and transcript footers.
+    fn status_data(&self) -> StatusData {
+        let window = self.agent.model.context_window.max(1);
+        // Nothing is signed in for the current model — it's a bootstrap
+        // placeholder, not something the user chose, so don't show it.
+        StatusData {
+            model: self.signed_in.then(|| self.agent.model_slug()),
+            effort: if self.signed_in {
+                self.status_effort.clone()
+            } else {
+                None
+            },
+            context_used: self.context_tokens,
+            context_total: Some(window),
+        }
     }
 
     /* ---------- pickers ---------- */
@@ -631,7 +559,9 @@ impl App {
         if pool.len() <= 1 {
             let scoped = model::scope().map(|s| !s.is_empty()).unwrap_or(false);
             self.notice(
-                if scoped {
+                if scoped && pool.is_empty() {
+                    "no scoped models are currently available; your saved scope is unchanged"
+                } else if scoped {
                     "only one model in scope"
                 } else {
                     "only one model available"
@@ -703,7 +633,7 @@ impl App {
         let consumed = match code {
             KeyCode::Up => {
                 if review.visible {
-                    stash(&mut review, self.editor.text());
+                    stash(&mut review, self.editor.expanded_text());
                     if review.selected > 0 {
                         review.selected -= 1;
                         self.editor.set_text(&review.entries[review.selected].1);
@@ -718,7 +648,7 @@ impl App {
                 }
             }
             KeyCode::Down if review.visible => {
-                stash(&mut review, self.editor.text());
+                stash(&mut review, self.editor.expanded_text());
                 if review.selected + 1 < review.entries.len() {
                     review.selected += 1;
                     self.editor.set_text(&review.entries[review.selected].1);
@@ -735,7 +665,7 @@ impl App {
                 // The visible draft commits only when it holds text — an
                 // emptied draft sends its entry unchanged.
                 if review.visible && !self.editor.is_empty() {
-                    stash(&mut review, self.editor.text());
+                    stash(&mut review, self.editor.expanded_text());
                 }
                 if review.dirty.iter().any(|d| *d) {
                     // Only edited entries rewrite: a trim drops an entry that
@@ -894,15 +824,14 @@ impl App {
             match m.role() {
                 "user" => {
                     open_group = None;
-                    let mut content = m.content.clone();
-                    if !m.images().is_empty() {
-                        content.push_str(&format!(
-                            "\n[attached {} image{}]",
-                            m.images().len(),
-                            if m.images().len() == 1 { "" } else { "s" }
-                        ));
-                    }
-                    self.transcript.push(Block::new(Kind::User, content));
+                    let count = m.images().len();
+                    let content = if count == 0 {
+                        m.content.clone()
+                    } else {
+                        display_image_prompt(&m.content, count)
+                    };
+                    self.transcript
+                        .push(Block::new(Kind::User, content).with_images(count));
                 }
                 "assistant" => {
                     if !m.content.trim().is_empty() {
@@ -993,6 +922,7 @@ impl App {
         // instead of splicing into a restored one.
         for block in &mut self.transcript.blocks {
             if block.kind == Kind::ToolGroup {
+                block.tool_label_rows = self.tool_label_rows;
                 block.seal();
             }
         }
@@ -1037,6 +967,7 @@ impl App {
         self.shell_block = None;
         self.held_prompts.clear();
         self.compacting = false;
+        self.discard_composer_images();
         self.rebuild_transcript(&messages);
         self.agent.load_history(messages);
         self.agent.set_session(Some(session));
@@ -1130,6 +1061,7 @@ impl App {
         self.shell_block = None;
         self.held_prompts.clear();
         self.compacting = false;
+        self.discard_composer_images();
         self.rebuild_transcript(&messages);
         self.agent.rewind_to(head, messages);
         self.editor.set_text(&prompt);
@@ -1157,8 +1089,273 @@ impl App {
         }
     }
 
+    /// Ctrl+C is global, including during trust and login. The first press
+    /// cancels work and clears transient input; a second press exits without
+    /// recording a trust decision or waiting for cancellation to finish.
+    fn interrupt_or_exit(&mut self) {
+        if self
+            .armed_at
+            .is_some_and(|at| at.elapsed() < Duration::from_millis(1500))
+        {
+            self.should_quit = true;
+            return;
+        }
+        if self.agent.is_streaming() {
+            self.agent.interrupt();
+        }
+        self.cancel_login();
+        self.auth = None;
+        self.trust = None;
+        self.queue_review = None;
+        self.pending_initial = None;
+        self.pending_initial_images.clear();
+        self.pending_key = None;
+        self.editor.mask = false;
+        self.editor.set_text("");
+        self.discard_composer_images();
+        self.viewer = None;
+        self.settings = None;
+        self.menu = None;
+        self.staged_scope = None;
+        arm(self);
+    }
+
+    /// Insert text normally, or turn a pasted list of image paths into
+    /// attachments — but only into a free composer: over an open surface a
+    /// paste is plain text, so it cannot silently stack onto a draft the
+    /// user is not looking at. Line endings normalise to `\n`: CRLF first,
+    /// so a Windows clipboard does not double every line, then the bare CR
+    /// some terminals send for a pasted newline.
+    fn paste(&mut self, text: &str) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        if self.composer_free() {
+            let paths: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(String::from)
+                .collect();
+            let all_files = !paths.is_empty()
+                && paths
+                    .iter()
+                    .all(|path| std::path::Path::new(path).is_file());
+            if all_files && self.agent.model.image_input {
+                // The reads run off the event loop — a slow or networked
+                // file must not stall input and repaint. Stale results are
+                // dropped by the draft generation, like a clipboard read;
+                // a read that cannot attach restores the pasted text.
+                let generation = self.composer_generation;
+                let results = self.results.clone();
+                let fallback = Some(text.clone());
+                crate::core::config::home::spawn(async move {
+                    let images = tokio::task::spawn_blocking(move || {
+                        crate::core::providers::ImageInput::from_paths(&paths)
+                    })
+                    .await
+                    .unwrap_or_else(|_| Err("image attachment reader panicked".into()));
+                    let _ = results
+                        .send(AppJob::ClipboardPaste {
+                            generation,
+                            paste: images.map(clipboard::Paste::Images),
+                            fallback,
+                        })
+                        .await;
+                });
+                return;
+            }
+        }
+        self.editor.insert_paste(&text);
+        self.sync_menu();
+    }
+
+    /// True when nothing overlays the composer and a paste may attach to it.
+    fn composer_free(&self) -> bool {
+        self.viewer.is_none()
+            && self.menu.is_none()
+            && self.settings.is_none()
+            && self.auth.is_none()
+            && self.trust.is_none()
+            && self.queue_review.is_none()
+    }
+
+    /// Forget attachments with a discarded or replaced composer draft.
+    fn discard_composer_images(&mut self) {
+        self.composer_images.clear();
+        self.clipboard_submit_pending = false;
+        self.composer_generation = self.composer_generation.wrapping_add(1);
+    }
+
+    /// Put a paste back into the composer when its images could not load —
+    /// the text is the user's, whether or not it turned into attachments.
+    fn restore_fallback(&mut self, fallback: Option<String>) {
+        if let Some(text) = fallback {
+            self.editor.insert_paste(&text);
+            self.sync_menu();
+        }
+    }
+
+    /// Start a bounded clipboard read without blocking terminal input. One
+    /// read at a time — a second paste while one is in flight is declined
+    /// rather than stacked, so a slow helper cannot accumulate waiters.
+    fn paste_clipboard(&mut self) {
+        if self.clipboard_reading {
+            return;
+        }
+        self.clipboard_reading = true;
+        let generation = self.composer_generation;
+        let results = self.results.clone();
+        crate::core::config::home::spawn(async move {
+            let paste = tokio::task::spawn_blocking(clipboard::read)
+                .await
+                .unwrap_or_else(|_| Err("clipboard reader panicked".into()));
+            let _ = results
+                .send(AppJob::ClipboardPaste {
+                    generation,
+                    paste,
+                    fallback: None,
+                })
+                .await;
+        });
+    }
+
+    /// Apply a clipboard or pasted-path result to the current draft. Attachment
+    /// state renders outside the editor so history can never contain fake labels.
+    fn apply_clipboard_paste(
+        &mut self,
+        generation: u64,
+        paste: Result<clipboard::Paste, String>,
+        fallback: Option<String>,
+    ) {
+        // Only a direct clipboard job owns these flags; a path-paste read
+        // never set them.
+        let submit_after = if fallback.is_none() {
+            self.clipboard_reading = false;
+            std::mem::take(&mut self.clipboard_submit_pending)
+        } else {
+            false
+        };
+        if generation != self.composer_generation {
+            // The old payload cannot enter a newer draft, but Enter may have
+            // been pressed on that draft while this stale read still owned the
+            // in-flight flag. Release the requested submission now.
+            if submit_after {
+                let text = self.editor.text();
+                self.editor.set_text("");
+                self.submit_composer(text);
+            }
+            return;
+        }
+        match paste {
+            Ok(clipboard::Paste::Images(images)) if !images.is_empty() => {
+                let mut batch = self.composer_images.clone();
+                batch.extend(images.iter().cloned());
+                if let Err(error) = crate::core::providers::ImageInput::validate_batch(&batch) {
+                    self.notice(error);
+                    self.restore_fallback(fallback);
+                } else if self.agent.model.image_input {
+                    self.composer_images.extend(images);
+                    self.sync_menu();
+                } else {
+                    self.notice(format!(
+                        "{} does not accept image input",
+                        model::slug(&self.agent.model)
+                    ));
+                }
+            }
+            Ok(clipboard::Paste::Images(_)) => {}
+            Ok(clipboard::Paste::Text(text)) => {
+                self.editor.insert_paste(&text);
+                self.sync_menu();
+            }
+            Err(error) => {
+                self.notice(error);
+                self.restore_fallback(fallback);
+            }
+        }
+        if submit_after {
+            let text = self.editor.text();
+            self.editor.set_text("");
+            self.submit_composer(text);
+        }
+    }
+
+    /// Submit the visible draft with any clipboard images attached to it.
+    fn submit_composer(&mut self, text: String) {
+        if self.clipboard_reading {
+            self.editor.set_text(&text);
+            self.clipboard_submit_pending = true;
+            return;
+        }
+        if self.composer_images.is_empty() {
+            if !text.trim().is_empty() {
+                self.composer_generation = self.composer_generation.wrapping_add(1);
+            }
+            self.submit(text);
+            return;
+        }
+        // A command or shell line never carries images: route the text
+        // through the normal dispatch and drop the attachments — they were
+        // attached to a draft, and the dispatch owns what happens to it.
+        let trimmed = text.trim();
+        if trimmed.starts_with('/') || trimmed.starts_with('!') {
+            self.discard_composer_images();
+            self.notice("commands do not carry image attachments".into());
+            self.submit(text);
+            return;
+        }
+        if !self.agent.model.image_input {
+            self.editor.set_text(&text);
+            self.notice(format!(
+                "{} does not accept image input",
+                model::slug(&self.agent.model)
+            ));
+            return;
+        }
+        if self.agent.is_streaming()
+            || self.compacting
+            || self.reloading
+            || self.shell_block.is_some()
+        {
+            self.editor.set_text(&text);
+            self.notice("send image prompts between turns".into());
+            return;
+        }
+        self.composer_generation = self.composer_generation.wrapping_add(1);
+        let images = std::mem::take(&mut self.composer_images);
+        self.submit_images(text, images);
+    }
+
+    /// Submit attached images through the same ordered input-hook path as text.
+    fn submit_images(&mut self, text: String, images: Vec<crate::core::providers::ImageInput>) {
+        let trimmed = text.trim();
+        let prompt = if trimmed.is_empty() {
+            "Describe this image.".to_string()
+        } else {
+            trimmed.to_string()
+        };
+        // History is recorded where the prompt is actually accepted — the
+        // hook may consume or replace this text.
+        if self.host.has_input_hook() {
+            let host = self.host.clone();
+            let results = self.results.clone();
+            let sequence = self.input_verdicts.reserve();
+            crate::core::config::home::spawn(async move {
+                let verdict = host.hook_input(&prompt).await;
+                let _ = results
+                    .send(AppJob::InputVerdict {
+                        sequence,
+                        text: prompt,
+                        images: Some(images),
+                        verdict,
+                    })
+                    .await;
+            });
+        } else {
+            self.submit_with_images(prompt, images);
+        }
+    }
+
     fn submit(&mut self, text: String) {
-        let text = self.editor.expand_pastes(&text);
         let trimmed = text.trim().to_string();
         // An extension's question takes the line whole — even an empty one
         // is an answer — and it never reaches input hooks or the model.
@@ -1210,23 +1407,20 @@ impl App {
             self.notice(notice);
         }
         if verdict.consume {
-            // Swallowed entirely — nothing reaches the agent. Images that
-            // rode along with a consumed initial prompt are dropped with
-            // it; there is no accepted text left to attach them to.
+            // Swallowed entirely. Any attached images are dropped with the
+            // text because there is no accepted prompt left to carry them.
         } else if let Some(replace) = verdict.replace {
             // The extension rewrote the line; it already saw the original, so
             // no second hook pass.
             match images {
-                Some(images) if !images.is_empty() => {
-                    self.submit_initial_with_images(replace, images)
-                }
+                Some(images) if !images.is_empty() => self.submit_with_images(replace, images),
                 _ => self.submit_direct(replace),
             }
         } else {
             // Allowed through — the hook already saw the text, so submit
             // directly. Re-running submit() here would loop through the hook.
             match images {
-                Some(images) if !images.is_empty() => self.submit_initial_with_images(text, images),
+                Some(images) if !images.is_empty() => self.submit_with_images(text, images),
                 _ => self.submit_direct(text),
             }
         }
@@ -1238,20 +1432,24 @@ impl App {
         if trimmed.is_empty() {
             return;
         }
-        self.editor.push_history(text);
 
         if let Some((path, prompt)) = leading_image_prompt(&trimmed) {
+            // The successful branch records history in submit_with_images,
+            // with the text that actually went to the model; these falls
+            // record the original line.
             if !self.agent.model.image_input {
                 // The image cannot ride along, but the question after the
                 // path is still the user's prompt — discarding it and
                 // stopping the turn would swallow the typed message along
                 // with the attachment.
                 if prompt.is_empty() {
+                    self.editor.push_history(text);
                     self.notice(format!(
                         "{} does not accept image input",
                         model::slug(&self.agent.model)
                     ));
                 } else {
+                    self.editor.push_history(text);
                     self.notice(format!(
                         "{} does not accept image input — sending the text without the screenshot",
                         model::slug(&self.agent.model)
@@ -1267,12 +1465,17 @@ impl App {
                     } else {
                         prompt.to_string()
                     };
-                    self.submit_initial_with_images(prompt, vec![image]);
+                    self.submit_with_images(prompt, vec![image]);
                 }
-                Err(error) => self.notice(format!("could not attach image: {error}")),
+                Err(error) => {
+                    self.editor.push_history(text);
+                    self.notice(format!("could not attach image: {error}"));
+                }
             }
             return;
         }
+
+        self.editor.push_history(text);
 
         // `!cmd` runs in the shell directly; the output lands in the
         // transcript and in history, so the model sees what the user did.
@@ -1356,7 +1559,8 @@ impl App {
                 // they stay discoverable.
                 self.notice(
                     "! <cmd> runs a shell command (the model sees the output) · \
-                     shift+tab cycles reasoning effort · ctrl+o opens full tool detail"
+                     shift+tab cycles reasoning effort · ctrl+v attaches clipboard images · \
+                     ctrl+o opens full tool detail"
                         .into(),
                 );
                 self.menu = Some(
@@ -1383,6 +1587,7 @@ impl App {
                 self.shell_block = None;
                 self.reload_block = None;
                 self.context_tokens = 0;
+                self.discard_composer_images();
                 self.agent.clear();
                 self.agent.clear_session_name();
                 self.agent.set_session(None);
@@ -1482,27 +1687,24 @@ impl App {
             return;
         }
         let images = std::mem::take(&mut self.pending_initial_images);
-        self.submit_initial_with_images(text, images);
+        self.submit_with_images(text, images);
     }
 
-    fn submit_initial_with_images(
+    fn submit_with_images(
         &mut self,
         text: String,
         images: Vec<crate::core::providers::ImageInput>,
     ) {
+        self.editor.push_history(text.clone());
         let count = images.len();
         let held = self.agent.submit_message(
             crate::core::providers::ChatMessage::user_with_images(text.clone(), images),
             system_prompt(),
         );
         if !held {
-            self.transcript.push(Block::new(
-                Kind::User,
-                format!(
-                    "{text}\n[attached {count} image{}]",
-                    if count == 1 { "" } else { "s" }
-                ),
-            ));
+            self.transcript.push(
+                Block::new(Kind::User, display_image_prompt(&text, count)).with_images(count),
+            );
         }
     }
 
@@ -1692,13 +1894,29 @@ impl App {
         self.keymap = crate::core::config::keybindings::load();
     }
 
-    /// Re-derive the cached sign-in and effort state from disk. Call after
-    /// anything that can change them: sign-in, model switch, effort cycle,
-    /// settings changes, /reload.
+    /// Refresh cached sign-in, effort, and layout preferences from disk.
+    /// Call after sign-in, model switches, effort cycles, settings changes,
+    /// and /reload.
     fn refresh_status_cache(&mut self) {
         self.signed_in =
             crate::core::auth::signed_in(&crate::core::auth::load(), &self.agent.model.provider);
         self.status_effort = self.agent.effort();
+        self.bottom_pinned = crate::core::config::settings::tui_mode() == "fullscreen";
+        self.live_preview_rows = crate::core::config::settings::get_u64("tool_preview_rows")
+            .filter(|n| *n <= 20)
+            .unwrap_or(5) as usize;
+        self.tool_label_rows = crate::core::config::settings::get_u64("tool_label_rows")
+            .filter(|n| (1..=20).contains(n))
+            .unwrap_or(2) as usize;
+        for block in &mut self.transcript.blocks {
+            if block.live_preview_rows != self.live_preview_rows
+                || block.tool_label_rows != self.tool_label_rows
+            {
+                block.live_preview_rows = self.live_preview_rows;
+                block.tool_label_rows = self.tool_label_rows;
+                block.touch();
+            }
+        }
     }
 
     fn notice(&mut self, text: String) {
@@ -1733,12 +1951,14 @@ fn tab_title(path: &str, session_name: Option<&str>) -> String {
     format!("𝑒 · {label}")
 }
 
+/// Write a title without letting a path or session name terminate its OSC.
 fn set_tab_title(title: &str) {
     // Escape codes into a pipe are garbage in the pipe; titles only make
     // sense on a terminal.
     if !stdout_is_tty() {
         return;
     }
+    let title = crate::core::tools::sanitize_display(title).replace('\n', " ");
     let mut out = std::io::stdout();
     let _ = write!(out, "\x1b]0;{title}\x07");
     let _ = out.flush();
@@ -1837,6 +2057,27 @@ fn command_arg<'a>(input: &'a str, command: &str) -> Option<&'a str> {
     input
         .strip_prefix(command)
         .filter(|rest| rest.is_empty() || rest.starts_with(' '))
+}
+
+/// Stable labels used in composer chrome and the transcript for attachments.
+fn image_labels(count: usize) -> String {
+    (1..=count)
+        .map(|index| format!("[Image {index}]"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Add attachment labels when the prompt text does not already carry them.
+fn display_image_prompt(text: &str, count: usize) -> String {
+    let labels = image_labels(count);
+    let already_labeled = text.starts_with(&labels);
+    if already_labeled {
+        text.to_string()
+    } else if text.trim().is_empty() {
+        labels
+    } else {
+        format!("{labels} {text}")
+    }
 }
 
 /// A screenshot tool commonly pastes an absolute temporary path followed by
@@ -2007,8 +2248,9 @@ fn tree_items(nodes: &[crate::core::session::Node]) -> Vec<(String, String, bool
 }
 
 /// The rewind target for a chosen node: its parent, the message history before
-/// it, and its prompt text for the composer. None means the id no longer
-/// resolves or the ancestor path is corrupt.
+/// it (repaired the same way a resume's is, so a crash-cut ancestor never
+/// replays as a dangling call), and its prompt text for the composer. None
+/// means the id no longer resolves or the ancestor path is corrupt.
 fn rewind_target(
     nodes: &[crate::core::session::Node],
     node_id: &str,
@@ -2033,10 +2275,11 @@ fn rewind_target(
         cursor = node.parent.clone();
     }
     path_ids.reverse();
-    let messages = path_ids
+    let mut messages = path_ids
         .iter()
         .filter_map(|id| by_id.get(id.as_str()).map(|n| n.message.clone()))
         .collect();
+    crate::core::session::repair_history(&mut messages);
     Some((head, messages, target.message.content.clone()))
 }
 
@@ -2046,6 +2289,14 @@ fn rewind_target(
 /// unmentioned falls through to e's built-in bindings below, so an empty or
 /// missing file reproduces this function's behavior exactly.
 fn key_of(event: &KeyEvent, keymap: &crate::core::config::keybindings::Keymap) -> Option<Key> {
+    // Crossterm can report Command/Super through the enhanced keyboard
+    // protocol. Never degrade an unhandled modified key to printable text.
+    if event
+        .modifiers
+        .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)
+    {
+        return None;
+    }
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let shift = event.modifiers.contains(KeyModifiers::SHIFT);
@@ -2149,14 +2400,22 @@ async fn run_scoped(
     } = options;
     // A panic mid-frame must not strand the shell in raw mode with a hidden
     // cursor or kitty keyboard flags — restore the terminal first, then
-    // report as usual. (\x1b[<u pops the keyboard enhancement stack.)
+    // report as usual. (\x1b[<u pops the keyboard enhancement stack.) Only
+    // a panic on this thread — the frame loop, driven by the runtime's
+    // block_on — is fatal to the session; the paint thread, tool tasks and
+    // the turn worker all run elsewhere and catch their own panics to keep
+    // the session alive, so the hook must leave the terminal alone for them
+    // (the hook fires before any catch_unwind gets its say).
     {
         let default_hook = std::panic::take_hook();
+        let frame_thread = std::thread::current().id();
         std::panic::set_hook(Box::new(move |info| {
-            let _ = terminal::disable_raw_mode();
-            print!("\x1b[<u\x1b[?2004l\x1b[?25h\r\n");
-            use std::io::Write as _;
-            let _ = std::io::stdout().flush();
+            if std::thread::current().id() == frame_thread {
+                let _ = terminal::disable_raw_mode();
+                print!("\x1b[<u\x1b[?2004l\x1b[?25h\r\n");
+                use std::io::Write as _;
+                let _ = std::io::stdout().flush();
+            }
             default_hook(info);
         }));
     }
@@ -2200,6 +2459,10 @@ async fn run_scoped(
         keymap,
         transcript: Transcript::default(),
         editor: Editor::new(),
+        composer_images: Vec::new(),
+        composer_generation: 0,
+        clipboard_reading: false,
+        clipboard_submit_pending: false,
         agent,
         active: None,
         overlay: None,
@@ -2208,6 +2471,7 @@ async fn run_scoped(
         context_tokens: 0,
         pending_key: None,
         menu: None,
+        staged_scope: None,
         auth: None,
         settings: None,
         show_thinking: crate::core::config::settings::show_thinking(),
@@ -2237,6 +2501,9 @@ async fn run_scoped(
         rendering_delayed: false,
         last_paint_failure: None,
         light_background: detected,
+        bottom_pinned: false,
+        live_preview_rows: 5,
+        tool_label_rows: 2,
         signed_in: false,
         status_effort: None,
         requests: requests_tx,
@@ -2269,6 +2536,11 @@ async fn run_scoped(
     }
     if crate::core::config::trust::status(&app.agent.cwd()).is_none() {
         app.trust = Some(TrustStage::new(&app.agent.cwd()));
+    }
+    // The trust lookup may be the first read of trust.json; drain afterward so
+    // its recovery joins warnings collected while constructing the app.
+    for warning in crate::core::config::store::take_warnings() {
+        app.notice(format!("warning: {warning}"));
     }
     // The harness pattern: check for a newer release in the background at
     // launch, install it silently, and say so — the running session is
@@ -2328,7 +2600,7 @@ async fn run_scoped(
     if let Some(initial) = stage_initial_prompt(initial, hold_initial, &mut app.pending_initial) {
         app.submit_initial(initial);
     }
-    painter.frame(app.frame(cols as usize, rows as usize));
+    painter.frame_in_view(app.frame(cols as usize, rows as usize), false);
 
     // Frame pacing: every select arm may change what's on screen, but frames
     // are built at most once per interval — a token burst becomes one paint,
@@ -2337,19 +2609,26 @@ async fn run_scoped(
     let mut next_paint = tokio::time::Instant::now();
     let mut paint_deferred = false;
     let mut event_buf: Vec<SessionEvent> = Vec::with_capacity(128);
+    let mut mouse_enabled = false;
 
     loop {
         tokio::select! {
             maybe = events.next() => {
                 let Some(Ok(event)) = maybe else { break };
                 match event {
-                    TermEvent::Paste(text) => {
-                        // A paste is one unit; long or multiline pastes become
-                        // a placeholder token (the reference behavior) that
-                        // expands back on submit.
-                        app.editor.insert_paste(&text.replace('\r', "\n"));
-                        app.sync_menu();
+                    TermEvent::Paste(text) if app.viewer.is_none() => {
+                        app.paste(&text);
+
                     }
+                    TermEvent::Mouse(event) => {
+                        if app.viewer.is_some() {
+                            match event.kind {
+                                crossterm::event::MouseEventKind::ScrollUp => app.scroll_viewer(false, 3, cols as usize, rows as usize),
+                                crossterm::event::MouseEventKind::ScrollDown => app.scroll_viewer(true, 3, cols as usize, rows as usize),
+                                _ => {}
+                            }
+                        }
+                    },
                     TermEvent::Resize(c, r) => {
                         cols = c;
                         rows = r;
@@ -2357,45 +2636,21 @@ async fn run_scoped(
                     }
                     TermEvent::Key(k) if k.kind != crossterm::event::KeyEventKind::Release => {
                         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-                        if app.viewer.is_some() {
-                            let close = k.code == KeyCode::Esc
-                                || (ctrl && k.code == KeyCode::Char('o'));
-                            if close {
-                                app.viewer = None;
-                            } else {
-                                let full =
-                                    app.viewer.as_ref().map(|v| v.full).unwrap_or(false);
-                                let total = app.viewer_rows(cols as usize, full).len();
-                                if let Some(viewer) = &mut app.viewer {
-                                    match k.code {
-                                        KeyCode::Up => {
-                                            viewer.scroll = viewer.scroll.saturating_sub(1)
-                                        }
-                                        KeyCode::Down => {
-                                            viewer.scroll =
-                                                (viewer.scroll + 1).min(total.saturating_sub(1))
-                                        }
-                                        KeyCode::PageUp => {
-                                            viewer.scroll = viewer.scroll.saturating_sub(20)
-                                        }
-                                        KeyCode::PageDown => {
-                                            viewer.scroll =
-                                                (viewer.scroll + 20).min(total.saturating_sub(1))
-                                        }
-                                        // ←/→ switch between the reference's
-                                        // two depths: Review folds details,
-                                        // Full expands everything.
-                                        KeyCode::Left => viewer.full = false,
-                                        KeyCode::Right => viewer.full = true,
-                                        _ => {}
-                                    }
-                                }
-                            }
+                        let system_paste = k
+                            .modifiers
+                            .intersects(KeyModifiers::SUPER | KeyModifiers::META)
+                            && matches!(k.code, KeyCode::Char('v') | KeyCode::Char('V'));
+                        if ctrl && k.code == KeyCode::Char('c') {
+                            app.interrupt_or_exit();
+                        } else if ((ctrl && k.code == KeyCode::Char('v')) || system_paste)
+                            && app.composer_free()
+                            && !app.editor.mask
+                        {
+                            app.paste_clipboard();
+                        } else if app.viewer_key(k, cols as usize, rows as usize) {
+
                         } else if ctrl && k.code == KeyCode::Char('o') {
-                            app.viewer = Some(Viewer {
-                                full: false,
-                                scroll: 0,
-                            });
+                            app.viewer = Some(Viewer::new());
                         } else if app.ext_panel.as_ref().is_some_and(|p| p.interactive)
                             && app.menu.is_none()
                             && app.settings.is_none()
@@ -2426,6 +2681,8 @@ async fn run_scoped(
                             match k.code {
                                 KeyCode::Up => stage.step(-1),
                                 KeyCode::Down => stage.step(1),
+                                KeyCode::PageUp => stage.page(-1, cols as usize, (rows as usize).saturating_sub(1)),
+                                KeyCode::PageDown => stage.page(1, cols as usize, (rows as usize).saturating_sub(1)),
                                 KeyCode::Enter => {
                                     // The middle row (when offered) trusts the
                                     // broader ancestor; trust propagates down,
@@ -2522,6 +2779,7 @@ async fn run_scoped(
                                     app.pending_key = None;
                                     app.editor.mask = false;
                                     app.editor.set_text("");
+                                    app.discard_composer_images();
                                     if waiting && cancelled {
                                         app.notice("login cancelled".into());
                                     }
@@ -2589,18 +2847,20 @@ async fn run_scoped(
                             .map(|m| m.kind == MenuKind::Scoped)
                             .unwrap_or(false)
                             && ((k.code == KeyCode::Char(' ') && !ctrl)
-                                || (ctrl && k.code == KeyCode::Char('x')))
+                                || (ctrl && matches!(k.code, KeyCode::Char('x') | KeyCode::Char('s'))))
                         {
-                            if ctrl {
-                                match model::clear_scope() {
-                                    Ok(()) => {
-                                        app.notice("scope cleared — ctrl+p cycles every model again".into());
-                                        app.open_scoped_menu();
-                                    }
-                                    Err(error) => app.notice(format!("could not save model scope: {error}")),
+                            match (k.code, ctrl) {
+                                (KeyCode::Char('x'), true) => {
+                                    // Reset: stage nothing — the picker
+                                    // mirrors "no scope" and Ctrl+S saves it
+                                    // (or Ctrl+X again is enough to walk
+                                    // back). Nothing hits settings.json
+                                    // until Ctrl+S.
+                                    app.staged_scope = Some(Vec::new());
+                                    app.open_scoped_menu();
                                 }
-                            } else {
-                                app.toggle_scoped();
+                                (KeyCode::Char('s'), true) => app.save_scope(),
+                                _ => app.toggle_scoped(),
                             }
                         } else if app.menu.is_some()
                             && (matches!(k.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter | KeyCode::Esc)
@@ -2647,6 +2907,9 @@ async fn run_scoped(
                                         app.cancel_ui_prompt();
                                     }
                                     app.menu = None;
+                                    // Closing the scoped picker without
+                                    // Ctrl+S discards its staged edits.
+                                    app.staged_scope = None;
                                     // Declining the -r picker releases a
                                     // held launch prompt into the current
                                     // session.
@@ -2658,21 +2921,10 @@ async fn run_scoped(
                             app.pending_key = None;
                             app.editor.mask = false;
                             app.editor.set_text("");
+                            app.discard_composer_images();
                             app.notice("login cancelled".into());
                         } else if k.code == KeyCode::Esc && app.agent.is_streaming() {
                             app.agent.interrupt();
-                        } else if ctrl && k.code == KeyCode::Char('c') {
-                            if app.agent.is_streaming() {
-                                app.agent.interrupt();
-                                arm(&mut app);
-                            } else if !app.editor.is_empty() {
-                                app.editor.set_text("");
-                                arm(&mut app);
-                            } else if app.armed_at.map(|t| t.elapsed() < Duration::from_millis(1500)).unwrap_or(false) {
-                                break;
-                            } else {
-                                arm(&mut app);
-                            }
                         } else if ctrl && matches!(k.code, KeyCode::Char('p') | KeyCode::Char('P')) {
                             let backward = k.code == KeyCode::Char('P')
                                 || k.modifiers.contains(KeyModifiers::SHIFT);
@@ -2718,7 +2970,7 @@ async fn run_scoped(
                             // Consumed by the queued-prompt review.
                         } else if let Some(key) = key_of(&k, &app.keymap) {
                             if let EditorResult::Submit(text) = app.editor.key(key) {
-                                app.submit(text);
+                                app.submit_composer(text);
                             }
                             app.sync_menu();
                         }
@@ -2776,6 +3028,13 @@ async fn run_scoped(
                         ));
                         app.update_installed = Some(version);
                     }
+                    Some(AppJob::ClipboardPaste {
+                        generation,
+                        paste,
+                        fallback,
+                    }) => {
+                        app.apply_clipboard_paste(generation, paste, fallback);
+                    }
                     Some(AppJob::Reloaded(host)) => {
                         app.reloading = false;
                         app.host = host.clone();
@@ -2812,16 +3071,15 @@ async fn run_scoped(
                                 }
                                 text
                             };
+                            let output_id = (!output.content.trim().is_empty()).then(|| app.remember_output(format!("$ {cmd}"), display_output));
                             if let Some(idx) = app.shell_block.take() {
                                 if let Some(block) = app.transcript.blocks.get_mut(idx) {
                                     block.done = true;
                                     block.is_error = output.is_error();
                                     block.detail = Some(shown);
+                                    block.output_id = output_id;
                                     block.touch();
                                 }
-                            }
-                            if !output.content.trim().is_empty() {
-                                app.remember_output(format!("$ {cmd}"), display_output);
                             }
                             app.agent.record_user(format!(
                                 "I ran `{cmd}` in my shell. Output:\n```\n{}\n```",
@@ -2917,6 +3175,15 @@ async fn run_scoped(
                 }
             }
         }
+        let capture_mouse = app.viewer.is_some();
+        if capture_mouse != mouse_enabled {
+            if capture_mouse {
+                let _ = execute!(std::io::stdout(), EnableMouseCapture);
+            } else {
+                let _ = execute!(std::io::stdout(), DisableMouseCapture);
+            }
+            mouse_enabled = capture_mouse;
+        }
         let paint_status = painter.status();
         app.rendering_delayed = paint_status.delayed(Duration::from_millis(500));
         match paint_status.failure.as_ref().map(|(_, error)| error) {
@@ -2935,7 +3202,7 @@ async fn run_scoped(
             } else {
                 app.frame(cols as usize, rows as usize)
             };
-            painter.frame(frame);
+            painter.frame_in_view(frame, app.viewer.is_some());
             next_paint = now + FRAME_INTERVAL;
             paint_deferred = false;
         } else {
@@ -2989,7 +3256,8 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             std::io::stdout(),
             PopKeyboardEnhancementFlags,
-            DisableBracketedPaste
+            DisableBracketedPaste,
+            DisableMouseCapture
         );
         let _ = terminal::disable_raw_mode();
         use std::io::Write as _;
@@ -3001,6 +3269,28 @@ impl Drop for TerminalGuard {
 
 #[cfg(test)]
 mod tests {
+    /// Interrupt dismisses transient navigation without trusting or submitting.
+    #[test]
+    fn interrupt_dismisses_trust_and_queue_review_and_drops_held_prompt() {
+        let mut app = session_app();
+        app.trust = Some(crate::tui::trustpanel::TrustStage::new(&app.agent.cwd()));
+        app.queue_review = Some(QueueReview {
+            entries: vec![(1, "queued".into())],
+            dirty: vec![false],
+            selected: 0,
+            visible: true,
+        });
+        app.pending_initial = Some("must not run".into());
+        app.editor.set_text("draft");
+        app.interrupt_or_exit();
+        assert!(app.trust.is_none());
+        assert!(app.queue_review.is_none());
+        assert!(app.pending_initial.is_none());
+        assert!(app.editor.is_empty());
+        assert!(!app.agent.is_streaming());
+        assert!(!app.should_quit);
+    }
+
     use super::*;
 
     #[test]
@@ -3116,6 +3406,11 @@ mod tests {
         assert!(matches!(key_of(&ctrl_w, &keymap), Some(Key::KillWord)));
         let plain_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
         assert!(matches!(key_of(&plain_x, &keymap), Some(Key::Char('x'))));
+        let command_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::SUPER);
+        assert!(
+            key_of(&command_v, &keymap).is_none(),
+            "an unhandled Command key must not insert its printable character"
+        );
         // On a non-empty composer ctrl+d is forward delete (the empty
         // composer's quit is the app-level handler's job, before key_of).
         let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
@@ -3287,6 +3582,139 @@ mod tests {
     }
 
     #[test]
+    fn a_command_submitted_with_attachments_dispatches_without_them() {
+        let mut app = session_app();
+        app.composer_images = vec![crate::core::providers::ImageInput {
+            media_type: "image/png".into(),
+            data: std::sync::Arc::from("AA=="),
+        }];
+
+        app.submit_composer("/effort high".into());
+
+        assert!(app.composer_images.is_empty(), "commands drop attachments");
+        // The command dispatched: this model has no effort levels, so the
+        // command's own notice replaces a model prompt.
+        let notice = app
+            .transcript
+            .blocks
+            .iter()
+            .rev()
+            .find(|block| block.kind == crate::tui::transcript::Kind::Notice)
+            .expect("the command dispatched");
+        assert_eq!(notice.text, "this model has no reasoning effort control");
+    }
+
+    #[test]
+    fn saved_unavailable_models_remain_visible_in_the_scope_picker() {
+        let mut app = session_app();
+        let missing = "signed-out/model".to_string();
+        app.staged_scope = Some(vec![missing.clone()]);
+        app.menu = Some(Menu::new(
+            MenuKind::Scoped,
+            "Scoped models",
+            HINT_SCOPED,
+            Vec::new(),
+        ));
+
+        app.open_scoped_menu();
+        let menu = app.menu.as_mut().expect("scope picker remains open");
+        menu.select_value(&missing);
+        let rendered = menu.render(&app.theme, 80).join("\n");
+        assert!(rendered.contains(&missing));
+        assert!(rendered.contains("unavailable"));
+        assert_eq!(
+            app.staged_scope.as_deref(),
+            Some(std::slice::from_ref(&missing))
+        );
+
+        app.toggle_scoped();
+        assert_eq!(app.staged_scope.as_deref(), Some([].as_slice()));
+    }
+
+    #[test]
+    fn a_paste_over_an_open_surface_stays_text() {
+        let mut app = session_app();
+        app.viewer = Some(Viewer::new());
+        let path = std::env::temp_dir().join("e-paste-gate-test.png");
+        std::fs::write(&path, b"png").unwrap();
+
+        app.paste(&path.display().to_string());
+
+        assert!(app.composer_images.is_empty(), "no attach over a surface");
+        assert_eq!(app.editor.text(), path.display().to_string());
+    }
+
+    #[test]
+    fn a_crlf_paste_keeps_one_newline_per_line() {
+        let mut app = session_app();
+        app.paste("line1\r\nline2\r\n");
+        assert_eq!(app.editor.text(), "line1\nline2\n");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enter_waits_for_the_clipboard_result_before_submitting() {
+        let mut app = session_app();
+        app.clipboard_reading = true;
+
+        app.submit_composer("question".into());
+        assert_eq!(app.editor.text(), "question");
+        assert!(app.clipboard_submit_pending);
+
+        app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text(" answer".into())), None);
+        assert!(!app.clipboard_reading);
+        assert!(!app.clipboard_submit_pending);
+        assert_eq!(app.editor.text(), "");
+        app.editor.key(Key::Up);
+        assert_eq!(app.editor.text(), "question answer");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stale_clipboard_result_releases_a_newer_pending_submit() {
+        let mut app = session_app();
+        app.clipboard_reading = true;
+        app.discard_composer_images();
+        app.submit_composer("new draft".into());
+
+        app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text("stale".into())), None);
+
+        assert_eq!(app.editor.text(), "");
+        app.editor.key(Key::Up);
+        assert_eq!(app.editor.text(), "new draft");
+    }
+
+    #[test]
+    fn clipboard_images_stay_out_of_editable_text_and_get_chat_labels() {
+        let mut app = session_app();
+        app.agent.model.image_input = true;
+        let image = || crate::core::providers::ImageInput {
+            media_type: "image/png".into(),
+            data: std::sync::Arc::from("AA=="),
+        };
+
+        app.apply_clipboard_paste(
+            0,
+            Ok(clipboard::Paste::Images(vec![image(), image()])),
+            None,
+        );
+
+        assert_eq!(app.editor.text(), "");
+        assert_eq!(app.composer_images.len(), 2);
+        let attachment_label = app.theme.fg("dim", "[Image 1] [Image 2]");
+        assert!(app
+            .frame(80, 20)
+            .iter()
+            .any(|line| line.contains(&attachment_label)));
+        assert_eq!(
+            display_image_prompt("explain these", 2),
+            "[Image 1] [Image 2] explain these"
+        );
+        assert_eq!(
+            display_image_prompt("[Image 1] [Image 2] explain these", 2),
+            "[Image 1] [Image 2] explain these"
+        );
+    }
+
+    #[test]
     fn screenshot_paths_at_the_start_of_a_prompt_are_split_from_the_question() {
         let dir = std::env::temp_dir().join(format!("e-shot-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3370,6 +3798,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The error block supplies its own label, so the event text stays bare.
+    #[test]
+    fn failed_turn_does_not_duplicate_the_error_label() {
+        let mut app = session_app();
+        app.on_session_event(SessionEvent::TurnStart);
+        app.on_session_event(SessionEvent::Error("provider response interrupted".into()));
+        app.on_session_event(SessionEvent::TurnEnd { aborted: false });
+        let error = app
+            .transcript
+            .blocks
+            .iter()
+            .find(|block| block.kind == Kind::Error)
+            .unwrap();
+        assert_eq!(error.text, "provider response interrupted");
+    }
+
+    /// CRLF is one pasted line break; standalone CR and LF still work.
+    #[test]
+    fn paste_normalizes_line_endings_once() {
+        let mut app = session_app();
+        app.paste("first\r\nsecond\rthird\nfourth");
+        assert_eq!(app.editor.text(), "first\nsecond\nthird\nfourth");
+    }
+
+    /// Global cancellation stops an in-flight sign-in and retires secret input.
+    #[tokio::test]
+    async fn ctrl_c_cancels_login_before_arming_exit() {
+        let mut app = session_app();
+        let cancellation = crate::core::auth::login::LoginCancellation::default();
+        let observed = cancellation.clone();
+        app.login_task = Some(ActiveLogin {
+            flow_id: 1,
+            cancellation,
+            task: tokio::spawn(std::future::pending()),
+            wait_for_callback: false,
+        });
+        app.auth = Some(AuthStage::Waiting { back: None });
+        app.pending_key = Some("mock".into());
+        app.editor.mask = true;
+        app.editor.set_text("synthetic-secret");
+        app.interrupt_or_exit();
+        assert!(observed.is_cancelled());
+        assert!(app.auth.is_none());
+        assert!(app.pending_key.is_none());
+        assert!(!app.editor.mask);
+        assert!(app.editor.is_empty());
+        assert!(!app.should_quit);
+        app.interrupt_or_exit();
+        assert!(app.should_quit);
+    }
+
     #[tokio::test]
     async fn active_login_guard_cancels_on_drop() {
         let cancellation = crate::core::auth::login::LoginCancellation::default();
@@ -3385,6 +3864,46 @@ mod tests {
         drop(login);
         assert!(observed.is_cancelled());
         tokio::task::yield_now().await;
+    }
+
+    #[test]
+    fn compaction_uses_the_request_models_pricing_after_a_model_switch() {
+        let mut app = session_app();
+        app.on_session_event(SessionEvent::TurnStart);
+        app.agent.model.id = "switched".into();
+        app.agent.model.pricing = Some(crate::core::providers::catalog::Pricing {
+            input_per_million: 99.0,
+            output_per_million: 99.0,
+            cache_read_per_million: None,
+            cache_write_5m_per_million: None,
+            cache_write_1h_per_million: None,
+        });
+        let request_pricing = crate::core::providers::catalog::Pricing {
+            input_per_million: 2.0,
+            output_per_million: 10.0,
+            cache_read_per_million: Some(0.2),
+            cache_write_5m_per_million: Some(2.5),
+            cache_write_1h_per_million: Some(4.0),
+        };
+        let usage = crate::core::providers::Usage {
+            input: 1_000_000,
+            ..Default::default()
+        };
+        app.on_session_event(SessionEvent::Compacted {
+            summary: "summary".into(),
+            context_tokens: 10,
+            response: crate::core::providers::ResponseMeta {
+                id: "response".into(),
+                timestamp: 1,
+                provider: "mock".into(),
+                model: "m".into(),
+                purpose: crate::core::providers::ResponsePurpose::Compaction,
+                usage: Some(usage),
+            },
+            pricing: Some(request_pricing),
+        });
+
+        assert_eq!(app.active.unwrap().cost_usd, Some(2.0));
     }
 
     fn session_app() -> App {
@@ -3413,6 +3932,10 @@ mod tests {
             keymap: crate::core::config::keybindings::Keymap::empty(),
             transcript: Transcript::default(),
             editor: Editor::new(),
+            composer_images: Vec::new(),
+            composer_generation: 0,
+            clipboard_reading: false,
+            clipboard_submit_pending: false,
             agent,
             active: None,
             overlay: None,
@@ -3421,6 +3944,7 @@ mod tests {
             context_tokens: 0,
             pending_key: None,
             menu: None,
+            staged_scope: None,
             auth: None,
             settings: None,
             show_thinking: true,
@@ -3450,6 +3974,9 @@ mod tests {
             rendering_delayed: false,
             last_paint_failure: None,
             light_background: false,
+            bottom_pinned: false,
+            live_preview_rows: 5,
+            tool_label_rows: 2,
             signed_in: false,
             status_effort: None,
             requests: tokio::sync::mpsc::channel(1).0,
@@ -3685,11 +4212,40 @@ mod tests {
     }
 
     #[test]
+    fn full_reader_opens_at_tail_and_keeps_a_paused_reading_position() {
+        let mut app = session_app();
+        app.editor.set_text("unsent draft");
+        for i in 0..30 {
+            app.transcript
+                .push(Block::new(Kind::User, format!("message {i}")));
+        }
+        app.viewer = Some(Viewer::new());
+        let frame = app.viewer_frame(80, 24);
+        assert_eq!(frame.len(), 24);
+        assert!(frame[..21].iter().any(|row| row.contains("message 29")));
+        assert!(frame[21].contains("Review"));
+        assert_eq!(frame[22], "");
+        app.scroll_viewer(false, 5, 80, 24);
+        let paused = app.viewer_frame(80, 24);
+        app.transcript.push(Block::new(Kind::User, "new arrival"));
+        assert_eq!(app.viewer_frame(80, 24), paused);
+        app.scroll_viewer(true, usize::MAX, 80, 24);
+        assert!(app
+            .viewer_frame(80, 24)
+            .iter()
+            .any(|row| row.contains("new arrival")));
+        assert!(app.viewer_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 80, 24));
+        assert!(app.viewer.is_none());
+        assert_eq!(app.editor.text(), "unsent draft");
+    }
+
+    #[test]
     fn review_screen_rebuilds_after_transcript_changes() {
         let mut app = session_app();
         app.viewer = Some(Viewer {
-            full: false,
+            follow_tail: false,
             scroll: 0,
+            ..Viewer::new()
         });
         app.transcript
             .push(Block::new(Kind::User, "before the change"));
@@ -3708,8 +4264,9 @@ mod tests {
     fn review_screen_rebuilds_when_a_tool_reports() {
         let mut app = session_app();
         app.viewer = Some(Viewer {
-            full: false,
+            follow_tail: false,
             scroll: 0,
+            ..Viewer::new()
         });
         let child = crate::tui::transcript::ToolChild::pending(
             7,
@@ -3744,8 +4301,9 @@ mod tests {
         let mut app = session_app();
         app.transcript.push(Block::new(Kind::User, "some content"));
         app.viewer = Some(Viewer {
-            full: false,
+            follow_tail: false,
             scroll: 500,
+            ..Viewer::new()
         });
 
         let frame = app.viewer_frame(80, 24);
@@ -3760,6 +4318,187 @@ mod tests {
             0,
             "the clamp persists so ↑/↓ arithmetic starts in range"
         );
+    }
+
+    /// Review closes each group after its inserted output, at either depth.
+    #[test]
+    fn review_branches_connect_through_output_and_omission_rows() {
+        let mut app = session_app();
+        let detail = app.remember_output("output".into(), "one\ntwo\nthree\nfour".into());
+        let mut group = Block::tool_group(
+            (1..=2)
+                .map(|id| {
+                    crate::tui::transcript::ToolChild::pending(
+                        id,
+                        "command".into(),
+                        "Running".into(),
+                        "Ran".into(),
+                        format!("command {id}\nwrapped argument"),
+                    )
+                })
+                .collect(),
+        );
+        for id in 1..=2 {
+            group.start_tool(id);
+            group.finish_tool(
+                id,
+                crate::core::tools::ToolOutcome::Completed,
+                "done".into(),
+                "",
+            );
+        }
+        for child in &mut group.tool_children {
+            child.detail = Some(detail);
+        }
+        app.transcript.push(group);
+        for full in [false, true] {
+            let rows: Vec<_> = app
+                .viewer_rows(80, full)
+                .iter()
+                .map(|row| crate::core::tools::strip_ansi(row))
+                .collect();
+            assert_eq!(rows.iter().filter(|row| row.starts_with('└')).count(), 1);
+            assert_eq!(rows.iter().filter(|row| row.starts_with('├')).count(), 2);
+            assert_eq!(rows[2], "│ wrapped argument");
+            assert_eq!(
+                rows.last().unwrap(),
+                if full {
+                    "└ four"
+                } else {
+                    "└ 1 more rows · → to expand"
+                }
+            );
+            assert!(rows[1..rows.len() - 1]
+                .iter()
+                .all(|row| row.starts_with('├') || row.starts_with('│')));
+        }
+    }
+
+    #[test]
+    fn tui_mode_defaults_inline_and_settings_cycle_the_layout() {
+        let home = std::env::temp_dir().join(format!("e-composer-{}", uuid::Uuid::new_v4()));
+        crate::core::config::home::with_home(home.clone(), || {
+            let mut app = session_app();
+            app.refresh_status_cache();
+            assert!(!app.bottom_pinned);
+            assert!(app.frame(80, 30).len() < 30);
+
+            let setting = crate::core::config::settings::all(Vec::new())
+                .into_iter()
+                .find(|setting| setting.key == "tui_mode")
+                .unwrap();
+            assert_eq!(setting.current(), "inline");
+            crate::core::config::settings::set_string("composer_position", "bottom").unwrap();
+            app.refresh_status_cache();
+            assert!(app.bottom_pinned);
+            assert_eq!(setting.current(), "fullscreen");
+            setting.cycle(-1).unwrap();
+            assert_eq!(setting.current(), "inline");
+            setting.cycle(1).unwrap();
+            app.refresh_status_cache();
+            assert!(app.bottom_pinned);
+            assert_eq!(app.frame(80, 30).len(), 30);
+
+            setting.cycle(-1).unwrap();
+            app.refresh_status_cache();
+            assert!(!app.bottom_pinned);
+            assert!(app.frame(80, 30).len() < 30);
+
+            crate::core::config::settings::set_string("tui_mode", "invalid").unwrap();
+            app.refresh_status_cache();
+            assert_eq!(setting.current(), "inline");
+            assert!(!app.bottom_pinned);
+        });
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// Reloaded label budgets invalidate existing frames and apply to new groups.
+    #[test]
+    fn tool_label_preference_updates_existing_and_new_groups() {
+        let home = std::env::temp_dir().join(format!("e-tool-labels-{}", uuid::Uuid::new_v4()));
+        crate::core::config::home::with_home(home.clone(), || {
+            let mut app = session_app();
+            app.refresh_status_cache();
+            app.on_session_event(SessionEvent::TurnStart);
+            let batch = || SessionEvent::ToolBatchStart {
+                calls: vec![crate::core::agent::ToolCallPresentation {
+                    id: 1,
+                    name: "bash".into(),
+                    arguments: "{}".into(),
+                    category: "command".into(),
+                    running: "Running".into(),
+                    completed: "Ran".into(),
+                    target: "long-command".repeat(20),
+                }],
+            };
+            app.on_session_event(batch());
+            app.on_session_event(SessionEvent::ToolStart { id: 1 });
+            let original = app.transcript.blocks[0].lines_for_test(&app.theme, 40);
+            crate::core::config::store::update_versioned(
+                &home.join("settings.json"),
+                0o644,
+                1,
+                |settings| {
+                    settings.insert("tool_label_rows".into(), serde_json::json!(1));
+                },
+            )
+            .unwrap();
+            app.refresh_status_cache();
+            let shorter = app.transcript.blocks[0].lines_for_test(&app.theme, 40);
+            assert_eq!(shorter.len() + 1, original.len());
+            app.notice("separate group".into());
+            app.on_session_event(batch());
+            assert_eq!(app.transcript.blocks.last().unwrap().tool_label_rows, 1);
+        });
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn command_output_and_completion_do_not_move_the_composer_dock() {
+        let mut app = session_app();
+        app.bottom_pinned = true;
+        app.on_session_event(SessionEvent::TurnStart);
+        app.on_session_event(SessionEvent::ToolBatchStart {
+            calls: vec![crate::core::agent::ToolCallPresentation {
+                id: 1,
+                name: "bash".into(),
+                arguments: "{}".into(),
+                category: "command".into(),
+                running: "Running".into(),
+                completed: "Ran".into(),
+                target: "test command with a long argument".into(),
+            }],
+        });
+        app.on_session_event(SessionEvent::ToolStart { id: 1 });
+        for (width, height, count) in [(80, 24, 1), (24, 12, 30), (80, 24, 2)] {
+            app.on_session_event(SessionEvent::ToolOutput {
+                id: 1,
+                stream: crate::core::tools::OutputStream::Stdout,
+                chunk: "output line with a long argument\n".repeat(count),
+            });
+            let frame = app.frame(width, height);
+            assert!(frame.len() >= height);
+            assert!(crate::core::tools::strip_ansi(&frame[frame.len() - 3]).starts_with("┃ "));
+            let review = app.viewer_rows(width, true).join("\n");
+            assert!(
+                review.contains("output line"),
+                "running output must be reviewable"
+            );
+        }
+        app.on_session_event(SessionEvent::ToolEnd {
+            id: 1,
+            outcome: crate::core::tools::ToolOutcome::Completed,
+            summary: "done".into(),
+            content: "authoritative final output".into(),
+        });
+        app.on_session_event(SessionEvent::TurnEnd { aborted: false });
+        let frame = app.frame(80, 24);
+        assert_eq!(frame.len(), 24);
+        assert!(crate::core::tools::strip_ansi(&frame[21]).starts_with("┃ "));
+        assert!(app
+            .viewer_rows(80, true)
+            .join("\n")
+            .contains("authoritative final output"));
     }
 
     #[test]
@@ -3831,6 +4570,8 @@ mod tests {
         app.on_session_event(SessionEvent::ToolBatchStart {
             calls: vec![crate::core::agent::ToolCallPresentation {
                 id: 2,
+                name: "bash".into(),
+                arguments: "{}".into(),
                 category: "command".into(),
                 running: "Running".into(),
                 completed: "Ran".into(),
@@ -3915,6 +4656,8 @@ mod tests {
         SessionEvent::ToolBatchStart {
             calls: vec![crate::core::agent::ToolCallPresentation {
                 id: 1,
+                name: "read".into(),
+                arguments: "{\"path\":\"f.rs\"}".into(),
                 category: "read".into(),
                 running: "reading".into(),
                 completed: "read".into(),
@@ -3951,6 +4694,11 @@ mod tests {
             ],
             "a fresh burst opens its own block below the tools"
         );
+
+        // Continuing tools must not absorb expanded reasoning as though it
+        // were an old collapsed summary, shrinking the transcript mid-turn.
+        app.on_session_event(tool_batch());
+        assert_eq!(thinking_flags(&app).len(), 2);
 
         app.on_session_event(SessionEvent::TurnEnd { aborted: false });
         assert_eq!(

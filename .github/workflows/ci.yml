@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   guard:
-    # Cheap and trust-sensitive; stays on GitHub-hosted.
+    # Audit the security surface before running the repository contract.
     name: Guard (security surface)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -27,26 +27,17 @@ jobs:
         run: ./scripts/guard.sh
 
   test:
-    # Linux leg runs on the self-hosted runner in the intuitum fleet naming
-    # scheme (Blacksmith-style): 24-core Ubuntu 26.04 box, systemd service
-    # actions.runner.intuitums-e.intuitum-24vcpu-ubuntu-2604-01, user `anvil`.
-    # Fork PRs are held for approval by GitHub's external-contributor gate and
-    # must never be approved onto it; macOS stays GitHub-hosted.
+    # Run the repository contract on fresh GitHub-hosted Linux and macOS VMs.
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [intuitum-24vcpu-ubuntu-2604-01, macos-latest]
-    # checkout's default `clean: true` runs git clean -ffdx, which wipes
-    # target/ every run; on a persistent self-hosted box we keep it so cargo
-    # rebuilds incrementally.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          clean: false
 
       - name: Rust toolchain
         run: rustc --version
@@ -54,15 +45,26 @@ jobs:
       - name: Repository contract
         run: ./x check
 
+      - name: Terminal frame checks
+        run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
+
+      - name: Retain terminal frames on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-frames-${{ runner.os }}
+          path: ${{ runner.temp }}/e-ui-frames
+          if-no-files-found: ignore
+          retention-days: 7
+
   performance:
     name: Performance budgets
-    runs-on: intuitum-24vcpu-ubuntu-2604-01
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          clean: false
 
       - name: Rust toolchain
         run: rustc --version
@@ -70,8 +72,11 @@ jobs:
       - name: Measure release binary
         run: ./x bench
 
+      # A reviewer convenience, not a contract: GitHub's artifact service
+      # occasionally 403s at finalize, and that flake must not fail the job.
       - name: Upload pull-request binary
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e-${{ runner.os }}-${{ runner.arch }}-${{ github.event.pull_request.number }}

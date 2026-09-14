@@ -104,6 +104,49 @@ fn wrap_styled_never_splits_a_hyperlink_sequence() {
     );
 }
 
+/// A link destination with a space (CommonMark's `<…>` form) reaches the
+/// OSC 8 sequence percent-encoded, so the word-wrapper never splits the
+/// sequence and the URI never leaks as visible text.
+#[test]
+fn link_destination_whitespace_is_percent_encoded() {
+    use e::tui::markdown::render_markdown;
+    let theme = dark();
+    let rows = render_markdown(
+        &theme,
+        "see the [design doc](<docs/My Design.md>) now\n",
+        12,
+    );
+    let open = "\x1b]8;id=e-1;docs/My%20Design.md\x1b\\";
+    assert!(rows.iter().any(|r| r.contains(open)), "{rows:?}");
+    for row in &rows {
+        assert_eq!(
+            row.matches("Design.md").count(),
+            row.matches(open).count(),
+            "a row mentions the destination outside a complete sequence: {rows:?}"
+        );
+        assert!(visible_width(row) <= 12, "{row:?}");
+    }
+}
+
+/// The vertical table fallback copies a hyperlink's OSC 8 sequence whole:
+/// every `│…│` row stays exactly the frame's width, and no row carries an
+/// unterminated sequence that would swallow the box into the URI.
+#[test]
+fn vertical_table_keeps_hyperlink_sequences_whole() {
+    use e::tui::markdown::render_markdown;
+    let theme = dark();
+    let md = "| name | url |\n|---|---|\n| docs | https://example.com/a/very/long/path/that/does/not/fit |\n";
+    let rows = render_markdown(&theme, md, 30);
+    for row in rows.iter().filter(|r| r.starts_with('│')) {
+        assert_eq!(visible_width(row), 30, "row width drifted: {row:?}");
+        assert_eq!(
+            row.matches("\x1b]").count(),
+            row.matches("\x1b\\").count(),
+            "an OSC sequence is split across rows: {row:?}"
+        );
+    }
+}
+
 /// The composer lays out by display width, and a wrap-boundary cursor
 /// renders in exactly one row.
 #[test]
@@ -138,7 +181,7 @@ fn composer_uses_display_width_and_one_cursor() {
 /// paste inserts literally.
 #[test]
 fn paste_placeholders_retire_on_submit() {
-    use e::tui::composer::Editor;
+    use e::tui::composer::{Editor, EditorResult, Key};
     let mut editor = Editor::new();
     editor.insert_paste("line one\nline two\nline three");
     assert!(
@@ -151,13 +194,14 @@ fn paste_placeholders_retire_on_submit() {
     editor.insert_paste(&long);
     let draft = editor.text();
     assert!(draft.contains("[Pasted text #1"));
-    let expanded = editor.expand_pastes(&draft);
-    assert!(expanded.contains("line two"));
-    assert!(expanded.contains("xxxx"));
-    // The mapping is gone: the same token now passes through literally.
-    let again = editor.expand_pastes(&draft);
-    assert!(
-        again.contains("[Pasted text #1"),
-        "stale payload re-expanded"
-    );
+    let EditorResult::Submit(expanded) = editor.key(Key::Enter) else {
+        panic!("expected submission");
+    };
+    assert_eq!(expanded, long);
+    // Retyping the marker cannot resurrect the submitted payload.
+    editor.insert_str(&draft);
+    let EditorResult::Submit(again) = editor.key(Key::Enter) else {
+        panic!("expected submission");
+    };
+    assert_eq!(again, draft);
 }

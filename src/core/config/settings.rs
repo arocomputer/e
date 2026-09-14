@@ -119,7 +119,12 @@ pub struct Setting {
 
 impl Setting {
     pub fn current(&self) -> String {
-        get_string(&self.key)
+        let value = if self.key == "tui_mode" {
+            Some(tui_mode())
+        } else {
+            get_string(&self.key)
+        };
+        value
             .filter(|v| self.options.iter().any(|o| o == v))
             .unwrap_or_else(|| self.default.clone())
     }
@@ -171,6 +176,13 @@ pub fn all(effort_levels: Vec<String>) -> Vec<Setting> {
             default: "auto".into(),
         },
         Setting {
+            key: "tui_mode".into(),
+            label: "TUI Mode".into(),
+            category: "Interface",
+            options: vec!["inline".into(), "fullscreen".into()],
+            default: "inline".into(),
+        },
+        Setting {
             key: "show_thinking".into(),
             label: "Show thinking".into(),
             category: "Interface",
@@ -202,6 +214,23 @@ pub fn all(effort_levels: Vec<String>) -> Vec<Setting> {
     ]
 }
 
+/// The main-screen layout. Older composer preferences apply only until a
+/// TUI mode is saved; missing or invalid values keep the compact inline layout.
+pub fn tui_mode() -> String {
+    let value = get_string("tui_mode").unwrap_or_else(|| {
+        if get_string("composer_position").as_deref() == Some("bottom") {
+            "fullscreen".into()
+        } else {
+            "inline".into()
+        }
+    });
+    if value == "fullscreen" {
+        value
+    } else {
+        "inline".into()
+    }
+}
+
 pub fn theme() -> String {
     get_string("theme").unwrap_or_else(|| "auto".into())
 }
@@ -218,6 +247,11 @@ pub fn auto_update() -> bool {
 /// not bury the draft.
 pub fn paste_placeholder() -> u64 {
     get_u64("paste_placeholder").unwrap_or(1000)
+}
+
+/// Collapsed paste label. Counts describe source text, not wrapped screen rows.
+pub fn paste_label() -> String {
+    get_string("paste_label").unwrap_or_else(|| "[Pasted text #{id}, {chars} chars]".into())
 }
 
 #[cfg(test)]

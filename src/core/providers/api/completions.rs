@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::core::providers::runtime::Authorization;
 use crate::core::providers::{
     http, require_success, retry_after_seconds, send_request, with_attribution, Event,
-    FinishReason, ProviderError, Request, SseStream, StreamEnd, ToolCall,
+    FinishReason, ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
 /// Provider/model/level combinations that rejected our `reasoning_effort`
@@ -137,6 +137,7 @@ pub async fn run(
     let response = if matches!(first.status().as_u16(), 400 | 422) {
         let status = first.status();
         let retry_after = retry_after_seconds(&first);
+        let response_context = crate::core::providers::ResponseContext::from_response(&first);
         let text = first.text().await.unwrap_or_default();
         let lower = text.to_ascii_lowercase();
         // A validation rejection over an optional field we added is recoverable:
@@ -174,7 +175,9 @@ pub async fn run(
             }
             healed
         } else {
-            return Err(ProviderError::from_status(status, &text).with_retry_after(retry_after));
+            return Err(ProviderError::from_status(status, &text)
+                .with_retry_after(retry_after)
+                .with_response(response_context));
         }
     } else {
         require_success(first).await?
@@ -199,7 +202,8 @@ pub async fn run(
         }
     };
 
-    let mut sse = SseStream::new(response.bytes_stream());
+    let response_context = crate::core::providers::ResponseContext::from_response(&response);
+    let mut sse = SseStream::new(response.bytes_stream()).with_response(response_context);
     let mut finish = FinishReason::Normal;
     loop {
         let payload = sse.next().await?;
@@ -215,6 +219,12 @@ pub async fn run(
                     continue;
                 }
             };
+            // Error frames fail the response without flushing unfinished tool calls.
+            if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
+                return Err(
+                    ProviderError::from_error_frame(error).with_response(sse.response.clone())
+                );
+            }
             if let Some(delta) = value["choices"][0]["delta"].as_object() {
                 if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
                     if !text.is_empty() {
@@ -281,12 +291,14 @@ pub async fn run(
                 let cached = usage["prompt_tokens_details"]["cached_tokens"]
                     .as_u64()
                     .unwrap_or(0);
+                let total = usage["prompt_tokens"].as_u64().unwrap_or(0);
                 let _ = tx
-                    .send(Event::Usage {
-                        input: usage["prompt_tokens"].as_u64().unwrap_or(0),
+                    .send(Event::Usage(Usage {
+                        input: total.saturating_sub(cached),
                         output: usage["completion_tokens"].as_u64().unwrap_or(0),
                         cache_read: cached,
-                    })
+                        ..Usage::default()
+                    }))
                     .await;
             }
         }

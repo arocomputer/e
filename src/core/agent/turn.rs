@@ -78,6 +78,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
     // Steps this turn has run (one request each). The cap is a
     // runaway backstop far above real work, not a working budget.
     let mut steps = 0u32;
+    let mut settled_tools = 0usize;
+    let mut failed_tools = 0usize;
     let outcome = 'turn: loop {
         if cancel.load(Ordering::SeqCst) {
             break Outcome::Cancelled;
@@ -113,15 +115,21 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // Steer: fold any pending messages into this turn between
         // steps. The queue review edits these entries by key
         // concurrently; whatever the loop takes here is gone to it.
-        let steered: Vec<String> = {
+        let steered: Vec<ChatMessage> = {
             let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
-            pending.items.drain(..).map(|(_, text)| text).collect()
+            pending
+                .items
+                .drain(..)
+                .map(|(_, message)| message)
+                .collect()
         };
         for message in steered {
-            let _ = events.send(SessionEvent::Steered(message.clone())).await;
-            // Harness-authored: steering echoes and continuations
-            // fill the history but are not user turns.
-            let mut recorded = ChatMessage::user(message);
+            let _ = events
+                .send(SessionEvent::Steered(message.content.clone()))
+                .await;
+            // Queued whole, images included: a steering message is the
+            // user's intent, not a text-only echo.
+            let mut recorded = message;
             recorded.mark_internal();
             log.commit_async(recorded).await;
         }
@@ -270,7 +278,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // (Gemini sends usageMetadata per chunk), so forwarding every
         // frame would let a consumer that sums per-step usage count
         // the same tokens more than once.
-        let mut step_usage: Option<(u64, u64, u64)> = None;
+        let mut step_usage: Option<providers::Usage> = None;
         // Cumulative argument bytes this attempt, for the liveness
         // row. Deliberately not part of the retry-safety check: a
         // partial call never left the dialect, so replaying the
@@ -337,12 +345,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 ProviderEvent::ToolCallStart { .. } | ProviderEvent::ToolCallEnd { .. } => {}
                 ProviderEvent::ToolCall(call) => calls.push(call),
                 ProviderEvent::ReasoningItem(item) => reasoning_items.push(item),
-                ProviderEvent::Usage {
-                    input,
-                    output,
-                    cache_read,
-                } => {
-                    step_usage = Some((input, output, cache_read));
+                ProviderEvent::Usage(usage) => {
+                    step_usage = Some(usage);
                 }
                 ProviderEvent::Error(err) => {
                     // A suspension that outlived the resume window
@@ -371,7 +375,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     let nothing_produced = text.is_empty()
                         && calls.is_empty()
                         && reasoning_items.is_empty()
-                        && !reasoning_streamed;
+                        && !reasoning_streamed
+                        && assembly_bytes == 0;
                     // The attempt was in flight across a sleep that
                     // fits the window: the run keeps going. Nothing
                     // streamed means an immediate replay — not
@@ -466,6 +471,47 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                             break 'stream;
                         }
                     }
+                    let retry_decision = failure::ErrorDetails::retry_decision(
+                        &err,
+                        !nothing_produced,
+                        max_attempts,
+                    );
+                    let details = failure::ErrorDetails {
+                        summary: failure::ErrorDetails::summary(&err).await,
+                        detail: err.diagnostic(),
+                        cause: err.cause,
+                        stage: err.stage,
+                        response: err.response.as_ref().clone(),
+                        provider_code: err.provider_code.clone(),
+                        provider: model.provider.clone(),
+                        model: model.id.clone(),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64,
+                        attempt_elapsed_ms: attempt_started
+                            .elapsed()
+                            .as_millis()
+                            .min(u64::MAX as u128)
+                            as u64,
+                        step: steps,
+                        attempt,
+                        max_attempts,
+                        retry_after_secs: err.retry_after,
+                        partial_tool_argument_bytes: assembly_bytes,
+                        retry_decision,
+                        partial_text_bytes: text.len(),
+                        reasoning_received: reasoning_streamed || !reasoning_items.is_empty(),
+                        unexecuted_tool_calls: calls.len(),
+                        settled_tools,
+                        failed_tools,
+                        recovery: failure::ErrorDetails::recovery(err.cause, retry_decision),
+                    };
+                    log.record_error(details.clone()).await;
+                    let _ = events
+                        .send(SessionEvent::ErrorDetails(Box::new(details)))
+                        .await;
                     // Distinguish genuine exhaustion (the cause was
                     // retryable and nothing had streamed, but the
                     // budget ran out) from a failure that simply
@@ -525,17 +571,19 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 }
             }
         }
-        // One Usage per step, the stream's final frame: `input` is
-        // this request's full context, `output` what this step alone
-        // generated. Emitted even when the stream then errored — the
-        // tokens were still consumed.
-        if let Some((input, output, cache_read)) = step_usage {
-            last_context = input.saturating_add(output);
+        // Mint response provenance once so a response with no replayable
+        // content can still be recorded, while ordinary replies attach the
+        // same envelope to their assistant message.
+        let response =
+            providers::ResponseMeta::new(&model, providers::ResponsePurpose::Turn, step_usage);
+        // One Usage per step, the stream's final frame. Emitted even
+        // when the stream then errored — the tokens were still consumed.
+        if let Some(usage) = step_usage {
+            last_context = usage.prompt_tokens().saturating_add(usage.output);
             let _ = events
                 .send(SessionEvent::Usage {
-                    input,
-                    output,
-                    cache_read,
+                    usage,
+                    pricing: model.pricing.clone(),
                 })
                 .await;
         } else {
@@ -568,14 +616,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     )
                 };
                 let unrun = calls.clone();
-                let mut final_message = ChatMessage::assistant(std::mem::take(&mut text), calls);
-                if let Some((input, output, cache_read)) = step_usage {
-                    final_message = final_message.with_usage(providers::MessageUsage {
-                        input,
-                        output,
-                        cache_read,
-                    });
-                }
+                let final_message = ChatMessage::assistant(std::mem::take(&mut text), calls)
+                    .with_response(response.clone());
                 log.commit_async(final_message).await;
                 for call in unrun {
                     log.commit_async(ChatMessage::tool_result_with_meta(
@@ -634,6 +676,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 .items
                 .is_empty()
         {
+            // The request completed and may have been billed even though it
+            // produced nothing safe to replay. Keep its response envelope out
+            // of model history before either retrying or surfacing the error.
+            log.record_response(response.clone()).await;
             if !empty_retried && max_attempts > 1 {
                 empty_retried = true;
                 let _ = events
@@ -663,17 +709,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         for item in reasoning_items.drain(..) {
             log.commit_async(ChatMessage::reasoning(item)).await;
         }
-        // Commit the assistant turn (text + any calls), with the
-        // step's real usage attached when the stream reported it —
-        // the session file then carries the token accounting.
-        let mut final_message = ChatMessage::assistant(text, calls.clone());
-        if let Some((input, output, cache_read)) = step_usage {
-            final_message = final_message.with_usage(providers::MessageUsage {
-                input,
-                output,
-                cache_read,
-            });
-        }
+        // Commit the assistant turn with response provenance and any
+        // reported usage; compaction carries this metadata forward without
+        // putting it back into provider history.
+        let final_message = ChatMessage::assistant(text, calls.clone()).with_response(response);
         log.commit_async(final_message).await;
 
         if calls.is_empty() {
@@ -714,6 +753,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 call.clone(),
                 ToolCallPresentation {
                     id,
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
                     category: presentation.category,
                     running: presentation.running,
                     completed: presentation.completed,
@@ -868,6 +909,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                         display: None,
                     },
                 };
+                settled_tools += 1;
+                failed_tools += usize::from(output.outcome.is_error());
                 last_context = last_context
                     .saturating_add((output.content.chars().count() as u64).div_ceil(4));
                 log.commit_async(ChatMessage::tool_result_with_meta(

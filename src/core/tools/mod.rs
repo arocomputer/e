@@ -14,6 +14,10 @@ pub mod diffview;
 mod edit;
 mod fs;
 
+/// The clipboard reader terminates its helpers the same way the bash tool
+/// does: the whole process group, so descendants holding a pipe die too.
+pub(crate) use bash::kill_group;
+
 /// Mutable tool state owned by one agent. File observations and background
 /// handles must not leak between independent conversations in one process.
 #[derive(Default)]
@@ -234,7 +238,9 @@ fn target_command(args: &Value) -> String {
         .as_str()
         .or_else(|| args["handle"].as_str())
         .unwrap_or("");
-    sanitize_inline(value)
+    // Keep shell line boundaries so the TUI can hide heredoc bodies without
+    // losing the full command in review or restored sessions.
+    sanitize_display(value)
 }
 fn target_pattern(args: &Value) -> String {
     sanitize_inline(args["pattern"].as_str().unwrap_or(""))
@@ -407,51 +413,7 @@ impl ToolRuntime {
     }
 }
 
-/// Remove ANSI escape sequences — CSI (colours, cursor moves), OSC (titles,
-/// hyperlinks), and two-byte ESC forms — leaving the plain text. Applied to
-/// the model-facing capture and the display path alike: neither should pay
-/// for (or render) colour codes.
-pub fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('[') => {
-                chars.next();
-                // CSI: parameter and intermediate bytes, then one final byte.
-                for n in chars.by_ref() {
-                    if ('\u{40}'..='\u{7e}').contains(&n) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next();
-                // OSC: runs to BEL or the ESC \ string terminator.
-                while let Some(n) = chars.next() {
-                    if n == '\u{07}' {
-                        break;
-                    }
-                    if n == '\u{1b}' {
-                        if chars.peek() == Some(&'\\') {
-                            chars.next();
-                        }
-                        break;
-                    }
-                }
-            }
-            Some(_) => {
-                chars.next(); // ESC plus one byte (ESC 7, ESC c, …)
-            }
-            None => {}
-        }
-    }
-    out
-}
+pub use e_terminal::text::{sanitize_display, strip_ansi};
 
 /// Resolve carriage-return overwrites the way a terminal would: within each
 /// line only the text after the last `\r` survives, so a progress bar that
@@ -463,20 +425,6 @@ pub fn resolve_carriage_returns(text: &str) -> String {
         .map(|line| line.rsplit('\r').next().unwrap_or(line))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Remove control sequences before untrusted process output reaches the TUI.
-pub fn sanitize_display(text: &str) -> String {
-    let mut clean = String::with_capacity(text.len());
-    for character in strip_ansi(text).chars() {
-        match character {
-            '\n' => clean.push('\n'),
-            '\t' => clean.push_str("    "),
-            character if !character.is_control() => clean.push(character),
-            _ => {}
-        }
-    }
-    clean
 }
 
 fn sanitize_inline(text: &str) -> String {
@@ -523,7 +471,6 @@ fn staged_replace(
     let parent = target
         .parent()
         .ok_or_else(|| std::io::Error::other("file has no parent"))?;
-    let temporary = parent.join(format!(".e-write-{}", uuid::Uuid::new_v4()));
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create_new(true);
     #[cfg(unix)]
@@ -531,7 +478,22 @@ fn staged_replace(
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(if metadata.is_some() { 0o600 } else { 0o666 });
     }
-    let mut file = options.open(&temporary)?;
+    let stage = |dir: &Path| {
+        let temporary = dir.join(format!(".e-write-{}", uuid::Uuid::new_v4()));
+        options.open(&temporary).map(|file| (temporary, file))
+    };
+    let (temporary, mut file) = match stage(parent) {
+        Ok(staged) => staged,
+        // A read-only directory still allows writing into an existing file's
+        // inode (a shell's `echo > f` does the same), only the staging file
+        // beside it is refused: stage in the system temp dir and copy in.
+        Err(error)
+            if existing.is_some() && error.kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            stage(&std::env::temp_dir())?
+        }
+        Err(error) => return Err(error),
+    };
     let result = (|| {
         write(&mut file)?;
         file.sync_all()?;
@@ -546,8 +508,17 @@ fn staged_replace(
             #[cfg(unix)]
             verify_target_identity(existing, &target)?;
         } else {
-            // Publish without overwriting a file created during staging.
-            std::fs::hard_link(&temporary, &target)?;
+            // Publish without overwriting a file created during staging. A
+            // filesystem without hard links (exFAT, some network mounts)
+            // refuses the link; then create the target exclusively and copy
+            // the staged bytes in, which keeps the same guarantee.
+            match std::fs::hard_link(&temporary, &target) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(error)
+                }
+                Err(_) => copy_into_new(&mut file, &target)?,
+            }
         }
         std::fs::remove_file(&temporary)?;
         #[cfg(unix)]
@@ -556,6 +527,38 @@ fn staged_replace(
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Publish a staged file where `hard_link` is unavailable: create `target`
+/// exclusively (a concurrent creator still wins with AlreadyExists) and copy
+/// the staged bytes in. Failed copies remove their partial target.
+fn copy_into_new(staged: &mut std::fs::File, target: &Path) -> std::io::Result<()> {
+    use std::io::Seek;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o666);
+    }
+    let mut created = options.open(target)?;
+    let result = (|| {
+        staged.rewind()?;
+        std::io::copy(staged, &mut created)?;
+        created.sync_all()
+    })();
+    if result.is_err() {
+        // Do not remove a replacement created by another writer.
+        #[cfg(unix)]
+        let ours = verify_target_identity(&created, target).is_ok();
+        #[cfg(not(unix))]
+        let ours = true;
+        drop(created);
+        if ours {
+            let _ = std::fs::remove_file(target);
+        }
     }
     result
 }
@@ -675,7 +678,10 @@ fn note_seen_stamp(state: &ToolRuntime, path: &Path, stamp: (std::time::SystemTi
     seen.insert(freshness_key(path), stamp);
 }
 
-/// Fail when a recorded file changed on disk since e last saw it.
+/// Fail when a recorded file changed on disk since e last saw it. A file
+/// that has since been removed passes: there is nothing left to clobber, and
+/// demanding a re-read of a missing file would wedge the path for the rest
+/// of the session. Other metadata failures remain stale, never confirmed deletions.
 fn check_fresh(
     state: &ToolRuntime,
     path: &Path,
@@ -689,8 +695,16 @@ fn check_fresh(
     let Some(recorded) = recorded else {
         return Ok(());
     };
-    if file_stamp(path) == Some(recorded) {
-        return Ok(());
+    match std::fs::metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Ok(meta)
+            if meta
+                .modified()
+                .is_ok_and(|modified| (modified, meta.len()) == recorded) =>
+        {
+            return Ok(());
+        }
+        _ => {}
     }
     Err(ToolOutput {
         content: format!(
@@ -741,6 +755,31 @@ fn walk_files(root: &Path, visit: &mut dyn FnMut(&Path) -> bool) -> bool {
     true
 }
 
+/// Read an `integer` parameter the way lenient models send it: a JSON
+/// integer, an integral float (`2.0`), or a numeric string (`"2"`). Absent
+/// is `Ok(None)`; anything else names the parameter so the model can correct
+/// it — silently ignoring `limit: 50.0` used to dump the whole file.
+fn integer_arg(args: &Value, name: &str) -> Result<Option<u64>, String> {
+    let invalid = || format!("{name} must be a non-negative integer");
+    match &args[name] {
+        Value::Null => Ok(None),
+        Value::String(s) => s.trim().parse::<u64>().map(Some).map_err(|_| invalid()),
+        Value::Number(n) => {
+            if let Some(n) = n.as_u64() {
+                return Ok(Some(n));
+            }
+            match n.as_f64() {
+                // 2^64 is exactly representable; u64::MAX rounds up to it.
+                Some(n) if n >= 0.0 && n.fract() == 0.0 && n < 18446744073709551616.0 => {
+                    Ok(Some(n as u64))
+                }
+                _ => Err(invalid()),
+            }
+        }
+        _ => Err(invalid()),
+    }
+}
+
 /// Resolve a possibly-relative path against the workspace root.
 fn resolve(cwd: &Path, p: &str) -> PathBuf {
     let path = Path::new(p);
@@ -768,6 +807,63 @@ fn schema_object(name: &str, description: &str, properties: Value, required: &[&
 
 #[cfg(test)]
 mod tests {
+
+    /// Integer coercion must preserve exact bounds, including JSON u64 values.
+    #[test]
+    fn integer_arguments_reject_overflow_without_rounding() {
+        for value in [
+            serde_json::json!("18446744073709551616"),
+            serde_json::json!(18446744073709551616.0),
+        ] {
+            for name in ["offset", "limit", "timeout"] {
+                assert!(super::integer_arg(&serde_json::json!({name: value}), name).is_err());
+            }
+        }
+        for value in [
+            serde_json::json!(u64::MAX),
+            serde_json::json!(u64::MAX.to_string()),
+        ] {
+            assert_eq!(
+                super::integer_arg(&serde_json::json!({"limit": value}), "limit"),
+                Ok(Some(u64::MAX))
+            );
+        }
+        assert_eq!(
+            super::integer_arg(&serde_json::json!({"limit": 2.0}), "limit"),
+            Ok(Some(2))
+        );
+    }
+
+    /// A copy failure must not publish an empty or partially copied target.
+    #[test]
+    fn failed_link_free_copy_removes_its_target() {
+        let dir = std::env::temp_dir().join(format!("e-copy-failure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut staged = std::fs::File::create(dir.join("stage")).unwrap();
+        let target = dir.join("target");
+        // A write-only stage permits rewind but makes the copy's read fail.
+        assert!(super::copy_into_new(&mut staged, &target).is_err());
+        assert!(!target.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Metadata errors must not impersonate a confirmed deletion.
+    #[cfg(unix)]
+    #[test]
+    fn freshness_fails_closed_when_metadata_cannot_be_read() {
+        let dir = std::env::temp_dir().join(format!("e-stat-failure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("file");
+        std::fs::write(&path, "seen").unwrap();
+        let state = super::ToolRuntime::default();
+        super::note_seen(&state, &path);
+        std::fs::remove_file(&path).unwrap();
+        assert!(super::check_fresh(&state, &path, "write", "file").is_ok());
+        std::os::unix::fs::symlink("file", &path).unwrap();
+        assert!(super::check_fresh(&state, &path, "write", "file").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use super::{
         failure_summary, filter_schemas, is_builtin, restrict_to, schemas, stable_path_key,
     };
@@ -939,6 +1035,57 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "other writer");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The staging file normally sits beside the target; when the parent is
+    /// read-only but the target is writable, the update still goes through.
+    #[cfg(unix)]
+    #[test]
+    fn staged_write_updates_a_writable_file_in_a_read_only_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("e-write-rodir-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = super::staged_write(&path, b"new");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        result.unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "no staging file left behind"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The link-less publish path (exFAT and friends can't be made in a
+    /// test, so the fallback is exercised directly): the staged bytes land
+    /// in a fresh target, and a file that appeared meanwhile is left alone.
+    #[test]
+    fn link_free_publish_creates_exclusively_from_the_staged_bytes() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("e-write-nolink-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let staged_path = dir.join("staged");
+        let mut staged = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&staged_path)
+            .unwrap();
+        staged.write_all(b"published").unwrap();
+        let target = dir.join("new");
+        super::copy_into_new(&mut staged, &target).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "published");
+        assert_eq!(
+            super::copy_into_new(&mut staged, &target)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

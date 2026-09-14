@@ -68,6 +68,17 @@ built-in (`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
 - **Prompts** become `/name` commands.
 - **Themes** appear in `/settings` → Theme.
 
+## First-party packages
+
+e's own packages are Rust crates under `packages/` in the e repository
+(`packages/diff` is the first; `packages/terminal` holds primitives they
+share). They are workspace members, never compiled into the e binary, and
+today they install by building and copying the executable into
+`~/.e/extensions/` — see [diff.md](diff.md). A git package (above) and a
+workspace crate are the same thing to e at runtime: an executable speaking
+the line protocol. The two meet when releases ship the crates' binaries, at
+which point `e install` can fetch them like any other package.
+
 ## Publishing a package
 
 1. Create a repository with the directories above. Include a README that
@@ -79,9 +90,10 @@ built-in (`dark`) and replace it, unless `~/.e/themes/dark.json` exists.
    gh search repos --topic e-package
    ```
 
-The first one is [diff](https://github.com/intuitums/diff): a `/diff`
-command, a per-turn summary of what the agent changed, and a `diff` tool the
-model can call.
+[intuitums/diff](https://github.com/intuitums/diff) shows the shape: one
+extension file and one prompt template, installable with a single `e
+install`. It is the git-package counterpart of `packages/diff`; the crate is
+the one that carries e's own Git review.
 
 Try a package before publishing it with a local install:
 

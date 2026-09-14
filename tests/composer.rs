@@ -65,6 +65,35 @@ fn words_wrap_whole() {
 }
 
 #[test]
+fn a_space_that_misses_the_edge_hangs_instead_of_starting_a_row() {
+    // "aaaa bbbb" at inner width 4: the word fills the row, the space has
+    // nowhere to go — it hangs off the seam, so the next row starts on
+    // "bbbb" (no indent) and no rail-only row of spaces appears.
+    let rendered = rows("aaaa bbbb", 6);
+    assert_eq!(rendered.len(), 1 + 2 + 1, "{rendered:?}"); // + trailing cursor row
+    assert!(rendered[1].ends_with(" aaaa"), "{:?}", rendered[1]);
+    assert!(rendered[2].ends_with(" bbbb"), "{:?}", rendered[2]);
+}
+
+#[test]
+fn up_down_follow_display_columns_over_wide_chars() {
+    // Row 1 is four CJK chars (8 cells), row 2 eight ASCII chars. From
+    // column 4 of row 2, Up lands on column 4 of row 1 — index 2, not 4.
+    let theme = theme::resolve("dark", false);
+    let mut editor = Editor::new();
+    editor.set_text("日本語日abcdefgh");
+    editor.render(&theme, 10, 24); // inner width 8
+    for _ in 0..4 {
+        editor.key(Key::Left);
+    }
+    assert_eq!(editor.cursor(), 8);
+    editor.key(Key::Up);
+    assert_eq!(editor.cursor(), 2, "column 4 of the CJK row");
+    editor.key(Key::Down);
+    assert_eq!(editor.cursor(), 8, "and back to column 4 of the ASCII row");
+}
+
+#[test]
 fn up_down_move_between_visual_rows_and_fall_back_to_history() {
     let theme = theme::resolve("dark", false);
 
@@ -100,4 +129,42 @@ fn paste_replaces_selection_and_clears_it() {
     assert_eq!(editor.cursor(), 3);
     editor.key(Key::Left);
     assert_eq!(editor.cursor(), 2, "paste must not leave a stale selection");
+}
+
+#[test]
+fn extension_attachment_replacement_preserves_the_draft_and_caret() {
+    let mut editor = Editor::new();
+    editor.set_text("explain");
+    editor.insert_attachment("⧉ 1 line from diff", "old source");
+    editor.insert_str(" please");
+    editor.insert_attachment("⧉ 16 lines from diff", "new source");
+    assert_eq!(editor.text(), "explain ⧉ 16 lines from diff please");
+    assert_eq!(editor.expanded_text(), "explain new source please");
+    assert_eq!(editor.cursor(), editor.text().chars().count());
+    let rendered = editor
+        .render(&theme::load_bundled(false).unwrap(), 80, 24)
+        .join("\n");
+    assert!(rendered.contains(
+        &theme::load_bundled(false)
+            .unwrap()
+            .fg("attachmentText", "⧉ 16 lines from diff")
+    ));
+}
+
+#[test]
+fn extension_attachment_backspace_selects_then_deletes_and_motion_cancels_selection() {
+    let mut editor = Editor::new();
+    editor.insert_attachment("⧉ 1 line from diff", "source");
+    editor.key(Key::Backspace);
+    assert_eq!(editor.expanded_text(), "source");
+    assert!(editor
+        .render(&theme::load_bundled(false).unwrap(), 80, 24)
+        .join("\n")
+        .contains("\x1b[7m"));
+    editor.key(Key::Right);
+    editor.key(Key::Backspace);
+    assert_eq!(editor.expanded_text(), "source");
+    editor.key(Key::Backspace);
+    assert!(editor.text().is_empty());
+    assert!(editor.expanded_text().is_empty());
 }

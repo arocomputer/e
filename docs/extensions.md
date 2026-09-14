@@ -41,7 +41,7 @@ e → extension, requests (each carries an `id` to answer with):
 
 ```
 {"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
-{"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--worktree","feature"],"flags":{"worktree":"feature"}}}
+{"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--project","../app"],"flags":{"project":"../app"}}}
 {"id":3,"method":"tool_call","params":{"name":"greet","arguments":{...}}}
 {"id":4,"method":"command","params":{"name":"ping","args":"rest of the line"}}
 {"id":5,"method":"hook.tool_call","params":{"name":"bash","arguments":{...}}}
@@ -92,7 +92,7 @@ top-level key:
  "tools":[{"name":"greet","description":"say hi","parameters":{"type":"object","properties":{}},
            "label":{"category":"greet","running":"Greeting","completed":"Greeted","target":"who"}}],
  "commands":[{"name":"ping","description":"check the extension"}],
- "flags":[{"name":"worktree","type":"string","description":"run in a fresh worktree"},
+ "flags":[{"name":"project","type":"string","description":"relaunch in this directory"},
            {"name":"plan","type":"boolean","description":"plan mode"}],
  "hooks":["tool_call","input","before_turn","tool_result","compact_summary"],
  "events":["session_start","turn_start","tool_end"],
@@ -111,7 +111,7 @@ is recognized in startup argv — booleans match `--name`, `--name=true|false`,
 `--no-name`; strings match `--name=value` or `--name value` (a following
 `-` token is never consumed as a value). A bare string flag at end-of-argv
 parses as `null` (flag present, no value). Last occurrence wins; `--` stops
-parsing. A name that isn't a clean `--name` token (e.g. `"-w, --worktree"`)
+parsing. A name that isn't a clean `--name` token (e.g. `"-x, --example"`)
 appears in `e --help` but is never parsed — those flags still need the
 startup hook's raw argv. After every startup hook has seen raw argv, e removes
 typed flags and their separated string values before parsing its own
@@ -188,8 +188,11 @@ order; the first extension to consume or replace wins:
 {"consume":false,"replace":null}
 ```
 
-An empty result allows the line through untouched. A pasted API key is
-handled before the hook and never reaches it.
+An empty result allows the line through untouched; `{"notice":"…"}` allows
+it and posts the notice. Notices from every extension that allowed the line
+reach the transcript, alongside the notice of whichever finally consumed or
+replaced it. A pasted API key is handled before the hook and never reaches
+it.
 
 **hook.startup** → rewritten arguments and optional process changes, given
 `{cwd, argv, flags}` where `flags` are the parsed values of every typed
@@ -198,7 +201,7 @@ flag declaration:
 ```json
 {"argv":["-c"],
  "env":{"REMOVE_ME":null},
- "relaunch":{"cwd":"/path/to/worktree","env":{"BOOTSTRAPPED":"1"}}}
+ "relaunch":{"cwd":"/path/to/project","env":{"BOOTSTRAPPED":"1"}}}
 ```
 
 Startup hooks run in extension filename order before e parses subcommands,
@@ -316,7 +319,8 @@ is running; first declaration wins between extensions, with a notice.
 - Tool calls have 300 s, commands 60 s.
 - On quit e sends `shutdown`, waits a beat, then kills the process.
 - A crashed or missing extension is reported in the transcript and skipped;
-  it is never a reason e can't run.
+  it is never a reason e can't run. An exit immediately after a valid initialize
+  response still emits one notice, including which runtime hooks now fail open.
 
 ## Examples
 
@@ -326,7 +330,7 @@ docs/extensions/
   hello.mjs      every surface at once, on the optional scaffold helper
   gate.mjs       the tool_call hook as a fail-open guard
   protected.mjs  the tool_call hook denying credential-shaped paths
-  worktree.mjs   a minimal startup-hook launcher (e -w)
+  project.mjs    a startup-hook directory router (e --project <path>)
   mcp.mjs        one MCP stdio server's tools as extension tools
   scaffold.mjs   an optional wire-protocol helper (not required, never installed)
   plan.mjs       a plan mode on the new surface: session.tools, a shortcut,
@@ -336,6 +340,20 @@ docs/extensions/
 An extension speaks the protocol directly — `subagent.mjs` and the shell
 `ping.sh` below are single self-contained files, reading a JSON request per
 line and writing a response per line. e installs nothing beside an extension.
+
+## Packaged extensions
+
+Extensions are programs, not scripts only: anything that speaks the line
+protocol qualifies, including a compiled Rust binary. The first packaged
+extension lives at `packages/diff` — the Git review surface, `e-diff`. It is
+a workspace member, not an `e` dependency: the release binary never ships it,
+and building it is opt-in (`cargo build --release -p e-diff`, then copy the
+executable into `~/.e/extensions/`). `packages/terminal` (`e-terminal`) holds
+the palette/text primitives both e and e-diff render with. Note that what an
+extension sends still crosses the line as data: notices are sanitized before
+paint, so an extension that wants colour returns a `show` with a `format`
+rather than styled bytes. Packages users install from git, and how the two
+relate, are in [packages.md](packages.md).
 
 **`scaffold.mjs`** is an *optional* convenience: the same stdin/stdout framing,
 id routing, and a `connect({ manifest, handlers })` wrapper, so you write
@@ -356,8 +374,8 @@ never installed for you, and it is not a thing you have to think about.
   read into context or written to disk, not just what bash runs. See
   [`docs/sandboxing.md`](sandboxing.md) for e's trust model and where a
   hook like this fits.
-- **`worktree.mjs`** — the startup-hook launcher on the scaffold:
-  `e -w [branch]` creates a Git worktree and relaunches e there.
+- **`project.mjs`.** This startup-hook launcher uses the scaffold.
+  `e --project <path>` relaunches e in an existing project directory.
 - **`subagent.mjs`.** Its `delegate` tool drives a single-shot `e rpc
   --no-extensions` child with one JSON request line in and one result out. The
   delegated turn is extension-free, so it cannot delegate again. It defines
@@ -413,6 +431,11 @@ configure the stdio server e should own in `~/.e/settings.json`:
 }
 ```
 
+`npx -y` downloads the server on first use, which routinely takes longer
+than the 5 s initialize budget — the bridge is then skipped with
+`initialize timed out` until the package is cached. Run the `npx` line once
+by hand first, or point `command` at an installed binary.
+
 The bridge intentionally maps only MCP tools. Prompts, resources, sampling,
 elicitation, and authorization stay out of e's core and out of this example.
 It uses the 2025-11-25 initialize/initialized stdio lifecycle supported by
@@ -462,7 +485,6 @@ list when a provider emits a tool call.
 ## What startup hooks are for
 
 Because a startup extension sees raw argv and can relaunch the same binary in
-a new cwd, it can implement things like managed Git worktree launches (`-w`
-creating `<root>/<repo>/<branch>` and continuing there), project profiles, or
-scratch-directory routing — all in any language the line protocol speaks,
-with nothing hardcoded in e itself.
+a new cwd, it can implement project-directory routing (`--project <path>`),
+project profiles, or scratch-directory routing. Any language that speaks the
+line protocol can add these behaviors without hardcoding them in e.
