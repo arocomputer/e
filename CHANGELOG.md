@@ -22,6 +22,11 @@
 
 ### New features
 
+- The benchmark suite measures the real launches: boot-to-first-frame on a
+  populated home (skills, a package with a live extension, prompt history),
+  a cold launch with the binary evicted from the file cache, and `e -c`
+  resuming a 400-turn saved session — each with a regression budget in CI,
+  not just `e --version` and a bare home.
 - Extension commands can declare `arguments` (a hint shown in the `/`
   picker; picking the command leaves `/name ` to finish) and
   `completions` (typing `/name pre` asks the extension and offers its
