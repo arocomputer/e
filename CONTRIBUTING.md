@@ -65,6 +65,24 @@ a sentence or two, then how you fixed it; the template only carries the
 checklist CI and review expect. One concern per PR — if the description
 says "also", split it.
 
+## AI/LLM assistance
+
+Creating issues and pull requests with AI/LLM help is fine, on one
+condition: the content is yours to own.
+
+- Review everything the AI produced — code, prose, commit messages —
+  before you ask anyone here to review it for you.
+- Never attribute a commit to AI/LLM as author, co-author, committer, or
+  signatory: no `Assisted-by`, `Co-authored-by`, or similar trailer, and
+  no generated footer naming the model or harness. Attribution here is
+  human only.
+- Answer maintainer questions and review comments yourself; what an
+  agent wrote is input to your reply, not the reply.
+- One AI-assisted pull request open at a time.
+
+If you reach the point where you feel unwilling or unable to do the
+above, close your issue or pull request.
+
 ## License
 
 By contributing, you agree that your work is released under the repository's
