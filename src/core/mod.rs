@@ -15,6 +15,7 @@ pub mod extensions;
 pub mod providers;
 pub mod resources;
 pub mod session;
+pub mod text;
 pub mod tools;
 pub mod update;
 pub mod usage;

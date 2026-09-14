@@ -10,7 +10,9 @@
   with its docs and scripts; the Git review is the
   [e-diff](https://github.com/fschrhunt/e-diff) package
   (`e install git:github.com/fschrhunt/e-diff`), which speaks the same
-  display surface. `packages/terminal` stays as e's own rendering crate.
+  display surface. The `packages/` directory is gone with it: the palette,
+  highlighter, and text sanitizers it held are back inside e, and the
+  repository ships nothing but e and its SDK — packages are the community's.
 - `e ask` is removed. Use `e rpc` for headless automation, with one JSON request and response per line. Piped stdin without `e rpc` now reports a usage error.
 - Read-only tool mode is removed, including `--read-only`, `--ro`, the `read_only` RPC mode, and `read_only_notice`. Use `--no-tools` to disable tools, or the RPC `tools` allowlist to select built-ins.
 - The `ask` tool and its question panel are removed. Extensions should read required input from configuration or report what is missing.

@@ -568,7 +568,7 @@ impl ToolRuntime {
     }
 }
 
-pub use e_terminal::text::{sanitize_display, strip_ansi};
+pub use crate::core::text::{sanitize_display, strip_ansi};
 
 /// Resolve carriage-return overwrites the way a terminal would: within each
 /// line only the text after the last `\r` survives, so a progress bar that

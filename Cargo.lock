@@ -237,7 +237,6 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "crossterm",
- "e-terminal",
  "futures",
  "libc",
  "proptest",
@@ -264,15 +263,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "e-terminal"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "unicode-width",
 ]
 
 [[package]]

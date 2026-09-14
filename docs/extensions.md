@@ -348,9 +348,7 @@ protocol qualifies, including a compiled binary. A compiled extension lives
 in its own repository, like every package, and reaches users as a release
 package (`e install release:<owner>/<repo>/<name>`, see
 [packages.md](packages.md)); the e repository ships no extensions of its own.
-`packages/terminal` (`e-terminal`) is the palette and text crate e renders
-with, which a Rust extension may depend on. What an extension sends still
-crosses the line as data: notices are sanitized before paint, so an
+What an extension sends still crosses the line as data: notices are sanitized before paint, so an
 extension that wants colour returns a `show` with a `format` rather than
 styled bytes.
 

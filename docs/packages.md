@@ -86,10 +86,9 @@ ones e itself is released for.
 
 To publish one, name the asset `<name>-<target>.tar.gz` with the executable
 at its top level, list it in the release's `checksums.txt` (`sha256sum`), and
-build one per target e is released for (`e update` names them). A Rust
-extension may depend on the `e-terminal` crate from the e repository for
-the host's palette and text primitives; the e repository itself ships no
-extensions, so nothing about a package needs a change to e.
+build one per target e is released for (`e update` names them). The e
+repository ships no packages of its own, so nothing about a package needs a
+change to e.
 
 ## Publishing a package
 

@@ -66,10 +66,6 @@ sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a consumer of the library target with its own release boundary
              (decisions/0002), never a fourth layer
-packages/    shared crates, never a place for extensions: an extension is a
-             package of its own repository (docs/packages.md), like pi's
-  terminal/       e-terminal — palette, ANSI-aware text, highlight, panel
-                  primitives e renders with and an extension may reuse
 ```
 
 ## Running one thing, not everything
