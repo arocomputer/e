@@ -27,5 +27,5 @@ jobs:
           rustup toolchain install nightly-2026-08-20 --profile minimal
           cargo +nightly-2026-08-20 install cargo-fuzz --version 0.11.0 --locked
 
-      - name: Fuzz bounded parser surface
+      - name: Fuzz
         run: cargo +nightly-2026-08-20 fuzz run "${{ matrix.target }}" -- -max_total_time=120 -rss_limit_mb=2048
