@@ -14,6 +14,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Docs-only changes can't affect the binary or the test suite, so they
+    # skip the heavy jobs — but the required checks must still report green,
+    # so Build & Test and Performance stay running and short-circuit their
+    # steps instead of skipping themselves.
+    name: Decide what needs building
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The push path diffs the squash commit against its parent.
+          fetch-depth: 2
+
+      - name: Gate the heavy jobs on the changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          # On a pull request the file list comes from the API; on a push —
+          # the squash merge itself — from the diff against the parent.
+          # A listing failure is fail-open: the heavy jobs run. CI is never
+          # skipped on uncertainty.
+          if [ -n "$PR" ]; then
+            if ! files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename'); then
+              echo "file listing failed; running the heavy jobs"
+              echo "build=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            files=$(git diff --name-only HEAD^ HEAD)
+          fi
+          # Paths that cannot affect the binary or the tests: prose, record
+          # files, repository metadata. Anything unlisted runs the heavy
+          # jobs — an unfamiliar path errs toward testing, not skipping.
+          build=false
+          while IFS= read -r file; do
+            case "$file" in
+              *.md | README | docs/* | LICENSE | CHANGELOG.md | \
+              benchmarks/results/* | .gitignore | .gitattributes | .editorconfig | \
+              .github/pull_request_template.md | .github/CODEOWNERS | \
+              .github/dependabot.yml) ;;
+              *) build=true; break ;;
+            esac
+          done <<EOF
+          $files
+          EOF
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   guard:
     # Audit the security surface before running the repository contract.
     name: Guard (security surface)
@@ -31,6 +86,7 @@ jobs:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
@@ -39,13 +95,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Docs-only change — heavy steps below are skipped
+        if: needs.changes.outputs.build != 'true'
+        run: echo "nothing here can affect the binary; Build & Test passes"
+
       - name: Rust toolchain
+        if: needs.changes.outputs.build == 'true'
         run: rustc --version
 
       - name: Repository contract
+        if: needs.changes.outputs.build == 'true'
         run: ./x check
 
       - name: Terminal frame checks
+        if: needs.changes.outputs.build == 'true'
         run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
 
       - name: Retain terminal frames on failure
@@ -62,20 +125,27 @@ jobs:
     name: Performance budgets
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: changes
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Docs-only change — build and budgets skipped
+        if: needs.changes.outputs.build != 'true'
+        run: echo "nothing here can affect the binary; Performance budgets passes"
+
       - name: Rust toolchain
+        if: needs.changes.outputs.build == 'true'
         run: rustc --version
 
       - name: Measure release binary
+        if: needs.changes.outputs.build == 'true'
         run: ./x bench
 
       # A reviewer convenience, not a contract: GitHub's artifact service
       # occasionally 403s at finalize, and that flake must not fail the job.
       - name: Upload pull-request binary
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && needs.changes.outputs.build == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
