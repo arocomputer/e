@@ -213,12 +213,16 @@ fn expand_local(spec: &str) -> PathBuf {
         },
         None => PathBuf::from(spec),
     };
-    if path.is_absolute() {
-        return path;
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(&path))
-        .unwrap_or(path)
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(&path))
+            .unwrap_or(path)
+    };
+    // The real path, so `./pkg` and a symlinked temp root record the same
+    // way they resolve; a path that does not exist yet stays as written.
+    path.canonicalize().unwrap_or(path)
 }
 
 /// Split the trailing `@ref`, ignoring the `user@` of an SSH authority.
@@ -578,7 +582,13 @@ pub async fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
             root.display()
         );
     }
-    record(&source, spec.trim()).map_err(|e| format!("could not update settings.json: {e}"))?;
+    // A local path is recorded as it resolved, so a `./pkg` installed from
+    // one directory still loads (and removes) from any other.
+    let recorded = match &source {
+        Source::Local(path) => path.to_string_lossy().into_owned(),
+        _ => spec.trim().to_string(),
+    };
+    record(&source, &recorded).map_err(|e| format!("could not update settings.json: {e}"))?;
     let counts = counts(&root);
     Ok((root, counts))
 }

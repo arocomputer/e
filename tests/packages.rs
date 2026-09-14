@@ -274,10 +274,27 @@ fn remove_deletes_a_managed_clone_but_leaves_a_local_directory_alone() {
         "not installed twice"
     );
 
+    // A relative local source is recorded as it resolved, so it loads from
+    // any later working directory and can be removed by either spelling.
+    let previous = std::env::current_dir().unwrap();
+    std::env::set_current_dir(repo.dir.parent().unwrap()).unwrap();
+    let relative = format!("./{}", repo.dir.file_name().unwrap().to_string_lossy());
+    block(packages::install(&relative)).unwrap();
+    std::env::set_current_dir(&previous).unwrap();
+    let recorded = settings_packages(&home);
+    assert_eq!(recorded.len(), 1);
+    assert!(
+        std::path::Path::new(&recorded[0]).is_absolute(),
+        "{recorded:?}"
+    );
+    assert_eq!(packages::roots(), vec![repo.dir.canonicalize().unwrap()]);
+    packages::remove(&recorded[0]).unwrap();
+    assert!(settings_packages(&home).is_empty());
+
     // A local path is referenced in place, so removal only forgets it.
     let local = repo.dir.to_string_lossy().into_owned();
     let (root, counts) = block(packages::install(&local)).unwrap();
-    assert_eq!(root, repo.dir);
+    assert_eq!(root, repo.dir.canonicalize().unwrap());
     assert_eq!(counts, [1, 1, 2, 1]);
     packages::remove(&local).unwrap();
     assert!(repo.dir.join("skills/hello/SKILL.md").is_file());
@@ -427,7 +444,7 @@ fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
     let extra = home.dir.join("extra");
     std::fs::create_dir_all(extra.join("prompts")).unwrap();
     let root = block(packages::use_once(&extra.to_string_lossy())).unwrap();
-    assert_eq!(root, extra);
+    assert_eq!(root, extra.canonicalize().unwrap());
     let cloned = block(packages::use_once(&repo.source(None))).unwrap();
     assert!(cloned.join("skills/hello/SKILL.md").is_file());
     assert_eq!(packages::roots().len(), 4);

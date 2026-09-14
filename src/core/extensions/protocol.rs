@@ -11,7 +11,7 @@
 //!   {"id":6,"method":"hook.before_turn","params":{"prompt":"…"}}
 //!   {"id":8,"method":"hook.tool_result","params":{"name":"…","content":"…","is_error":false}}
 //!   {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
-//!   {"id":3,"method":"shortcut","params":{"key":"ctrl+g"}}
+//!   {"id":3,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 //!   {"id":11,"method":"command.complete","params":{"name":"deploy","prefix":"st"}}
 //! e → extension notifications (no response):
 //!   {"method":"flags","params":{"flags":{…}}}              (at start, to extensions declaring typed flags)
@@ -33,7 +33,7 @@
 //!    "flags":[{"name","description","type"?,"default"?}…],   (shown in --help /help; typed ones are parsed)
 //!    "hooks":["startup","tool_call","input","before_turn","tool_result","compact_summary"],
 //!    "events":["session_start","turn_start","tool_end"…],
-//!    "shortcuts":[{"key":"ctrl+g","description":"…"}]}
+//!    "shortcuts":[{"key":"ctrl+alt+g","description":"…"}]}
 //!
 //! Requests from an extension carry the extension's own `id` (any JSON
 //! value) and are answered with the same id. Their methods are the `ui.*`

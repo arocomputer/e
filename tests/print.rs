@@ -128,3 +128,47 @@ fn a_failed_turn_exits_one_and_says_why() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("error:"));
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn print_mode_tells_extensions_there_is_no_ui() {
+    let _lock = env_lock();
+    let (port, _server) = serve_sse(&[OK_STREAM]);
+    let home = mock_home("print-headless", port);
+    let ext = home.dir.join("extensions");
+    std::fs::create_dir_all(&ext).unwrap();
+    let path = ext.join("asker.sh");
+    std::fs::write(
+        &path,
+        "#!/bin/sh\nlog=\"$E_HOME/ext.log\"\nwhile IFS= read -r line; do\n\
+         id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9][0-9]*\\),\"method\".*/\\1/p')\n\
+         case \"$line\" in\n\
+         *'\"method\":\"initialize\"'*) printf '%s\\n' \"$line\" | grep -o '\"ui\":[a-z]*' >> \"$log\"; \
+           printf '{\"id\":%s,\"result\":{\"name\":\"asker\"}}\\n' \"$id\"; printf '{\"id\":\"q\",\"method\":\"session.info\",\"params\":{}}\\n' ;;\n\
+         *'\"id\":\"q\"'*) printf 'reply %s\\n' \"$line\" >> \"$log\" ;;\n\
+         *'\"method\":\"shutdown\"'*) exit 0 ;;\n\
+         esac\ndone\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let child = Command::new(env!("CARGO_BIN_EXE_e"))
+        .args(["--no-save", "-p", "hi"])
+        .env("E_HOME", &home.dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = std::fs::read_to_string(home.dir.join("ext.log")).unwrap_or_default();
+    assert!(log.contains("\"ui\":false"), "{log}");
+    assert!(log.contains(r#"reply {"error":"no ui","id":"q"}"#), "{log}");
+}

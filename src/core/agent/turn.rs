@@ -132,9 +132,13 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 .collect()
         };
         for message in steered {
-            let _ = events
-                .send(SessionEvent::Steered(message.content.clone()))
-                .await;
+            // An extension's internal message rides the queue too; the
+            // transcript never sees it, the model does.
+            if !message.is_internal() {
+                let _ = events
+                    .send(SessionEvent::Steered(message.content.clone()))
+                    .await;
+            }
             // Queued whole, images included: a steering message is the
             // user's intent, not a text-only echo.
             let mut recorded = message;
@@ -1052,7 +1056,7 @@ async fn load_nested_instructions(
         let mut message = ChatMessage::user(format!(
             "Instructions for files under {}:\n<project_instructions path=\"{}\">\n{text}\n</project_instructions>",
             dir.display(),
-            shown.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
+            context::xml_escape(&shown)
         ));
         message.mark_internal();
         log.commit_async(message).await;

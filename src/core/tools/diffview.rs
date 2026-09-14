@@ -202,84 +202,6 @@ fn lcs_ops(old: &[DiffLine<'_>], new: &[DiffLine<'_>], offset: usize, ops: &mut 
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::render;
-
-    #[test]
-    fn a_one_line_change_shows_numbers_context_and_markers() {
-        let before = "a\nb\nc\nd\ne\nf\ng\nh\n";
-        let after = "a\nb\nc\nd\nE\nf\ng\nh\n";
-        let out = render(before, after);
-        // Old number on the removal, new number on the addition, three
-        // context lines each side, the far edges elided.
-        assert!(out.contains("    5 - e"), "{out}");
-        assert!(out.contains("    5 + E"), "{out}");
-        assert!(out.contains("    4   d"), "{out}");
-        assert!(out.contains("    8   h"), "{out}");
-        assert!(out.contains("      ⋯"), "{out}");
-        assert!(!out.contains("  1   a"), "{out}");
-    }
-
-    #[test]
-    fn identical_texts_render_nothing() {
-        assert_eq!(render("same\n", "same\n"), "");
-    }
-
-    #[test]
-    fn crlf_to_lf_is_visible() {
-        let out = render("one\r\ntwo\r\n", "one\ntwo\n");
-        assert!(out.contains("    1 - one␍"), "{out}");
-        assert!(out.contains("    1 + one"), "{out}");
-        assert!(!out.contains("    1 + one␍"), "{out}");
-    }
-
-    #[test]
-    fn final_newline_changes_are_visible() {
-        let removed = render("one\n", "one");
-        assert!(removed.contains("    1 - one"), "{removed}");
-        assert!(removed.contains("    1 + one"), "{removed}");
-        assert!(
-            removed.contains("\\ No newline at end of file"),
-            "{removed}"
-        );
-
-        let added = render("one", "one\n");
-        assert!(added.contains("    1 - one"), "{added}");
-        assert!(added.contains("    1 + one"), "{added}");
-        assert!(added.contains("\\ No newline at end of file"), "{added}");
-    }
-
-    #[test]
-    fn a_new_file_is_all_additions() {
-        let out = render("", "one\ntwo\n");
-        assert!(out.contains("    1 + one"), "{out}");
-        assert!(out.contains("    2 + two"), "{out}");
-        assert!(!out.contains('-'), "{out}");
-    }
-
-    #[test]
-    fn insertion_shifts_following_numbers() {
-        let before = "a\nb\nc\n";
-        let after = "a\nnew\nb\nc\n";
-        let out = render(before, after);
-        assert!(out.contains("    2 + new"), "{out}");
-        // Context after the insertion carries new-file numbers.
-        assert!(out.contains("    3   b"), "{out}");
-        assert!(out.contains("    4   c"), "{out}");
-    }
-
-    #[test]
-    fn oversized_middles_still_render_a_replacement() {
-        // Force the fallback path with unique lines beyond the cell budget.
-        let before: String = (0..2_100).map(|i| format!("x{i}\n")).collect();
-        let after: String = (0..2_100).map(|i| format!("y{i}\n")).collect();
-        let out = render(&before, &after);
-        assert!(out.contains("    1 - x0"), "{}", &out[..200]);
-        assert!(out.contains("    1 + y0"), "{}", &out[..200]);
-    }
-}
-
 /// Convert a unified diff (what `git diff` prints) into the row grammar
 /// above, so an extension's diff paints like a built-in edit's: `-` rows
 /// carry old-file numbers, `+` and context rows new-file numbers, hunks
@@ -394,5 +316,83 @@ diff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n";
     #[test]
     fn text_that_is_not_a_diff_yields_nothing() {
         assert_eq!(from_unified("hello\nworld\n"), "");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+
+    #[test]
+    fn a_one_line_change_shows_numbers_context_and_markers() {
+        let before = "a\nb\nc\nd\ne\nf\ng\nh\n";
+        let after = "a\nb\nc\nd\nE\nf\ng\nh\n";
+        let out = render(before, after);
+        // Old number on the removal, new number on the addition, three
+        // context lines each side, the far edges elided.
+        assert!(out.contains("    5 - e"), "{out}");
+        assert!(out.contains("    5 + E"), "{out}");
+        assert!(out.contains("    4   d"), "{out}");
+        assert!(out.contains("    8   h"), "{out}");
+        assert!(out.contains("      ⋯"), "{out}");
+        assert!(!out.contains("  1   a"), "{out}");
+    }
+
+    #[test]
+    fn identical_texts_render_nothing() {
+        assert_eq!(render("same\n", "same\n"), "");
+    }
+
+    #[test]
+    fn crlf_to_lf_is_visible() {
+        let out = render("one\r\ntwo\r\n", "one\ntwo\n");
+        assert!(out.contains("    1 - one␍"), "{out}");
+        assert!(out.contains("    1 + one"), "{out}");
+        assert!(!out.contains("    1 + one␍"), "{out}");
+    }
+
+    #[test]
+    fn final_newline_changes_are_visible() {
+        let removed = render("one\n", "one");
+        assert!(removed.contains("    1 - one"), "{removed}");
+        assert!(removed.contains("    1 + one"), "{removed}");
+        assert!(
+            removed.contains("\\ No newline at end of file"),
+            "{removed}"
+        );
+
+        let added = render("one", "one\n");
+        assert!(added.contains("    1 - one"), "{added}");
+        assert!(added.contains("    1 + one"), "{added}");
+        assert!(added.contains("\\ No newline at end of file"), "{added}");
+    }
+
+    #[test]
+    fn a_new_file_is_all_additions() {
+        let out = render("", "one\ntwo\n");
+        assert!(out.contains("    1 + one"), "{out}");
+        assert!(out.contains("    2 + two"), "{out}");
+        assert!(!out.contains('-'), "{out}");
+    }
+
+    #[test]
+    fn insertion_shifts_following_numbers() {
+        let before = "a\nb\nc\n";
+        let after = "a\nnew\nb\nc\n";
+        let out = render(before, after);
+        assert!(out.contains("    2 + new"), "{out}");
+        // Context after the insertion carries new-file numbers.
+        assert!(out.contains("    3   b"), "{out}");
+        assert!(out.contains("    4   c"), "{out}");
+    }
+
+    #[test]
+    fn oversized_middles_still_render_a_replacement() {
+        // Force the fallback path with unique lines beyond the cell budget.
+        let before: String = (0..2_100).map(|i| format!("x{i}\n")).collect();
+        let after: String = (0..2_100).map(|i| format!("y{i}\n")).collect();
+        let out = render(&before, &after);
+        assert!(out.contains("    1 - x0"), "{}", &out[..200]);
+        assert!(out.contains("    1 + y0"), "{}", &out[..200]);
     }
 }

@@ -910,18 +910,12 @@ impl Agent {
     }
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
         self.tools = Arc::new(tools::ToolRuntime::default());
-        self.instructions_loaded
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        self.reset_session_scoped();
         *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
     }
     pub fn clear(&mut self) {
         self.tools = Arc::new(tools::ToolRuntime::default());
-        self.instructions_loaded
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        self.reset_session_scoped();
         self.history
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -974,6 +968,27 @@ impl Agent {
 
     fn take_next_turn(&self) -> Vec<ChatMessage> {
         std::mem::take(&mut *self.next_turn.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// State that belongs to one session's run and must not outlive it: the
+    /// nested instructions already loaded, an extension's tool narrowing,
+    /// and messages attached to the next turn.
+    fn reset_session_scoped(&self) {
+        self.instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.set_active_tools(None);
+        self.next_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
+    /// Whether this agent writes a session log — and, by the same token,
+    /// whether anything it does should persist to disk.
+    pub fn saves_session(&self) -> bool {
+        self.options.save_session
     }
 
     /// `/undo`: revert the newest write or edit this session made. Idle

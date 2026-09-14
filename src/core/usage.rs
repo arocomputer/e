@@ -52,9 +52,15 @@ fn now_ms() -> u64 {
 /// by model. `session_paths` lets the caller (and tests) scope the files.
 pub fn report(session_paths: &[std::path::PathBuf], since_ms: Option<u64>) -> Report {
     let mut by_model: BTreeMap<String, Row> = BTreeMap::new();
+    // A fork or a compaction copies responses into a new file; one
+    // provider response is billed once, whatever it was copied into.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for path in session_paths {
         for response in crate::core::session::responses_in(path) {
             if since_ms.is_some_and(|since| response.timestamp < since) {
+                continue;
+            }
+            if !response.id.is_empty() && !seen.insert(response.id.clone()) {
                 continue;
             }
             let Some(usage) = response.usage else {

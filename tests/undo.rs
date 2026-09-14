@@ -66,3 +66,30 @@ fn undo_walks_back_through_writes_and_edits() {
     );
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_failed_write_leaves_nothing_to_undo() {
+    use std::os::unix::fs::PermissionsExt;
+    let ws = std::env::temp_dir().join(format!("e-undo-fail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ws);
+    std::fs::create_dir_all(ws.join("locked")).unwrap();
+    std::fs::set_permissions(ws.join("locked"), std::fs::Permissions::from_mode(0o500)).unwrap();
+    let runtime = ToolRuntime::default();
+    let cancel = AtomicBool::new(false);
+    let out = runtime.run_streaming(
+        "write",
+        r#"{"path":"locked/new.txt","content":"x"}"#,
+        &ws,
+        &cancel,
+        |_, _| {},
+    );
+    assert_ne!(out.outcome, ToolOutcome::Completed);
+    assert_eq!(
+        runtime.undo_depth(),
+        0,
+        "a write that did not happen cannot be undone"
+    );
+    std::fs::set_permissions(ws.join("locked"), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = std::fs::remove_dir_all(&ws);
+}

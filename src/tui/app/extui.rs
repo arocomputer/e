@@ -239,15 +239,16 @@ impl App {
                         options
                             .iter()
                             .filter_map(|option| match option {
-                                Value::String(label) => {
-                                    let label = one_line(
-                                        &crate::core::tools::sanitize_display(label),
-                                        TITLE_COLUMNS,
-                                    );
-                                    Some(MenuItem::new(&label, "", &label))
+                                Value::String(raw) => {
+                                    // The answer is the offered string; only
+                                    // the row's label is clipped.
+                                    let value = crate::core::tools::sanitize_display(raw);
+                                    let label = one_line(&value, TITLE_COLUMNS);
+                                    Some(MenuItem::new(&label, "", &value))
                                 }
                                 Value::Object(_) => {
-                                    let label = one_line(&text_of(option, "label"), TITLE_COLUMNS);
+                                    let full_label = text_of(option, "label");
+                                    let label = one_line(&full_label, TITLE_COLUMNS);
                                     if label.is_empty() {
                                         return None;
                                     }
@@ -257,7 +258,7 @@ impl App {
                                             Value::String(s) => s.clone(),
                                             other => other.to_string(),
                                         })
-                                        .unwrap_or_else(|| label.clone());
+                                        .unwrap_or(full_label);
                                     Some(MenuItem::new(
                                         &label,
                                         &one_line(&text_of(option, "description"), TITLE_COLUMNS),

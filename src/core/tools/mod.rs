@@ -33,7 +33,7 @@ pub struct ToolRuntime {
 
 /// One reversible file change: the bytes the path held before a write or
 /// edit (None when the file did not exist), and how to name it.
-struct Change {
+pub(crate) struct Change {
     path: PathBuf,
     before: Option<Vec<u8>>,
     label: String,
@@ -45,21 +45,26 @@ const UNDO_DEPTH: usize = 100;
 const UNDO_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 impl ToolRuntime {
-    /// Snapshot `path` before a write or edit, so `/undo` can put it back.
+    /// Snapshot `path` before a write or edit; `keep_change` records it once
+    /// the write succeeded, so a failed tool leaves nothing to undo.
     /// Oversized files are skipped rather than held in memory.
-    pub(crate) fn record_change(&self, path: &Path, label: String) {
+    pub(crate) fn snapshot_change(&self, path: &Path, label: String) -> Option<Change> {
         let before = match std::fs::metadata(path) {
-            Ok(meta) if meta.len() > UNDO_MAX_BYTES => return,
+            Ok(meta) if meta.len() > UNDO_MAX_BYTES => return None,
             Ok(_) => std::fs::read(path).ok(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return,
+            Err(_) => return None,
         };
-        let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
-        changes.push(Change {
+        Some(Change {
             path: path.to_path_buf(),
             before,
             label,
-        });
+        })
+    }
+
+    pub(crate) fn keep_change(&self, change: Change) {
+        let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        changes.push(change);
         let excess = changes.len().saturating_sub(UNDO_DEPTH);
         changes.drain(..excess);
     }

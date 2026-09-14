@@ -49,7 +49,7 @@ e → extension, requests (each carries an `id` to answer with):
 {"id":7,"method":"hook.before_turn","params":{"prompt":"the user's message"}}
 {"id":8,"method":"hook.tool_result","params":{"name":"bash","content":"…","is_error":false}}
 {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
-{"id":10,"method":"shortcut","params":{"key":"ctrl+g"}}
+{"id":10,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 ```
 
 e → extension, notifications (no `id`, no reply):
@@ -96,7 +96,7 @@ top-level key:
            {"name":"plan","type":"boolean","description":"plan mode"}],
  "hooks":["tool_call","input","before_turn","tool_result","compact_summary"],
  "events":["session_start","turn_start","tool_end"],
- "shortcuts":[{"key":"ctrl+g","description":"greet"}]}
+ "shortcuts":[{"key":"ctrl+alt+g","description":"greet"}]}
 ```
 
 A tool's `label` gives its transcript row the built-in grammar
@@ -306,11 +306,12 @@ is explained in [decisions/0005](decisions/0005-extension-surface.md).
 ## Shortcuts
 
 Declare `shortcuts` in the manifest; a chord the user presses arrives as
-`{"id":…,"method":"shortcut","params":{"key":"ctrl+g"}}` and is answered
+`{"id":…,"method":"shortcut","params":{"key":"ctrl+alt+g"}}` and is answered
 like a command. Chords need `ctrl` or `alt`; bare keys and shift-only
 chords are how text gets typed and are refused at the manifest. e keeps
-`ctrl+c`, `ctrl+d`, `ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+z`,
-`ctrl+l`, `ctrl+m`, `ctrl+i`, and `ctrl+j`. A chord the composer binds
+`ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`, `ctrl+j`, `ctrl+l`, `ctrl+m`,
+`ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+s`, `ctrl+v`, `ctrl+shift+v`,
+`ctrl+x`, and `ctrl+z`. A chord the composer binds
 (`ctrl+k`, say — see `docs/keybindings.md`) goes to the extension while it
 is running; first declaration wins between extensions, with a notice.
 

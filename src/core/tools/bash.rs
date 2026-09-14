@@ -617,9 +617,15 @@ where
             start += 1;
         }
         let tail = full[start..].to_string();
+        let kept = full.len();
         let id = state.retain_result(full);
+        let dropped = if total_bytes > kept {
+            format!("; the first {} bytes were not kept", total_bytes - kept)
+        } else {
+            String::new()
+        };
         format!(
-            "… [truncated: {total_bytes} bytes total, showing the last {}; earlier output: read_result {{\"id\": {id}}}]\n{tail}",
+            "… [truncated: {total_bytes} bytes total, showing the last {}; earlier output: read_result {{\"id\": {id}}}{dropped}]\n{tail}",
             tail.len()
         )
     } else if total_bytes > retained.len() {
@@ -769,9 +775,12 @@ fn retain_and_publish<F>(
     // Far more than the model's copy (the last 32 KiB): the rest is kept
     // for `read_result`, so a long log's beginning is deferred, not lost.
     const RETAIN_LIMIT: usize = 4 * 1024 * 1024;
+    // Trim in slabs: draining a few bytes off the front of a 4 MiB buffer
+    // on every chunk would make a long stream quadratic.
+    const RETAIN_SLACK: usize = 512 * 1024;
     *total_bytes = total_bytes.saturating_add(bytes.len());
     retained.extend_from_slice(bytes);
-    if retained.len() > RETAIN_LIMIT {
+    if retained.len() > RETAIN_LIMIT + RETAIN_SLACK {
         let excess = retained.len() - RETAIN_LIMIT;
         retained.drain(..excess);
         // The raw byte cut may land inside a UTF-8 code point. Discard only

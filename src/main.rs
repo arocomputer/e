@@ -259,7 +259,8 @@ async fn main() -> std::io::Result<()> {
     // Extensions' own requests (`ui.*`, `session.*`) travel this channel
     // to the terminal frontend. Headless runs (`e rpc`) start the host
     // without it, so `initialize` tells extensions there is no UI.
-    let headless = cli::leading_subcommand(&args) == Some("rpc");
+    let headless =
+        cli::leading_subcommand(&args) == Some("rpc") || cli::has_flag(&args, &["--print", "-p"]);
     let (requests_tx, requests_rx) =
         tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
     // `--package <source>` packages join this run before extensions start,

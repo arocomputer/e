@@ -58,6 +58,13 @@ fn usage_folds_responses_by_model_within_the_period() {
     assert!(all.cost_usd.is_none(), "an unlisted model has no price");
     assert!(all.rows.iter().all(|r| r.cost_usd.is_none()));
 
+    // A fork copies responses into a new file: the same id is one request.
+    let mut forked = SessionLog::create(&cwd, "mock/other").unwrap();
+    let copied = e::core::session::responses_in(b.path()).remove(0);
+    forked.append_response(copied).unwrap();
+    let with_fork = [paths.clone(), vec![forked.path().to_path_buf()]].concat();
+    assert_eq!(e::core::usage::report(&with_fork, None).requests, 4);
+
     let recent = e::core::usage::report(&paths, Some(5_000));
     assert_eq!(
         recent.requests, 3,

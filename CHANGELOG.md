@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**Git review arrives as e's first packaged extension, `/diff`, and Ctrl+O now reads full tool output in a two-depth reviewer. Pasted text is easier to identify and remove. Cancellation, compaction, and session saving have also been hardened.**
+**Packages and an extension surface at pi's reach, plus the core features that could not be extensions: a headless print mode, tool-result paging, session fork and export, undo, prompt history across sessions, a usage dashboard, and nested instructions. Ctrl+O reads full tool output in a two-depth reviewer; pasted text is easier to identify and remove; cancellation, compaction, and session saving have been hardened. The `/diff` review is now the `e-diff` package, outside this repository.**
 
 ### Breaking changes
 

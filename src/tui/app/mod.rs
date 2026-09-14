@@ -987,7 +987,6 @@ impl App {
         self.agent
             .adopt_session_name(crate::core::session::name_of(&path));
         self.session_epoch += 1;
-        self.agent.set_active_tools(None);
         extui::shutdown_then_start(self, "resume");
         self.notice(format!(
             "resumed {}",
@@ -1610,7 +1609,6 @@ impl App {
                 self.transcript
                     .push(Block::new(Kind::Banner, crate::VERSION));
                 set_tab_title(&tab_title(&title_path(), None));
-                self.agent.set_active_tools(None);
                 extui::shutdown_then_start(self, "new");
             }
             "/resume" => self.open_resume_menu(),
@@ -2087,7 +2085,11 @@ impl App {
     /// A submitted prompt joins up-arrow recall for this session and the
     /// history file for the next. API keys never come through here.
     fn remember_prompt(&mut self, text: String) {
-        crate::tui::history::append(&text);
+        // A memory-only run (`--no-save`) leaves no trace on disk, prompts
+        // included; recall still works within the session.
+        if self.agent.saves_session() {
+            crate::tui::history::append(&text);
+        }
         self.editor.push_history(text);
     }
 }
@@ -3241,6 +3243,9 @@ async fn run_scoped(
                         app.reloading = false;
                         app.host = host.clone();
                         app.agent.set_host(host);
+                        // A narrowing the old host's extension installed
+                        // has no owner left to lift it.
+                        app.agent.set_active_tools(None);
                         app.apply_theme();
                         app.apply_keymap();
                         app.refresh_status_cache();
@@ -3448,10 +3453,6 @@ fn arm(app: &mut App) {
     app.overlay = Some("press ctrl+c again to exit".into());
 }
 
-/// Restores every terminal mode the TUI enables — keyboard enhancement
-/// flags, bracketed paste, raw mode, cursor visibility — on every exit
-/// path, `?` returns and unwinds included. Popping a mode that never got
-/// enabled is harmless; leaving one enabled corrupts the user's shell.
 /// Read terminal events on a thread the frame loop can pause. Each poll
 /// waits at most 100 ms, so a pause takes effect within that; the thread
 /// ends when the receiver is dropped.
@@ -3500,10 +3501,16 @@ async fn edit_externally(
         return;
     };
     let draft = app.editor.expanded_text();
-    let path = std::env::temp_dir().join(format!("e-draft-{}.md", std::process::id()));
+    // An unguessable name and create_new: a pre-placed symlink in the shared
+    // temp directory is refused rather than followed.
+    let path = std::env::temp_dir().join(format!(
+        "e-draft-{}-{}.md",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
     {
         let mut options = std::fs::OpenOptions::new();
-        options.create(true).write(true).truncate(true);
+        options.create_new(true).write(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
@@ -3567,6 +3574,10 @@ async fn edit_externally(
     painter.frame(app.frame(cols as usize, rows as usize));
 }
 
+/// Restores every terminal mode the TUI enables — keyboard enhancement
+/// flags, bracketed paste, raw mode, cursor visibility — on every exit
+/// path, `?` returns and unwinds included. Popping a mode that never got
+/// enabled is harmless; leaving one enabled corrupts the user's shell.
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
@@ -4377,6 +4388,18 @@ mod tests {
             Ok(serde_json::json!({"value": "plan", "label": "Plan"}))
         );
         assert!(app.menu.is_none() && app.ui_prompt.is_none());
+
+        // A long plain option answers with the string that was offered,
+        // whatever the row showed.
+        let long = "/Users/me/projects/very/long/path/to/some/deeply/nested/file_name.rs";
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.select",
+            serde_json::json!({"title": "File", "options": [long]}),
+        );
+        app.on_host_request(request);
+        assert!(app.select_menu());
+        assert_eq!(reply.blocking_recv().unwrap().unwrap()["value"], long);
 
         // A second modal while one is open waits its turn; Esc cancels
         // the open one and the next takes the surface on the next frame.

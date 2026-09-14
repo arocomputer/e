@@ -282,10 +282,13 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
             return err(format!("write {path}: {error}"), "write", path);
         }
     }
-    state.record_change(&full, format!("write {path}"));
+    let change = state.snapshot_change(&full, format!("write {path}"));
     match super::staged_write(&full, content.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);
+            if let Some(change) = change {
+                state.keep_change(change);
+            }
             let additions = content.lines().count();
             let deletions = before_lines;
             // The model wrote this content one message ago — echoing it back

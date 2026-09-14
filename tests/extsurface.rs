@@ -6,52 +6,27 @@
 
 mod common;
 
-use std::sync::Mutex;
-
+use common::{env_lock, Home};
 use e::core::extensions::{ExtensionHost, HostRequest};
 
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+/// Put one shell extension into an isolated home.
+fn with_extension(label: &str, body: &str) -> Home {
+    let home = Home::new(&format!("surface-{label}"));
+    let ext = home.dir.join("extensions");
+    std::fs::create_dir_all(&ext).unwrap();
+    let path = ext.join("surface.sh");
+    std::fs::write(&path, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    home
 }
 
-/// An isolated home with one shell extension. Each call rewrites the file,
-/// so tests run alone under the env lock.
-struct Home {
-    dir: std::path::PathBuf,
-}
-
-impl Home {
-    fn with_extension(body: &str) -> Home {
-        let dir = std::env::temp_dir().join(format!(
-            "e-surface-{}-{}",
-            std::process::id(),
-            uuid::Uuid::now_v7()
-        ));
-        let ext = dir.join("extensions");
-        std::fs::create_dir_all(&ext).unwrap();
-        let path = ext.join("surface.sh");
-        std::fs::write(&path, body).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        std::env::set_var("E_HOME", &dir);
-        Home { dir }
-    }
-
-    /// What the extension appended to its log file so far.
-    fn log(&self) -> String {
-        std::fs::read_to_string(self.dir.join("ext.log")).unwrap_or_default()
-    }
-}
-
-impl Drop for Home {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+/// What the extension appended to its log file so far.
+fn log_of(home: &Home) -> String {
+    std::fs::read_to_string(home.dir.join("ext.log")).unwrap_or_default()
 }
 
 /// A version-2 extension: subscribes to two events, declares every new
@@ -101,11 +76,11 @@ async fn settle() {
 #[tokio::test]
 async fn headless_hosts_answer_extension_requests_with_no_ui() {
     let _lock = env_lock();
-    let home = Home::with_extension(SURFACE);
+    let home = with_extension("h", SURFACE);
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
     let host = ExtensionHost::start(notices, None).await;
     settle().await;
-    let log = home.log();
+    let log = log_of(&home);
     assert!(log.contains("\"ui\":false"), "{log}");
     assert!(
         log.contains(r#"reply {"error":"no ui","id":"q1"}"#),
@@ -122,7 +97,7 @@ async fn headless_hosts_answer_extension_requests_with_no_ui() {
 #[tokio::test]
 async fn requests_reach_the_surface_owner_and_replies_return_verbatim() {
     let _lock = env_lock();
-    let home = Home::with_extension(SURFACE);
+    let home = with_extension("h", SURFACE);
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
     let (requests, mut inbox) = tokio::sync::mpsc::channel::<HostRequest>(8);
     let host = ExtensionHost::start(notices, Some(requests)).await;
@@ -138,7 +113,7 @@ async fn requests_reach_the_surface_owner_and_replies_return_verbatim() {
     // Dropping a request unanswered still answers the extension.
     drop(second);
     settle().await;
-    let log = home.log();
+    let log = log_of(&home);
     assert!(log.contains("\"ui\":true"), "{log}");
     assert!(
         log.contains(r#"reply {"id":"q1","result":{"cwd":"/w"}}"#),
@@ -155,7 +130,7 @@ async fn requests_reach_the_surface_owner_and_replies_return_verbatim() {
 #[tokio::test]
 async fn events_go_only_to_subscribers_and_hooks_chain_their_answers() {
     let _lock = env_lock();
-    let home = Home::with_extension(SURFACE);
+    let home = with_extension("h", SURFACE);
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
     let host = ExtensionHost::start(notices, None).await;
 
@@ -165,7 +140,7 @@ async fn events_go_only_to_subscribers_and_hooks_chain_their_answers() {
         .await;
     host.event("tool_end", serde_json::json!({"id": 1})).await;
     settle().await;
-    let log = home.log();
+    let log = log_of(&home);
     assert!(
         log.contains("event turn_start") && log.contains("event tool_end"),
         "{log}"
@@ -199,7 +174,7 @@ async fn events_go_only_to_subscribers_and_hooks_chain_their_answers() {
 #[tokio::test]
 async fn labels_and_shortcuts_are_declared_once_and_normalized() {
     let _lock = env_lock();
-    let _home = Home::with_extension(SURFACE);
+    let _home = with_extension("h", SURFACE);
     let (notices, mut rx) = tokio::sync::mpsc::channel(16);
     let host = ExtensionHost::start(notices, None).await;
 

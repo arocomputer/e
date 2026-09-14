@@ -1595,21 +1595,27 @@ async fn spawn(
     Ok(Extension { manifest, ..ext })
 }
 
-/// Chords e keeps for itself: the interrupt and quit keys, the viewer and
-/// model pickers, the terminal's own suspend and clear. Everything else
+/// Chords e keeps for itself: interrupt and quit, the viewer and model
+/// pickers, the external editor, clipboard paste and copy, the scoped-models
+/// save, the terminal's own suspend and clear. Everything else
 /// with a ctrl or alt modifier is an extension's to declare; bare keys and
 /// shift-only chords never are, since they are how text gets typed.
 const RESERVED_CHORDS: &[&str] = &[
     "ctrl+c",
     "ctrl+d",
+    "ctrl+g",
+    "ctrl+i",
+    "ctrl+j",
+    "ctrl+l",
+    "ctrl+m",
     "ctrl+o",
     "ctrl+p",
     "ctrl+shift+p",
+    "ctrl+s",
+    "ctrl+v",
+    "ctrl+shift+v",
+    "ctrl+x",
     "ctrl+z",
-    "ctrl+l",
-    "ctrl+m",
-    "ctrl+i",
-    "ctrl+j",
 ];
 
 /// Whether a normalized chord may be declared as an extension shortcut.
@@ -1619,37 +1625,16 @@ pub fn shortcut_allowed(chord: &str) -> bool {
         && !RESERVED_CHORDS.contains(&chord)
 }
 
-/// A chord in canonical form: lowercase, modifiers sorted `ctrl+alt+shift+`,
-/// no whitespace — so `Ctrl+Shift+G` and `shift+ctrl+g` are one key.
+/// The keybindings grammar's canonical chord, shared with the composer's
+/// own overrides so `Ctrl+Shift+G` and `shift+ctrl+g` are one key. A
+/// modifier with no key is nothing to bind.
 pub fn normalize_chord(chord: &str) -> String {
-    let mut ctrl = false;
-    let mut alt = false;
-    let mut shift = false;
-    let mut key = String::new();
-    for part in chord.split('+').map(|p| p.trim().to_lowercase()) {
-        match part.as_str() {
-            "ctrl" | "control" => ctrl = true,
-            "alt" | "meta" | "option" => alt = true,
-            "shift" => shift = true,
-            "" => {}
-            other => key = other.to_string(),
-        }
-    }
-    if key.is_empty() {
+    let normalized = crate::core::config::keybindings::normalize_chord(chord);
+    let key = normalized.rsplit('+').next().unwrap_or("");
+    if key.is_empty() && !normalized.ends_with("++") {
         return String::new();
     }
-    let mut out = String::new();
-    if ctrl {
-        out.push_str("ctrl+");
-    }
-    if alt {
-        out.push_str("alt+");
-    }
-    if shift {
-        out.push_str("shift+");
-    }
-    out.push_str(&key);
-    out
+    normalized
 }
 
 /// The transcript line for an extension that dies mid-session. A guard
