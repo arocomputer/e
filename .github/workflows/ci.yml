@@ -95,10 +95,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Skipped — no build-affecting paths
-        if: needs.changes.outputs.build != 'true'
-        run: echo "nothing here can affect the binary; Build & Test passes"
-
       - name: Rust toolchain
         if: needs.changes.outputs.build == 'true'
         run: rustc --version
@@ -129,10 +125,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Skipped — no build-affecting paths
-        if: needs.changes.outputs.build != 'true'
-        run: echo "nothing here can affect the binary; Performance budgets passes"
 
       - name: Rust toolchain
         if: needs.changes.outputs.build == 'true'
