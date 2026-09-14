@@ -21,6 +21,12 @@ Step one …
 - The `$` picker inserts a skill by hand.
 - Files are read per use — add or edit a skill and it is live immediately.
 
+## Package skills
+
+An installed [package](packages.md) contributes its `skills/` directory the
+same way. A global skill of the same name shadows a package's; the `$` picker
+labels package skills `Package`.
+
 ## Repo-local skills
 
 A trusted repository can carry its own skills in `.e/skills/`:

@@ -25,12 +25,16 @@ use e::tui::app;
 fn print_help(host: &e::core::extensions::ExtensionHost) {
     println!(
         "e — a coding agent for your terminal\n\n\
-usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use `e rpc` headless)\n  \
+usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use -p or `e rpc` headless)\n  \
+e -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
 e -c, --continue      continue this directory's most recent session\n  \
 e -r, --resume        pick a session to resume\n  \
 e rpc                 JSONL request/response protocol on stdin/stdout\n  \
 e docs [topic]        print a built-in format guide\n  \
 e update              update e to the latest release\n  \
+e install [source]    install a package, or make every listed one current\n  \
+e remove <source>     forget a package and delete its clone\n  \
+e packages            list installed packages\n  \
 e auth                show sign-in status\n  \
 e doctor [--no-network]\n                      print paste-safe, local-only runtime diagnostics\n  \
 e providers           list provider support and sign-in state\n  \
@@ -45,7 +49,8 @@ e -v, --version"
 --model, -m <model>    select a model for this process\n  \
 --effort, --ef <level> select reasoning effort for this process\n  \
 --image, -i <path>     attach an image to the first prompt (repeatable)\n  \
---json, -j             machine output (doctor, providers)"
+--package, -P <source> load a package for this run only (repeatable)\n  \
+--json, -j             machine output (doctor, providers, --print)"
     );
     let flags = host.flags();
     let commands = host.commands();
@@ -59,6 +64,13 @@ e -v, --version"
         println!("\nextension commands:");
         for (name, description) in commands {
             println!("  /{name:<17} {description}");
+        }
+    }
+    let shortcuts = host.shortcuts();
+    if !shortcuts.is_empty() {
+        println!("\nextension shortcuts:");
+        for (chord, description) in shortcuts {
+            println!("  {chord:<18} {description}");
         }
     }
 }
@@ -125,6 +137,103 @@ async fn usage_error(host: &e::core::extensions::ExtensionHost, json: bool, mess
     std::process::exit(2);
 }
 
+/// `e install [source]`, `e remove <source>`, `e packages`: the package
+/// commands, extension-free one-shots (a package's own broken extension must
+/// never stand between the user and `e remove`). Returns the exit status.
+async fn package_command(sub: &str, rest: &[String]) -> i32 {
+    use e::core::resources::packages::{self, Status, KINDS};
+    let plural = |n: usize, kind: &str| {
+        let noun = kind.trim_end_matches('s');
+        if n == 1 {
+            format!("1 {noun}")
+        } else {
+            format!("{n} {kind}")
+        }
+    };
+    let describe = |counts: &[usize; 4]| -> String {
+        let parts: Vec<String> = KINDS
+            .iter()
+            .zip(counts)
+            .filter(|(_, n)| **n > 0)
+            .map(|(kind, n)| plural(*n, kind))
+            .collect();
+        if parts.is_empty() {
+            "nothing to load".into()
+        } else {
+            parts.join(", ")
+        }
+    };
+    match (sub, rest) {
+        ("install", []) => {
+            let results = packages::install_all().await;
+            if results.is_empty() {
+                println!(
+                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                );
+                return 0;
+            }
+            let mut failed = false;
+            for result in results {
+                match result {
+                    Ok(line) => println!("{line}"),
+                    Err(line) => {
+                        failed = true;
+                        eprintln!("{line}");
+                    }
+                }
+            }
+            i32::from(failed)
+        }
+        ("install", [spec]) => match packages::install(spec).await {
+            Ok((root, counts)) => {
+                println!(
+                    "installed {spec} → {} ({}) — restart or /reload to use it",
+                    root.display(),
+                    describe(&counts)
+                );
+                0
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        },
+        ("remove", [spec]) => match packages::remove(spec) {
+            Ok(_) => {
+                println!("removed {spec} — restart or /reload to drop it");
+                0
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        },
+        ("packages", []) => {
+            let list = packages::list();
+            if list.is_empty() {
+                println!(
+                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                );
+                return 0;
+            }
+            let width = list.iter().map(|p| p.spec.len()).max().unwrap_or(0);
+            for package in list {
+                let status = match &package.status {
+                    Status::Installed { counts, .. } => describe(counts),
+                    Status::Missing => "missing — run `e install`".into(),
+                    Status::Invalid(reason) => format!("invalid: {reason}"),
+                };
+                println!("{:<width$}  {status}", package.spec);
+            }
+            0
+        }
+        _ => {
+            eprintln!("{}", cli::subcommand_usage(sub).unwrap_or("usage: e help"));
+            2
+        }
+    }
+}
+
 /// Append the subcommand's usage line when the failing argv names one, so
 /// `e doctor --unknown` points at `e doctor` instead of generic help.
 fn with_subcommand_usage(message: String, args: &[String]) -> String {
@@ -150,12 +259,37 @@ async fn main() -> std::io::Result<()> {
     // consume custom flags and safely relaunch this same binary in a new cwd,
     // and so --help can list the flags and commands extensions declare.
     let (jobs_tx, jobs_rx) = tokio::sync::mpsc::channel::<String>(256);
-    let diagnostic_requested =
-        matches!(cli::leading_subcommand(&args), Some("doctor" | "providers"));
+    let diagnostic_requested = matches!(
+        cli::leading_subcommand(&args),
+        Some("doctor" | "providers" | "install" | "remove" | "packages")
+    );
+    // Extensions' own requests (`ui.*`, `session.*`) travel this channel
+    // to the terminal frontend. Headless runs (`e rpc`) start the host
+    // without it, so `initialize` tells extensions there is no UI.
+    let headless =
+        cli::leading_subcommand(&args) == Some("rpc") || cli::has_flag(&args, &["--print", "-p"]);
+    let (requests_tx, requests_rx) =
+        tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
+    // `--package <source>` packages join this run before extensions start,
+    // so their extensions launch like installed ones. A bad source is a
+    // usage error, not a silent omission.
+    if !diagnostic_requested {
+        for spec in cli::flag_values(&args, &["--package", "-P"]) {
+            if let Err(message) = e::core::resources::packages::use_once(&spec).await {
+                eprintln!("--package {spec}: {message}");
+                e::core::resources::packages::forget_once();
+                std::process::exit(2);
+            }
+        }
+    }
     let host = if cli::extensions_disabled(&args) || diagnostic_requested {
         e::core::extensions::ExtensionHost::empty()
     } else {
-        e::core::extensions::ExtensionHost::start(jobs_tx.clone()).await
+        e::core::extensions::ExtensionHost::start(
+            jobs_tx.clone(),
+            (!headless).then(|| requests_tx.clone()),
+        )
+        .await
     };
     if cli::has_flag(&args, &["--help", "-h"]) {
         print_help(&host);
@@ -169,6 +303,19 @@ async fn main() -> std::io::Result<()> {
     if let Ok(diagnostic_options) = cli::parse(args.clone(), &[]) {
         let diagnostic_args = &diagnostic_options.positional;
         let sub = leading_positional_subcommand(&diagnostic_options);
+        // Package commands are one-shots on the same extension-free footing:
+        // they change what the next session loads, never the current one.
+        if let Some(sub @ ("install" | "remove" | "packages")) = sub {
+            if diagnostic_options.json {
+                eprintln!("--json is supported by `e doctor` and `e providers`");
+                std::process::exit(2);
+            }
+            let status = package_command(sub, &diagnostic_args[1..]).await;
+            if status != 0 {
+                std::process::exit(status);
+            }
+            return Ok(());
+        }
         if sub == Some("doctor") || sub == Some("providers") {
             let doctor = sub == Some("doctor");
             // Parsing accepts `--no-network` (a no-op: diagnostics are
@@ -238,6 +385,7 @@ async fn main() -> std::io::Result<()> {
                 eprintln!("{message}");
             }
             host.shutdown().await;
+            e::core::resources::packages::forget_once();
             std::process::exit(1);
         }
     }
@@ -302,8 +450,18 @@ async fn main() -> std::io::Result<()> {
     if args.first().map(String::as_str) == Some("rpc") {
         return rpc(host, &options).await;
     }
+    if options.print {
+        let status = print_turn(host.clone(), &options, args).await;
+        e::core::tools::kill_tracked_processes();
+        host.shutdown().await;
+        e::core::resources::packages::forget_once();
+        if status != 0 {
+            std::process::exit(status);
+        }
+        return Ok(());
+    }
     if options.json {
-        eprintln!("--json is supported by `e doctor` and `e providers`");
+        eprintln!("--json is supported by `e doctor`, `e providers`, and `-p`");
         host.shutdown().await;
         std::process::exit(2);
     }
@@ -395,7 +553,7 @@ async fn main() -> std::io::Result<()> {
             std::process::exit(2);
         }
     };
-    app::run(
+    let outcome = app::run(
         app::RunOptions {
             initial,
             continue_session: options.continue_session,
@@ -407,8 +565,11 @@ async fn main() -> std::io::Result<()> {
         host,
         jobs_tx,
         jobs_rx,
+        (requests_tx, requests_rx),
     )
-    .await
+    .await;
+    e::core::resources::packages::forget_once();
+    outcome
 }
 
 fn resolve_model(options: &Options) -> Result<Model, String> {
@@ -588,6 +749,115 @@ impl TurnAccumulator {
             "tools": {"calls": self.tool_calls, "failures": self.tool_failures},
         })
     }
+}
+
+/// `e -p [prompt]`: one headless turn. The prompt is the positional text,
+/// or piped stdin when there is none. Plain mode streams the reply's text
+/// to stdout as it arrives and puts warnings and errors on stderr; `--json`
+/// streams every session event as one JSON line and ends with the same
+/// result object `e rpc` returns. Exit status: 0 for a completed turn, 1
+/// for an error or an interrupted turn, 2 for a usage problem.
+async fn print_turn(
+    host: std::sync::Arc<e::core::extensions::ExtensionHost>,
+    options: &Options,
+    args: &[String],
+) -> i32 {
+    use std::io::Write as _;
+    let json = options.json;
+    let fail = |message: String| -> i32 {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"type": "result", "error": message})
+            );
+        } else {
+            eprintln!("{message}");
+        }
+        2
+    };
+    let mut prompt = args.join(" ");
+    if prompt.trim().is_empty() && !std::io::stdin().is_terminal() {
+        let mut piped = String::new();
+        if let Err(error) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut piped) {
+            return fail(format!("could not read stdin: {error}"));
+        }
+        prompt = piped;
+    }
+    if prompt.trim().is_empty() {
+        return fail("-p needs a prompt: an argument, or text on stdin".into());
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let selected = match resolve_model(options) {
+        Ok(selected) => selected,
+        Err(error) => return fail(error),
+    };
+    let images = match load_images(options, &selected) {
+        Ok(images) => images,
+        Err(error) => return fail(error),
+    };
+    let slug = model::slug(&selected);
+    let pricing = selected.pricing.clone();
+    let system = e::core::agent::context::system_prompt(&cwd);
+    let (mut agent, mut events) = Agent::with_options(selected, agent_options(options));
+    let effort = agent.effort();
+    agent.set_host(host);
+    agent.submit_message(
+        e::core::providers::ChatMessage::user_with_images(prompt, images),
+        system,
+    );
+
+    let mut result = TurnAccumulator::with_warnings(model::config_warnings());
+    let mut stdout = std::io::stdout();
+    let mut printed_any = false;
+    while let Some(event) = events.recv().await {
+        result.observe(&event);
+        if json {
+            if let Some(line) = event.to_json() {
+                println!("{line}");
+            }
+        } else {
+            match &event {
+                SessionEvent::TextDelta(delta) => {
+                    let _ = stdout.write_all(delta.as_bytes());
+                    let _ = stdout.flush();
+                    printed_any = true;
+                }
+                SessionEvent::Warning(message) => eprintln!("warning: {message}"),
+                SessionEvent::Retry {
+                    attempt,
+                    limit,
+                    delay_secs,
+                    reason,
+                    ..
+                } => eprintln!("retrying ({attempt}/{limit}) in {delay_secs}s: {reason}"),
+                _ => {}
+            }
+        }
+        if result.terminal {
+            break;
+        }
+    }
+    result.finish();
+    let failed = result.error.is_some() || result.aborted;
+    if json {
+        let mut body = result.json(&slug, effort.as_deref(), pricing.as_ref());
+        body["type"] = serde_json::Value::from("result");
+        body["session"] = agent
+            .session_path()
+            .map(|p| serde_json::Value::from(p.display().to_string()))
+            .unwrap_or(serde_json::Value::Null);
+        println!("{body}");
+    } else {
+        if printed_any && !result.output.ends_with('\n') {
+            println!();
+        }
+        if let Some(error) = &result.error {
+            eprintln!("error: {error}");
+        } else if result.aborted {
+            eprintln!("turn interrupted");
+        }
+    }
+    i32::from(failed)
 }
 
 /// Bound on one RPC request line — generous for pasted prompt text (images

@@ -219,6 +219,21 @@ impl SessionLog {
         })
     }
 
+    /// A fresh log already carrying `messages` as its trunk: `/fork` copies
+    /// the current branch into a file of its own, so the two sessions grow
+    /// apart from here while the original stays exactly as it was.
+    pub fn create_with(
+        cwd: &Path,
+        model: &str,
+        messages: &[ChatMessage],
+    ) -> std::io::Result<SessionLog> {
+        let mut log = Self::create(cwd, model)?;
+        for message in messages {
+            log.append(message)?;
+        }
+        Ok(log)
+    }
+
     /// One serialized record per write call, newline included — even under
     /// an unexpected second writer, records never share a line. A failed
     /// write is lost history: callers must surface the error, not shrug.
@@ -598,6 +613,28 @@ pub fn repair_history(messages: &mut Vec<ChatMessage>) {
         messages.push(message);
     }
     messages.extend(unanswered.into_iter().map(synthetic));
+}
+
+/// Every provider response recorded in a session file, in order: the ones
+/// attached to messages and the ones written on their own. Unreadable
+/// lines are skipped — usage reporting must not fail on one bad record.
+pub fn responses_in(path: &Path) -> Vec<ResponseMeta> {
+    let Ok(file) = File::open(path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else { break };
+        match serde_json::from_str::<Entry>(&line) {
+            Ok(Entry::Message {
+                response: Some(response),
+                ..
+            })
+            | Ok(Entry::Response { response }) => out.push(response),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The latest persisted display name in a session file, if any — the name a

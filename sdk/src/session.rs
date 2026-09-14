@@ -285,7 +285,7 @@ impl SessionBuilder {
             // many broken extensions cannot fill it and stall startup.
             let start = home::scope(
                 home.clone(),
-                ExtensionHost::start_in(sender, cwd, Vec::new()),
+                ExtensionHost::start_in(sender, cwd, Vec::new(), None),
             );
             tokio::pin!(start);
             let mut startup_notices = VecDeque::new();

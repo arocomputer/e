@@ -92,6 +92,24 @@ pub fn serve_raw(responses: Vec<String>) -> (u16, JoinHandle<Vec<String>>) {
     (port, handle)
 }
 
+/// `serve_raw` for responses that are not text — a release tarball.
+pub fn serve_raw_bytes(responses: Vec<Vec<u8>>) -> (u16, JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let handle = std::thread::spawn(move || {
+        let mut captured = Vec::new();
+        for response in responses {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = vec![0u8; 262144];
+            let n = sock.read(&mut buf).unwrap();
+            captured.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+            sock.write_all(&response).unwrap();
+        }
+        captured
+    });
+    (port, handle)
+}
+
 pub fn serve_sse(bodies: &[&str]) -> (u16, JoinHandle<Vec<String>>) {
     serve_raw(bodies.iter().copied().map(sse_response).collect())
 }

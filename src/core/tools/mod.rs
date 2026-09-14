@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use crate::core::cli::ToolMode;
 
 mod bash;
-mod diffview;
+pub mod diffview;
 mod edit;
 mod fs;
+mod results;
 
 /// The clipboard reader terminates its helpers the same way the bash tool
 /// does: the whole process group, so descendants holding a pipe die too.
@@ -24,6 +25,149 @@ pub(crate) use bash::kill_group;
 pub struct ToolRuntime {
     seen: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::time::SystemTime, u64)>>,
     background: std::sync::Arc<bash::BackgroundRegistry>,
+    /// Full tool outputs the model saw truncated, for `read_result`.
+    results: std::sync::Mutex<ResultStore>,
+    /// What write and edit replaced, newest last, for `/undo`.
+    changes: std::sync::Mutex<Vec<Change>>,
+}
+
+/// One reversible file change: the bytes the path held before a write or
+/// edit (None when the file did not exist), and how to name it.
+pub(crate) struct Change {
+    path: PathBuf,
+    before: Option<Vec<u8>>,
+    label: String,
+}
+
+/// Changes kept for `/undo`; the oldest fall off past this.
+const UNDO_DEPTH: usize = 100;
+/// A file larger than this is not snapshotted: its change stays, unrevertable.
+const UNDO_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+impl ToolRuntime {
+    /// Snapshot `path` before a write or edit; `keep_change` records it once
+    /// the write succeeded, so a failed tool leaves nothing to undo.
+    /// Oversized files are skipped rather than held in memory.
+    pub(crate) fn snapshot_change(&self, path: &Path, label: String) -> Option<Change> {
+        let before = match std::fs::metadata(path) {
+            Ok(meta) if meta.len() > UNDO_MAX_BYTES => return None,
+            Ok(_) => std::fs::read(path).ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return None,
+        };
+        Some(Change {
+            path: path.to_path_buf(),
+            before,
+            label,
+        })
+    }
+
+    pub(crate) fn keep_change(&self, change: Change) {
+        let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        changes.push(change);
+        let excess = changes.len().saturating_sub(UNDO_DEPTH);
+        changes.drain(..excess);
+    }
+
+    /// Revert the newest recorded change: restore the previous bytes, or
+    /// remove a file that did not exist. Returns its label, or None when
+    /// nothing is left to undo. A failed restore keeps the change so a
+    /// second attempt is possible.
+    pub fn undo_last(&self) -> Result<Option<String>, String> {
+        let change = {
+            let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+            match changes.pop() {
+                Some(change) => change,
+                None => return Ok(None),
+            }
+        };
+        let result = match &change.before {
+            Some(bytes) => staged_write(&change.path, bytes),
+            None => match std::fs::remove_file(&change.path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+        };
+        match result {
+            Ok(()) => {
+                note_seen(self, &change.path);
+                Ok(Some(change.label))
+            }
+            Err(error) => {
+                let label = change.label.clone();
+                self.changes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(change);
+                Err(format!("could not undo {label}: {error}"))
+            }
+        }
+    }
+
+    /// How many changes `/undo` can still revert.
+    pub fn undo_depth(&self) -> usize {
+        self.changes.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
+
+/// The whole text behind each truncated result, newest last, bounded by
+/// entries and bytes: a session that produces many long outputs keeps the
+/// recent ones and forgets the oldest, and `read_result` says so.
+#[derive(Default)]
+struct ResultStore {
+    next_id: u64,
+    entries: std::collections::VecDeque<(u64, String)>,
+    bytes: usize,
+}
+
+const STORE_MAX_ENTRIES: usize = 32;
+const STORE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+impl ToolRuntime {
+    /// Keep a full result and return the id a truncation notice names.
+    pub fn retain_result(&self, full: String) -> u64 {
+        let mut store = self.results.lock().unwrap_or_else(|e| e.into_inner());
+        store.next_id += 1;
+        let id = store.next_id;
+        store.bytes += full.len();
+        store.entries.push_back((id, full));
+        while store.entries.len() > STORE_MAX_ENTRIES || store.bytes > STORE_MAX_BYTES {
+            match store.entries.pop_front() {
+                Some((_, evicted)) => store.bytes -= evicted.len(),
+                None => break,
+            }
+        }
+        id
+    }
+
+    /// The kept text for `id`, if it is still held.
+    pub fn result(&self, id: u64) -> Option<String> {
+        self.results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entries
+            .iter()
+            .find(|(kept, _)| *kept == id)
+            .map(|(_, text)| text.clone())
+    }
+
+    /// Cap a result the model reads at `MAX_BYTES`. A cut keeps the whole
+    /// text for `read_result` and says which id continues it.
+    pub fn cap(&self, text: String) -> String {
+        if text.len() <= MAX_BYTES {
+            return text;
+        }
+        let total = text.len();
+        let mut cut = MAX_BYTES;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let head = text[..cut].to_string();
+        let id = self.retain_result(text);
+        format!(
+            "{head}\n… [truncated: {total} bytes total, showing the first {cut}; read the rest with read_result {{\"id\": {id}, \"offset\": {cut}}}]"
+        )
+    }
 }
 
 fn default_runtime() -> &'static ToolRuntime {
@@ -155,9 +299,17 @@ pub fn restrict_to(schemas: Vec<Value>, allowed: Option<&[String]>) -> Vec<Value
         .filter(|schema| {
             schema["function"]["name"]
                 .as_str()
-                .is_some_and(|name| allowed.iter().any(|a| a == name))
+                .is_some_and(|name| always_available(name) || allowed.iter().any(|a| a == name))
         })
         .collect()
+}
+
+/// Tools no narrowing removes. `read_result` only pages through output the
+/// model already received truncated; without it a narrowed session (an
+/// extension's `session.tools`, an rpc request's allowlist) would offer a
+/// continuation it cannot follow.
+pub fn always_available(name: &str) -> bool {
+    name == "read_result"
 }
 
 /// Labels and category used to project one tool through its lifecycle.
@@ -187,6 +339,42 @@ pub fn present(name: &str, args: &Value) -> Presentation {
     }
 }
 
+/// Labels for an extension tool that declared its own grammar: the verbs
+/// as given, the target read from the named argument. Empty verbs fall
+/// back to the generic `Running <name>` / `Ran <name>`.
+pub fn present_labeled(
+    name: &str,
+    category: &str,
+    running: &str,
+    completed: &str,
+    target_arg: &str,
+    args: &Value,
+) -> Presentation {
+    let generic = present(name, args);
+    let pick = |given: &str, fallback: String| {
+        if given.trim().is_empty() {
+            fallback
+        } else {
+            sanitize_inline(given)
+        }
+    };
+    let target = if target_arg.is_empty() {
+        String::new()
+    } else {
+        match &args[target_arg] {
+            Value::String(s) => sanitize_inline(s),
+            Value::Null => String::new(),
+            other => sanitize_inline(&other.to_string()),
+        }
+    };
+    Presentation {
+        category: pick(category, generic.category),
+        running: pick(running, generic.running),
+        completed: pick(completed, generic.completed),
+        target,
+    }
+}
+
 /// `(name, one-line description)` for the system prompt's tools list.
 pub fn snippets() -> impl Iterator<Item = (&'static str, &'static str)> {
     SPECS.iter().map(|s| (s.name, s.snippet))
@@ -205,6 +393,12 @@ fn target_command(args: &Value) -> String {
     // Keep shell line boundaries so the TUI can hide heredoc bodies without
     // losing the full command in review or restored sessions.
     sanitize_display(value)
+}
+fn target_result(args: &Value) -> String {
+    args["id"]
+        .as_u64()
+        .map(|id| format!("#{id}"))
+        .unwrap_or_default()
 }
 fn target_pattern(args: &Value) -> String {
     sanitize_inline(args["pattern"].as_str().unwrap_or(""))
@@ -280,6 +474,16 @@ static SPECS: &[Spec] = &[
         target: target_pattern,
         schema: fs::grep_schema,
         run: fs::grep,
+    },
+    Spec {
+        name: "read_result",
+        snippet: "Read more of a truncated tool result by id: a byte window, or the lines matching a query.",
+        category: "read",
+        running: "Reading result",
+        completed: "Read result",
+        target: target_result,
+        schema: results::read_result_schema,
+        run: results::read_result,
     },
     Spec {
         name: "bash",
@@ -377,7 +581,7 @@ impl ToolRuntime {
     }
 }
 
-pub use e_terminal::text::{sanitize_display, strip_ansi};
+pub use crate::core::text::{sanitize_display, strip_ansi};
 
 /// Resolve carriage-return overwrites the way a terminal would: within each
 /// line only the text after the last `\r` survives, so a progress bar that
@@ -856,7 +1060,8 @@ mod tests {
             .into_iter()
             .filter_map(|s| s["function"]["name"].as_str().map(str::to_string))
             .collect();
-        assert_eq!(names, vec!["read", "grep"]);
+        // The pager rides along: a narrowed set can still truncate.
+        assert_eq!(names, vec!["read", "grep", "read_result"]);
         // None leaves the set whole.
         assert_eq!(restrict_to(schemas(), None).len(), schemas().len());
         assert!(is_builtin("read"));

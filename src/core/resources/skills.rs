@@ -1,5 +1,5 @@
-//! Skills: `SKILL.md` directories under `~/.e/skills/` and, for trusted
-//! directories, `<repo>/.e/skills/`.
+//! Skills: `SKILL.md` directories under `~/.e/skills/`, each installed
+//! package's `skills/`, and, for trusted directories, `<repo>/.e/skills/`.
 //!
 //! Each skill is a folder with a `SKILL.md`: YAML-ish frontmatter (name,
 //! description, optional `disable-model-invocation`) then a markdown body.
@@ -7,12 +7,13 @@
 //! are advertised in the system prompt as a catalog of name, description, and
 //! the SKILL.md path; the model pages a body in with the ordinary `read` tool
 //! — no dedicated skill tool. `$` in the composer opens a picker over all of
-//! them. A repo skill shadows a global skill of the same name — the closer
-//! context wins.
+//! them. On a name clash the closer context wins: a repo skill shadows a
+//! global one, which shadows a package's.
 
 use std::path::Path;
 
 use crate::core::config::{home, trust};
+use crate::core::resources::packages;
 
 pub struct Skill {
     pub name: String,
@@ -26,10 +27,18 @@ pub struct Skill {
     pub dir: std::path::PathBuf,
 }
 
-/// Global skills plus, when `cwd` is trusted, its own `.e/skills/`; on a
-/// name clash the repo's skill wins.
+/// Global skills, then package skills not shadowed by a global name, plus,
+/// when `cwd` is trusted, its own `.e/skills/`; on a name clash the repo's
+/// skill wins.
 pub fn list(cwd: &Path) -> Vec<Skill> {
     let mut skills = read_dir(&home::skills_dir());
+    for dir in packages::dirs("skills") {
+        for skill in read_dir(&dir) {
+            if !skills.iter().any(|s| s.name == skill.name) {
+                skills.push(skill);
+            }
+        }
+    }
     if trust::trusted(cwd) {
         let local = read_dir(&cwd.join(".e").join("skills"));
         skills.retain(|g| !local.iter().any(|l| l.name == g.name));

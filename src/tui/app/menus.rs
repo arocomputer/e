@@ -30,8 +30,32 @@ impl App {
                 "/tree",
             ),
             MenuItem::new("/new", "start a fresh session", "/new"),
+            MenuItem::new(
+                "/fork",
+                "continue in a new session file seeded with this one — /fork <name>",
+                "/fork",
+            ),
+            MenuItem::new(
+                "/export",
+                "write this session as a self-contained HTML page — /export <path>",
+                "/export",
+            ),
             MenuItem::new("/copy", "copy the last reply", "/copy"),
-            MenuItem::new("/compact", "summarize into a fresh session", "/compact"),
+            MenuItem::new(
+                "/compact",
+                "summarize into a fresh session — /compact <focus> steers what it keeps",
+                "/compact",
+            ),
+            MenuItem::new(
+                "/usage",
+                "tokens and estimated cost by model — /usage 24h|7d|30d|all",
+                "/usage",
+            ),
+            MenuItem::new(
+                "/undo",
+                "put back what the last write or edit replaced",
+                "/undo",
+            ),
             MenuItem::new(
                 "/trust",
                 "trust this directory (loads its AGENTS.md, .e resources)",
@@ -75,11 +99,99 @@ impl App {
                 continue;
             }
             let slash = format!("/{name}");
+            let description = match self.host.command_hint(&name) {
+                Some(hint) if !hint.trim().is_empty() => format!("{description} — {hint}"),
+                _ => description,
+            };
             let mut item = MenuItem::new(&slash, &description, &slash);
             item.meta = "Extension".into();
             items.push(item);
         }
         items
+    }
+
+    /// Whether picking `/name` should leave `/name ` in the composer for
+    /// the user to finish, rather than run it bare: a prompt template with
+    /// an argument hint, or an extension command that declared arguments.
+    fn command_takes_arguments(&self, slashed: &str) -> bool {
+        let name = slashed.trim_start_matches('/');
+        if let Some(template) = crate::core::resources::prompts::find(name, &self.agent.cwd()) {
+            return !template.argument_hint.trim().is_empty();
+        }
+        self.host
+            .command_hint(name)
+            .is_some_and(|hint| !hint.trim().is_empty())
+    }
+
+    /// `/name prefix` in the composer, when `name` is an extension command
+    /// with completions: the part typed after the name, else None.
+    fn completion_prefix(&self, text: &str) -> Option<(String, String)> {
+        let rest = text.strip_prefix('/')?;
+        if rest.contains('\n') {
+            return None;
+        }
+        let (name, args) = rest.split_once(' ')?;
+        if !self.host.has_completions(name) {
+            return None;
+        }
+        // The prefix is the last word being typed; earlier words are done.
+        let prefix = args.rsplit(' ').next().unwrap_or("").to_string();
+        Some((name.to_string(), prefix))
+    }
+
+    /// Ask the extension for completions of what is being typed. The
+    /// answer is applied only if the composer still says the same thing.
+    fn request_completions(&mut self, command: String, prefix: String) {
+        let host = self.host.clone();
+        let results = self.results.clone();
+        crate::core::config::home::spawn(async move {
+            let items = host.complete_command(&command, &prefix).await;
+            let _ = results
+                .send(AppJob::Completions {
+                    command,
+                    prefix,
+                    items,
+                })
+                .await;
+        });
+    }
+
+    /// Completions arrived: open (or refresh) the arguments picker if the
+    /// composer still ends with the prefix they were asked for.
+    pub(super) fn show_completions(
+        &mut self,
+        command: &str,
+        prefix: &str,
+        items: Vec<crate::core::extensions::Completion>,
+    ) {
+        let text = self.editor.text();
+        match self.completion_prefix(&text) {
+            Some((name, current)) if name == command && current == prefix => {}
+            _ => return,
+        }
+        if items.is_empty() {
+            if self
+                .menu
+                .as_ref()
+                .is_some_and(|m| m.kind == MenuKind::Arguments)
+            {
+                self.menu = None;
+            }
+            return;
+        }
+        let items: Vec<MenuItem> = items
+            .into_iter()
+            .map(|c| {
+                let label = c.label.clone().unwrap_or_else(|| c.value.clone());
+                MenuItem::new(&label, c.description.as_deref().unwrap_or(""), &c.value)
+            })
+            .collect();
+        self.menu = Some(Menu::new(
+            MenuKind::Arguments,
+            format!("/{command}"),
+            HINT_USE,
+            items,
+        ));
     }
 
     /// The scoped-models multi-select: available models plus saved unavailable
@@ -291,10 +403,15 @@ impl App {
         let items: Vec<MenuItem> = crate::core::resources::skills::list(&self.agent.cwd())
             .into_iter()
             .map(|s| {
-                let global = s.dir.starts_with(&global_root);
-                let scope = if global { "Global" } else { "Workspace" };
+                let (scope, tab) = if s.dir.starts_with(&global_root) {
+                    ("Global", 1)
+                } else if crate::core::resources::packages::is_packaged(&s.dir) {
+                    ("Package", 3)
+                } else {
+                    ("Workspace", 2)
+                };
                 let mut item = MenuItem::new(&s.name, scope, &s.name);
-                item.tab = Some(if global { 1 } else { 2 });
+                item.tab = Some(tab);
                 item
             })
             .collect();
@@ -302,7 +419,12 @@ impl App {
             return;
         }
         let mut menu = Menu::new(MenuKind::Skills, "Skills", HINT_SKILLS, items).with_tabs(
-            vec!["All".into(), "Global".into(), "Workspace".into()],
+            vec![
+                "All".into(),
+                "Global".into(),
+                "Workspace".into(),
+                "Package".into(),
+            ],
             Some(0),
             0,
             "Source",
@@ -326,17 +448,25 @@ impl App {
     /// the command picker, an `@word` under the cursor the file picker.
     pub(super) fn sync_menu(&mut self) {
         let text = self.editor.text();
-        if self.pending_key.is_some() {
+        // A secret or an answer to an extension's question is not a
+        // trigger for any picker.
+        if self.pending_key.is_some() || self.ui_input_open() {
             return;
         }
-        // /help opens this picker after its slash command has already left the
-        // composer. In that mode all later composer input is the query.
+        // A picker a command opened (/help, /resume, /tree, an extension's
+        // select) has no trigger text in the composer: everything typed
+        // from here is its filter.
         if let Some(menu) = self
             .menu
             .as_mut()
-            .filter(|menu| menu.kind == MenuKind::Commands && menu.filter_without_trigger)
+            .filter(|menu| menu.filter_without_trigger)
         {
-            menu.set_query(text.strip_prefix('/').unwrap_or(&text));
+            let query = if menu.kind == MenuKind::Commands {
+                text.strip_prefix('/').unwrap_or(&text)
+            } else {
+                text.as_str()
+            };
+            menu.set_query(query);
             return;
         }
         // Slash picker: leading '/', no space yet.
@@ -356,6 +486,27 @@ impl App {
                 }
             }
             return;
+        }
+        // Argument picker: `/name …` where the extension completes
+        // arguments. Every change re-asks; the answer lands through
+        // `AppJob::Completions` and is dropped if the text moved on.
+        if let Some((name, prefix)) = self.completion_prefix(&text) {
+            let already = self
+                .menu
+                .as_ref()
+                .is_some_and(|m| m.kind == MenuKind::Arguments && m.title == format!("/{name}"));
+            if !already {
+                self.menu = None;
+            }
+            self.request_completions(name, prefix);
+            return;
+        }
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Arguments)
+        {
+            self.menu = None;
         }
         // File picker: the last token starts with '@'.
         if let Some(token) = text
@@ -396,12 +547,37 @@ impl App {
     pub(super) fn select_menu(&mut self) -> bool {
         let Some(menu) = &self.menu else { return false };
         let Some(item) = menu.current().cloned() else {
+            // Enter on a picker the filter emptied closes it; an
+            // extension's picker owes its owner an answer.
+            if menu.kind == MenuKind::Extension {
+                self.cancel_ui_prompt();
+            }
             self.menu = None;
             return true;
         };
         let kind = menu.kind;
+        // Whatever was typed to filter a command-opened picker was the
+        // filter, not a draft.
+        if menu.filter_without_trigger && kind != MenuKind::Commands {
+            self.editor.set_text("");
+        }
         self.menu = None;
         match kind {
+            MenuKind::Commands if self.command_takes_arguments(&item.value) => {
+                // A command that takes arguments is started, not run: the
+                // composer holds `/name ` for the user to complete.
+                self.editor.set_text(&format!("{} ", item.value));
+                self.sync_menu();
+            }
+            MenuKind::Arguments => {
+                // Replace the typed prefix with the chosen value, keeping
+                // earlier words and leaving a space for the next.
+                let text = self.editor.text();
+                let cut = text.rfind(' ').map(|at| at + 1).unwrap_or(text.len());
+                self.editor
+                    .set_text(&format!("{}{} ", &text[..cut], item.value));
+                self.sync_menu();
+            }
             MenuKind::Commands => {
                 // The picker consumed the draft line; any attachments were
                 // tied to it and go with it.
@@ -465,11 +641,16 @@ impl App {
                     self.notice(format!("model set to {}", model::slug(&found)));
                     self.agent.model = found;
                     self.refresh_status_cache();
+                    self.emit(
+                        "model_change",
+                        serde_json::json!({"model": self.agent.model_slug()}),
+                    );
                 }
             }
             MenuKind::Tree => {
                 self.rewind_to_node(&item.value);
             }
+            MenuKind::Extension => self.answer_ui_select(&item),
         }
         true
     }

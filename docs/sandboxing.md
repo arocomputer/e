@@ -19,6 +19,21 @@ for how older session files are handled.
 lives, SHA-pinned CI actions), not the permissions of a running session. A
 clean `guard.sh` says nothing about what a live `e` process can reach.
 
+The rest of the extension surface (`docs/extensions.md`: events, the
+`before_turn` and `tool_result` hooks, `ui.*` and `session.*` requests) is
+the same posture. An extension can narrow the toolset (`session.tools`),
+append to the system prompt, redact tool output, and ask the user things —
+none of which contains it. It cannot emit terminal bytes, rewrite the
+provider request, or replace the system prompt, and every request it makes
+is bounded and answered; that is what the boundary protects, and it is
+e's own integrity, not the machine's.
+
+Packages (`e install`) widen this, not narrow it: a package's extensions
+launch as your user like any other, and its skills and prompts steer the
+model. Installing is cloning with your own `git`; nothing runs at install
+time, everything runs at the next launch. Read a package before installing
+it and pin the ref you read (`@v1`).
+
 ## What e gives you: the `tool_call` hook
 
 Extensions can gate individual tool calls — see

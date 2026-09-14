@@ -102,9 +102,10 @@ fn rpc_tools_field_restricts_the_advertised_tools() {
                 .collect()
         })
         .unwrap_or_default();
+    // `read_result` always rides along: a narrowed set can still truncate.
     assert_eq!(
         names,
-        vec!["read", "grep"],
+        vec!["read", "grep", "read_result"],
         "tools not restricted to the allowlist"
     );
 }

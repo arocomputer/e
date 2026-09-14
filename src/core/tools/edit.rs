@@ -76,9 +76,13 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     if normalized {
         updated = updated.replace('\n', "\r\n");
     }
+    let change = state.snapshot_change(&full, format!("edit {path}"));
     match super::staged_write(&full, updated.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);
+            if let Some(change) = change {
+                state.keep_change(change);
+            }
             let delta = updated.lines().count() as isize - text.lines().count() as isize;
             let additions = new.lines().count();
             let deletions = old.lines().count();

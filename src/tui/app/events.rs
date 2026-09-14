@@ -19,7 +19,12 @@ impl App {
                 self.compacting = true;
                 self.end_thinking_burst();
                 self.end_assistant_burst();
-                self.notice("compacting…".into());
+                // Mid-turn the activity row says so instead of "Thinking";
+                // idle (a /compact between turns) the notice is the record.
+                match &mut self.active {
+                    Some(s) => s.turn.phase = TurnPhase::Compacting,
+                    None => self.notice("compacting…".into()),
+                }
             }
             SessionEvent::Compacted {
                 summary,
@@ -29,6 +34,11 @@ impl App {
             } => {
                 self.compacting = false;
                 self.context_tokens = context_tokens;
+                if let Some(s) = &mut self.active {
+                    if s.turn.phase == TurnPhase::Compacting {
+                        s.turn.phase = TurnPhase::Waiting;
+                    }
+                }
                 if let (Some(usage), Some(active), Some(pricing)) =
                     (response.usage, self.active.as_mut(), pricing.as_ref())
                 {
@@ -154,6 +164,9 @@ impl App {
                         }
                     }
                 }
+            }
+            SessionEvent::Instructions { path } => {
+                self.notice(format!("loaded instructions from {path}"));
             }
             SessionEvent::Named(name) => {
                 self.agent.set_session_name(name.clone());

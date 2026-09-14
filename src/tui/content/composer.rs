@@ -256,6 +256,13 @@ impl Editor {
         self.text.is_empty()
     }
 
+    /// Seed recall with earlier sessions' prompts, oldest first; the
+    /// in-session entries follow as they are submitted.
+    pub fn seed_history(&mut self, entries: Vec<String>) {
+        self.history = entries;
+        self.history_pos = None;
+    }
+
     pub fn push_history(&mut self, entry: String) {
         if !entry.trim().is_empty() {
             self.history.push(entry);
