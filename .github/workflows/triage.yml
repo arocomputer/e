@@ -11,11 +11,11 @@ permissions:
 
 jobs:
   paths:
-    name: Label changed areas
+    name: Triage / Labels
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Apply maintained path labels
+      - name: Label
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
