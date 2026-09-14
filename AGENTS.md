@@ -117,7 +117,8 @@ surface? Route it through `panel.rs` so it can't diverge.
   per dialect, even when the decision is "no change here". Persisted and
   user-facing contracts (CLI, sessions, configuration, the extension protocol)
   follow `docs/compatibility.md`: fixtures under `tests/fixtures/` are release
-  artifacts, so a contract change adds or updates one in the same PR.
+  artifacts, so a contract change adds or updates one in the same PR, and
+  labels it `breaking` — the one label no path can apply for you.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - `~/.e/` is the only home e reads. Never reach into another tool's directory.
@@ -156,8 +157,10 @@ surface? Route it through `panel.rs` so it can't diverge.
   `core`, `tui`, `sdk`, `infra`, `docs` — or omitted when the change spans
   them. The title becomes the squash commit on `main`, so write it as the
   one line someone reads in `git log`.
-- Body: the problem in a sentence or two, then how you fixed it. End with
-  the model and harness that did the work.
+- Body: the problem in a sentence or two, then how you fixed it. Never
+  attribute work to AI: no `Co-authored-by`, `Assisted-by`, or similar
+  trailer, no model or harness line, no agent self-mention. The AI/LLM
+  rules live in CONTRIBUTING.md.
 - Rendering changes carry a captured frame (`scripts/ptycap.py`), not a
   description of bytes.
 - One concern per PR. If the description says "also", split it. Unrelated
