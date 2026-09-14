@@ -22,7 +22,7 @@ fn export_renders_the_branch_and_escapes_everything() {
         ChatMessage::tool_result("c1", "1\tfn main() {}\n<script>alert(1)</script>"),
         steer,
         ChatMessage::assistant(
-            "Done: **fixed** `main`.\n\n```rust\nfn main() {}\n```",
+            "Done: **fixed** `main`.\n\n```rust\nfn main() {}\n```\n\n<script>alert(2)</script> and <b>inline</b>",
             Vec::new(),
         ),
     ];
@@ -34,9 +34,10 @@ fn export_renders_the_branch_and_escapes_everything() {
     assert!(page.contains("<pre><code class=\"language-rust\">fn main() {}"));
     assert!(page.contains("<summary>read {&quot;path&quot;:&quot;&lt;x&gt;&quot;}</summary>"));
     assert!(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert!(page.contains("&lt;b&gt;inline&lt;/b&gt;"));
     assert!(
-        !page.contains("<script>"),
-        "nothing from the session executes"
+        !page.contains("<script>") && !page.contains("<b>"),
+        "nothing from the session executes: raw HTML in a reply is text"
     );
     assert!(
         !page.contains("hidden steering echo"),

@@ -291,9 +291,12 @@ fn parse_git(rest: &str, spec: &str) -> Result<Source, String> {
     } else {
         host
     };
-    if !host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    // The host becomes the first directory under the managed root, so it
+    // must be a plain name: dots inside are fine, a leading one is not.
+    if host.starts_with('.')
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
     {
         return Err(format!("`{host}` is not a host name"));
     }
@@ -327,7 +330,7 @@ pub struct Package {
 
 pub enum Status {
     /// On disk; per-kind resource counts in [`KINDS`] order.
-    Installed { root: PathBuf, counts: [usize; 4] },
+    Installed { counts: [usize; 4] },
     /// Listed in settings, absent on disk — `e install` restores it.
     Missing,
     /// The settings entry does not parse.
@@ -342,7 +345,9 @@ pub fn settings_entries() -> Vec<String> {
 
 /// A trusted repository's own list: `<cwd>/.e/packages`, one source per
 /// line, `#` comments. Shared by the team through the repository; installs
-/// land in the user's managed roots like any other package.
+/// land in the user's managed roots like any other package. Only git and
+/// release sources are honoured: a local directory would run in place, and
+/// trusting a checkout must not be enough to execute code it carries.
 pub fn project_entries(cwd: &Path) -> Vec<String> {
     if !crate::core::config::trust::trusted(cwd) {
         return Vec::new();
@@ -353,6 +358,7 @@ pub fn project_entries(cwd: &Path) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| !matches!(Source::parse(line), Ok(Source::Local(_))))
         .map(str::to_string)
         .collect()
 }
@@ -401,7 +407,7 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
             ));
             let _ = std::fs::remove_dir_all(&dir);
             git(
-                None,
+                &std::env::temp_dir(),
                 &["clone", "--quiet", "--", url, &dir.to_string_lossy()],
             )?;
             if let Some(rev) = rev {
@@ -467,7 +473,6 @@ pub fn list() -> Vec<Package> {
                     if root.is_dir() {
                         Status::Installed {
                             counts: counts(&root),
-                            root,
                         }
                     } else {
                         Status::Missing
@@ -700,11 +705,10 @@ fn sync(source: &Source) -> Result<(), String> {
         return Err(format!("refusing to write outside {}", managed.display()));
     }
     if !root.is_dir() {
-        if let Some(parent) = root.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
+        let parent = root.parent().unwrap_or(&managed);
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         let result = git(
-            None,
+            parent,
             &["clone", "--quiet", "--", url, &root.to_string_lossy()],
         )
         .and_then(|_| match rev {
@@ -717,15 +721,15 @@ fn sync(source: &Source) -> Result<(), String> {
         }
         return Ok(());
     }
-    git(Some(&root), &["fetch", "--quiet", "--tags", "origin"])?;
+    git(&root, &["fetch", "--quiet", "--tags", "origin"])?;
     match rev {
         Some(rev) => checkout(&root, rev),
         None => {
             // A clone that was pinned earlier sits detached; return to the
             // remote's default branch before fast-forwarding.
-            if git(Some(&root), &["symbolic-ref", "--quiet", "HEAD"]).is_err() {
+            if git(&root, &["symbolic-ref", "--quiet", "HEAD"]).is_err() {
                 let head = git(
-                    Some(&root),
+                    &root,
                     &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
                 )?;
                 let branch = head
@@ -735,9 +739,9 @@ fn sync(source: &Source) -> Result<(), String> {
                     .to_string();
                 // A branch name is a ref, not a pathspec, so no `--` here;
                 // git itself refuses to create names that start with `-`.
-                git(Some(&root), &["checkout", "--quiet", &branch])?;
+                git(&root, &["checkout", "--quiet", &branch])?;
             }
-            git(Some(&root), &["pull", "--quiet", "--ff-only"]).map(|_| ())
+            git(&root, &["pull", "--quiet", "--ff-only"]).map(|_| ())
         }
     }
 }
@@ -746,24 +750,21 @@ fn sync(source: &Source) -> Result<(), String> {
 /// tracks the fetched tip, not a stale local branch), then the tag or commit.
 fn checkout(root: &Path, rev: &str) -> Result<(), String> {
     let remote = format!("origin/{rev}");
-    if git(
-        Some(root),
-        &["checkout", "--quiet", "--detach", &remote, "--"],
-    )
-    .is_ok()
-    {
+    if git(root, &["checkout", "--quiet", "--detach", &remote, "--"]).is_ok() {
         return Ok(());
     }
-    git(Some(root), &["checkout", "--quiet", "--detach", rev, "--"]).map(|_| ())
+    git(root, &["checkout", "--quiet", "--detach", rev, "--"]).map(|_| ())
 }
 
-/// Run git, returning stdout; a failure carries git's own stderr.
-fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("git");
-    if let Some(cwd) = cwd {
-        command.current_dir(cwd);
-    }
-    let output = command
+/// Run git in `cwd`, returning stdout; a failure carries git's own stderr.
+/// Every call names its directory so no command inherits the process cwd —
+/// a checkout's own `.git/config` (an `insteadOf` rewrite, say) must not
+/// shape a clone e performs. Git never prompts: a source that needs
+/// credentials fails instead of hanging the terminal.
+fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .args(args)
         .output()
         .map_err(|e| format!("could not run git: {e}"))?;
@@ -843,6 +844,8 @@ mod tests {
                 .join("intuitums/e-diff")
         );
         assert!(Source::parse("git:github.com/../x").is_err());
+        assert!(Source::parse("git:../intuitums/e").is_err());
+        assert!(Source::parse("git:.hidden/intuitums/e").is_err());
         assert!(Source::parse("git:github.com/intuitums/e@-bad").is_err());
         assert!(Source::parse("--upload-pack=x").is_err());
         assert!(Source::parse("git:github.com").is_err());

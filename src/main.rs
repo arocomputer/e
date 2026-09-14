@@ -66,6 +66,13 @@ e -v, --version"
             println!("  /{name:<17} {description}");
         }
     }
+    let shortcuts = host.shortcuts();
+    if !shortcuts.is_empty() {
+        println!("\nextension shortcuts:");
+        for (chord, description) in shortcuts {
+            println!("  {chord:<18} {description}");
+        }
+    }
 }
 
 fn auth_status_requested(args: &[String]) -> Result<bool, &'static str> {
@@ -267,12 +274,11 @@ async fn main() -> std::io::Result<()> {
     // so their extensions launch like installed ones. A bad source is a
     // usage error, not a silent omission.
     if !diagnostic_requested {
-        if let Ok(early) = cli::parse(args.clone(), &[]) {
-            for spec in &early.packages {
-                if let Err(message) = e::core::resources::packages::use_once(spec).await {
-                    eprintln!("--package {spec}: {message}");
-                    std::process::exit(2);
-                }
+        for spec in cli::flag_values(&args, &["--package", "-P"]) {
+            if let Err(message) = e::core::resources::packages::use_once(&spec).await {
+                eprintln!("--package {spec}: {message}");
+                e::core::resources::packages::forget_once();
+                std::process::exit(2);
             }
         }
     }
@@ -379,6 +385,7 @@ async fn main() -> std::io::Result<()> {
                 eprintln!("{message}");
             }
             host.shutdown().await;
+            e::core::resources::packages::forget_once();
             std::process::exit(1);
         }
     }

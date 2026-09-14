@@ -216,7 +216,28 @@ pub fn extensions_disabled(args: &[String]) -> bool {
 pub fn has_flag(args: &[String], names: &[&str]) -> bool {
     args.iter()
         .take_while(|arg| arg.as_str() != "--")
-        .any(|arg| names.contains(&arg.as_str()))
+        .any(|arg| names.contains(&arg.split_once('=').map_or(arg.as_str(), |(name, _)| name)))
+}
+
+/// Every value given to one of `names` (`-P x`, `--package=x`), before any
+/// `--`. A direct scan that needs no full parse — the package flags must be
+/// read before extensions start, and a full parse cannot know their flags
+/// yet.
+pub fn flag_values(args: &[String], names: &[&str]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut args = args.iter().take_while(|arg| arg.as_str() != "--");
+    while let Some(arg) = args.next() {
+        match arg.split_once('=') {
+            Some((name, value)) if names.contains(&name) => values.push(value.to_string()),
+            None if names.contains(&arg.as_str()) => {
+                if let Some(value) = args.next() {
+                    values.push(value.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    values
 }
 
 fn take_value(
@@ -385,6 +406,17 @@ mod tests {
         assert!(!extensions_disabled(&args(&["--", "--ne"])));
         assert!(!has_flag(&args(&["--", "--version"]), &["--version", "-v"]));
         assert!(!parsed(&["hello"]).delimited);
+    }
+
+    #[test]
+    fn package_flags_are_read_by_a_scan_that_ignores_unknown_flags() {
+        let args: Vec<String> = ["-P", "./a", "--package=./b", "--verbose", "--", "-P", "./c"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse(args.clone(), &[]).is_err(), "--verbose is unknown");
+        assert_eq!(flag_values(&args, &["--package", "-P"]), vec!["./a", "./b"]);
+        assert!(has_flag(&["--print=1".to_string()], &["--print", "-p"]));
     }
 
     #[test]

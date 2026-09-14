@@ -856,6 +856,10 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                         if let Some(h) = &host {
                             // Redaction and trimming happen before the
                             // result is shown, stored, or sent anywhere.
+                            // The hook sees `content` only, so a rewrite
+                            // also retires the richer `display` text: what
+                            // the viewer shows must never say more than
+                            // what the hook let through.
                             if h.has_hook("tool_result") {
                                 if let Some(content) = h
                                     .hook_tool_result(
@@ -865,6 +869,9 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                                     )
                                     .await
                                 {
+                                    if content != output.content {
+                                        output.display = None;
+                                    }
                                     output.content = content;
                                 }
                             }

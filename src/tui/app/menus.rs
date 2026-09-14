@@ -547,6 +547,11 @@ impl App {
     pub(super) fn select_menu(&mut self) -> bool {
         let Some(menu) = &self.menu else { return false };
         let Some(item) = menu.current().cloned() else {
+            // Enter on a picker the filter emptied closes it; an
+            // extension's picker owes its owner an answer.
+            if menu.kind == MenuKind::Extension {
+                self.cancel_ui_prompt();
+            }
             self.menu = None;
             return true;
         };

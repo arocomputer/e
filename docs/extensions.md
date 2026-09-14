@@ -179,7 +179,8 @@ prompt that started it.
 **hook.tool_result** → `{"content":"what the model should read instead"}`
 or `{}` to keep it. Runs after every tool, before the result is shown,
 stored, or sent — redaction and trimming live here. Extensions see each
-other's rewrites in declaration order.
+other's rewrites in declaration order. A rewrite also drops the tool's
+richer `display` text, so the viewer shows exactly what you let through.
 
 **hook.compact_summary** → `{"summary":"…"}` or `{}`. The generated summary
 is about to replace the older conversation; this is the last word on it.
@@ -282,7 +283,9 @@ session.send      {content, internal?, run?, when?} → {}  internal: model sees
                                                          for visible messages, false for internal;
                                                          when: "next_turn" holds an internal message
                                                          until the user's next prompt and sends it
-                                                         just ahead of it
+                                                         just ahead of it. While a turn runs only
+                                                         run: true (a steer) or when: "next_turn"
+                                                         is accepted; run: false is an error then
 session.info      {}                          → {path, id, name, cwd, model, effort, running,
                                                   tools, context_tokens, context_window}
 session.name      {name}                      → {}
@@ -311,9 +314,11 @@ like a command. Chords need `ctrl` or `alt`; bare keys and shift-only
 chords are how text gets typed and are refused at the manifest. e keeps
 `ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`, `ctrl+j`, `ctrl+l`, `ctrl+m`,
 `ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+s`, `ctrl+v`, `ctrl+shift+v`,
-`ctrl+x`, and `ctrl+z`. A chord the composer binds
-(`ctrl+k`, say — see `docs/keybindings.md`) goes to the extension while it
-is running; first declaration wins between extensions, with a notice.
+`ctrl+x`, and `ctrl+z`. A chord the composer binds (`ctrl+k`, say — see
+`docs/keybindings.md`) stays the composer's: a shortcut fires only when the
+key would otherwise do nothing, so a user frees a chord for your extension
+by unbinding it in `keybindings.json`. First declaration wins between
+extensions, with a notice.
 
 ## Rules of the road
 

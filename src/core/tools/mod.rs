@@ -299,9 +299,17 @@ pub fn restrict_to(schemas: Vec<Value>, allowed: Option<&[String]>) -> Vec<Value
         .filter(|schema| {
             schema["function"]["name"]
                 .as_str()
-                .is_some_and(|name| allowed.iter().any(|a| a == name))
+                .is_some_and(|name| always_available(name) || allowed.iter().any(|a| a == name))
         })
         .collect()
+}
+
+/// Tools no narrowing removes. `read_result` only pages through output the
+/// model already received truncated; without it a narrowed session (an
+/// extension's `session.tools`, an rpc request's allowlist) would offer a
+/// continuation it cannot follow.
+pub fn always_available(name: &str) -> bool {
+    name == "read_result"
 }
 
 /// Labels and category used to project one tool through its lifecycle.
@@ -1052,7 +1060,8 @@ mod tests {
             .into_iter()
             .filter_map(|s| s["function"]["name"].as_str().map(str::to_string))
             .collect();
-        assert_eq!(names, vec!["read", "grep"]);
+        // The pager rides along: a narrowed set can still truncate.
+        assert_eq!(names, vec!["read", "grep", "read_result"]);
         // None leaves the set whole.
         assert_eq!(restrict_to(schemas(), None).len(), schemas().len());
         assert!(is_builtin("read"));

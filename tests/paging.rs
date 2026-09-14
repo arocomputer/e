@@ -124,3 +124,26 @@ fn capped_results_keep_the_whole_and_the_store_evicts_the_oldest() {
     assert!(runtime.result(33).is_none());
     assert!(runtime.result(34).is_some());
 }
+
+#[test]
+fn read_result_survives_every_tool_narrowing() {
+    // A narrowed toolset (an extension's session.tools, an rpc allowlist)
+    // still advertises the pager, or the truncation notice would point at a
+    // tool the model cannot call.
+    let names = |schemas: Vec<serde_json::Value>| -> Vec<String> {
+        schemas
+            .iter()
+            .filter_map(|s| s["function"]["name"].as_str().map(str::to_string))
+            .collect()
+    };
+    let narrowed = names(e::core::tools::restrict_to(
+        e::core::tools::schemas(),
+        Some(&["read".to_string()]),
+    ));
+    assert_eq!(
+        narrowed,
+        vec!["read".to_string(), "read_result".to_string()]
+    );
+    assert!(e::core::tools::always_available("read_result"));
+    assert!(!e::core::tools::always_available("bash"));
+}

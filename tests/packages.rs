@@ -429,13 +429,15 @@ fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
         "untrusted: the list is ignored"
     );
     e::core::config::trust::set(&ws, true).unwrap();
+    // The local directory line is not honoured: trust must not run code in
+    // place. The git source is.
     let listed = packages::configured();
-    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert_eq!(listed, vec![repo.source(Some("v1"))]);
     assert_eq!(packages::missing(), vec![repo.source(Some("v1"))]);
     // `e install` installs the project's packages into the user's roots.
     let results = block(packages::install_all());
     assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
-    assert_eq!(packages::roots().len(), 2);
+    assert_eq!(packages::roots().len(), 1);
     // Settings stay the user's: nothing from the project list was written.
     assert!(settings_packages(&home).is_empty());
 
@@ -447,10 +449,10 @@ fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
     assert_eq!(root, extra.canonicalize().unwrap());
     let cloned = block(packages::use_once(&repo.source(None))).unwrap();
     assert!(cloned.join("skills/hello/SKILL.md").is_file());
-    assert_eq!(packages::roots().len(), 4);
+    assert_eq!(packages::roots().len(), 3);
     packages::forget_once();
     assert!(!cloned.exists(), "the temporary clone is gone");
     assert!(extra.is_dir(), "the local directory is not ours to delete");
-    assert_eq!(packages::roots().len(), 2);
+    assert_eq!(packages::roots().len(), 1);
     std::env::set_current_dir(previous).unwrap();
 }

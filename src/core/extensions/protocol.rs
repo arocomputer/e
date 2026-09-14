@@ -238,10 +238,11 @@ impl FlagDecl {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
-    #[default]
-    Text,
     Markdown,
     Diff,
+    #[default]
+    #[serde(other)]
+    Text,
 }
 
 /// A block an extension shows: a command's `show`, a `ui.show` request, or
@@ -451,6 +452,16 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unknown_format_reads_as_text_instead_of_failing_the_result() {
+        let result: ToolResult =
+            serde_json::from_str(r#"{"content":"x","format":"sixel"}"#).unwrap();
+        assert_eq!(result.format, Format::Text);
+        let result: ToolResult =
+            serde_json::from_str(r#"{"content":"x","format":"diff"}"#).unwrap();
+        assert_eq!(result.format, Format::Diff);
+    }
 
     #[test]
     fn flag_decl_keeps_the_declared_default() {

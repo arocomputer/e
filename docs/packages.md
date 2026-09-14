@@ -47,7 +47,10 @@ Two more ways a package reaches a session:
   comments — lists packages the team shares. They install into your own
   managed roots on `e install`, show in `e packages`, and are reported at
   startup when missing, exactly like your settings' entries; they are never
-  written into your settings.
+  written into your settings. Only git and release sources count here: a
+  local directory line is ignored, because trusting a checkout must not be
+  enough to run code it carries in place. Install one yourself with
+  `e install ./dir` if you mean it.
 
 Settings are the source of truth, not the directory:
 

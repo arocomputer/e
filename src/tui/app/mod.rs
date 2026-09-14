@@ -1114,6 +1114,10 @@ impl App {
             self.agent.interrupt();
         }
         self.cancel_login();
+        // An extension's modal is answered "cancelled", never left waiting
+        // behind a surface that is gone.
+        self.cancel_ui_prompt();
+        self.close_ext_panel(true);
         self.auth = None;
         self.trust = None;
         self.queue_review = None;
@@ -3153,20 +3157,6 @@ async fn run_scoped(
                                 Ok(None) => {}
                                 Err(error) => app.notice(format!("could not save reasoning effort: {error}")),
                             }
-                        } else if let Some(chord) = extui::chord_of(&k)
-                            .filter(|chord| app.host.has_shortcut(chord))
-                            .filter(|_| !app.ui_input_open() && app.pending_key.is_none())
-                        {
-                            // A declared extension shortcut, answered like
-                            // a command. Only chords e itself left unbound
-                            // reach this branch.
-                            let host = app.host.clone();
-                            let results = app.results.clone();
-                            let epoch = app.session_epoch;
-                            crate::core::config::home::spawn(async move {
-                                let result = host.run_shortcut(&chord).await;
-                                let _ = results.send(AppJob::Command { result, epoch }).await;
-                            });
                         } else if !ctrl && app.queue_review_key(k.code) {
                             // Consumed by the queued-prompt review.
                         } else if let Some(key) = key_of(&k, &app.keymap) {
@@ -3174,6 +3164,23 @@ async fn run_scoped(
                                 app.submit_composer(text);
                             }
                             app.sync_menu();
+                        } else if let Some(chord) = extui::chord_of(&k)
+                            .filter(|chord| app.host.has_shortcut(chord))
+                            .filter(|_| !app.ui_input_open() && app.pending_key.is_none())
+                        {
+                            // A declared extension shortcut, answered like
+                            // a command. Only a chord neither e nor the
+                            // composer (built in, or the user's
+                            // keybindings.json) took reaches this branch —
+                            // so unbinding a chord there frees it for an
+                            // extension.
+                            let host = app.host.clone();
+                            let results = app.results.clone();
+                            let epoch = app.session_epoch;
+                            crate::core::config::home::spawn(async move {
+                                let result = host.run_shortcut(&chord).await;
+                                let _ = results.send(AppJob::Command { result, epoch }).await;
+                            });
                         }
                     }
                     _ => {}

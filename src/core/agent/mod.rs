@@ -321,6 +321,15 @@ async fn compact_log(
         result = compact::summarize(log.model.clone(), &older, session_id, focus.as_deref()) => result?,
         _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
     };
+    // Extensions get the last word on the summary, not the history: the
+    // hook is bounded and fails open, so a silent one changes nothing.
+    let mut summary = summary;
+    if let Some(h) = host.filter(|h| h.has_hook("compact_summary")) {
+        if let Some(text) = h.hook_compact_summary(&summary.text).await {
+            summary.text = text;
+        }
+    }
+    // Judged after the hook: the sections that matter are the stored ones.
     let missing = compact::missing_sections(&summary.text);
     if !missing.is_empty() {
         let _ = log
@@ -330,14 +339,6 @@ async fn compact_log(
                 missing.join(", ")
             )))
             .await;
-    }
-    // Extensions get the last word on the summary, not the history: the
-    // hook is bounded and fails open, so a silent one changes nothing.
-    let mut summary = summary;
-    if let Some(h) = host.filter(|h| h.has_hook("compact_summary")) {
-        if let Some(text) = h.hook_compact_summary(&summary.text).await {
-            summary.text = text;
-        }
     }
     let mut projected = vec![ChatMessage::user(compact::seed(&summary.text))];
     projected.extend(kept.iter().cloned());
@@ -1082,6 +1083,12 @@ impl Agent {
             session.set_head(head);
         }
         *history_guard = messages;
+        // A nested AGENTS.md loaded past the new head is gone from the
+        // history; forgetting it lets the next touch load it again.
+        self.instructions_loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Name this session: applies immediately when a log exists, otherwise
@@ -1131,6 +1138,7 @@ impl Agent {
             .unwrap_or_else(|e| e.into_inner())
             .items
             .iter()
+            .filter(|(_, message)| !message.is_internal())
             .map(|(id, message)| (*id, message.content.clone()))
             .collect()
     }
@@ -1446,7 +1454,7 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
         events,
     } = context;
     if let Some(active) = &active_tools {
-        if !active.iter().any(|a| a == name) {
+        if !active.iter().any(|a| a == name) && !tools::always_available(name) {
             return tools::ToolOutput {
                 content: format!(
                     "tool {name} is not active right now — an extension narrowed the toolset"
@@ -1476,7 +1484,7 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
     // Enforce the request's list at execution too. The advertised schemas are
     // not a security boundary because a provider can still emit any tool name.
     if let Some(allowed) = &allowed_tools {
-        if !allowed.iter().any(|a| a == name) {
+        if !allowed.iter().any(|a| a == name) && !tools::always_available(name) {
             return tools::ToolOutput {
                 content: format!("tool blocked by the request's tool allowlist: {name}"),
                 outcome: tools::ToolOutcome::Blocked,

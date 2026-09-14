@@ -554,6 +554,17 @@ impl App {
                     request.ok();
                     return;
                 }
+                if !run && self.agent.is_streaming() {
+                    // A turn is mid-flight: a commit now could land between
+                    // a tool call and its result, which every provider
+                    // rejects. Steering (run: true) queues correctly; so
+                    // does waiting for the next prompt.
+                    request.respond(Err(
+                        "a turn is running — steer with run: true, or use when: \"next_turn\""
+                            .into(),
+                    ));
+                    return;
+                }
                 if run && !internal {
                     // A visible message that starts (or steers) a turn is a
                     // prompt like any other.
@@ -664,14 +675,17 @@ impl App {
 /// Which session-lifecycle reason a frontend transition carries — pi's
 /// vocabulary, so extensions written against it port by renaming.
 pub(super) fn shutdown_then_start(app: &App, reason: &'static str) {
-    app.emit("session_shutdown", json!({"reason": reason}));
-    app.emit(
-        "session_start",
-        json!({
-            "reason": reason,
-            "path": app.agent.session_path().map(|p| p.display().to_string()),
-        }),
-    );
+    let host = app.host.clone();
+    let start = json!({
+        "reason": reason,
+        "path": app.agent.session_path().map(|p| p.display().to_string()),
+    });
+    // One task, two awaits: separate spawns could deliver them reordered.
+    crate::core::config::home::spawn(async move {
+        host.event("session_shutdown", json!({"reason": reason}))
+            .await;
+        host.event("session_start", start).await;
+    });
 }
 
 pub(super) type UiQueue = VecDeque<HostRequest>;

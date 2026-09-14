@@ -22,8 +22,14 @@ fn escape(text: &str) -> String {
     out
 }
 
+/// Assistant markdown as HTML. Raw HTML in the source is demoted to text so
+/// a model-written `<script>` renders as its characters, never runs.
 fn markdown(text: &str) -> String {
-    let parser = pulldown_cmark::Parser::new(text);
+    use pulldown_cmark::Event;
+    let parser = pulldown_cmark::Parser::new(text).map(|event| match event {
+        Event::Html(raw) | Event::InlineHtml(raw) => Event::Text(raw),
+        other => other,
+    });
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, parser);
     html

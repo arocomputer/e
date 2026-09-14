@@ -5,7 +5,6 @@
 //! anywhere.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use crate::core::providers::{catalog, Usage};
 
@@ -138,9 +137,4 @@ pub fn markdown(report: &Report, period_label: &str) -> String {
     ));
     out.push_str("\nCosts are estimates from the current catalog's prices; a model no longer listed shows —.");
     out
-}
-
-/// Whether `path` is a session log this report would read.
-pub fn is_session_log(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e == "jsonl")
 }

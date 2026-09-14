@@ -70,9 +70,10 @@ Fields:
 - `model` and `effort` override process defaults from `-m` / `--ef`.
 - `tool_mode` is `all` or `none`.
 - `tools` is a positive built-in allowlist. `null` is the full built-in and
-  extension set. A list advertises and executes only those built-ins, and an
-  unknown name makes the request fail. The system prompt gets a generic policy
-  suffix naming the allowed tools. `tool_mode: "none"` still takes precedence.
+  extension set. A list advertises and executes only those built-ins (plus
+  `read_result`, so a truncated output stays readable), and an unknown name
+  makes the request fail. The system prompt gets a generic policy suffix
+  naming the allowed tools. `tool_mode: "none"` still takes precedence.
 - `save` defaults to false.
 - `images` is a list of PNG, JPEG, GIF, or WebP paths, up to ten files,
   20 MiB each, and 40 MiB total. The selected model must declare image input

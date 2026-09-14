@@ -75,7 +75,7 @@ fn trim(path: &std::path::Path) {
         return;
     }
     let kept: Vec<&str> = text.lines().skip(lines - RECALL).collect();
-    let staged = path.with_extension("jsonl.tmp");
+    let staged = path.with_extension(format!("jsonl.{}.tmp", std::process::id()));
     let mut options = std::fs::OpenOptions::new();
     options.create(true).write(true).truncate(true);
     #[cfg(unix)]
