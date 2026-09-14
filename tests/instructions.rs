@@ -108,3 +108,32 @@ async fn an_untrusted_workspace_loads_nothing() {
     assert!(!requests[1].contains("Be gentle"));
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_attached_to_the_next_turn_precedes_the_prompt_once() {
+    let _lock = env_lock();
+    let (port, server) = serve_sse(&[REPLY, REPLY]);
+    let home = Home::new("next-turn");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let ws = workspace("next-turn");
+    std::env::set_current_dir(&ws).unwrap();
+    let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    agent.attach_to_next_turn("remember: the deploy target is staging".into());
+    agent.submit("what is the target?".into(), "sys".into());
+    run_turn(&mut agent, &mut rx).await;
+    agent.submit("and again".into(), "sys".into());
+    run_turn(&mut agent, &mut rx).await;
+    let history = agent.history_snapshot();
+    assert!(history[0].is_internal() && history[0].content.contains("staging"));
+    assert_eq!(history[1].content, "what is the target?");
+    let requests = server.join().unwrap();
+    let first = &requests[0];
+    assert!(first.find("staging").unwrap() < first.find("what is the target").unwrap());
+    assert_eq!(
+        requests[1].matches("staging").count(),
+        1,
+        "attached once, not per turn"
+    );
+    let _ = std::fs::remove_dir_all(&ws);
+}

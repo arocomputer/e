@@ -35,7 +35,16 @@ impl ToolMode {
 }
 
 /// Built-in flags that consume the following token when one is present.
-const VALUE_FLAGS: &[&str] = &["--model", "-m", "--effort", "--ef", "--image", "-i"];
+const VALUE_FLAGS: &[&str] = &[
+    "--model",
+    "-m",
+    "--effort",
+    "--ef",
+    "--image",
+    "-i",
+    "--package",
+    "-P",
+];
 
 /// Every built-in flag name, canonical and alias: suggestion candidates and
 /// the bool/value split for raw-argv scans.
@@ -57,6 +66,8 @@ const ALL_FLAGS: &[&str] = &[
     "--ef",
     "--image",
     "-i",
+    "--package",
+    "-P",
     "--continue",
     "-c",
     "--resume",
@@ -183,6 +194,9 @@ pub struct Options {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub images: Vec<String>,
+    /// `--package <source>`: packages loaded for this run only, never
+    /// recorded in settings (a git source is cloned into a temporary dir).
+    pub packages: Vec<String>,
     pub continue_session: bool,
     pub resume_session: bool,
     /// Accepted for compatibility; diagnostics are always local-only.
@@ -266,6 +280,10 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
             "--image" | "-i" => out
                 .images
                 .push(take_value(&args, &mut index, inline, "--image")?),
+            "--package" | "-P" => {
+                out.packages
+                    .push(take_value(&args, &mut index, inline, "--package")?)
+            }
             "--continue" | "-c" => out.continue_session = true,
             "--resume" | "-r" => out.resume_session = true,
             "--no-network" => out.no_network = true,
@@ -310,6 +328,14 @@ mod tests {
 
     fn parsed(values: &[&str]) -> Options {
         parse(args(values), &[]).unwrap()
+    }
+
+    #[test]
+    fn packages_for_one_run_are_collected_in_order() {
+        let options = parsed(&["--package", "./a", "-P", "git:h/u/r", "hi"]);
+        assert_eq!(options.packages, vec!["./a", "git:h/u/r"]);
+        assert_eq!(options.positional, vec!["hi"]);
+        assert!(parse(args(&["--package"]), &[]).is_err());
     }
 
     #[test]

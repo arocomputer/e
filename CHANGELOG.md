@@ -22,6 +22,15 @@
 
 ### New features
 
+- Extension commands can declare `arguments` (a hint shown in the `/`
+  picker; picking the command leaves `/name ` to finish) and
+  `completions` (typing `/name pre` asks the extension and offers its
+  answers in a picker). Prompt templates with an argument hint start the
+  same way.
+- `e --package <source>` (`-P`) loads a package for one run without
+  recording it; a trusted repository's `.e/packages` lists packages the
+  team shares. `session.send` takes `when: "next_turn"` to attach an
+  internal message to the user's next prompt.
 - Release packages: `e install release:<owner>/<repo>/<name>[@tag]` fetches
   a compiled extension published as `<name>-<target>.tar.gz` on a GitHub
   release, verifies it against the release's `checksums.txt`, and installs

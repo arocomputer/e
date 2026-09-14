@@ -36,6 +36,19 @@ Installing clones the repository under `~/.e/packages/<host>/<path>` and
 records the source in the `packages` list of `~/.e/settings.json`. Restart e
 or run `/reload` to pick it up.
 
+Two more ways a package reaches a session:
+
+- `e --package <source> …` (or `-P`) loads a package for this run only: a
+  directory in place, a git source into a temporary clone, a release asset
+  into a temporary directory. Nothing is recorded; clones are removed at
+  exit. Repeat the flag for several. This is how you try a package before
+  installing it, or run one from a checkout you are editing.
+- A trusted repository's `.e/packages` file — one source per line, `#`
+  comments — lists packages the team shares. They install into your own
+  managed roots on `e install`, show in `e packages`, and are reported at
+  startup when missing, exactly like your settings' entries; they are never
+  written into your settings.
+
 Settings are the source of truth, not the directory:
 
 - `e install` with no source clones every listed package that is missing

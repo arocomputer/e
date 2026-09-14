@@ -20,7 +20,7 @@ pub use host::{
     StartupAction, ToolProgress,
 };
 pub use protocol::{
-    parse_incoming, BeforeTurnResult, CommandResult, Format, HookVerdict, Incoming,
+    parse_incoming, BeforeTurnResult, CommandResult, Completion, Format, HookVerdict, Incoming,
     InjectedMessage, InputVerdict, Manifest, ShortcutDecl, Show, ToolLabel, ToolResult,
     CAPABILITIES, EVENTS, MAX_SHOW_BYTES, PROTOCOL_VERSION,
 };

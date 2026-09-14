@@ -49,6 +49,7 @@ e -v, --version"
 --model, -m <model>    select a model for this process\n  \
 --effort, --ef <level> select reasoning effort for this process\n  \
 --image, -i <path>     attach an image to the first prompt (repeatable)\n  \
+--package, -P <source> load a package for this run only (repeatable)\n  \
 --json, -j             machine output (doctor, providers, --print)"
     );
     let flags = host.flags();
@@ -261,6 +262,19 @@ async fn main() -> std::io::Result<()> {
     let headless = cli::leading_subcommand(&args) == Some("rpc");
     let (requests_tx, requests_rx) =
         tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
+    // `--package <source>` packages join this run before extensions start,
+    // so their extensions launch like installed ones. A bad source is a
+    // usage error, not a silent omission.
+    if !diagnostic_requested {
+        if let Ok(early) = cli::parse(args.clone(), &[]) {
+            for spec in &early.packages {
+                if let Err(message) = e::core::resources::packages::use_once(spec).await {
+                    eprintln!("--package {spec}: {message}");
+                    std::process::exit(2);
+                }
+            }
+        }
+    }
     let host = if cli::extensions_disabled(&args) || diagnostic_requested {
         e::core::extensions::ExtensionHost::empty()
     } else {
@@ -432,6 +446,7 @@ async fn main() -> std::io::Result<()> {
         let status = print_turn(host.clone(), &options, args).await;
         e::core::tools::kill_tracked_processes();
         host.shutdown().await;
+        e::core::resources::packages::forget_once();
         if status != 0 {
             std::process::exit(status);
         }
@@ -530,7 +545,7 @@ async fn main() -> std::io::Result<()> {
             std::process::exit(2);
         }
     };
-    app::run(
+    let outcome = app::run(
         app::RunOptions {
             initial,
             continue_session: options.continue_session,
@@ -544,7 +559,9 @@ async fn main() -> std::io::Result<()> {
         jobs_rx,
         (requests_tx, requests_rx),
     )
-    .await
+    .await;
+    e::core::resources::packages::forget_once();
+    outcome
 }
 
 fn resolve_model(options: &Options) -> Result<Model, String> {

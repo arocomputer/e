@@ -101,6 +101,13 @@ enum AppJob {
         result: crate::core::extensions::CommandResult,
         epoch: u64,
     },
+    /// Argument completions for `/command prefix` arrived; shown only if the
+    /// composer still says exactly that.
+    Completions {
+        command: String,
+        prefix: String,
+        items: Vec<crate::core::extensions::Completion>,
+    },
     /// A /reload finished: the restarted extension host.
     Reloaded(std::sync::Arc<crate::core::extensions::ExtensionHost>),
     /// The background updater installed a new version.
@@ -3190,6 +3197,9 @@ async fn run_scoped(
                     Some(AppJob::Command { result, epoch }) => {
                         app.deliver_command_result(result, epoch);
                     }
+                    Some(AppJob::Completions { command, prefix, items }) => {
+                        app.show_completions(&command, &prefix, items);
+                    }
                     Some(AppJob::InputVerdict { sequence, text, images, verdict }) => {
                         // A later hook may finish first; hold it until every
                         // earlier submission has a verdict, then apply the
@@ -4453,6 +4463,25 @@ mod tests {
         assert!(
             app.editor.is_empty(),
             "the filter does not linger as a draft"
+        );
+    }
+
+    #[test]
+    fn picking_an_argument_completion_replaces_the_typed_prefix() {
+        use crate::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+        let mut app = session_app();
+        app.editor.set_text("/deploy eu st");
+        app.menu = Some(Menu::new(
+            MenuKind::Arguments,
+            "/deploy",
+            HINT_USE,
+            vec![MenuItem::new("staging", "pre-prod", "staging")],
+        ));
+        assert!(app.select_menu());
+        assert_eq!(app.editor.text(), "/deploy eu staging ");
+        assert!(
+            app.menu.is_none(),
+            "an empty host offers no further completions"
         );
     }
 

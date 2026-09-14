@@ -330,9 +330,125 @@ pub enum Status {
     Invalid(String),
 }
 
-/// The configured sources, in settings order.
-pub fn configured() -> Vec<String> {
+/// The sources recorded in `settings.json`, in order — what `e install` and
+/// `e remove` edit.
+pub fn settings_entries() -> Vec<String> {
     settings::get_strings(SETTINGS_KEY).unwrap_or_default()
+}
+
+/// A trusted repository's own list: `<cwd>/.e/packages`, one source per
+/// line, `#` comments. Shared by the team through the repository; installs
+/// land in the user's managed roots like any other package.
+pub fn project_entries(cwd: &Path) -> Vec<String> {
+    if !crate::core::config::trust::trusted(cwd) {
+        return Vec::new();
+    }
+    let Ok(text) = std::fs::read_to_string(cwd.join(".e").join("packages")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every configured source: settings first, then the current directory's
+/// project list (entries already in settings are not repeated).
+pub fn configured() -> Vec<String> {
+    let mut entries = settings_entries();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    for entry in project_entries(&cwd) {
+        let same = |a: &str, b: &str| match (Source::parse(a), Source::parse(b)) {
+            (Ok(a), Ok(b)) => a.identity() == b.identity(),
+            _ => a == b,
+        };
+        if !entries.iter().any(|known| same(known, &entry)) {
+            entries.push(entry);
+        }
+    }
+    entries
+}
+
+/// Roots loaded for this process only (`--package`), kept beside the
+/// configured ones and forgotten at exit.
+fn once_roots() -> &'static std::sync::Mutex<Vec<PathBuf>> {
+    static ROOTS: std::sync::OnceLock<std::sync::Mutex<Vec<PathBuf>>> = std::sync::OnceLock::new();
+    ROOTS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Load a package for this run without recording it: a local directory is
+/// used in place, a git source is cloned into a temporary directory, a
+/// release asset is fetched into one. Returns the root.
+pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
+    let source = Source::parse(spec)?;
+    let root = match &source {
+        Source::Local(path) => {
+            if !path.is_dir() {
+                return Err(format!("{} is not a directory", path.display()));
+            }
+            path.clone()
+        }
+        Source::Git { url, rev, .. } => {
+            let dir = std::env::temp_dir().join(format!(
+                "e-package-{}-{}",
+                std::process::id(),
+                once_roots().lock().unwrap_or_else(|e| e.into_inner()).len()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            git(
+                None,
+                &["clone", "--quiet", "--", url, &dir.to_string_lossy()],
+            )?;
+            if let Some(rev) = rev {
+                checkout(&dir, rev)?;
+            }
+            dir
+        }
+        Source::Release {
+            owner,
+            repo,
+            name,
+            tag,
+            ..
+        } => {
+            let dir = std::env::temp_dir().join(format!(
+                "e-package-{}-{}",
+                std::process::id(),
+                once_roots().lock().unwrap_or_else(|e| e.into_inner()).len()
+            ));
+            let (base, api) = crate::core::update::github_release_urls(owner, repo);
+            let wanted = match tag {
+                Some(tag) => tag.clone(),
+                None => crate::core::update::latest_tag_from(&api)
+                    .await?
+                    .ok_or("the repository has no releases")?,
+            };
+            crate::core::update::install_release_package(&base, &wanted, name, &dir).await?;
+            dir
+        }
+    };
+    once_roots()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(root.clone());
+    Ok(root)
+}
+
+/// Remove the temporary clones `use_once` made. Local directories are
+/// untouched.
+pub fn forget_once() {
+    let roots = std::mem::take(&mut *once_roots().lock().unwrap_or_else(|e| e.into_inner()));
+    let prefix = format!("e-package-{}-", std::process::id());
+    for root in roots {
+        let temporary = root
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+            && root.starts_with(std::env::temp_dir());
+        if temporary {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
 }
 
 /// Every configured package with its on-disk status.
@@ -359,14 +475,25 @@ pub fn list() -> Vec<Package> {
         .collect()
 }
 
-/// The roots of every package present on disk, in settings order.
+/// The roots of every package present on disk, in settings order, then
+/// the project's, then this run's `--package` roots.
 pub fn roots() -> Vec<PathBuf> {
-    configured()
+    let mut roots: Vec<PathBuf> = configured()
         .iter()
         .filter_map(|spec| Source::parse(spec).ok())
         .map(|source| source.root())
         .filter(|root| root.is_dir())
-        .collect()
+        .collect();
+    for root in once_roots()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+    {
+        if !roots.contains(root) {
+            roots.push(root.clone());
+        }
+    }
+    roots
 }
 
 /// Each installed package's `<kind>/` directory, when it has one.
@@ -505,7 +632,7 @@ async fn install_one(spec: &str) -> Result<String, String> {
 pub fn remove(spec: &str) -> Result<PathBuf, String> {
     let source = Source::parse(spec)?;
     let identity = source.identity();
-    let mut entries = configured();
+    let mut entries = settings_entries();
     let before = entries.len();
     entries.retain(|entry| {
         Source::parse(entry)
@@ -540,7 +667,7 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
 /// `e install …@v2` moves a pin instead of duplicating it.
 fn record(source: &Source, spec: &str) -> std::io::Result<()> {
     let identity = source.identity();
-    let mut entries = configured();
+    let mut entries = settings_entries();
     entries.retain(|entry| {
         Source::parse(entry)
             .map(|s| s.identity() != identity)

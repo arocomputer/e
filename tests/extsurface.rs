@@ -65,7 +65,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*)
       printf '%s\n' "$line" | grep -o '"ui":[a-z]*' >> "$log"
-      printf '{"id":%s,"result":{"name":"surface","version":"2","events":["turn_start","tool_end"],"hooks":["before_turn","tool_result","compact_summary"],"tools":[{"name":"diff","description":"d","parameters":{"type":"object"},"label":{"category":"diff","running":"Diffing","completed":"Diffed","target":"path"}}],"shortcuts":[{"key":"Ctrl+Shift+G","description":"go"},{"key":"enter","description":"steal"}]}}\n' "$id"
+      printf '{"id":%s,"result":{"name":"surface","version":"2","events":["turn_start","tool_end"],"hooks":["before_turn","tool_result","compact_summary"],"tools":[{"name":"diff","description":"d","parameters":{"type":"object"},"label":{"category":"diff","running":"Diffing","completed":"Diffed","target":"path"}}],"commands":[{"name":"deploy","description":"ship it","arguments":"<env>","completions":true}],"shortcuts":[{"key":"Ctrl+Shift+G","description":"go"},{"key":"enter","description":"steal"}]}}\n' "$id"
       printf '{"id":"q1","method":"session.info","params":{}}\n'
       printf '{"id":"q2","method":"ui.select","params":{"title":"pick","options":["a","b"]}}\n' ;;
     *'"method":"hook.before_turn"'*)
@@ -77,6 +77,11 @@ while IFS= read -r line; do
       esac ;;
     *'"method":"hook.compact_summary"'*)
       printf '{"id":%s,"result":{"summary":"edited summary"}}\n' "$id" ;;
+    *'"method":"command.complete"'*)
+      case "$line" in
+        *'"prefix":"st"'*) printf '{"id":%s,"result":{"items":[{"value":"staging","description":"pre-prod"}]}}\n' "$id" ;;
+        *) printf '{"id":%s,"result":{"items":[{"value":"dev"},{"value":"staging"},{"value":"prod"}]}}\n' "$id" ;;
+      esac ;;
     *'"method":"shortcut"'*)
       printf '{"id":%s,"result":{"notice":"shortcut ran","show":{"title":"t","body":"b","format":"text"}}}\n' "$id" ;;
     *'"method":"event"'*)
@@ -222,5 +227,18 @@ async fn labels_and_shortcuts_are_declared_once_and_normalized() {
     let result = host.run_shortcut("ctrl+shift+g").await;
     assert_eq!(result.notice.as_deref(), Some("shortcut ran"));
     assert_eq!(result.show.unwrap().title, "t");
+
+    // Argument hints and completions ride the command declaration.
+    assert_eq!(host.command_hint("deploy").as_deref(), Some("<env>"));
+    assert!(host.has_completions("deploy") && !host.has_completions("other"));
+    let all = host.complete_command("deploy", "").await;
+    assert_eq!(
+        all.iter().map(|c| c.value.as_str()).collect::<Vec<_>>(),
+        ["dev", "staging", "prod"]
+    );
+    let some = host.complete_command("deploy", "st").await;
+    assert_eq!(some.len(), 1);
+    assert_eq!(some[0].description.as_deref(), Some("pre-prod"));
+    assert!(host.complete_command("other", "x").await.is_empty());
     host.shutdown().await;
 }

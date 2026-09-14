@@ -61,6 +61,9 @@ pub enum MenuKind {
     /// An extension's `ui.select` / `ui.confirm`: Enter answers with the
     /// row's value, Esc answers "cancelled".
     Extension,
+    /// Argument completions for the `/command` being typed: Enter puts the
+    /// row's value into the composer in place of the typed prefix.
+    Arguments,
 }
 
 pub struct Menu {

@@ -32,7 +32,14 @@ const ext = connect({
     name: "plan",
     version: "1.0",
     description: "plan mode: read-only tools, a planning prompt, a step panel",
-    commands: [{ name: "plan", description: "toggle plan mode (/plan pick · /plan show)" }],
+    commands: [
+      {
+        name: "plan",
+        description: "toggle plan mode",
+        arguments: "[pick|show]",
+        completions: true,
+      },
+    ],
     shortcuts: [{ key: "ctrl+alt+p", description: "toggle plan mode" }],
     hooks: ["before_turn"],
     events: ["session_start"],
@@ -58,6 +65,12 @@ const ext = connect({
   async shortcut() {
     await setPlanning(!planning);
     return {};
+  },
+  complete({ prefix }) {
+    const items = ["pick", "show"]
+      .filter((word) => word.startsWith(prefix))
+      .map((value) => ({ value, description: value === "pick" ? "choose the mode" : "the step panel" }));
+    return { items };
   },
   beforeTurn() {
     if (!planning) return {};

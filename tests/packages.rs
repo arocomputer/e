@@ -387,3 +387,53 @@ fn a_release_package_installs_its_executable_under_extensions() {
     assert!(Source::parse("release:intuitums/../e/tool").is_err());
     assert!(Source::parse("release:intuitums/e/tool@-x").is_err());
 }
+
+#[test]
+fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
+    let _lock = env_lock();
+    let home = Home::new("pkg-project");
+    let repo = Repo::new("project");
+    let ws = home.dir.join("ws");
+    std::fs::create_dir_all(ws.join(".e")).unwrap();
+    std::fs::write(
+        ws.join(".e/packages"),
+        format!(
+            "# team packages\n{}\n\n{}\n",
+            repo.source(Some("v1")),
+            repo.dir.display()
+        ),
+    )
+    .unwrap();
+    let previous = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&ws).unwrap();
+
+    assert!(
+        packages::configured().is_empty(),
+        "untrusted: the list is ignored"
+    );
+    e::core::config::trust::set(&ws, true).unwrap();
+    let listed = packages::configured();
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert_eq!(packages::missing(), vec![repo.source(Some("v1"))]);
+    // `e install` installs the project's packages into the user's roots.
+    let results = block(packages::install_all());
+    assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
+    assert_eq!(packages::roots().len(), 2);
+    // Settings stay the user's: nothing from the project list was written.
+    assert!(settings_packages(&home).is_empty());
+
+    // `--package`: a local directory joins the roots in place; a clone is
+    // temporary and removed by forget_once.
+    let extra = home.dir.join("extra");
+    std::fs::create_dir_all(extra.join("prompts")).unwrap();
+    let root = block(packages::use_once(&extra.to_string_lossy())).unwrap();
+    assert_eq!(root, extra);
+    let cloned = block(packages::use_once(&repo.source(None))).unwrap();
+    assert!(cloned.join("skills/hello/SKILL.md").is_file());
+    assert_eq!(packages::roots().len(), 4);
+    packages::forget_once();
+    assert!(!cloned.exists(), "the temporary clone is gone");
+    assert!(extra.is_dir(), "the local directory is not ours to delete");
+    assert_eq!(packages::roots().len(), 2);
+    std::env::set_current_dir(previous).unwrap();
+}

@@ -21,9 +21,9 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use super::protocol::{
-    self, BeforeTurnResult, CommandResult, CompactSummaryResult, HookVerdict, Incoming,
-    InjectedMessage, InputVerdict, Manifest, Relaunch, StartupResult, ToolLabel, ToolResult,
-    ToolResultPatch,
+    self, BeforeTurnResult, CommandResult, CompactSummaryResult, Completion, Completions,
+    HookVerdict, Incoming, InjectedMessage, InputVerdict, Manifest, Relaunch, StartupResult,
+    ToolLabel, ToolResult, ToolResultPatch,
 };
 use crate::core::config::home;
 
@@ -31,6 +31,8 @@ const INIT_TIMEOUT: Duration = Duration::from_secs(5);
 const HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+/// Argument completions race the user's typing; a slow answer is dropped.
+const COMPLETE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_EXTENSION_LINE_BYTES: usize = 1024 * 1024;
 /// How long to wait on a killed child before leaving it to tokio's orphan
 /// reaper — quitting must never hang on one.
@@ -694,6 +696,54 @@ impl ExtensionHost {
                     .map(|c| (c.name.clone(), c.description.clone()))
             })
             .collect()
+    }
+
+    /// The declared argument hint of an extension command, if any.
+    pub fn command_hint(&self, name: &str) -> Option<String> {
+        self.extensions
+            .iter()
+            .flat_map(|e| e.manifest.commands.iter())
+            .find(|c| c.name == name)
+            .and_then(|c| c.arguments.clone())
+    }
+
+    /// Whether an extension offers argument completions for `name`.
+    pub fn has_completions(&self, name: &str) -> bool {
+        self.extensions
+            .iter()
+            .flat_map(|e| e.manifest.commands.iter())
+            .any(|c| c.name == name && c.completions)
+    }
+
+    /// Ask the owning extension what could follow `/name prefix`. Empty on
+    /// any failure: completions are a convenience, never a gate.
+    pub async fn complete_command(&self, name: &str, prefix: &str) -> Vec<Completion> {
+        let Some(ext) = self.extensions.iter().find(|e| {
+            e.manifest
+                .commands
+                .iter()
+                .any(|c| c.name == name && c.completions)
+        }) else {
+            return Vec::new();
+        };
+        match self
+            .request(
+                ext,
+                "command.complete",
+                json!({"name": name, "prefix": prefix}),
+                COMPLETE_TIMEOUT,
+            )
+            .await
+        {
+            Ok(value) => serde_json::from_value::<Completions>(value)
+                .map(|c| c.items)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|c| !c.value.is_empty())
+                .take(50)
+                .collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// `(name, description)` of every extension flag, for `--help`/`/help`.

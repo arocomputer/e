@@ -28,6 +28,8 @@
  *   command({name, args})  — {"notice": …} | {"show": {…}} | {"prompt": …}
  *                            | {"session_name": …}
  *   shortcut({key})        — same result shape as a command
+ *   complete({name, prefix}) — {"items": [{value, label?, description?}]} for
+ *                            a command declared with "completions": true
  *   tool({name, arguments}, {update}) — {"content", "is_error"?,
  *                            "summary"?, "display"?, "format"?}; `update(chunk,
  *                            stream?)` streams stdout/stderr progress first
@@ -237,6 +239,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
       },
       command: handlers.command,
       shortcut: handlers.shortcut,
+      "command.complete": handlers.complete,
       tool_call: handlers.tool,
       "hook.tool_call": handlers.hookToolCall,
       "hook.input": handlers.hookInput,

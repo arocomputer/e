@@ -152,6 +152,14 @@ async tool({ arguments }, { update }) {
 }
 ```
 
+A command may declare `"arguments":"<env>"` — shown in the `/` picker, and
+picking the command then leaves `/name ` in the composer for the user to
+finish — and `"completions":true`, after which typing `/name pre` sends
+`{"id":…,"method":"command.complete","params":{"name":"name","prefix":"pre"}}`
+and the answer `{"items":[{"value":"prefix-match","label"?,"description"?}]}`
+opens a picker whose choice replaces the prefix. Completions have three
+seconds; a slow or empty answer shows nothing.
+
 **command** → `{"notice":"line for the transcript"}`, `{"show":{"title":
 "diff src/main.rs","body":"…","format":"diff"}}` (a block in the
 transcript — see `ui.show`), and/or `{"prompt":"text submitted as the
@@ -269,9 +277,12 @@ again. That is pi's custom component, declaratively: you own the state
 and the keys, e owns the frame.
 
 ```
-session.send      {content, internal?, run?}  → {}      internal: model sees it, transcript does not;
+session.send      {content, internal?, run?, when?} → {}  internal: model sees it, transcript does not;
                                                          run: start (or steer) a turn — default true
-                                                         for visible messages, false for internal
+                                                         for visible messages, false for internal;
+                                                         when: "next_turn" holds an internal message
+                                                         until the user's next prompt and sends it
+                                                         just ahead of it
 session.info      {}                          → {path, id, name, cwd, model, effort, running,
                                                   tools, context_tokens, context_window}
 session.name      {name}                      → {}

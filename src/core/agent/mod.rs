@@ -743,6 +743,9 @@ pub struct Agent {
     compact_focus: Arc<Mutex<Option<String>>>,
     /// Nested `AGENTS.md` directories already loaded this session.
     instructions_loaded: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
+    /// Messages an extension attached to the next prompt (`session.send`
+    /// with `when: "next_turn"`): committed just before it, never alone.
+    next_turn: Mutex<Vec<ChatMessage>>,
     /// The supervisor owns the worker's terminal event. Keeping its handle
     /// prevents the turn from becoming unobserved background work.
     turn_task: Option<tokio::task::JoinHandle<()>>,
@@ -807,6 +810,7 @@ impl Agent {
             compact_requested: Arc::new(AtomicBool::new(false)),
             compact_focus: Arc::new(Mutex::new(None)),
             instructions_loaded: Arc::new(Mutex::new(Default::default())),
+            next_turn: Mutex::new(Vec::new()),
             turn_task: None,
             session: Arc::new(Mutex::new(None)),
             session_name: Arc::new(Mutex::new(None)),
@@ -954,6 +958,22 @@ impl Agent {
         let mut message = ChatMessage::user(text);
         message.mark_internal();
         self.log().commit(message);
+    }
+
+    /// Hold an internal message until the next prompt, then commit it just
+    /// ahead of that prompt — context that should ride with what the user
+    /// says next rather than sit alone in the conversation.
+    pub fn attach_to_next_turn(&self, text: String) {
+        let mut message = ChatMessage::user(text);
+        message.mark_internal();
+        self.next_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(message);
+    }
+
+    fn take_next_turn(&self) -> Vec<ChatMessage> {
+        std::mem::take(&mut *self.next_turn.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// `/undo`: revert the newest write or edit this session made. Idle
@@ -1161,17 +1181,24 @@ impl Agent {
     /// Steering remains text-only because a running request cannot safely
     /// acquire a new binary payload halfway through its provider stream.
     pub fn submit_message(&mut self, message: ChatMessage, system: String) -> bool {
+        let attached = self.take_next_turn();
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         if pending.running {
-            pending.next_id += 1;
-            let key = pending.next_id;
-            pending.items.push((key, message));
+            for held in attached.into_iter().chain(std::iter::once(message)) {
+                pending.next_id += 1;
+                let key = pending.next_id;
+                pending.items.push((key, held));
+            }
             drop(pending);
             return true;
         }
         pending.running = true;
         drop(pending);
-        self.log().commit(message);
+        let log = self.log();
+        for held in attached {
+            log.commit(held);
+        }
+        log.commit(message);
         self.start(system, false);
         false
     }

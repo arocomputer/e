@@ -12,6 +12,7 @@
 //!   {"id":8,"method":"hook.tool_result","params":{"name":"…","content":"…","is_error":false}}
 //!   {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
 //!   {"id":3,"method":"shortcut","params":{"key":"ctrl+g"}}
+//!   {"id":11,"method":"command.complete","params":{"name":"deploy","prefix":"st"}}
 //! e → extension notifications (no response):
 //!   {"method":"flags","params":{"flags":{…}}}              (at start, to extensions declaring typed flags)
 //!   {"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
@@ -28,7 +29,7 @@
 //!   {"name":"…","version":"…",
 //!    "tools":[{"name","description","parameters":{JSON Schema},
 //!              "label":{"category","running","completed","target"}}…],
-//!    "commands":[{"name","description"}…],
+//!    "commands":[{"name","description","arguments"?,"completions"?}…],
 //!    "flags":[{"name","description","type"?,"default"?}…],   (shown in --help /help; typed ones are parsed)
 //!    "hooks":["startup","tool_call","input","before_turn","tool_result","compact_summary"],
 //!    "events":["session_start","turn_start","tool_end"…],
@@ -148,6 +149,32 @@ pub struct CommandDecl {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// What the command takes after its name (`<env>`, `[path]`), shown in
+    /// the `/` picker; picking such a command fills `/name ` in the
+    /// composer instead of running it bare.
+    #[serde(default)]
+    pub arguments: Option<String>,
+    /// Whether the extension answers `command.complete` with argument
+    /// choices as the user types them.
+    #[serde(default)]
+    pub completions: bool,
+}
+
+/// One argument completion an extension offers: the text to insert, and
+/// what the picker shows for it.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Completion {
+    pub value: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct Completions {
+    #[serde(default)]
+    pub items: Vec<Completion>,
 }
 
 /// A command-line flag an extension understands, for `--help`/`/help` and

@@ -542,6 +542,17 @@ impl App {
                     request.respond(Err("the session is busy — try again after the turn".into()));
                     return;
                 }
+                if params.get("when").and_then(Value::as_str) == Some("next_turn") {
+                    // Ride with whatever the user says next; a visible
+                    // message cannot wait, so only internal ones may.
+                    if !internal {
+                        request.respond(Err("next_turn delivery needs internal: true".into()));
+                        return;
+                    }
+                    self.agent.attach_to_next_turn(content);
+                    request.ok();
+                    return;
+                }
                 if run && !internal {
                     // A visible message that starts (or steers) a turn is a
                     // prompt like any other.
