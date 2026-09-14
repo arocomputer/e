@@ -15,8 +15,12 @@
 mod host;
 mod protocol;
 
-pub use host::{read_bounded_line, ExtensionHost, StartupAction, ToolProgress};
+pub use host::{
+    normalize_chord, read_bounded_line, shortcut_allowed, BeforeTurn, ExtensionHost, HostRequest,
+    StartupAction, ToolProgress,
+};
 pub use protocol::{
-    parse_incoming, CommandResult, HookVerdict, Incoming, InputVerdict, Manifest, ToolResult,
-    PROTOCOL_VERSION,
+    parse_incoming, BeforeTurnResult, CommandResult, Format, HookVerdict, Incoming,
+    InjectedMessage, InputVerdict, Manifest, ShortcutDecl, Show, ToolLabel, ToolResult,
+    CAPABILITIES, EVENTS, MAX_SHOW_BYTES, PROTOCOL_VERSION,
 };

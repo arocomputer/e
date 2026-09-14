@@ -246,10 +246,15 @@ impl App {
         let items: Vec<MenuItem> = crate::core::resources::skills::list(&self.agent.cwd())
             .into_iter()
             .map(|s| {
-                let global = s.dir.starts_with(&global_root);
-                let scope = if global { "Global" } else { "Workspace" };
+                let (scope, tab) = if s.dir.starts_with(&global_root) {
+                    ("Global", 1)
+                } else if crate::core::resources::packages::is_packaged(&s.dir) {
+                    ("Package", 3)
+                } else {
+                    ("Workspace", 2)
+                };
                 let mut item = MenuItem::new(&s.name, scope, &s.name);
-                item.tab = Some(if global { 1 } else { 2 });
+                item.tab = Some(tab);
                 item
             })
             .collect();
@@ -257,7 +262,12 @@ impl App {
             return;
         }
         let mut menu = Menu::new(MenuKind::Skills, "Skills", HINT_SKILLS, items).with_tabs(
-            vec!["All".into(), "Global".into(), "Workspace".into()],
+            vec![
+                "All".into(),
+                "Global".into(),
+                "Workspace".into(),
+                "Package".into(),
+            ],
             Some(0),
             0,
             "Source",
@@ -281,7 +291,9 @@ impl App {
     /// the command picker, an `@word` under the cursor the file picker.
     pub(super) fn sync_menu(&mut self) {
         let text = self.editor.text();
-        if self.pending_key.is_some() {
+        // A secret or an answer to an extension's question is not a
+        // trigger for any picker.
+        if self.pending_key.is_some() || self.ui_input_open() {
             return;
         }
         // /help opens this picker after its slash command has already left the
@@ -410,11 +422,16 @@ impl App {
                     self.notice(format!("model set to {}", model::slug(&found)));
                     self.agent.model = found;
                     self.refresh_status_cache();
+                    self.emit(
+                        "model_change",
+                        serde_json::json!({"model": self.agent.model_slug()}),
+                    );
                 }
             }
             MenuKind::Tree => {
                 self.rewind_to_node(&item.value);
             }
+            MenuKind::Extension => self.answer_ui_select(&item),
         }
         true
     }

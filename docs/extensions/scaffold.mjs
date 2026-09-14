@@ -11,22 +11,47 @@
  * Copy this file next to your own extension and:
  *
  *   import { connect } from "./scaffold.mjs";
+ *   const ext = connect({ manifest, ...handlers });
+ *   ext.run();
  *
  * Handlers (each optional; returning undefined means "nothing to say").
  * Handlers receive e's `params` object as sent — command/tool get
  * `{name, args}` / `{name, arguments}`, hooks get their own params.
  *
  *   initialize(params)     — stash config ({extensions_config}), before the
- *                            manifest is answered
+ *                            manifest is answered; params.ui says whether a
+ *                            person can answer ui.* requests
  *   startup({cwd, argv, flags}) — {"argv": […], "env": {"K": "v"|null},
  *                            "relaunch": {"cwd": …}}. `flags` are the
  *                            parsed values of your typed flag declarations
  *                            (see flag() below).
- *   command({name, args})  — {"notice": …} | {"prompt": …} | {"session_name": …}
- *   tool({name, arguments}, {update}) — result object; `update(chunk,
+ *   command({name, args})  — {"notice": …} | {"show": {…}} | {"prompt": …}
+ *                            | {"session_name": …}
+ *   shortcut({key})        — same result shape as a command
+ *   tool({name, arguments}, {update}) — {"content", "is_error"?,
+ *                            "summary"?, "display"?, "format"?}; `update(chunk,
  *                            stream?)` streams stdout/stderr progress first
  *   hookToolCall({name, arguments}) — {"block": true, "reason": …} | {"block": false}
  *   hookInput({text})      — {"consume": true} | {"replace": …} | {"notice": …} | {}
+ *   beforeTurn({prompt})   — {"system_suffix": …, "message": {content, internal}}
+ *   toolResult({name, content, is_error}) — {"content": …} | {}
+ *   compactSummary({summary}) — {"summary": …} | {}
+ *   event({name, extra})   — a subscribed lifecycle event (manifest `events`)
+ *   key({key})             — a key while your interactive panel is open
+ *   panelClosed()          — the user (or another panel) closed yours
+ *
+ * Asking e — every call returns a promise of the result, rejected with
+ * e's error text (for instance "no ui" under `e rpc`):
+ *
+ *   ext.ui.notify(message, tone?)          ext.ui.show({title, body, format})
+ *   ext.ui.select(title, options)          ext.ui.confirm(title, message?)
+ *   ext.ui.input(title, {placeholder, prefill, secret}?)
+ *   ext.ui.status(text | null)             ext.ui.compose(text)
+ *   ext.ui.panel({title, lines, interactive}) / ext.ui.panel(null)
+ *   ext.session.send(content, {internal, run}?)   ext.session.info()
+ *   ext.session.name(name)   .model(m)   .effort(l)   .tools(names | null)
+ *   ext.session.interrupt()  .compact()
+ *   ext.hasUI                              true once initialize said so
  *
  * `flag(name)` (pi's getFlag) reads a parsed flag from any handler, any
  * time: a passed value, else the flag's `default` in the manifest, else
@@ -47,18 +72,20 @@ import { createInterface } from "node:readline";
 /**
  * Build an extension from a manifest plus handlers; call `.run()` to start.
  * `manifest` is the initialize result minus the id: {"name", "version",
- * "description"?, "tools"?[], "commands"?[], "flags"?[], "hooks"?[]}.
+ * "description"?, "tools"?[], "commands"?[], "flags"?[], "hooks"?[],
+ * "events"?[], "shortcuts"?[]}.
  */
 export function connect({ manifest = {}, ...handlers } = {}) {
   const rl = createInterface({ input: process.stdin });
 
+  function send(obj) {
+    process.stdout.write(JSON.stringify(obj) + "\n");
+  }
   function reply(id, result) {
-    process.stdout.write(JSON.stringify({ id, result }) + "\n");
+    send({ id, result });
   }
   function fail(id, error) {
-    process.stdout.write(
-      JSON.stringify({ id, error: error instanceof Error ? error.message : String(error) }) + "\n"
-    );
+    send({ id, error: error instanceof Error ? error.message : String(error) });
   }
   /** Await a handler result (sync or promise) and answer with it. */
   function answer(id, result) {
@@ -83,10 +110,81 @@ export function connect({ manifest = {}, ...handlers } = {}) {
     if (Object.hasOwn(flag, "default")) defaults[flag.name] = flag.default;
   }
 
-  function route(request) {
-    const { id, method, params } = request;
+  // ---- our own requests to e ------------------------------------------
+  let nextId = 0;
+  const pending = new Map();
+  /** Ask e; resolves with the result, rejects with e's error text. */
+  function ask(method, params = {}) {
+    const id = `s${++nextId}`;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      send({ id, method, params });
+    });
+  }
+  function settle(id, result, error) {
+    const waiter = pending.get(id);
+    if (!waiter) return false;
+    pending.delete(id);
+    if (error !== undefined) waiter.reject(new Error(String(error)));
+    else waiter.resolve(result);
+    return true;
+  }
+
+  const api = {
+    hasUI: false,
+    ui: {
+      notify: (message, tone) => ask("ui.notify", tone ? { message, tone } : { message }),
+      show: (block) => ask("ui.show", block),
+      select: (title, options) => ask("ui.select", { title, options }),
+      confirm: (title, message) => ask("ui.confirm", message ? { title, message } : { title }),
+      input: (title, options = {}) => ask("ui.input", { title, ...options }),
+      status: (text) => ask("ui.status", { text }),
+      compose: (text) => ask("ui.compose", { text }),
+      panel: (panel) => ask("ui.panel", panel === null || panel === undefined ? null : panel),
+    },
+    session: {
+      send: (content, options = {}) => ask("session.send", { content, ...options }),
+      info: () => ask("session.info"),
+      name: (name) => ask("session.name", { name }),
+      model: (model) => ask("session.model", { model }),
+      effort: (effort) => ask("session.effort", { effort }),
+      tools: (names) => ask("session.tools", { names }),
+      interrupt: () => ask("session.interrupt"),
+      compact: () => ask("session.compact"),
+    },
+    /** pi's getFlag: the parsed value of a typed flag in any handler —
+     *  the passed value, else the manifest default, else undefined. Works
+     *  from any handler, no startup hook needed. */
+    flag(name) {
+      return Object.hasOwn(lastFlags, name) ? lastFlags[name] : defaults[name];
+    },
+    /** True only when the flag was actually on the command line (passed),
+     *  regardless of its default. */
+    flagPassed(name) {
+      return Object.hasOwn(lastFlags, name);
+    },
+    run() {
+      rl.on("line", (line) => {
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          return;
+        }
+        route(message);
+      });
+    },
+  };
+
+  function route(message) {
+    const { id, method, params } = message;
+    // A reply to one of our own requests: an id we issued, no method.
+    if (method === undefined && id !== undefined && settle(id, message.result, message.error)) {
+      return;
+    }
     switch (method) {
       case "initialize":
+        api.hasUI = Boolean(params && params.ui);
         try {
           if (typeof handlers.initialize === "function") handlers.initialize(params);
         } catch (error) {
@@ -103,7 +201,32 @@ export function connect({ manifest = {}, ...handlers } = {}) {
         process.exit(0);
         return;
       case "event":
-        return; // a notification; never answered
+        if (typeof handlers.event === "function") {
+          try {
+            handlers.event(params || {});
+          } catch {
+            // A notification has no reply; a throwing observer is its own problem.
+          }
+        }
+        return;
+      case "ui.key":
+        if (typeof handlers.key === "function") {
+          try {
+            handlers.key(params || {});
+          } catch {
+            // as above
+          }
+        }
+        return;
+      case "ui.panel_closed":
+        if (typeof handlers.panelClosed === "function") {
+          try {
+            handlers.panelClosed();
+          } catch {
+            // as above
+          }
+        }
+        return;
       default:
         break;
     }
@@ -112,22 +235,21 @@ export function connect({ manifest = {}, ...handlers } = {}) {
         if (params && typeof params.flags === "object") lastFlags = params.flags;
         return handlers.startup ? handlers.startup(params) : undefined;
       },
-      "command": handlers.command,
-      "tool_call": handlers.tool,
+      command: handlers.command,
+      shortcut: handlers.shortcut,
+      tool_call: handlers.tool,
       "hook.tool_call": handlers.hookToolCall,
       "hook.input": handlers.hookInput,
+      "hook.before_turn": handlers.beforeTurn,
+      "hook.tool_result": handlers.toolResult,
+      "hook.compact_summary": handlers.compactSummary,
     }[method];
     if (typeof handler !== "function") return; // not ours; stay quiet
     try {
       const context = {
         update(chunk, stream = "stdout") {
           if (method !== "tool_call" || chunk === undefined || chunk === null) return;
-          process.stdout.write(
-            JSON.stringify({
-              method: "tool.update",
-              params: { id, stream, chunk: String(chunk) },
-            }) + "\n"
-          );
+          send({ method: "tool.update", params: { id, stream, chunk: String(chunk) } });
         },
       };
       answer(id, handler(params, context));
@@ -136,30 +258,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
     }
   }
 
-  return {
-    /** pi's getFlag: the parsed value of a typed flag in any handler —
-     *  the passed value, else the manifest default, else undefined. Works
-     *  from any handler, no startup hook needed. */
-    flag(name) {
-      return Object.hasOwn(lastFlags, name) ? lastFlags[name] : defaults[name];
-    },
-    /** True only when the flag was actually on the command line (passed),
-     *  regardless of its default. */
-    flagPassed(name) {
-      return Object.hasOwn(lastFlags, name);
-    },
-    run() {
-      rl.on("line", (line) => {
-        let request;
-        try {
-          request = JSON.parse(line);
-        } catch {
-          return;
-        }
-        route(request);
-      });
-    },
-  };
+  return api;
 }
 // ---- direct-run no-op -----------------------------------------------------
 // When executed (rather than imported), serve a minimal manifest so e sees

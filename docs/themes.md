@@ -1,8 +1,9 @@
 # Themes
 
-A theme is a JSON file: `~/.e/themes/<name>.json`. Every name in
-`/settings` → Theme comes from this directory plus the two built-ins
-(`dark`, `light`) — a file named like a built-in replaces it.
+A theme is a JSON file: `~/.e/themes/<name>.json`, or `themes/<name>.json`
+in an installed [package](packages.md). Every name in `/settings` → Theme
+comes from these directories plus the two built-ins (`dark`, `light`) — a
+file named like a built-in replaces it, the home's file first.
 
 ## Format
 

@@ -21,6 +21,10 @@ pub const TOPICS: &[(&str, &str)] = &[
         "JSON output and the long-lived JSONL RPC protocol",
     ),
     (
+        "packages",
+        "install shared extensions, skills, prompts, and themes",
+    ),
+    (
         "sdk",
         "the e-sdk crate: embed the agent core in Rust programs",
     ),
@@ -50,6 +54,7 @@ pub fn body(topic: &str) -> Option<&'static str> {
         "themes" => include_str!("../../../docs/themes.md"),
         "models" => include_str!("../../../docs/models.md"),
         "automation" => include_str!("../../../docs/automation.md"),
+        "packages" => include_str!("../../../docs/packages.md"),
         "sdk" => include_str!("../../../docs/sdk.md"),
         "prompt-templates" => include_str!("../../../docs/prompt-templates.md"),
         "skills" => include_str!("../../../docs/skills.md"),

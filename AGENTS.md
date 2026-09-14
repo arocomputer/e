@@ -33,10 +33,14 @@ src/core/    the harness, terminal-free
   config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·
                   keybindings.rs (composer chord overrides)
-  resources/      skills.rs · prompts.rs (/name templates) · docs.rs (the
+  resources/      skills.rs · prompts.rs (/name templates) · packages.rs
+                  (`e install`: git clones under ~/.e/packages that every
+                  loader reads after ~/.e's own dirs) · docs.rs (the
                   embedded guides behind `e docs`)
   extensions/     the extension host: subprocesses over a JSONL line
-                  protocol (docs/extensions.md) — tools, commands, hooks
+                  protocol (docs/extensions.md) — tools, commands, hooks,
+                  events, and the extensions' own ui.*/session.* requests
+                  (HostRequest, answered by the frontend; decision 0005)
   tools/          read · write · edit · grep (optional `glob` filter) · bash
                   (optional `background`/`handle` for long-lived processes)
                   — the whole surface; directory listing and file-finding go
@@ -50,7 +54,8 @@ src/tui/     the frontend (short paths re-export from the groups)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state, keys, the frame loop) · events.rs
                   (session-event handling) · menus.rs (footer menus) ·
-                  login.rs (sign-in flows)
+                  login.rs (sign-in flows) · extui.rs (answering
+                  extensions: modals, panels, status slots, session control)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
 ```
 
@@ -100,13 +105,19 @@ surface? Route it through `panel.rs` so it can't diverge.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - `~/.e/` is the only home e reads. Never reach into another tool's directory.
+- A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/
+  themes/`), no manifest. New resource kinds join that list; package
+  discovery stays convention, not configuration.
 - **Don't hardcode what a user might change.** Looks, wordings, and behaviours a
   person could sensibly prefer are read from `~/.e/` with a built-in default —
   themes from `~/.e/themes/`, and skills, prompts, instructions, the system
   prompt the same way. When you add something user-facing, make it a file-backed
   override, not a constant. When data isn't enough there is the extension API
   (`core/extensions/`, docs/extensions.md) — grow its protocol by need, never by
-  symmetry, and keep hooks fail-open.
+  symmetry, and keep hooks fail-open. What crosses the line is data, never code
+  or terminal bytes: an extension describes (`show`, `panel`, a `label`), e
+  paints through the theme. A new rendering need is a new `format` or token, not
+  a way for extensions to emit escape sequences.
 - Verify UI changes with a real frame, not by reasoning about bytes. `scripts/`
   has a pty capture-and-replay harness; that is how the look gets checked.
 - `scripts/guard.sh` pins the trust boundary: allowed network hosts, the

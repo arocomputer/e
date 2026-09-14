@@ -31,6 +31,9 @@ e -r, --resume        pick a session to resume\n  \
 e rpc                 JSONL request/response protocol on stdin/stdout\n  \
 e docs [topic]        print a built-in format guide\n  \
 e update              update e to the latest release\n  \
+e install [source]    install a package, or make every listed one current\n  \
+e remove <source>     forget a package and delete its clone\n  \
+e packages            list installed packages\n  \
 e auth                show sign-in status\n  \
 e doctor [--no-network]\n                      print paste-safe, local-only runtime diagnostics\n  \
 e providers           list provider support and sign-in state\n  \
@@ -125,6 +128,103 @@ async fn usage_error(host: &e::core::extensions::ExtensionHost, json: bool, mess
     std::process::exit(2);
 }
 
+/// `e install [source]`, `e remove <source>`, `e packages`: the package
+/// commands, extension-free one-shots (a package's own broken extension must
+/// never stand between the user and `e remove`). Returns the exit status.
+fn package_command(sub: &str, rest: &[String]) -> i32 {
+    use e::core::resources::packages::{self, Status, KINDS};
+    let plural = |n: usize, kind: &str| {
+        let noun = kind.trim_end_matches('s');
+        if n == 1 {
+            format!("1 {noun}")
+        } else {
+            format!("{n} {kind}")
+        }
+    };
+    let describe = |counts: &[usize; 4]| -> String {
+        let parts: Vec<String> = KINDS
+            .iter()
+            .zip(counts)
+            .filter(|(_, n)| **n > 0)
+            .map(|(kind, n)| plural(*n, kind))
+            .collect();
+        if parts.is_empty() {
+            "nothing to load".into()
+        } else {
+            parts.join(", ")
+        }
+    };
+    match (sub, rest) {
+        ("install", []) => {
+            let results = packages::install_all();
+            if results.is_empty() {
+                println!(
+                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                );
+                return 0;
+            }
+            let mut failed = false;
+            for result in results {
+                match result {
+                    Ok(line) => println!("{line}"),
+                    Err(line) => {
+                        failed = true;
+                        eprintln!("{line}");
+                    }
+                }
+            }
+            i32::from(failed)
+        }
+        ("install", [spec]) => match packages::install(spec) {
+            Ok((root, counts)) => {
+                println!(
+                    "installed {spec} → {} ({}) — restart or /reload to use it",
+                    root.display(),
+                    describe(&counts)
+                );
+                0
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        },
+        ("remove", [spec]) => match packages::remove(spec) {
+            Ok(_) => {
+                println!("removed {spec} — restart or /reload to drop it");
+                0
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        },
+        ("packages", []) => {
+            let list = packages::list();
+            if list.is_empty() {
+                println!(
+                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                );
+                return 0;
+            }
+            let width = list.iter().map(|p| p.spec.len()).max().unwrap_or(0);
+            for package in list {
+                let status = match &package.status {
+                    Status::Installed { counts, .. } => describe(counts),
+                    Status::Missing => "missing — run `e install`".into(),
+                    Status::Invalid(reason) => format!("invalid: {reason}"),
+                };
+                println!("{:<width$}  {status}", package.spec);
+            }
+            0
+        }
+        _ => {
+            eprintln!("{}", cli::subcommand_usage(sub).unwrap_or("usage: e help"));
+            2
+        }
+    }
+}
+
 /// Append the subcommand's usage line when the failing argv names one, so
 /// `e doctor --unknown` points at `e doctor` instead of generic help.
 fn with_subcommand_usage(message: String, args: &[String]) -> String {
@@ -150,12 +250,24 @@ async fn main() -> std::io::Result<()> {
     // consume custom flags and safely relaunch this same binary in a new cwd,
     // and so --help can list the flags and commands extensions declare.
     let (jobs_tx, jobs_rx) = tokio::sync::mpsc::channel::<String>(256);
-    let diagnostic_requested =
-        matches!(cli::leading_subcommand(&args), Some("doctor" | "providers"));
+    let diagnostic_requested = matches!(
+        cli::leading_subcommand(&args),
+        Some("doctor" | "providers" | "install" | "remove" | "packages")
+    );
+    // Extensions' own requests (`ui.*`, `session.*`) travel this channel
+    // to the terminal frontend. Headless runs (`e rpc`) start the host
+    // without it, so `initialize` tells extensions there is no UI.
+    let headless = cli::leading_subcommand(&args) == Some("rpc");
+    let (requests_tx, requests_rx) =
+        tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
     let host = if cli::extensions_disabled(&args) || diagnostic_requested {
         e::core::extensions::ExtensionHost::empty()
     } else {
-        e::core::extensions::ExtensionHost::start(jobs_tx.clone()).await
+        e::core::extensions::ExtensionHost::start(
+            jobs_tx.clone(),
+            (!headless).then(|| requests_tx.clone()),
+        )
+        .await
     };
     if cli::has_flag(&args, &["--help", "-h"]) {
         print_help(&host);
@@ -169,6 +281,19 @@ async fn main() -> std::io::Result<()> {
     if let Ok(diagnostic_options) = cli::parse(args.clone(), &[]) {
         let diagnostic_args = &diagnostic_options.positional;
         let sub = leading_positional_subcommand(&diagnostic_options);
+        // Package commands are one-shots on the same extension-free footing:
+        // they change what the next session loads, never the current one.
+        if let Some(sub @ ("install" | "remove" | "packages")) = sub {
+            if diagnostic_options.json {
+                eprintln!("--json is supported by `e doctor` and `e providers`");
+                std::process::exit(2);
+            }
+            let status = package_command(sub, &diagnostic_args[1..]);
+            if status != 0 {
+                std::process::exit(status);
+            }
+            return Ok(());
+        }
         if sub == Some("doctor") || sub == Some("providers") {
             let doctor = sub == Some("doctor");
             // Parsing accepts `--no-network` (a no-op: diagnostics are
@@ -385,6 +510,7 @@ async fn main() -> std::io::Result<()> {
         host,
         jobs_tx,
         jobs_rx,
+        (requests_tx, requests_rx),
     )
     .await
 }

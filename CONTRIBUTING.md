@@ -27,7 +27,9 @@ the version (`e --version`, or the commit if you built from source). Feature
 requests should explain the need before the design; an implementation sketch
 is welcome but optional. A feature that could be an extension is usually
 better as one — the extension API in [docs/extensions.md](docs/extensions.md)
-exists precisely so most additions never have to touch the binary.
+exists precisely so most additions never have to touch the binary, and
+[docs/packages.md](docs/packages.md) is how an extension, skill, prompt, or
+theme reaches other users without a release of e.
 
 ## Finding your way around
 

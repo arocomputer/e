@@ -1,8 +1,8 @@
-//! The extension process host: discovers extensions in `~/.e/extensions/` — a
-//! top-level executable file, or a subdirectory bundling its own files (its
-//! executable plus helpers like a scaffold or data) — keeps one long-lived
-//! process per extension, and routes tools, commands, hooks, and events over
-//! the line protocol.
+//! The extension process host: discovers extensions in `~/.e/extensions/`
+//! and each installed package's `extensions/` — a top-level executable file,
+//! or a subdirectory bundling its own files (its executable plus helpers like
+//! a scaffold or data) — keeps one long-lived process per extension, and
+//! routes tools, commands, hooks, and events over the line protocol.
 //!
 //! Failure posture: discovery and runtime hooks fail open and are reported.
 //! An extension that advertises a startup hook owns startup argument handling,
@@ -21,8 +21,9 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use super::protocol::{
-    self, CommandResult, HookVerdict, Incoming, InputVerdict, Manifest, Relaunch, StartupResult,
-    ToolResult,
+    self, BeforeTurnResult, CommandResult, CompactSummaryResult, HookVerdict, Incoming,
+    InjectedMessage, InputVerdict, Manifest, Relaunch, StartupResult, ToolLabel, ToolResult,
+    ToolResultPatch,
 };
 use crate::core::config::home;
 
@@ -31,6 +32,10 @@ const HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_EXTENSION_LINE_BYTES: usize = 1024 * 1024;
+/// Requests one extension may have unanswered at once (`ui.*`,
+/// `session.*`). Past this, a request is answered with an error at once —
+/// a runaway extension cannot queue work against the user's attention.
+const MAX_INFLIGHT_REQUESTS: usize = 32;
 
 /// Requests awaiting a response, keyed by wire id.
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
@@ -40,6 +45,65 @@ type ProgressMap = Arc<Mutex<HashMap<u64, mpsc::Sender<ToolProgress>>>>;
 pub struct ToolProgress {
     pub stream: crate::core::tools::OutputStream,
     pub chunk: String,
+}
+
+/// A `ui.*` or `session.*` request from an extension, handed to whoever
+/// owns the surface (the TUI) to answer. Dropping it unanswered replies
+/// with an error, so a request never leaves the extension waiting forever.
+#[derive(Debug)]
+pub struct HostRequest {
+    /// The manifest name of the asking extension.
+    pub extension: String,
+    pub method: String,
+    pub params: Value,
+    reply: Option<oneshot::Sender<Result<Value, String>>>,
+}
+
+impl HostRequest {
+    pub fn respond(mut self, result: Result<Value, String>) {
+        if let Some(reply) = self.reply.take() {
+            let _ = reply.send(result);
+        }
+    }
+
+    /// Answer with `{}`.
+    pub fn ok(self) {
+        self.respond(Ok(json!({})));
+    }
+
+    /// A request with no extension behind it, for tests of whoever answers
+    /// them: the receiver sees what the extension would have read.
+    pub fn fake(
+        extension: &str,
+        method: &str,
+        params: Value,
+    ) -> (HostRequest, oneshot::Receiver<Result<Value, String>>) {
+        let (tx, rx) = oneshot::channel();
+        (
+            HostRequest {
+                extension: extension.into(),
+                method: method.into(),
+                params,
+                reply: Some(tx),
+            },
+            rx,
+        )
+    }
+}
+
+impl Drop for HostRequest {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            let _ = reply.send(Err("request dropped".into()));
+        }
+    }
+}
+
+/// What `before_turn` hooks contributed, in extension order.
+#[derive(Debug, Default)]
+pub struct BeforeTurn {
+    pub system_suffixes: Vec<String>,
+    pub messages: Vec<InjectedMessage>,
 }
 
 struct Extension {
@@ -99,16 +163,28 @@ impl FlagValue {
 impl ExtensionHost {
     /// Discover and start every extension. `notices` receives extension
     /// `notify` messages and startup diagnostics for the transcript.
-    pub async fn start(notices: mpsc::Sender<String>) -> Arc<ExtensionHost> {
+    /// `requests` receives the extensions' own `ui.*` / `session.*`
+    /// requests; `None` is a headless host (`e rpc`, tests) where every
+    /// such request is answered "no ui" at once and `initialize` says so.
+    pub async fn start(
+        notices: mpsc::Sender<String>,
+        requests: Option<mpsc::Sender<HostRequest>>,
+    ) -> Arc<ExtensionHost> {
         // Spawn and hand-shake every extension concurrently: a slow (or
         // timing-out) child must not delay the ones after it, so startup
         // costs one handshake, not their sum. Results are collected in
         // discovery order — tool-clash resolution below is
         // first-declaration-wins and must stay deterministic.
         let paths = discover();
+        for spec in crate::core::resources::packages::missing() {
+            let _ = notices
+                .send(format!("package {spec}: not installed — run `e install`"))
+                .await;
+        }
         let started = futures::future::join_all(paths.iter().map(|path| {
             let notices = notices.clone();
-            async move { (path, spawn(path, notices).await) }
+            let requests = requests.clone();
+            async move { (path, spawn(path, notices, requests).await) }
         }))
         .await;
         let mut extensions = Vec::new();
@@ -137,6 +213,30 @@ impl ExtensionHost {
                     let _ = notices.try_send(format!(
                         "extension {name}: tool {} already provided by another extension — ignored",
                         tool.name
+                    ));
+                }
+                fresh
+            });
+        }
+        // Shortcuts resolve the same way: one owner per chord, first wins —
+        // and only chords e leaves unbound are offered at all.
+        let mut seen_keys: std::collections::HashSet<String> = Default::default();
+        for ext in &mut extensions {
+            let name = ext.manifest.name.clone();
+            ext.manifest.shortcuts.retain(|shortcut| {
+                let key = normalize_chord(&shortcut.key);
+                if !shortcut_allowed(&key) {
+                    let _ = notices.try_send(format!(
+                        "extension {name}: shortcut {} is not available to extensions — ignored",
+                        shortcut.key
+                    ));
+                    return false;
+                }
+                let fresh = seen_keys.insert(key.clone());
+                if !fresh {
+                    let _ = notices.try_send(format!(
+                        "extension {name}: shortcut {} already taken — ignored",
+                        shortcut.key
                     ));
                 }
                 fresh
@@ -471,6 +571,64 @@ impl ExtensionHost {
             .collect()
     }
 
+    /// Declared shortcuts as `(chord, description)`, normalized lowercase.
+    pub fn shortcuts(&self) -> Vec<(String, String)> {
+        self.extensions
+            .iter()
+            .flat_map(|e| {
+                e.manifest
+                    .shortcuts
+                    .iter()
+                    .map(|s| (normalize_chord(&s.key), s.description.clone()))
+            })
+            .collect()
+    }
+
+    pub fn has_shortcut(&self, chord: &str) -> bool {
+        let chord = normalize_chord(chord);
+        self.extensions.iter().any(|e| {
+            e.manifest
+                .shortcuts
+                .iter()
+                .any(|s| normalize_chord(&s.key) == chord)
+        })
+    }
+
+    /// Run the extension that owns `chord`; answered like a command.
+    pub async fn run_shortcut(&self, chord: &str) -> CommandResult {
+        let chord = normalize_chord(chord);
+        let Some(ext) = self.extensions.iter().find(|e| {
+            e.manifest
+                .shortcuts
+                .iter()
+                .any(|s| normalize_chord(&s.key) == chord)
+        }) else {
+            return CommandResult::default();
+        };
+        match self
+            .request(ext, "shortcut", json!({"key": chord}), COMMAND_TIMEOUT)
+            .await
+        {
+            Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| CommandResult {
+                notice: Some(format!("{chord}: bad result")),
+                ..Default::default()
+            }),
+            Err(reason) => CommandResult {
+                notice: Some(format!("{chord}: {reason}")),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// The declared transcript grammar for an extension tool, if any.
+    pub fn tool_label(&self, name: &str) -> Option<ToolLabel> {
+        self.extensions
+            .iter()
+            .flat_map(|e| e.manifest.tools.iter())
+            .find(|t| t.name == name)
+            .and_then(|t| t.label.clone())
+    }
+
     pub fn has_command(&self, name: &str) -> bool {
         self.extensions
             .iter()
@@ -504,7 +662,7 @@ impl ExtensionHost {
             return ToolResult {
                 content: format!("no extension owns tool {name}"),
                 is_error: true,
-                session_name: None,
+                ..Default::default()
             };
         };
         let args: Value =
@@ -522,12 +680,12 @@ impl ExtensionHost {
             Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| ToolResult {
                 content: format!("{name}: bad result"),
                 is_error: true,
-                session_name: None,
+                ..Default::default()
             }),
             Err(reason) => ToolResult {
                 content: format!("{name}: {reason}"),
                 is_error: true,
-                session_name: None,
+                ..Default::default()
             },
         }
     }
@@ -540,8 +698,7 @@ impl ExtensionHost {
         else {
             return CommandResult {
                 notice: Some(format!("no extension owns /{name}")),
-                prompt: None,
-                session_name: None,
+                ..Default::default()
             };
         };
         match self
@@ -555,13 +712,11 @@ impl ExtensionHost {
         {
             Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| CommandResult {
                 notice: Some(format!("/{name}: bad result")),
-                prompt: None,
-                session_name: None,
+                ..Default::default()
             }),
             Err(reason) => CommandResult {
                 notice: Some(format!("/{name}: {reason}")),
-                prompt: None,
-                session_name: None,
+                ..Default::default()
             },
         }
     }
@@ -634,13 +789,133 @@ impl ExtensionHost {
         InputVerdict::default()
     }
 
-    /// Fire-and-forget lifecycle event to every extension. try_send: a child
-    /// that stopped reading stdin gets its queue dropped, never our loop.
+    /// Ask every extension with the `before_turn` hook, in order, what to
+    /// add to this turn: system-prompt paragraphs and conversation
+    /// messages. Failures contribute nothing (fail open).
+    pub async fn hook_before_turn(&self, prompt: &str) -> BeforeTurn {
+        let mut out = BeforeTurn::default();
+        for ext in &self.extensions {
+            if !ext.manifest.hooks.iter().any(|h| h == "before_turn") {
+                continue;
+            }
+            if let Ok(value) = self
+                .request(
+                    ext,
+                    "hook.before_turn",
+                    json!({"prompt": prompt}),
+                    HOOK_TIMEOUT,
+                )
+                .await
+            {
+                let result: BeforeTurnResult = serde_json::from_value(value).unwrap_or_default();
+                if let Some(suffix) = result.system_suffix.filter(|s| !s.trim().is_empty()) {
+                    out.system_suffixes.push(suffix);
+                }
+                if let Some(message) = result.message.filter(|m| !m.content.trim().is_empty()) {
+                    out.messages.push(message);
+                }
+            }
+        }
+        out
+    }
+
+    /// Let every extension with the `tool_result` hook rewrite what the
+    /// model reads, in order — each sees the previous one's text. None when
+    /// nothing changed.
+    pub async fn hook_tool_result(
+        &self,
+        name: &str,
+        content: &str,
+        is_error: bool,
+    ) -> Option<String> {
+        let mut current: Option<String> = None;
+        for ext in &self.extensions {
+            if !ext.manifest.hooks.iter().any(|h| h == "tool_result") {
+                continue;
+            }
+            let text = current.as_deref().unwrap_or(content);
+            if let Ok(value) = self
+                .request(
+                    ext,
+                    "hook.tool_result",
+                    json!({"name": name, "content": text, "is_error": is_error}),
+                    HOOK_TIMEOUT,
+                )
+                .await
+            {
+                let patch: ToolResultPatch = serde_json::from_value(value).unwrap_or_default();
+                if let Some(replacement) = patch.content {
+                    current = Some(replacement);
+                }
+            }
+        }
+        current
+    }
+
+    /// Let every extension with the `compact_summary` hook edit the summary
+    /// about to replace the conversation, in order. None when unchanged.
+    pub async fn hook_compact_summary(&self, summary: &str) -> Option<String> {
+        let mut current: Option<String> = None;
+        for ext in &self.extensions {
+            if !ext.manifest.hooks.iter().any(|h| h == "compact_summary") {
+                continue;
+            }
+            let text = current.as_deref().unwrap_or(summary);
+            if let Ok(value) = self
+                .request(
+                    ext,
+                    "hook.compact_summary",
+                    json!({"summary": text}),
+                    HOOK_TIMEOUT,
+                )
+                .await
+            {
+                let result: CompactSummaryResult =
+                    serde_json::from_value(value).unwrap_or_default();
+                if let Some(replacement) = result.summary.filter(|s| !s.trim().is_empty()) {
+                    current = Some(replacement);
+                }
+            }
+        }
+        current
+    }
+
+    /// Whether any extension declared one of these hooks — callers skip the
+    /// round trip (and its bookkeeping) entirely when none did.
+    pub fn has_hook(&self, hook: &str) -> bool {
+        self.extensions
+            .iter()
+            .any(|e| e.manifest.hooks.iter().any(|h| h == hook))
+    }
+
+    /// Fire-and-forget lifecycle event to every subscribed extension. A
+    /// version-1 manifest (no `events`) receives `turn_end` alone. try_send:
+    /// a child that stopped reading stdin gets its queue dropped, never our
+    /// loop.
     pub async fn event(&self, name: &str, params: Value) {
         let line =
             json!({"method": "event", "params": {"name": name, "extra": params}}).to_string();
         for ext in &self.extensions {
-            let _ = ext.writer.try_send(line.clone());
+            let subscribed = match &ext.manifest.events {
+                None => name == "turn_end",
+                Some(events) => events.iter().any(|e| e == name),
+            };
+            if subscribed {
+                let _ = ext.writer.try_send(line.clone());
+            }
+        }
+    }
+
+    /// A notification to one extension by name (`ui.key` for an
+    /// interactive panel). Unknown names and full queues are dropped.
+    pub fn notify_extension(&self, extension: &str, method: &str, params: Value) {
+        if let Some(ext) = self
+            .extensions
+            .iter()
+            .find(|e| e.manifest.name == extension)
+        {
+            let line = json!({"method": method, "params": params}).to_string();
+            let _ = ext.writer.try_send(line);
         }
     }
 
@@ -748,12 +1023,22 @@ impl Drop for PendingGuard {
     }
 }
 
-/// Extensions under `~/.e/extensions/`. A top-level executable is one
-/// extension. A subdirectory can bundle an entry point with helper files.
-/// Entry-point selection checks the first `index.*` executable in path order,
-/// a file matching the directory name, then a sole executable.
+/// Extensions under `~/.e/extensions/`, then each installed package's
+/// `extensions/` in settings order. A top-level executable is one extension.
+/// A subdirectory can bundle an entry point with helper files. Entry-point
+/// selection checks the first `index.*` executable in path order, a file
+/// matching the directory name, then a sole executable.
 fn discover() -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(home::extensions_dir()) else {
+    let mut paths = scan(&home::extensions_dir());
+    for dir in crate::core::resources::packages::dirs("extensions") {
+        paths.extend(scan(&dir));
+    }
+    paths
+}
+
+/// One extensions directory, sorted so launch order is stable.
+fn scan(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -808,7 +1093,65 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extension, String> {
+/// Hand one extension request to the surface owner, or answer it at once
+/// when there is none, the owner is gone, or the extension already has
+/// [`MAX_INFLIGHT_REQUESTS`] unanswered. The reply, whenever it comes,
+/// goes back down the extension's stdin with the extension's own id.
+fn forward(
+    name: &Arc<std::sync::OnceLock<String>>,
+    requests: &Option<mpsc::Sender<HostRequest>>,
+    inflight: &Arc<std::sync::atomic::AtomicUsize>,
+    writer: &mpsc::Sender<String>,
+    id: Value,
+    method: String,
+    params: Value,
+) {
+    fn answer(id: &Value, result: Result<Value, String>) -> String {
+        match result {
+            Ok(value) => json!({"id": id, "result": value}),
+            Err(error) => json!({"id": id, "error": error}),
+        }
+        .to_string()
+    }
+    let Some(requests) = requests else {
+        let _ = writer.try_send(answer(&id, Err("no ui".into())));
+        return;
+    };
+    if inflight.load(Ordering::SeqCst) >= MAX_INFLIGHT_REQUESTS {
+        let _ = writer.try_send(answer(
+            &id,
+            Err(format!(
+                "too many requests in flight (limit {MAX_INFLIGHT_REQUESTS})"
+            )),
+        ));
+        return;
+    }
+    let (tx, rx) = oneshot::channel();
+    let request = HostRequest {
+        extension: name.get().cloned().unwrap_or_default(),
+        method,
+        params,
+        reply: Some(tx),
+    };
+    if requests.try_send(request).is_err() {
+        let _ = writer.try_send(answer(&id, Err("ui unavailable".into())));
+        return;
+    }
+    inflight.fetch_add(1, Ordering::SeqCst);
+    let inflight = inflight.clone();
+    let writer = writer.clone();
+    tokio::spawn(async move {
+        let result = rx.await.unwrap_or_else(|_| Err("request dropped".into()));
+        inflight.fetch_sub(1, Ordering::SeqCst);
+        let _ = writer.send(answer(&id, result)).await;
+    });
+}
+
+async fn spawn(
+    path: &PathBuf,
+    notices: mpsc::Sender<String>,
+    requests: Option<mpsc::Sender<HostRequest>>,
+) -> Result<Extension, String> {
     let mut child = tokio::process::Command::new(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -852,6 +1195,10 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
     let progress: ProgressMap = Arc::new(Mutex::new(HashMap::new()));
     let alive = Arc::new(AtomicBool::new(true));
+    // The manifest name, known after the handshake; requests before that
+    // (or from an extension that never names itself) carry the file name.
+    let name: Arc<std::sync::OnceLock<String>> = Arc::new(std::sync::OnceLock::new());
+    let ui = requests.is_some();
 
     // Writer task: serialized line output.
     let (writer, mut writer_rx) = mpsc::channel::<String>(64);
@@ -900,21 +1247,72 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
         }
     });
 
-    // Reader task: route responses to pending waiters, notifies to the app.
+    // Reader task: route responses to pending waiters, notifies to the app,
+    // and the extension's own requests to the surface owner.
     let pending_reader = pending.clone();
     let progress_reader = progress.clone();
     let alive_reader = alive.clone();
+    let name_reader = name.clone();
+    let writer_reader = writer.clone();
+    let inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
+        let mut early: Vec<(Value, String, Value)> = Vec::new();
         while let Ok(Some(line)) = read_bounded_line(&mut reader, MAX_EXTENSION_LINE_BYTES).await {
             match protocol::parse_incoming(&line) {
+                Some(Incoming::Request { id, method, params }) => {
+                    if name_reader.get().is_none() {
+                        // Sent on the heels of the manifest, before its
+                        // name is known here: held, in order, until the
+                        // manifest response below names the extension.
+                        early.push((id, method, params));
+                        continue;
+                    }
+                    forward(
+                        &name_reader,
+                        &requests,
+                        &inflight,
+                        &writer_reader,
+                        id,
+                        method,
+                        params,
+                    );
+                }
                 Some(Incoming::Response { id, result }) => {
+                    // The first response an extension ever sends is its
+                    // manifest; learning the name here (rather than after
+                    // the handshake task parses it) lets requests sent
+                    // right behind the manifest carry the right name.
+                    if name_reader.get().is_none() {
+                        if let Some(name) = result
+                            .as_ref()
+                            .ok()
+                            .and_then(|v| v.get("name"))
+                            .and_then(Value::as_str)
+                            .filter(|n| !n.is_empty())
+                        {
+                            let _ = name_reader.set(name.to_string());
+                        }
+                    }
                     if let Some(tx) = pending_reader
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .remove(&id)
                     {
                         let _ = tx.send(result);
+                    }
+                    if name_reader.get().is_some() {
+                        for (id, method, params) in early.drain(..) {
+                            forward(
+                                &name_reader,
+                                &requests,
+                                &inflight,
+                                &writer_reader,
+                                id,
+                                method,
+                                params,
+                            );
+                        }
                     }
                 }
                 Some(Incoming::Notify { message }) => {
@@ -965,7 +1363,9 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
     };
     let init = json!({
         "protocol": protocol::PROTOCOL_VERSION,
-        "capabilities": ["tool.update"],
+        "capabilities": protocol::CAPABILITIES,
+        // Whether `ui.*` requests can reach a person; false under `e rpc`.
+        "ui": ui,
         "e_version": crate::VERSION,
         "cwd": std::env::current_dir().unwrap_or_default().display().to_string(),
         // Namespaced extension config from ~/.e/settings.json:
@@ -981,7 +1381,65 @@ async fn spawn(path: &PathBuf, notices: mpsc::Sender<String>) -> Result<Extensio
     if manifest.name.is_empty() {
         return Err("manifest has no name".into());
     }
+    let _ = name.set(manifest.name.clone());
     Ok(Extension { manifest, ..ext })
+}
+
+/// Chords e keeps for itself: the interrupt and quit keys, the viewer and
+/// model pickers, the terminal's own suspend and clear. Everything else
+/// with a ctrl or alt modifier is an extension's to declare; bare keys and
+/// shift-only chords never are, since they are how text gets typed.
+const RESERVED_CHORDS: &[&str] = &[
+    "ctrl+c",
+    "ctrl+d",
+    "ctrl+o",
+    "ctrl+p",
+    "ctrl+shift+p",
+    "ctrl+z",
+    "ctrl+l",
+    "ctrl+m",
+    "ctrl+i",
+    "ctrl+j",
+];
+
+/// Whether a normalized chord may be declared as an extension shortcut.
+pub fn shortcut_allowed(chord: &str) -> bool {
+    !chord.is_empty()
+        && (chord.starts_with("ctrl+") || chord.starts_with("alt+"))
+        && !RESERVED_CHORDS.contains(&chord)
+}
+
+/// A chord in canonical form: lowercase, modifiers sorted `ctrl+alt+shift+`,
+/// no whitespace — so `Ctrl+Shift+G` and `shift+ctrl+g` are one key.
+pub fn normalize_chord(chord: &str) -> String {
+    let mut ctrl = false;
+    let mut alt = false;
+    let mut shift = false;
+    let mut key = String::new();
+    for part in chord.split('+').map(|p| p.trim().to_lowercase()) {
+        match part.as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "alt" | "meta" | "option" => alt = true,
+            "shift" => shift = true,
+            "" => {}
+            other => key = other.to_string(),
+        }
+    }
+    if key.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    if ctrl {
+        out.push_str("ctrl+");
+    }
+    if alt {
+        out.push_str("alt+");
+    }
+    if shift {
+        out.push_str("shift+");
+    }
+    out.push_str(&key);
+    out
 }
 
 /// Read one line without allowing an unbounded peer to grow memory

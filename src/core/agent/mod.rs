@@ -241,6 +241,7 @@ async fn compact_log(
     log: &TurnLog,
     system: &str,
     cancel: &Arc<AtomicBool>,
+    host: Option<&Arc<crate::core::extensions::ExtensionHost>>,
 ) -> Result<bool, String> {
     let history = log
         .history
@@ -270,9 +271,18 @@ async fn compact_log(
         .as_ref()
         .map(|session| session.id().to_string())
         .unwrap_or_default();
+    if let Some(h) = host {
+        h.event("compact_start", serde_json::json!({})).await;
+    }
     let summary = tokio::select! {
         result = compact::summarize(log.model.clone(), &older, session_id) => result?,
         _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+    };
+    // Extensions get the last word on the summary, not the history: the
+    // hook is bounded and fails open, so a silent one changes nothing.
+    let summary = match host.filter(|h| h.has_hook("compact_summary")) {
+        Some(h) => h.hook_compact_summary(&summary).await.unwrap_or(summary),
+        None => summary,
     };
     let mut projected = vec![ChatMessage::user(compact::seed(&summary))];
     projected.extend(kept.iter().cloned());
@@ -298,6 +308,10 @@ async fn compact_log(
             return Err("compaction cancelled; history was preserved".into());
         }
         return Err("compaction could not be installed; history changed or could not be saved; history was preserved".into());
+    }
+    if let Some(h) = host {
+        h.event("compact_end", serde_json::json!({"summary": summary}))
+            .await;
     }
     completion.send(SessionEvent::Compacted {
         summary,
@@ -563,6 +577,10 @@ pub struct Agent {
     /// events sender, and a per-turn counter would let its stale ToolEnd
     /// collide with (and corrupt) a later turn's row.
     tool_seq: Arc<AtomicU64>,
+    /// The tools the model may see and call right now, when an extension
+    /// narrowed them (`session.tools`); None is everything. Built-in and
+    /// extension names alike, checked at advertisement and at execution.
+    active_tools: Arc<Mutex<Option<Vec<String>>>>,
     /// The latest observed system-sleep gap. Written by the turn's
     /// heartbeat task; tests write it through [`Agent::inject_sleep_gap`].
     wake: wake::Shared,
@@ -611,6 +629,7 @@ impl Agent {
             session_name: Arc::new(Mutex::new(None)),
             persist_warned: Arc::new(AtomicBool::new(false)),
             tool_seq: Arc::new(AtomicU64::new(0)),
+            active_tools: Arc::new(Mutex::new(None)),
             wake: wake::shared(),
             options,
         };
@@ -735,6 +754,28 @@ impl Agent {
     /// so the model sees what the user ran.
     pub fn record_user(&self, text: String) {
         self.log().commit(ChatMessage::user(text));
+    }
+
+    /// Add a user-role message the model sees but the transcript does not,
+    /// without starting a turn — an extension's `session.send` with
+    /// `internal: true`.
+    pub fn record_internal(&self, text: String) {
+        let mut message = ChatMessage::user(text);
+        message.mark_internal();
+        self.log().commit(message);
+    }
+
+    /// Narrow (or with None, restore) the tools advertised and executable
+    /// from the next request on. Names are built-in or extension tools.
+    pub fn set_active_tools(&self, names: Option<Vec<String>>) {
+        *self.active_tools.lock().unwrap_or_else(|e| e.into_inner()) = names;
+    }
+
+    pub fn active_tools(&self) -> Option<Vec<String>> {
+        self.active_tools
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Replace the history with the compaction seed plus the kept recent
@@ -962,6 +1003,7 @@ impl Agent {
         let pending = self.pending.clone();
         let host = self.host.clone();
         let tool_seq = self.tool_seq.clone();
+        let active_tools = self.active_tools.clone();
         let wake = self.wake.clone();
         let compact_requested = self.compact_requested.clone();
         let tool_runtime = self.tools.clone();
@@ -1008,6 +1050,7 @@ impl Agent {
             pending,
             host,
             tool_seq,
+            active_tools,
             wake,
             system,
             allowed_tools,
@@ -1070,6 +1113,10 @@ struct ToolRunContext {
     host: Option<std::sync::Arc<crate::core::extensions::ExtensionHost>>,
     tool_mode: ToolMode,
     allowed_tools: Option<Arc<Vec<String>>>,
+    /// An extension's narrowing for this turn (`session.tools`), enforced
+    /// at execution like the request allowlist: a provider can still emit
+    /// any name.
+    active_tools: Option<Arc<Vec<String>>>,
     cwd: PathBuf,
     cancel: Arc<AtomicBool>,
     id: u64,
@@ -1082,11 +1129,24 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
         host,
         tool_mode,
         allowed_tools,
+        active_tools,
         cwd,
         cancel,
         id,
         events,
     } = context;
+    if let Some(active) = &active_tools {
+        if !active.iter().any(|a| a == name) {
+            return tools::ToolOutput {
+                content: format!(
+                    "tool {name} is not active right now — an extension narrowed the toolset"
+                ),
+                outcome: tools::ToolOutcome::Blocked,
+                summary: "blocked".into(),
+                display: None,
+            };
+        }
+    }
     if cancel.load(Ordering::SeqCst) {
         return tools::ToolOutput {
             content: "tool cancelled before execution".into(),
@@ -1181,15 +1241,35 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
             } else {
                 tools::ToolOutcome::Completed
             };
+            // The row and the viewer take the extension's shape when it
+            // gives one; the model still reads `content` alone. A diff
+            // body is converted to the reference row grammar here so the
+            // viewer paints it like a built-in edit's.
+            let summary = result
+                .summary
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| tools::sanitize_display(&s))
+                .unwrap_or_else(|| {
+                    if outcome.is_error() {
+                        "error".into()
+                    } else {
+                        "done".into()
+                    }
+                });
+            let display = match (result.format, result.display) {
+                (crate::core::extensions::Format::Diff, body) => {
+                    let rows =
+                        tools::diffview::from_unified(body.as_deref().unwrap_or(&result.content));
+                    (!rows.is_empty()).then(|| tools::truncate(rows))
+                }
+                (_, Some(body)) => Some(tools::truncate(body)),
+                (_, None) => None,
+            };
             return tools::ToolOutput {
                 content: result.content,
                 outcome,
-                summary: if outcome.is_error() {
-                    "error".into()
-                } else {
-                    "done".into()
-                },
-                display: None,
+                summary,
+                display,
             };
         }
     }
@@ -1261,7 +1341,7 @@ mod option_tests {
             }
             log.events = events;
             let cancel = Arc::new(AtomicBool::new(false));
-            let compaction = compact_log(&log, "system", &cancel);
+            let compaction = compact_log(&log, "system", &cancel, None);
             tokio::pin!(compaction);
             assert!(
                 tokio::time::timeout(Duration::from_millis(20), &mut compaction)
@@ -1474,6 +1554,7 @@ mod option_tests {
                 host: None,
                 tool_mode: ToolMode::None,
                 allowed_tools: None,
+                active_tools: None,
                 cwd: std::path::PathBuf::from("."),
                 cancel: Arc::new(AtomicBool::new(false)),
                 id: 1,
@@ -1497,6 +1578,7 @@ mod option_tests {
                 host: None,
                 tool_mode: ToolMode::All,
                 allowed_tools: Some(Arc::new(vec!["read".into(), "grep".into()])),
+                active_tools: None,
                 cwd: std::path::PathBuf::from("."),
                 cancel: Arc::new(AtomicBool::new(false)),
                 id: 1,

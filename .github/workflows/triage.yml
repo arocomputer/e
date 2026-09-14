@@ -42,5 +42,5 @@ jobs:
             add_label area:infra 6f42c1 'Build, CI, release, or repository automation' || true
           echo "$files" | grep -Eq '^(Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
-          echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|install.sh|SECURITY.md)' && \
+          echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages.rs|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true

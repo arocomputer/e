@@ -79,6 +79,10 @@ pub enum Kind {
     Error,
     /// A system lifecycle fact in the reference grammar: `● System: …`.
     System,
+    /// An extension's `show`: an optional `● title` row over a body painted
+    /// as text, markdown, or diff rows — the declarative rendering surface
+    /// (decision 0005). `text` is the title, `detail` the body.
+    Show,
 }
 
 /// One rendered block version. Streaming blocks may briefly retain a stale
@@ -126,6 +130,8 @@ pub struct Block {
     /// More output rows than the preview shows (drives the elision row).
     pub more: usize,
     cache: Option<RenderCache>,
+    /// How a `Show` body paints; Text for every other kind.
+    show_format: crate::core::extensions::Format,
     /// True while provider deltas are appending to this text block.
     streaming: bool,
     /// Bumped on every touch — the review screen's cache key folds these
@@ -152,9 +158,42 @@ impl Block {
             preview: Vec::new(),
             more: 0,
             cache: None,
+            show_format: crate::core::extensions::Format::default(),
             streaming: false,
             generation: 0,
         }
+    }
+
+    /// An extension's block. A diff body is converted from unified form to
+    /// the reference row grammar here, once; a body that turns out not to
+    /// be a diff paints as text. Bodies past `MAX_SHOW_BYTES` are clipped
+    /// with a note — a long diff still shows, it just ends early.
+    pub fn show(show: crate::core::extensions::Show) -> Self {
+        use crate::core::extensions::{Format, MAX_SHOW_BYTES};
+        let mut body = crate::core::tools::sanitize_display(&show.body);
+        if body.len() > MAX_SHOW_BYTES {
+            let mut cut = MAX_SHOW_BYTES;
+            while !body.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            body.truncate(cut);
+            body.push_str("\n… clipped");
+        }
+        let (body, format) = match show.format {
+            Format::Diff => {
+                let rows = crate::core::tools::diffview::from_unified(&body);
+                if rows.is_empty() {
+                    (body, Format::Text)
+                } else {
+                    (rows, Format::Diff)
+                }
+            }
+            other => (body, other),
+        };
+        let mut block = Block::new(Kind::Show, show.title.lines().next().unwrap_or(""));
+        block.detail = Some(body);
+        block.show_format = format;
+        block
     }
 
     pub fn touch(&mut self) {
@@ -630,8 +669,69 @@ impl Block {
                 &self.text,
                 width,
             ),
+            Kind::Show => {
+                use crate::core::extensions::Format;
+                let mut rows = Vec::new();
+                if !self.text.trim().is_empty() {
+                    rows.push(bold(
+                        &theme.fg("customMessageLabel", &format!("● {}", self.text)),
+                    ));
+                }
+                let body = self.detail.as_deref().unwrap_or("");
+                let inner = width.saturating_sub(2).max(8);
+                match self.show_format {
+                    Format::Markdown => rows.extend(
+                        crate::tui::markdown::render_markdown(theme, body, inner)
+                            .into_iter()
+                            .map(|l| format!("  {l}")),
+                    ),
+                    Format::Diff => rows.extend(body.lines().map(|line| {
+                        let styled = diff_row_style(theme, line)
+                            .unwrap_or_else(|| theme.fg("customMessageText", line));
+                        crate::tui::markdown::clip_styled(&format!("  {styled}"), width)
+                    })),
+                    Format::Text => rows.extend(
+                        wrap_styled(body, inner)
+                            .into_iter()
+                            .map(|l| format!("  {}", theme.fg("customMessageText", &l))),
+                    ),
+                }
+                rows
+            }
         }
     }
+}
+
+/// Color a row in the diff row grammar: the number-and-sign column takes
+/// the diff-marker hue (`+` green, `-` red), context and `⋯` elision rows
+/// dim, anything else — a file path, a binary note — passes through as
+/// None so the caller styles it. The reference keeps the changed text
+/// itself neutral. Shared by the ctrl+o viewer and `Show` blocks.
+pub fn diff_row_style(theme: &Theme, line: &str) -> Option<String> {
+    if line.trim() == "⋯" && line.starts_with("      ") {
+        return Some(theme.fg("dim", line));
+    }
+    let field = line.get(..5)?;
+    let number = field.trim_start();
+    if number.is_empty()
+        || !number.bytes().all(|b| b.is_ascii_digit())
+        || *field != format!("{number:>5}")
+    {
+        return None;
+    }
+    let rest = &line[5..];
+    if rest.is_empty() || rest.starts_with("   ") {
+        return Some(theme.fg("dim", line));
+    }
+    let added = if rest == " +" || rest.starts_with(" + ") {
+        true
+    } else if rest == " -" || rest.starts_with(" - ") {
+        false
+    } else {
+        return None;
+    };
+    let token = Theme::diff_marker_token(added);
+    Some(format!("{}{}", theme.fg(token, &line[..7]), &line[7..]))
 }
 
 /// Render `**strong**` reasoning without ever exposing a partial marker.

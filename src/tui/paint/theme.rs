@@ -130,16 +130,22 @@ pub fn load_bundled(light: bool) -> Result<Theme, String> {
     Theme::from_json(bundled_json(light))
 }
 
-/// A user theme from `~/.e/themes/<name>.json`, if present and valid.
+/// A user theme, `<name>.json` in `~/.e/themes/` or, failing that, in an
+/// installed package's `themes/` (settings order), if present and valid.
 pub fn load_user(name: &str) -> Option<Theme> {
-    let path = crate::core::config::home::themes_dir().join(format!("{name}.json"));
-    let json = std::fs::read_to_string(path).ok()?;
-    Theme::from_json(&json).ok()
+    let file = format!("{name}.json");
+    let mut dirs = vec![crate::core::config::home::themes_dir()];
+    dirs.extend(crate::core::resources::packages::dirs("themes"));
+    dirs.into_iter().find_map(|dir| {
+        let json = std::fs::read_to_string(dir.join(&file)).ok()?;
+        Theme::from_json(&json).ok()
+    })
 }
 
 /// Resolve the effective theme for a selection and a detected background.
-/// `~/.e/themes/<name>.json` wins over the built-ins for any name — so even
-/// `light`/`dark` are overridable — falling back to the embedded pair.
+/// `~/.e/themes/<name>.json` wins over a package's, which wins over the
+/// built-ins for any name — so even `light`/`dark` are overridable —
+/// falling back to the embedded pair.
 pub fn resolve(selection: &str, detected_light: bool) -> Theme {
     let name = if selection == "auto" {
         if detected_light {

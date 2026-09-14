@@ -35,6 +35,7 @@ pub(super) struct Context {
     pub(super) pending: Arc<Mutex<PendingQueue>>,
     pub(super) host: Option<Arc<crate::core::extensions::ExtensionHost>>,
     pub(super) tool_seq: Arc<AtomicU64>,
+    pub(super) active_tools: Arc<Mutex<Option<Vec<String>>>>,
     pub(super) wake: wake::Shared,
     pub(super) system: String,
     pub(super) allowed_tools: Option<Arc<Vec<String>>>,
@@ -57,6 +58,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         pending,
         host,
         tool_seq,
+        active_tools,
         wake,
         system,
         allowed_tools,
@@ -64,6 +66,8 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         tool_runtime,
         tool_mode,
     } = context;
+    // Extensions may append to the system prompt for this turn.
+    let mut system = system;
     let window_secs = wake::policy::window_secs();
     let max_continuations = wake::policy::max_continuations();
     let mut sleep_continuations = 0u32;
@@ -79,7 +83,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             break Outcome::Cancelled;
         }
         if compact_requested.swap(false, Ordering::SeqCst) {
-            match compact_log(&log, &system, &cancel).await {
+            match compact_log(&log, &system, &cancel, host.as_ref()).await {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events
@@ -122,6 +126,49 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             log.commit_async(recorded).await;
         }
 
+        // The first request of a run is the extensions' moment: the
+        // `before_turn` hook may add a system paragraph and a message,
+        // and `turn_start` carries the prompt. Continuations (later
+        // steps) and compaction-only runs are not turns.
+        if steps == 1 && !compact_only {
+            if let Some(h) = &host {
+                let prompt = history
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        matches!(m.kind, crate::core::providers::MessageKind::User { .. })
+                            && !m.is_internal()
+                    })
+                    .map(|m| m.content.clone())
+                    .unwrap_or_default();
+                if h.has_hook("before_turn") {
+                    let added = h.hook_before_turn(&prompt).await;
+                    for suffix in added.system_suffixes {
+                        system.push_str("\n\n");
+                        system.push_str(&suffix);
+                    }
+                    for message in added.messages {
+                        let mut recorded = ChatMessage::user(message.content.clone());
+                        if message.internal {
+                            recorded.mark_internal();
+                        } else {
+                            let _ = events.send(SessionEvent::Steered(message.content)).await;
+                        }
+                        log.commit_async(recorded).await;
+                    }
+                }
+                h.event("turn_start", serde_json::json!({"prompt": prompt}))
+                    .await;
+            }
+        }
+        let active_now: Option<Arc<Vec<String>>> = active_tools
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .map(Arc::new);
+
         let mut messages = { history.lock().unwrap_or_else(|e| e.into_inner()).clone() };
         // Some compatible gateways omit usage entirely. Keep a local,
         // conservative fallback so the mid-turn safety guard still
@@ -130,7 +177,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // the conservative side of what's actually sent.
         let mut last_context = compact::estimate_request_tokens(&system, &messages);
         if compact::should_compact(last_context, model.context_window) {
-            match compact_log(&log, &system, &cancel).await {
+            match compact_log(&log, &system, &cancel, host.as_ref()).await {
                 Ok(true) => {
                     messages = history
                         .lock()
@@ -174,16 +221,19 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             effort: effort.clone(),
             session_id,
             tools: tools::restrict_to(
-                tools::filter_schemas(
-                    match (&host, tool_mode, allowed_tools.is_some()) {
-                        // A request allowlist names built-ins. Extension
-                        // tools and overrides stay outside that contract.
-                        (Some(h), ToolMode::All, false) => h.merged_tool_schemas(),
-                        _ => tools::schemas(),
-                    },
-                    tool_mode,
+                tools::restrict_to(
+                    tools::filter_schemas(
+                        match (&host, tool_mode, allowed_tools.is_some()) {
+                            // A request allowlist names built-ins. Extension
+                            // tools and overrides stay outside that contract.
+                            (Some(h), ToolMode::All, false) => h.merged_tool_schemas(),
+                            _ => tools::schemas(),
+                        },
+                        tool_mode,
+                    ),
+                    allowed_tools.as_deref().map(Vec::as_slice),
                 ),
-                allowed_tools.as_deref().map(Vec::as_slice),
+                active_now.as_deref().map(Vec::as_slice),
             ),
         };
 
@@ -647,7 +697,17 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         for call in &calls {
             let args: serde_json::Value =
                 serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-            let presentation = tools::present(&call.name, &args);
+            let presentation = match host.as_ref().and_then(|h| h.tool_label(&call.name)) {
+                Some(label) => tools::present_labeled(
+                    &call.name,
+                    &label.category,
+                    &label.running,
+                    &label.completed,
+                    &label.target,
+                    &args,
+                ),
+                None => tools::present(&call.name, &args),
+            };
             let id = tool_seq.fetch_add(1, Ordering::SeqCst) + 1;
             batch.push((
                 id,
@@ -709,17 +769,28 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 let events = events.clone();
                 let cwd = cwd.clone();
                 let allowed_tools = allowed_tools.clone();
+                let active_tools = active_now.clone();
                 let tool_runtime = tool_runtime.clone();
                 handles.push((
                     call.clone(),
                     tokio::spawn(async move {
                         let _ = events.send(SessionEvent::ToolStart { id }).await;
-                        let output = run_tool(
+                        let args: serde_json::Value = serde_json::from_str(&call.arguments)
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Some(h) = &host {
+                            h.event(
+                                "tool_start",
+                                serde_json::json!({"id": id, "name": call.name, "arguments": args}),
+                            )
+                            .await;
+                        }
+                        let mut output = run_tool(
                             ToolRunContext {
                                 tools: tool_runtime,
-                                host,
+                                host: host.clone(),
                                 tool_mode,
                                 allowed_tools,
+                                active_tools,
                                 cwd,
                                 cancel,
                                 id,
@@ -729,6 +800,32 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                             &call.arguments,
                         )
                         .await;
+                        if let Some(h) = &host {
+                            // Redaction and trimming happen before the
+                            // result is shown, stored, or sent anywhere.
+                            if h.has_hook("tool_result") {
+                                if let Some(content) = h
+                                    .hook_tool_result(
+                                        &call.name,
+                                        &output.content,
+                                        output.is_error(),
+                                    )
+                                    .await
+                                {
+                                    output.content = content;
+                                }
+                            }
+                            h.event(
+                                "tool_end",
+                                serde_json::json!({
+                                    "id": id,
+                                    "name": call.name,
+                                    "outcome": format!("{:?}", output.outcome).to_lowercase(),
+                                    "content": output.content,
+                                }),
+                            )
+                            .await;
+                        }
                         let _ = events
                             .send(SessionEvent::ToolEnd {
                                 id,
@@ -793,7 +890,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                     "context nearly full — compacting before continuing".into(),
                 ))
                 .await;
-            match compact_log(&log, &system, &cancel).await {
+            match compact_log(&log, &system, &cancel, host.as_ref()).await {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = events

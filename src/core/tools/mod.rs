@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::core::cli::ToolMode;
 
 mod bash;
-mod diffview;
+pub mod diffview;
 mod edit;
 mod fs;
 
@@ -180,6 +180,42 @@ pub fn present(name: &str, args: &Value) -> Presentation {
             completed: format!("Ran {name}"),
             target: String::new(),
         },
+    }
+}
+
+/// Labels for an extension tool that declared its own grammar: the verbs
+/// as given, the target read from the named argument. Empty verbs fall
+/// back to the generic `Running <name>` / `Ran <name>`.
+pub fn present_labeled(
+    name: &str,
+    category: &str,
+    running: &str,
+    completed: &str,
+    target_arg: &str,
+    args: &Value,
+) -> Presentation {
+    let generic = present(name, args);
+    let pick = |given: &str, fallback: String| {
+        if given.trim().is_empty() {
+            fallback
+        } else {
+            sanitize_inline(given)
+        }
+    };
+    let target = if target_arg.is_empty() {
+        String::new()
+    } else {
+        match &args[target_arg] {
+            Value::String(s) => sanitize_inline(s),
+            Value::Null => String::new(),
+            other => sanitize_inline(&other.to_string()),
+        }
+    };
+    Presentation {
+        category: pick(category, generic.category),
+        running: pick(running, generic.running),
+        completed: pick(completed, generic.completed),
+        target,
     }
 }
 

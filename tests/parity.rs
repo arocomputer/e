@@ -1112,3 +1112,68 @@ fn sleep_events_speak_in_the_system_grammar() {
         )
     );
 }
+
+#[test]
+fn extension_show_blocks_paint_text_markdown_and_diff_through_the_theme() {
+    use e::core::extensions::{Format, Show};
+    use e::tui::transcript::Block;
+    let theme = dark();
+
+    // Text: a bold customMessageLabel title row, body rows indented two
+    // columns in the system-notice gray — the notice grammar, no colon.
+    let text = Block::show(Show {
+        title: "diff".into(),
+        body: "clean working tree\x1b[31m".into(),
+        format: Format::Text,
+    });
+    let rows = text.lines_for_test(&theme, 80);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0],
+        format!(
+            "\x1b[1m{}\x1b[22m",
+            theme.fg("customMessageLabel", "● diff")
+        )
+    );
+    assert_eq!(
+        rows[1],
+        format!("  {}", theme.fg("customMessageText", "clean working tree"))
+    );
+
+    // Diff: unified input becomes the edit tool's row grammar; the path row
+    // is neutral, the number-and-sign column wears the diff-marker tokens,
+    // context rows dim — byte for byte what the ctrl+o viewer paints.
+    let diff = Block::show(Show {
+        title: String::new(),
+        body: "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n".into(),
+        format: Format::Diff,
+    });
+    let rows = diff.lines_for_test(&theme, 80);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(
+        rows[0],
+        format!("  {}", theme.fg("customMessageText", "f.txt"))
+    );
+    assert_eq!(rows[1], format!("  {}", theme.fg("dim", "    1   a")));
+    let removed = e::tui::theme::Theme::diff_marker_token(false);
+    let added = e::tui::theme::Theme::diff_marker_token(true);
+    assert_eq!(rows[2], format!("  {} b", theme.fg(removed, "    2 -")));
+    assert_eq!(rows[3], format!("  {} B", theme.fg(added, "    2 +")));
+
+    // A body that is not a diff falls back to text rather than vanishing.
+    let not_diff = Block::show(Show {
+        title: "x".into(),
+        body: "just words".into(),
+        format: Format::Diff,
+    });
+    assert_eq!(not_diff.lines_for_test(&theme, 80).len(), 2);
+
+    // Markdown rides the transcript's own renderer, indented like the rest.
+    let md = Block::show(Show {
+        title: String::new(),
+        body: "# Head".into(),
+        format: Format::Markdown,
+    });
+    let rows = md.lines_for_test(&theme, 80);
+    assert_eq!(rows[0], format!("  {}", heading_style(1, "Head")));
+}

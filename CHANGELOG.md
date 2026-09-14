@@ -7,6 +7,34 @@ the pipeline publishes.
 
 ## Unreleased
 
+- The extension surface grows to pi's reach, across the process boundary
+  (decision 0005). Extensions can subscribe to lifecycle events
+  (`session_start`, `turn_start`, `tool_end`, `compact_end`, `model_change`,
+  …), shape a turn with `before_turn` (a system-prompt paragraph and a
+  message), `tool_result` (redaction), and `compact_summary` hooks, give
+  their tools built-in-style rows (`label`) and results a summary, viewer
+  detail, and a format (`text`, `markdown`, `diff` — a unified diff paints
+  with line numbers and coloured markers, like an edit's), show blocks in
+  the transcript, and declare shortcuts. A new direction: extensions ask e
+  things and get answers — `ui.notify`, `ui.show`, `ui.select`,
+  `ui.confirm`, `ui.input`, `ui.status`, `ui.compose`, `ui.panel` (an
+  interactive panel receives keys and redraws), `session.send`, `.info`,
+  `.name`, `.model`, `.effort`, `.tools` (narrow the toolset: plan mode),
+  `.interrupt`, `.compact`. Everything shown is data painted through the
+  theme; requests are bounded and answered "no ui" under `e rpc`. Version-1
+  extensions are unchanged. `docs/extensions/plan.mjs` shows the surface;
+  the scaffold gains promise-returning `ui` and `session` helpers.
+- Packages: `e install <source>` clones a git repository (or references a
+  local directory) shaped like `~/.e/` — `extensions/`, `skills/`,
+  `prompts/`, `themes/` — under `~/.e/packages/<host>/<path>`, records it in
+  the `packages` list of `settings.json`, and every loader reads it after the
+  home's own resources. `e packages` lists them, `e remove` forgets one and
+  deletes its clone, and `e install` alone makes disk match settings (clone
+  what is missing, re-check pinned refs, fast-forward unpinned ones). A
+  listed package missing on disk is reported at startup; startup itself never
+  touches the network. The `$` picker labels package skills `Package`.
+  `e docs packages` carries the guide.
+
 - Cancellation skips queued tool waves, and late tool events cannot change a
   newer turn. Rejected-image text stays a literal prompt, even when it starts
   with a command.

@@ -76,6 +76,10 @@ pub fn prompts_dir() -> PathBuf {
 pub fn themes_dir() -> PathBuf {
     home().join("themes")
 }
+/// Where `e install` clones packages: `packages/<host>/<path>` per source.
+pub fn packages_dir() -> PathBuf {
+    home().join("packages")
+}
 pub fn keybindings_path() -> PathBuf {
     home().join("keybindings.json")
 }

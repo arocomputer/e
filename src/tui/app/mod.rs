@@ -31,6 +31,7 @@ use crate::tui::transcript::{Block, Kind, Transcript};
 use crate::tui::trustpanel::{self, TrustStage};
 
 mod events;
+mod extui;
 mod login;
 mod menus;
 
@@ -84,10 +85,6 @@ struct QueueReview {
 
 /// Asynchronous work landing back in the frame loop.
 enum AppJob {
-    /// A line for the transcript (login progress, extension notify…).
-    Notice(String),
-    /// A prompt an extension command asked to submit as the user.
-    Prompt { text: String, epoch: u64 },
     /// An input hook's verdict on a submitted line: consume/replace/notice.
     /// `images` rides along only for the initial launch prompt (`-i`); a
     /// hook never sees or handles them, but they still attach once the
@@ -98,14 +95,17 @@ enum AppJob {
         images: Option<Vec<crate::core::providers::ImageInput>>,
         verdict: crate::core::extensions::InputVerdict,
     },
-    /// An extension named the session (command result). Tagged with the
-    /// session epoch the command started in.
-    Rename { name: String, epoch: u64 },
     /// A finished `!` shell command: what ran and what it printed. Tagged
     /// with the session epoch it started in.
     Shell {
         cmd: String,
         output: crate::core::tools::ToolOutput,
+        epoch: u64,
+    },
+    /// An extension command or shortcut finished. Tagged with the session
+    /// epoch it started in.
+    Command {
+        result: crate::core::extensions::CommandResult,
         epoch: u64,
     },
     /// A /reload finished: the restarted extension host.
@@ -283,6 +283,17 @@ struct App {
     /// they refresh only via `refresh_status_cache`.
     signed_in: bool,
     status_effort: Option<String>,
+    /// Where extensions' `ui.*` / `session.*` requests arrive; handed to
+    /// every host this session starts (launch, /reload).
+    requests: tokio::sync::mpsc::Sender<crate::core::extensions::HostRequest>,
+    /// Modal requests waiting for the footer to be free, first-come.
+    ui_queue: extui::UiQueue,
+    /// The open modal request, if any.
+    ui_prompt: Option<extui::UiPrompt>,
+    /// Each extension's `ui.status` text, by extension name.
+    ext_status: std::collections::BTreeMap<String, String>,
+    /// The extension panel below the composer, one slot.
+    ext_panel: Option<extui::ExtPanel>,
 }
 
 impl App {
@@ -412,33 +423,11 @@ impl App {
     /// `⋯` elision rows dim, anything else passes through untouched — the
     /// reference keeps the changed text itself neutral.
     fn diff_row_color(theme: &Theme, line: &str) -> Option<String> {
-        if line.trim() == "⋯" && line.starts_with("      ") {
-            return Some(theme.fg("dim", line));
-        }
-        let field = line.get(..5)?;
-        let number = field.trim_start();
-        if number.is_empty()
-            || !number.bytes().all(|b| b.is_ascii_digit())
-            || *field != format!("{number:>5}")
-        {
-            return None;
-        }
-        let rest = &line[5..];
-        if rest.is_empty() || rest.starts_with("   ") {
-            return Some(theme.fg("dim", line));
-        }
-        let added = if rest == " +" || rest.starts_with(" + ") {
-            true
-        } else if rest == " -" || rest.starts_with(" - ") {
-            false
-        } else {
-            return None;
-        };
-        let token = crate::tui::theme::Theme::diff_marker_token(added);
-        Some(format!("{}{}", theme.fg(token, &line[..7]), &line[7..]))
+        crate::tui::transcript::diff_row_style(theme, line)
     }
 
     fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
+        self.pump_ui_queue();
         let blink_on = self
             .active
             .as_ref()
@@ -571,6 +560,10 @@ impl App {
             lines.extend(panel.render(&self.theme, width));
         } else if let Some(menu) = &self.menu {
             lines.extend(menu.render(&self.theme, width));
+        } else if self.ui_input_open() {
+            lines.extend(self.render_ui_input(width));
+        } else if let Some(panel) = &self.ext_panel {
+            lines.extend(panel.render(&self.theme, width));
         }
         let window = self.agent.model.context_window.max(1);
         // Nothing is signed in for the current model — it's a bootstrap
@@ -585,22 +578,42 @@ impl App {
             context_used: self.context_tokens,
             context_total: Some(window),
         };
+        let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
+            if p.interactive {
+                extui::HINT_PANEL_INTERACTIVE
+            } else {
+                extui::HINT_PANEL
+            }
+        });
         let hint = self
             .settings
             .as_ref()
             .map(|_| crate::tui::settingspanel::HINT)
             .or_else(|| self.menu.as_ref().map(|m| m.hint))
+            .or_else(|| self.ui_input_open().then_some(extui::HINT_INPUT))
+            .or(ext_panel_hint)
             .map(|h| crate::tui::menu::degrade_hint(h, width));
         // A framed surface's bottom divider sits directly above the hint
         // row — the blank spacer belongs only to the bare-composer layout.
         let panel_open = self.trust.is_some()
             || self.auth.is_some()
             || self.settings.is_some()
-            || self.menu.is_some();
+            || self.menu.is_some()
+            || self.ui_input_open()
+            || self.ext_panel.is_some();
+        // Extensions' status slots share the right-hand overlay spot; a
+        // transient app overlay (copied, etc.) takes precedence while shown.
+        let ext_status = (!self.ext_status.is_empty()).then(|| {
+            self.ext_status
+                .values()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ")
+        });
         lines.extend(statusline(
             &self.theme,
             &data,
-            self.overlay.as_deref(),
+            self.overlay.as_deref().or(ext_status.as_deref()),
             hint,
             panel_open,
             width,
@@ -643,6 +656,10 @@ impl App {
         }
         self.agent.model = pool[next].clone();
         self.refresh_status_cache();
+        self.emit(
+            "model_change",
+            serde_json::json!({"model": self.agent.model_slug()}),
+        );
     }
 
     /// Queued-prompt review keys, the reference's grammar: ↑ on an empty
@@ -1028,6 +1045,8 @@ impl App {
         self.agent
             .adopt_session_name(crate::core::session::name_of(&path));
         self.session_epoch += 1;
+        self.agent.set_active_tools(None);
+        extui::shutdown_then_start(self, "resume");
         self.notice(format!(
             "resumed {}",
             path.file_name()
@@ -1141,6 +1160,12 @@ impl App {
     fn submit(&mut self, text: String) {
         let text = self.editor.expand_pastes(&text);
         let trimmed = text.trim().to_string();
+        // An extension's question takes the line whole — even an empty one
+        // is an answer — and it never reaches input hooks or the model.
+        if self.ui_input_open() {
+            self.answer_ui_input(&text);
+            return;
+        }
         if trimmed.is_empty() {
             return;
         }
@@ -1369,6 +1394,8 @@ impl App {
                 self.transcript
                     .push(Block::new(Kind::Banner, crate::VERSION));
                 set_tab_title(&tab_title(&title_path(), None));
+                self.agent.set_active_tools(None);
+                extui::shutdown_then_start(self, "new");
             }
             "/resume" => self.open_resume_menu(),
             "/tree" => self.open_tree_menu(),
@@ -1396,16 +1423,8 @@ impl App {
                     let (name, args) = (name.to_string(), args.to_string());
                     let epoch = self.session_epoch;
                     crate::core::config::home::spawn(async move {
-                        let out = host.run_command(&name, &args).await;
-                        if let Some(notice) = out.notice {
-                            let _ = results.send(AppJob::Notice(notice)).await;
-                        }
-                        if let Some(text) = out.prompt {
-                            let _ = results.send(AppJob::Prompt { text, epoch }).await;
-                        }
-                        if let Some(name) = out.session_name.filter(|n| !n.trim().is_empty()) {
-                            let _ = results.send(AppJob::Rename { name, epoch }).await;
-                        }
+                        let result = host.run_command(&name, &args).await;
+                        let _ = results.send(AppJob::Command { result, epoch }).await;
                     });
                 } else if is_literal_slash_prompt(&trimmed) {
                     // Absolute paths and a literal leading slash are prompt
@@ -1599,12 +1618,34 @@ impl App {
         }
         self.reloading = true;
         self.reload_block = Some(self.transcript.push(Block::new(Kind::Notice, "reloading…")));
+        // The old host's surfaces die with it; a modal it was waiting on is
+        // answered "cancelled" by the drop.
+        self.ui_queue.clear();
+        self.cancel_ui_prompt();
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Extension)
+        {
+            self.menu = None;
+        }
+        self.ext_panel = None;
+        self.ext_status.clear();
         let old = self.host.clone();
         let jobs = self.jobs.clone();
         let results = self.results.clone();
+        let requests = self.requests.clone();
+        let path = self.agent.session_path().map(|p| p.display().to_string());
         crate::core::config::home::spawn(async move {
+            old.event("session_shutdown", serde_json::json!({"reason": "reload"}))
+                .await;
             old.shutdown().await;
-            let host = crate::core::extensions::ExtensionHost::start(jobs).await;
+            let host = crate::core::extensions::ExtensionHost::start(jobs, Some(requests)).await;
+            host.event(
+                "session_start",
+                serde_json::json!({"reason": "reload", "path": path}),
+            )
+            .await;
             let _ = results.send(AppJob::Reloaded(host)).await;
         });
     }
@@ -2066,18 +2107,27 @@ pub struct RunOptions {
     pub images: Vec<crate::core::providers::ImageInput>,
 }
 
+/// The channel extensions' own requests travel on: created by the caller
+/// before the host starts (so `initialize` can promise a UI), consumed here.
+pub type Requests = (
+    tokio::sync::mpsc::Sender<crate::core::extensions::HostRequest>,
+    tokio::sync::mpsc::Receiver<crate::core::extensions::HostRequest>,
+);
+
 pub async fn run(
     options: RunOptions,
     host: std::sync::Arc<crate::core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     jobs_rx: tokio::sync::mpsc::Receiver<String>,
+    requests: Requests,
 ) -> std::io::Result<()> {
     let home = options
         .agent
         .home
         .clone()
         .unwrap_or_else(crate::core::config::home::home);
-    crate::core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx)).await
+    crate::core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests))
+        .await
 }
 
 /// Run the terminal and its configuration reads within the selected home.
@@ -2086,7 +2136,9 @@ async fn run_scoped(
     host: std::sync::Arc<crate::core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     mut jobs_rx: tokio::sync::mpsc::Receiver<String>,
+    requests: Requests,
 ) -> std::io::Result<()> {
+    let (requests_tx, mut requests_rx) = requests;
     let RunOptions {
         initial,
         continue_session,
@@ -2187,8 +2239,20 @@ async fn run_scoped(
         light_background: detected,
         signed_in: false,
         status_effort: None,
+        requests: requests_tx,
+        ui_queue: extui::UiQueue::new(),
+        ui_prompt: None,
+        ext_status: std::collections::BTreeMap::new(),
+        ext_panel: None,
     };
     app.refresh_status_cache();
+    app.emit(
+        "session_start",
+        serde_json::json!({
+            "reason": "startup",
+            "path": app.agent.session_path().map(|p| p.display().to_string()),
+        }),
+    );
     app.transcript
         .push(Block::new(Kind::Banner, crate::VERSION));
     for warning in model::config_warnings() {
@@ -2332,6 +2396,32 @@ async fn run_scoped(
                                 full: false,
                                 scroll: 0,
                             });
+                        } else if app.ext_panel.as_ref().is_some_and(|p| p.interactive)
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !(ctrl && k.code == KeyCode::Char('c'))
+                        {
+                            // The panel owns the keyboard: Esc closes it
+                            // here, every other chord goes to its owner.
+                            // ctrl+c stays e's.
+                            if k.code == KeyCode::Esc {
+                                app.close_ext_panel(true);
+                            } else {
+                                app.forward_panel_key(&k);
+                            }
+                        } else if k.code == KeyCode::Esc
+                            && app.ext_panel.is_some()
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                        {
+                            app.close_ext_panel(true);
+                        } else if k.code == KeyCode::Esc && app.ui_input_open() {
+                            app.cancel_ui_prompt();
                         } else if let Some(stage) = &mut app.trust {
                             match k.code {
                                 KeyCode::Up => stage.step(-1),
@@ -2553,6 +2643,9 @@ async fn run_scoped(
                                 }
                                 KeyCode::Enter => { app.select_menu(); }
                                 KeyCode::Esc => {
+                                    if app.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Extension) {
+                                        app.cancel_ui_prompt();
+                                    }
                                     app.menu = None;
                                     // Declining the -r picker releases a
                                     // held launch prompt into the current
@@ -2600,10 +2693,27 @@ async fn run_scoped(
                             // beneath it. The statusline confirms the
                             // change; nothing lands in the transcript.
                             match app.agent.cycle_effort() {
-                                Ok(Some(_)) => app.refresh_status_cache(),
+                                Ok(Some(level)) => {
+                                    app.refresh_status_cache();
+                                    app.emit("effort_change", serde_json::json!({"effort": level}));
+                                }
                                 Ok(None) => {}
                                 Err(error) => app.notice(format!("could not save reasoning effort: {error}")),
                             }
+                        } else if let Some(chord) = extui::chord_of(&k)
+                            .filter(|chord| app.host.has_shortcut(chord))
+                            .filter(|_| !app.ui_input_open() && app.pending_key.is_none())
+                        {
+                            // A declared extension shortcut, answered like
+                            // a command. Only chords e itself left unbound
+                            // reach this branch.
+                            let host = app.host.clone();
+                            let results = app.results.clone();
+                            let epoch = app.session_epoch;
+                            crate::core::config::home::spawn(async move {
+                                let result = host.run_shortcut(&chord).await;
+                                let _ = results.send(AppJob::Command { result, epoch }).await;
+                            });
                         } else if !ctrl && app.queue_review_key(k.code) {
                             // Consumed by the queued-prompt review.
                         } else if let Some(key) = key_of(&k, &app.keymap) {
@@ -2626,20 +2736,15 @@ async fn run_scoped(
                     app.on_session_event(e);
                 }
             }
+            request = requests_rx.recv() => {
+                if let Some(request) = request {
+                    app.on_host_request(request);
+                }
+            }
             job = results_rx.recv() => {
                 match job {
-                    Some(AppJob::Notice(notice)) => app.notice(notice),
-                    Some(AppJob::Prompt { text, epoch }) => {
-                        // A prompt from a command that started in an earlier
-                        // session must not start a turn in its replacement.
-                        if epoch == app.session_epoch {
-                            app.prompt(text);
-                        } else {
-                            app.notice(
-                                "an extension command finished after the session changed — its prompt was discarded"
-                                    .into(),
-                            );
-                        }
+                    Some(AppJob::Command { result, epoch }) => {
+                        app.deliver_command_result(result, epoch);
                     }
                     Some(AppJob::InputVerdict { sequence, text, images, verdict }) => {
                         // A later hook may finish first; hold it until every
@@ -2649,15 +2754,6 @@ async fn run_scoped(
                             app.input_verdicts.complete(sequence, text, images, verdict)
                         {
                             app.apply_input_verdict(text, images, verdict);
-                        }
-                    }
-                    Some(AppJob::Rename { name, epoch }) => {
-                        // A rename from a command that started in an earlier
-                        // session must not rename its replacement.
-                        if epoch == app.session_epoch {
-                            app.agent.set_session_name(name.clone());
-                            app.notice(format!("session: {name}"));
-                            set_tab_title(&tab_title(&title_path(), Some(&name)));
                         }
                     }
                     Some(AppJob::CatalogRefreshed) => {
@@ -2855,6 +2951,9 @@ async fn run_scoped(
     // gives extensions their shutdown notification.
     painter.shutdown();
     crate::core::tools::kill_tracked_processes();
+    app.host
+        .event("session_shutdown", serde_json::json!({"reason": "quit"}))
+        .await;
     app.host.shutdown().await;
     drop(_guard);
     // The tab title we set at launch (or from a session name) is ours to
@@ -3353,7 +3452,175 @@ mod tests {
             light_background: false,
             signed_in: false,
             status_effort: None,
+            requests: tokio::sync::mpsc::channel(1).0,
+            ui_queue: extui::UiQueue::new(),
+            ui_prompt: None,
+            ext_status: std::collections::BTreeMap::new(),
+            ext_panel: None,
         }
+    }
+
+    /// A request as the host would deliver it, with a receiver for the
+    /// reply an extension would read.
+    fn fake_request(
+        extension: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> (
+        crate::core::extensions::HostRequest,
+        tokio::sync::oneshot::Receiver<Result<serde_json::Value, String>>,
+    ) {
+        crate::core::extensions::HostRequest::fake(extension, method, params)
+    }
+
+    #[test]
+    fn show_requests_become_transcript_blocks_and_status_is_bounded() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "diff",
+            "ui.show",
+            serde_json::json!({"title": "diff f.txt", "body": "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n", "format": "diff"}),
+        );
+        app.on_host_request(request);
+        assert_eq!(reply.blocking_recv().unwrap(), Ok(serde_json::json!({})));
+        let block = app.transcript.blocks.last().unwrap();
+        assert_eq!(block.kind, Kind::Show);
+        assert_eq!(block.text, "diff f.txt");
+        assert_eq!(
+            block.detail.as_deref(),
+            Some("f.txt\n    1   a\n    2 - b\n    2 + B")
+        );
+
+        let (request, reply) = fake_request(
+            "diff",
+            "ui.status",
+            serde_json::json!({"text": "x".repeat(100) + "\x1b[31m"}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        let status = app.ext_status.get("diff").unwrap();
+        assert_eq!(status.chars().count(), 40);
+        assert!(status.ends_with('…') && !status.contains('\x1b'));
+
+        let (request, reply) = fake_request("diff", "ui.bogus", serde_json::json!({}));
+        app.on_host_request(request);
+        assert!(reply
+            .blocking_recv()
+            .unwrap()
+            .unwrap_err()
+            .contains("unknown method"));
+    }
+
+    #[test]
+    fn select_opens_the_picker_and_enter_answers_with_the_value() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.select",
+            serde_json::json!({"title": "Mode", "options": [
+                {"label": "Plan", "description": "read only", "value": "plan"},
+                "Build"
+            ]}),
+        );
+        app.on_host_request(request);
+        let menu = app.menu.as_ref().expect("picker opened");
+        assert_eq!(menu.kind, MenuKind::Extension);
+        assert_eq!(menu.title, "Mode");
+        assert!(app.select_menu());
+        assert_eq!(
+            reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"value": "plan", "label": "Plan"}))
+        );
+        assert!(app.menu.is_none() && app.ui_prompt.is_none());
+
+        // A second modal while one is open waits its turn; Esc cancels
+        // the open one and the next takes the surface on the next frame.
+        let (first, first_reply) =
+            fake_request("a", "ui.confirm", serde_json::json!({"title": "Sure?"}));
+        let (second, second_reply) =
+            fake_request("b", "ui.input", serde_json::json!({"title": "Name"}));
+        app.on_host_request(first);
+        app.on_host_request(second);
+        assert_eq!(app.ui_queue.len(), 1);
+        app.cancel_ui_prompt();
+        app.menu = None;
+        assert_eq!(
+            first_reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"confirmed": false}))
+        );
+        app.pump_ui_queue();
+        assert!(app.ui_input_open());
+        app.editor.set_text("world");
+        app.submit("world".into());
+        assert_eq!(
+            second_reply.blocking_recv().unwrap(),
+            Ok(serde_json::json!({"text": "world"}))
+        );
+        assert!(!app.ui_input_open() && app.editor.is_empty());
+    }
+
+    #[test]
+    fn session_tools_narrows_the_agent_and_info_reports_it() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "session.tools",
+            serde_json::json!({"names": ["read", "grep"]}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        assert_eq!(
+            app.agent.active_tools(),
+            Some(vec!["read".to_string(), "grep".to_string()])
+        );
+        let (request, reply) = fake_request("plan", "session.info", serde_json::json!({}));
+        app.on_host_request(request);
+        let info = reply.blocking_recv().unwrap().unwrap();
+        assert_eq!(info["tools"], serde_json::json!(["read", "grep"]));
+        assert_eq!(info["running"], false);
+        let (request, _) =
+            fake_request("plan", "session.tools", serde_json::json!({"names": null}));
+        app.on_host_request(request);
+        assert_eq!(app.agent.active_tools(), None);
+    }
+
+    #[test]
+    fn panels_keep_span_spacing_strip_control_bytes_and_paint_tokens() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "plan",
+            "ui.panel",
+            serde_json::json!({"title": "Plan", "interactive": true, "lines": [
+                [{"text": "› ", "token": "accent"}, {"text": "[ ] ", "token": "dim"}, {"text": "step\x1b[31m one"}],
+                "plain\nrow"
+            ]}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        let panel = app.ext_panel.as_ref().unwrap();
+        assert!(panel.interactive && panel.extension == "plan");
+        let rows = panel.render(&app.theme, 80);
+        // divider, header, blank, two rows, divider
+        assert_eq!(rows.len(), 6);
+        assert_eq!(
+            rows[3],
+            format!(
+                "  {}{}step one",
+                app.theme.fg("accent", "› "),
+                app.theme.fg("dim", "[ ] ")
+            )
+        );
+        assert_eq!(rows[4], "  plain row");
+        // Another extension's panel replaces it; a null from the owner closes.
+        let (request, _) = fake_request("other", "ui.panel", serde_json::json!({"lines": ["x"]}));
+        app.on_host_request(request);
+        assert_eq!(app.ext_panel.as_ref().unwrap().title, "other");
+        let (request, _) = fake_request("plan", "ui.panel", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.ext_panel.is_some(), "only the owner closes a panel");
+        let (request, _) = fake_request("other", "ui.panel", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.ext_panel.is_none());
     }
 
     #[test]

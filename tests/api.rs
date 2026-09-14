@@ -12,7 +12,7 @@ mod common;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 async fn start_host(notices: tokio::sync::mpsc::Sender<String>) -> std::sync::Arc<ExtensionHost> {
-    ExtensionHost::start(notices).await
+    ExtensionHost::start(notices, None).await
 }
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {

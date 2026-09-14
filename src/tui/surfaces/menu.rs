@@ -47,7 +47,7 @@ impl MenuItem {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuKind {
     Commands,
     Files,
@@ -58,11 +58,14 @@ pub enum MenuKind {
     Scoped,
     /// /tree: pick an earlier point in this session to rewind to.
     Tree,
+    /// An extension's `ui.select` / `ui.confirm`: Enter answers with the
+    /// row's value, Esc answers "cancelled".
+    Extension,
 }
 
 pub struct Menu {
     pub kind: MenuKind,
-    pub title: &'static str,
+    pub title: String,
     pub hint: &'static str,
     items: Vec<MenuItem>,
     filtered: Vec<usize>,
@@ -140,13 +143,13 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<usize> {
 impl Menu {
     pub fn new(
         kind: MenuKind,
-        title: &'static str,
+        title: impl Into<String>,
         hint: &'static str,
         items: Vec<MenuItem>,
     ) -> Self {
         let mut menu = Menu {
             kind,
-            title,
+            title: title.into(),
             hint,
             items,
             filtered: Vec::new(),

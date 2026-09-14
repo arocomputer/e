@@ -17,6 +17,11 @@ Review ${1:-everything} carefully. Focus on $2.
   as one word.
 - New files are picked up immediately — templates are read per use.
 
+## Package templates
+
+An installed [package](packages.md) contributes its `prompts/` directory the
+same way; a global template of the same name shadows a package's.
+
 ## Repo-local templates
 
 A trusted repository can carry its own commands in `.e/prompts/`:
