@@ -31,7 +31,7 @@ jobs:
           # The push path diffs the squash commit against its parent.
           fetch-depth: 2
 
-      - name: Gate the heavy jobs on the changed paths
+      - name: Gate
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,7 +78,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Audit the security surface
+      - name: Audit
         run: ./scripts/guard.sh
 
   test:
@@ -95,19 +95,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Rust toolchain
+      - name: Toolchain
         if: needs.changes.outputs.build == 'true'
         run: rustc --version
 
-      - name: Repository contract
+      - name: Check
         if: needs.changes.outputs.build == 'true'
         run: ./x check
 
-      - name: Terminal frame checks
+      - name: Frames
         if: needs.changes.outputs.build == 'true'
         run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
 
-      - name: Retain terminal frames on failure
+      - name: Retain frames
         if: failure()
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -126,17 +126,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Rust toolchain
+      - name: Toolchain
         if: needs.changes.outputs.build == 'true'
         run: rustc --version
 
-      - name: Measure release binary
+      - name: Bench
         if: needs.changes.outputs.build == 'true'
         run: ./x bench
 
       # A reviewer convenience, not a contract: GitHub's artifact service
       # occasionally 403s at finalize, and that flake must not fail the job.
-      - name: Upload pull-request binary
+      - name: Upload binary
         if: github.event_name == 'pull_request' && needs.changes.outputs.build == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
