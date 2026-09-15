@@ -3,6 +3,8 @@ use std::io::Write as _;
 use std::io::{BufRead as _, Read as _};
 use std::process::{Command, Stdio};
 
+mod common;
+
 #[cfg(unix)]
 fn wait_for_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -331,4 +333,43 @@ done
         "stderr: {stderr}"
     );
     let _ = std::fs::remove_dir_all(home);
+}
+
+/// An unattended session cannot answer the trust panel, so the decision has to
+/// be recordable from the command line — and the loader has to honour it.
+#[test]
+fn trust_records_a_decision_the_workspace_loader_honours() {
+    let _guard = common::env_lock();
+    let home = common::Home::new("cli-trust");
+    let workspace = std::env::temp_dir().join(format!(
+        "e-cli-trust-ws-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_e"))
+            .args(args)
+            .env("E_HOME", &home.dir)
+            .current_dir(&workspace)
+            .output()
+            .unwrap()
+    };
+    assert!(!e::core::config::trust::trusted(&workspace));
+
+    // No argument names the current directory, the way `e packages` does.
+    let trusted = run(&["trust"]);
+    assert!(trusted.status.success());
+    assert!(String::from_utf8_lossy(&trusted.stdout).contains("trusted"));
+    assert!(e::core::config::trust::trusted(&workspace));
+
+    let declined = run(&["untrust", workspace.to_str().unwrap()]);
+    assert!(declined.status.success());
+    assert!(!e::core::config::trust::trusted(&workspace));
+
+    let bad_flag = run(&["trust", "--nowhere"]);
+    assert_eq!(bad_flag.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad_flag.stderr).contains("usage: e trust [dir]"));
+
+    let _ = std::fs::remove_dir_all(&workspace);
 }

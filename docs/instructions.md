@@ -5,7 +5,8 @@ prompt, wrapped as project instructions with the file's path:
 
 - `~/.e/AGENTS.md` — yours, for every project.
 - `<workspace>/AGENTS.md` — the project's, loaded once the directory is
-  trusted (`/trust`). An untrusted repository cannot steer the agent.
+  trusted (`/trust`, or `e trust [dir]` when there is no terminal). An
+  untrusted repository cannot steer the agent.
 - `<workspace>/<dir>/…/AGENTS.md` — nested instructions, loaded the first
   time a tool reads, writes, edits, or searches a path under that directory,
   as a message in the conversation. The nearest file arrives last, so it
