@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500" viewBox="0 0 400 500">
+  <g fill="#fafafa">
+    <rect x="100" y="0" width="300" height="100"/>
+    <rect x="0" y="200" width="300" height="100"/>
+    <rect x="100" y="400" width="300" height="100"/>
+  </g>
+</svg>
