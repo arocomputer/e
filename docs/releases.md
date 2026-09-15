@@ -1,84 +1,159 @@
-# Releases and verification
+# Releases and testing
 
-A tag `vX.Y.Z` is publishable only when it exactly matches the user-facing
-`VERSION` in `src/lib.rs` and the `version` in `Cargo.toml`, has a nonempty
-`## X.Y.Z` section in `CHANGELOG.md`, and passes the complete repository
-contract. Release jobs build with the committed lockfile and smoke-test the
-native binary and installer before publication.
+## Run changes locally
 
-## Writing release notes
+Use Rust for local builds and Python 3.11 or newer for scenario and release tooling.
+PR preview commands also require an authenticated GitHub CLI.
 
-Each release has a version, publication date, short title, and a brief introduction.
-Use e's own wording and describe what changed for someone using the terminal.
+```sh
+./x dev /path/to/project
+./x scenario streaming
+./x scenario tools
+./x scenario cancellation
+./x scenario long-output
+./x scenario resume
+```
 
-- Keep the version heading exactly `## X.Y.Z` so release extraction can find it.
-  Put the date on the next nonempty line and the release title in a `###` heading.
-- Use `### New features`, `### Improvements`, and `### Fixes`, in that order.
-  Omit empty groups. Keep bullets short and describe observable behavior.
-- Put breaking changes first under Improvements, prefixed with **Upgrade:** and
-  the replacement command or migration step. Prefix security fixes with **Security:**.
-- Keep `## Unreleased` in the repository only, with no invented publication date.
-  Add changes to its existing groups rather than appending chronological batches.
-- The website uses the same release title and groups, with a shorter selection of
-  changes where useful. It shows published releases only, newest first, using
-  GitHub's publication date. Do not add a separate page title or introduction.
+`./x dev` builds the current checkout and runs it in the selected project.
+Arguments after the project path go to e. Local builds use `~/.e-dev` and never
+self-update. Set `E_HOME` to use another dedicated state directory.
 
-The GitHub release uses the version section verbatim, without its heading or
-an appended install block. Installation belongs in the README; artifact
-verification stays below. Qualification rejects missing, empty, or duplicate
-version sections rather than publishing fallback text.
+Scenarios run the real terminal against the existing loopback fixture provider.
+They use temporary settings, dummy credentials, and a disposable project; no
+paid provider calls run. Streaming, long-output, and cancellation share the same
+paced response so you can inspect scrolling or interrupt it. Tools enables a
+synthetic shell command and leaves the workspace trust choice to you. Resume
+reopens the saved conversation after the first terminal exits. State is removed
+when the scenario command finishes.
 
-## Cutting a release
+## Release channels
 
-1. Review `Unreleased` against the changes actually shipping. Do not include
-   unreleased work when editing an older release's notes.
-2. Rename `## Unreleased` to `## X.Y.Z` and open a new empty `## Unreleased`
-   above it. Add the publication date below the version heading.
-3. Bump `VERSION` in `src/lib.rs` and `version` in `Cargo.toml` to `X.Y.Z`,
-   updating `Cargo.lock` as needed.
-4. Preview the release body and qualify the candidate:
+| Channel | Trigger | Executable | Default state |
+| --- | --- | --- | --- |
+| stable | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |
+| dev | Successful CI for code changes on main | `e-dev` | `~/.e-dev` |
+| beta | Release workflow, action `beta`, selected main commit | `e-beta` | `~/.e-beta` |
+| PR | Preview workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
 
-   ```sh
-   ./scripts/release-notes.sh vX.Y.Z < CHANGELOG.md
-   ./x check
-   ./x release-check vX.Y.Z
-   ```
+`Cargo.toml` owns the base version. `scripts/release/identity.py` derives channel,
+package tag, executable name, and preview version. `build.rs` embeds the workflow's
+version, channel, and full source commit. Preview identities use
+`X.Y.Z-dev.NUMBER.gCOMMIT` or `X.Y.Z-beta.NUMBER.gCOMMIT`; the sequence is the
+Release workflow run number. PR builds use that workflow's run number.
+`e --version --json` and `e doctor` report the build identity.
 
-5. Commit, then tag that commit `vX.Y.Z` and push the tag. The workflow creates
-   a draft, uploads and verifies artifacts, then publishes it.
+Dev and beta are GitHub prereleases and never become GitHub's latest stable
+release. The `channel-dev` and `channel-beta` releases contain only a moving
+`version.txt` pointer. The pointer advances after npm and brew both publish.
+Versioned artifacts remain attached to their own release. Older retries cannot
+move package tags, formulas, or channel pointers backward. PR and local builds
+never self-update. Stable, dev, and beta self-updates stay in their own channel.
 
-## Verifying downloads
+Each home owns its credentials, settings, sessions, and extensions. Sign in
+separately in a new channel. State isolation does not isolate project edits;
+use a disposable project or worktree when trying unfinished features.
 
-Each release contains four binary archives, `checksums.txt`, and a CycloneDX
-`e-sbom.cdx.json`. GitHub generates signed build-provenance attestations for
-the artifacts. Given a downloaded archive:
+## Install or switch channels
+
+```sh
+curl -fsSL https://e.intuitum.sh/install.sh | sh -s -- --channel beta
+npm install -g @intuitums/e@beta
+bun add -g @intuitums/e@beta
+brew install intuitums/tap/e-beta
+```
+
+Use `dev` instead of `beta` for development builds. Stable remains the default:
+no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
+Curl and brew support side-by-side installations. npm and bun replace the
+installed version of `@intuitums/e` when switching its tag. Package installs
+carry channel-specific ownership markers; e directs updates to that manager.
+
+To reinstall an older version with curl, pass `--version X.Y.Z`; a preview also
+needs `--channel beta` or `--channel dev` and its full preview version. npm and
+bun accept an exact package version after `@`. Use curl in a separate directory
+for a historical brew build. An older curl build follows newer releases again
+unless auto-update is disabled in its settings.
+
+## Try a PR before merging
+
+```sh
+./x preview 123
+# After its Preview run succeeds:
+./x preview 123 --run RUN_ID
+```
+
+Requires `gh` authentication with access to Actions. The request returns
+immediately; find the run with `gh run list --repo intuitums/e --workflow preview.yml`.
+The installer verifies the artifact checksum and prints its source commit.
+It installs `e-pr-123` under `~/.local/bin`, or `E_INSTALL_DIR`.
+Artifacts expire after 14 days. The selected run stays pinned even if the PR
+changes later; request a new run to test new commits. PR code is unreviewed and
+can execute arbitrary code when built or run. Its workflow uses read-only
+permissions, no publishing credentials, and no persisted checkout token.
+
+## Select a beta and ship stable
+
+1. Prepare the next base version in `Cargo.toml` and `Cargo.lock` on main.
+2. Run Release with action `beta` and the chosen main commit. An empty commit
+   selects current main. The workflow runs `./x check`, qualifies the build,
+   builds all four platform archives, and publishes the channel installers.
+3. Test that beta. Fixes produce another beta from a newer main commit.
+4. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
+   title, introduction, and fixed groups. Create a fresh Unreleased section.
+5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`, then
+   tag it `vX.Y.Z` and push the tag.
+
+Stable recompiles with the stable identity. It is not a byte-for-byte rename of
+the beta binary. Keep functional changes out of the final promotion commit;
+if code changes, test another beta. The stable workflow checks the final commit
+again. No permanent beta or production branch is required.
+
+## Release notes and the website
+
+Use `### New features`, `### Improvements`, and `### Fixes`, in that order;
+omit empty groups. Keep `## X.Y.Z` exact for extraction. Put the date below it,
+then one `###` release title and a short introduction. Bullets may wrap across
+lines. Use inline code and bold for emphasis. Put **Upgrade:** instructions
+first under Improvements and **Security:** fixes under Fixes.
+
+The GitHub body comes from that version's section verbatim. The workflow
+exports the same content as `release.json`, with its version and source commit.
+The website reads that asset and GitHub's publication date, refreshing every
+five minutes. It excludes drafts, prereleases, channel pointers, and Unreleased.
+The first historical release predates the asset and remains a checked-in website
+entry. New releases need no separate website copy or deployment.
+
+## Verification and retrying publication
+
+Release builds use the committed lockfile. Each release has four archives,
+`checksums.txt`, a CycloneDX SBOM, and GitHub build-provenance attestations.
+The workflow smoke-tests native binaries and the shell installer before
+publication, then tests pinned and channel installs through the public website.
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
-gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz \
-  --repo intuitums/e
+gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo intuitums/e
 ```
 
-On macOS use `shasum -a 256` to compare the archive with the corresponding
-line in `checksums.txt`. A checksum detects corruption; provenance verifies
-that GitHub Actions built the artifact from this repository's release
-workflow.
+On macOS use `shasum -a 256`. To retry a partial package publication, run Release
+with action `retry` and the existing version tag. This downloads the published
+archives instead of rebuilding. npm compares the existing package's integrity;
+a different tarball under the same version fails. Each registry can fail
+independently; rerun failed publication after recovery. There is no transaction
+across registries.
 
-## Homebrew, npm, and bun
+```sh
+python3 -m unittest discover -s scripts/release -p 'test_*.py'
+python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
+node --test scripts/packaging/publish-npm.test.mjs
+scripts/packaging/smoke.sh
+```
 
-A published stable release starts the Homebrew and npm jobs in `release.yml`.
-They verify all four archives against `checksums.txt`, then generate the formula
-and npm packages from that tag. The npm package has platform-specific optional
-dependencies and a shell launcher. It works with npm and bun without lifecycle
-scripts or a JavaScript runtime at launch.
+PR CI runs installer checks only when packaging, installer, identity, updater,
+or workflow sources change. Docs-only main changes do not publish dev builds.
+Release installation checks always run. Preview builds require an explicit request.
 
-The jobs publish `intuitums/homebrew-tap` and these public npm packages:
-
-- `@intuitums/e`
-- `@intuitums/e-darwin-arm64`
-- `@intuitums/e-darwin-x64`
-- `@intuitums/e-linux-arm64`
-- `@intuitums/e-linux-x64`
+## Publishing credentials
 
 Homebrew uses `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to Contents
 read/write on `intuitums/homebrew-tap`. Deploy keys are disabled by repository
@@ -108,50 +183,8 @@ list @intuitums/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
 Subsequent releases need no npm token. The token in 1Password can remain available
 for separately authorized manual publishing.
 
-To retry package publication, manually run the Release workflow with the existing
-stable tag. This skips binary builds and downloads the already published archives.
-Retries compare npm integrity before accepting an existing version. Both channels
-refuse to move their latest version backward. A registry outage fails its job;
-rerun the failed job after service recovers. There is no cross-registry atomic
-transaction.
 
-Users install and update through the same channel:
-
-| Channel | Install | Update |
-| --- | --- | --- |
-| curl | `curl -fsSL https://e.intuitum.sh/install.sh` piped to `sh` | `e update` |
-| npm | `npm install -g @intuitums/e` | `npm install -g @intuitums/e@latest` |
-| bun | `bun add -g @intuitums/e` | `bun add -g @intuitums/e@latest` |
-| brew | `brew install intuitums/tap/e` | `brew update`, then `brew upgrade intuitums/tap/e` |
-
-Run `e --version` to verify the installed version. Binary packages support macOS
-and glibc Linux on ARM64 and x86-64. The website setup guide covers initial
-installation and connecting a model at `https://e.intuitum.sh/docs`.
-
-Package installers place `.e-install-method` beside the executable. Both automatic
-and manual self-update stop before network access when that marker exists;
-`e update` tells users to use their package manager. The first packaged release
-must include this guard. Packaging rejects v0.0.1, which predates it.
-
-To check packaging locally:
-
-```sh
-python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
-node --test scripts/packaging/publish-npm.test.mjs
-scripts/packaging/smoke.sh
-```
-
-The smoke check installs temporary npm and bun packages with scripts disabled.
-It leaves the user's global installations alone. CI runs it on macOS and Linux
-when package sources, packaging scripts, the shell installer, package ownership
-code/tests, the license, release qualification, or CI/release workflows change.
-Other PRs and main-branch pushes skip these jobs. Renames check both paths; a
-failed PR file lookup runs the jobs. Release installation checks always run.
-
-The public shell installer URL is `https://e.intuitum.sh/install.sh`. The website
-serves the maintained repository script with a five-minute cache. Release build
-checks use local archives before publication. After publication, a separate job
-downloads the installer through the website and checks the exact release version.
-It then installs into another temporary directory without `E_RELEASE_BASE`,
-checking the default download path against GitHub's latest published release.
-Deploy the website endpoint before enabling these checks.
+The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
+script from main with a five-minute cache. Merge the channel-aware installer
+before attempting the first channel release. No separate deployment is required
+for each binary release. The stable homepage installation stays unchanged.

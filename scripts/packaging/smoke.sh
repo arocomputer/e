@@ -3,7 +3,9 @@
 set -eu
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-python3 - "$scratch" <<'PY'
+version=${E_SMOKE_VERSION:-1.2.3}
+command=${E_SMOKE_COMMAND:-e}
+python3 - "$scratch" "v$version" <<'PY'
 import importlib.util, json, pathlib, subprocess, sys
 sys.path.insert(0, 'scripts/packaging')
 from test_prepare import Packages
@@ -12,7 +14,7 @@ fixture = Packages()
 fixture.setUp()
 root = pathlib.Path(sys.argv[1])
 try:
-    prepare('v1.2.3', fixture.assets, root / 'dist')
+    prepare(sys.argv[2], fixture.assets, root / 'dist')
     dependencies = {}
     for platform in PLATFORMS:
         result = json.loads(subprocess.check_output(['npm','pack', str(root/'dist'/platform), '--json','--pack-destination',str(root)]))
@@ -26,13 +28,13 @@ try:
 finally:
     fixture.tearDown()
 PY
-npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/intuitums-e-1.2.3.tgz"
-test "$("$scratch/npm/bin/e" 'argument with spaces')" = 'argument with spaces'
+npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/intuitums-e-$version.tgz"
+test "$("$scratch/npm/bin/$command" 'argument with spaces')" = 'argument with spaces'
 cat > "$scratch/bunfig.toml" <<CFG
 [install]
 globalDir = "$scratch/bun/global"
 globalBinDir = "$scratch/bun/bin"
 CFG
-bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/intuitums-e-1.2.3.tgz"
-test "$("$scratch/bun/bin/e" 'argument with spaces')" = 'argument with spaces'
+bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/intuitums-e-$version.tgz"
+test "$("$scratch/bun/bin/$command" 'argument with spaces')" = 'argument with spaces'
 echo 'npm and bun launch the native dependency without lifecycle scripts'

@@ -7,6 +7,29 @@ set -eu
 repo="intuitums/e"
 dir="${E_INSTALL_DIR:-$HOME/.local/bin}"
 
+# Explicit channel/version selection never changes the default stable installation.
+channel=stable
+version=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --channel) channel=${2:?channel required}; shift 2 ;;
+    --version) version=${2:?version required}; shift 2 ;;
+    *) echo 'usage: install.sh [--channel stable|dev|beta] [--version X.Y.Z]' >&2; exit 2 ;;
+  esac
+done
+case "$channel" in stable) command=e ;; dev|beta) command="e-$channel" ;; *) echo 'unknown channel' >&2; exit 2 ;; esac
+if [ -z "$version" ] && [ "$channel" != stable ]; then
+  version=$(curl -fsSL "https://github.com/$repo/releases/download/channel-$channel/version.txt")
+fi
+if [ -n "$version" ]; then
+  version=${version#v}
+  case "$channel" in
+    stable) pattern='^[0-9]+\.[0-9]+\.[0-9]+$' ;;
+    *) pattern="^[0-9]+\.[0-9]+\.[0-9]+-$channel\.[0-9]+\.g[a-f0-9]{12}$" ;;
+  esac
+  printf '%s\n' "$version" | grep -Eq "$pattern" || { echo 'version does not match channel' >&2; exit 2; }
+fi
+
 os=$(uname -s)
 arch=$(uname -m)
 case "$os" in
@@ -29,7 +52,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 # E_RELEASE_BASE is an internal release-smoke seam: production installs leave
 # it unset; CI points it at the just-built local artifacts.
-base="${E_RELEASE_BASE:-https://github.com/$repo/releases/latest/download}"
+base="https://github.com/$repo/releases/latest/download"
+if [ -n "$version" ]; then base="https://github.com/$repo/releases/download/v$version"; fi
+base=${E_RELEASE_BASE:-$base}
 
 curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
   echo "no release published yet — install.sh works once the first release exists" >&2
@@ -50,11 +75,22 @@ if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
   exit 1
 fi
 
-tar xzf e.tar.gz
+tar xzf e.tar.gz e
+[ -f e ] && [ ! -L e ] || { echo "invalid executable" >&2; exit 1; }
+if [ -n "$version" ] && [ "$(./e --version)" != "e $version" ]; then
+  echo "archive identity does not match requested version" >&2
+  exit 1
+fi
 mkdir -p "$dir"
-install -m 755 e "$dir/e"
+# Refuse to replace package-owned executables, including symlinks into their stores.
+if [ -L "$dir/$command" ] || [ -e "$dir/.e-install-method" ]; then
+  echo "destination is package-managed; choose another E_INSTALL_DIR" >&2
+  exit 1
+fi
+install -m 755 e "$dir/.$command.next"
+mv -f "$dir/.$command.next" "$dir/$command"
 
-echo "installed $("$dir/e" --version) to $dir/e"
+echo "installed $("$dir/$command" --version) to $dir/$command"
 case ":$PATH:" in
   *":$dir:"*) ;;
   *) echo "note: $dir is not on your PATH" ;;

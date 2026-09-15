@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
   exit 2
 }
 
@@ -15,6 +15,23 @@ if [ "$#" -gt 0 ]; then
 fi
 
 case "$command" in
+  dev)
+    unset E_BUILD_VERSION E_BUILD_CHANNEL E_BUILD_COMMIT
+    project=${1:-$PWD}
+    if [ "$#" -gt 0 ]; then shift; fi
+    project=$(CDPATH= cd "$project" && pwd)
+    cargo build --locked
+    binary="$PWD/target/debug/e"
+    cd "$project"
+    exec "$binary" "$@"
+    ;;
+  scenario)
+    cargo build --locked
+    exec python3 scripts/scenario.py "$@"
+    ;;
+  preview)
+    exec python3 scripts/release/preview.py "$@"
+    ;;
   check)
     [ "$#" -eq 0 ] || usage
     cargo fmt --check
@@ -22,6 +39,7 @@ case "$command" in
     cargo clippy --all-targets -- -D warnings
     cargo test --locked
     ./scripts/guard.sh
+    python3 -m unittest discover -s scripts/release -p 'test_*.py'
     ;;
   test)
     cargo test --locked "$@"

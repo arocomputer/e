@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const runNpm = (...args) => execFileSync("npm", args, { encoding: "utf8" });
 const newer = (a, b) => {
-    const left = a.split(".").map(Number),
-        right = b.split(".").map(Number);
-    for (let i = 0; i < 3; i++)
-        if (left[i] !== right[i]) return left[i] > right[i];
+    const parts = (v) => v.split(/[.-]/).slice(0, 5).map((s, i) => i === 3 ? s : Number(s));
+    const left = parts(a), right = parts(b);
+    for (const i of [0, 1, 2, 4])
+        if ((left[i] ?? 0) !== (right[i] ?? 0)) return left[i] > right[i];
     return false;
 };
 async function lookupRegistry(name, version) {
@@ -63,11 +63,12 @@ export async function publishPackages(
                     console.log(
                         `Publishing ${manifest.name}@${manifest.version}`,
                     );
-                    const latest = await lookup(manifest.name, "latest");
+                    const channel = manifest.publishConfig?.tag ?? "latest";
+                    const latest = await lookup(manifest.name, channel);
                     const tag =
                         latest && newer(latest.version, manifest.version)
                             ? `v${manifest.version}`
-                            : "latest";
+                            : channel;
                     npm(
                         "publish",
                         tarball,

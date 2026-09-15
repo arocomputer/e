@@ -89,3 +89,20 @@ above, close your issue or pull request.
 
 By contributing, you agree that your work is released under the repository's
 [MIT license](LICENSE).
+
+## Testing a working copy
+
+Run `./x dev /path/to/project` to use the current checkout with development state.
+Run `./x scenario streaming` for a repeatable local terminal session without a
+provider account. See [releases and testing](docs/releases.md) for beta channels,
+PR builds, package installation, and release promotion.
+
+Provider regressions can use reviewed response fixtures under
+`tests/fixtures/providers/`. Existing seed fixtures are synthetic; their `origin`
+field says so. `scripts/record-provider.py` records a real SSE response from an
+explicit endpoint and request file. It sends a real request, potentially billable,
+and never runs in CI. Use synthetic prompts, keep credentials in an environment
+variable, and review response text for private content before committing it.
+The recorder strips the supplied credential and named credential fields, but
+cannot identify arbitrary private prose. Combine successive response bodies in
+one fixture to exercise a tool loop through the existing `serve_sse` helper.
