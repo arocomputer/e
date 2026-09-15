@@ -28,7 +28,7 @@ pub enum TurnPhase {
 
 /// The detail `TurnPhase::Retrying` needs to render. `since` anchors the
 /// live countdown — the label ticks the remaining seconds down from
-/// `delay_secs` as the backoff burns, pi-style.
+/// `delay_secs` as the backoff burns.
 #[derive(Clone, Debug)]
 pub struct RetryStatus {
     pub attempt: u32,
@@ -66,7 +66,7 @@ pub use crate::core::output::format_elapsed;
 /// Per-turn token flow and focused activity phase. The display moves only
 /// on real provider usage frames — streamed bytes and request size are never
 /// estimated into it, so invisible reasoning or cached context can't balloon
-/// the numbers ahead of the truth (pi's model).
+/// the numbers ahead of the truth.
 pub struct Turn {
     /// Latest request's full context, from real provider usage.
     pub input: u64,

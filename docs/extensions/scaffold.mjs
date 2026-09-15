@@ -5,8 +5,7 @@
  * An e extension is a bare process speaking JSONL over stdin/stdout; the
  * framing (id routing, the initialize manifest, dispatch) is the same for
  * every extension. This file is that shared plumbing: `connect()` turns
- * your handlers into a running extension, so an extension reads like pi's
- * SDK (handlers in, protocol out) without importing anything but node.
+ * your handlers into a running extension using only Node.js built-ins.
  *
  * Copy this file next to your own extension and:
  *
@@ -63,7 +62,7 @@
  *   ext.session.interrupt()  .compact(focus?)
  *   ext.hasUI                              true once initialize said so
  *
- * `flag(name)` (pi's getFlag) reads a parsed flag from any handler, any
+ * `flag(name)` reads a parsed flag from any handler, any
  * time: a passed value, else the flag's `default` in the manifest, else
  * undefined. `flagPassed(name)` is true only when it was on the command
  * line. Flags arrive as a `flags` notification at startup — no startup
@@ -110,8 +109,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
   }
 
   // Flags e parsed from the command line ("flags" notification; also rides
-  // hook.startup params). flag()/flagPassed() read them — the pi getFlag
-  // analogs, available in any handler, not just at startup.
+  // hook.startup params). flag()/flagPassed() read them from any handler.
   let lastFlags = {};
 
   // The manifest's declared defaults, per flag name.
@@ -166,7 +164,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
       interrupt: () => ask("session.interrupt"),
       compact: (focus) => ask("session.compact", focus === undefined ? {} : { focus }),
     },
-    /** pi's getFlag: the parsed value of a typed flag in any handler —
+    /** Read a typed flag from any handler:
      *  the passed value, else the manifest default, else undefined. Works
      *  from any handler, no startup hook needed. */
     flag(name) {

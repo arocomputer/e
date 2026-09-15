@@ -29,9 +29,9 @@ Extensions can:
 - **handle startup arguments** and request a same-binary relaunch in another directory
 
 Everything an extension shows is data that e paints through the user's
-theme. An extension never emits terminal bytes and never runs inside e —
-that is the difference from pi's in-process API, and the reason a crashed
-or hostile extension is a notice rather than a broken terminal.
+theme. An extension never emits terminal bytes and never runs inside e.
+A crashed or hostile extension is reported as a notice without handing it
+control of the terminal.
 
 ## Wire protocol (version 1 + capabilities)
 
@@ -196,8 +196,7 @@ the body then replaces in the ctrl+o viewer, and `"assistant"` for a
 completed reply, whose markdown the body replaces in the transcript.
 Params are `{kind: "tool"|"assistant", name, content}`; extensions see
 each other's answers in declaration order, and a slow one changes
-nothing. This is pi's message renderer without the cells: you say what to
-show, e paints it.
+nothing. The extension supplies content; e renders it.
 
 **hook.compact_summary** → `{"summary":"…"}` or `{}`. The generated summary
 is about to replace the older conversation; this is the last word on it.
@@ -299,8 +298,7 @@ and yours is told with `ui.panel_closed`. An `interactive` panel receives
 the keyboard: every key arrives as `{"method":"ui.key","params":{"key":
 "down"}}` (chords like `ctrl+x`, `shift+tab`, `escape` never — Esc closes
 the panel and ctrl+c stays e's) and you redraw by sending `ui.panel`
-again. That is pi's custom component, declaratively: you own the state
-and the keys, e owns the frame.
+again. The extension handles state and key events; e renders the frame.
 
 `activity` is the row that reads `Thinking (3s) (↑1k ↓20)` during a turn:
 your text joins it through the `{activity}` token of the user's template
@@ -403,8 +401,7 @@ extensions, with a notice.
 - The initialize answer must arrive within 5 s or the extension is skipped.
 - Runtime hooks have 5 s and **fail open**: a slow or broken tool gate never
   blocks the agent, a silent `before_turn` adds nothing, a silent
-  `tool_result` changes nothing. (pi's `tool_call` is fail-closed; e's is
-  not, by design — answer `{"block":true}` yourself when unsure.) Startup
+  `tool_result` changes nothing. Return `{"block":true}` to deny a tool call. Startup
   hooks are different: an advertised startup hook that errors or times out
   stops launch, rather than leaking a consumed flag or branch name into the
   initial prompt.
@@ -509,7 +506,7 @@ Restart e, type `/ping`, get `pong`.
 
 ## MCP tools
 
-Put `mcp.mjs` in `~/.e/extensions/` with `scaffold.mjs` beside it, then
+Put `mcp.mjs` in `~/.e/extensions/`, make it executable, then
 configure the stdio server e should own in `~/.e/settings.json`:
 
 ```json

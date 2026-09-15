@@ -806,8 +806,7 @@ impl App {
     }
 }
 
-/// Which session-lifecycle reason a frontend transition carries — pi's
-/// vocabulary, so extensions written against it port by renaming.
+/// Notify extensions of shutdown followed by startup for a frontend transition.
 pub(super) fn shutdown_then_start(app: &App, reason: &'static str) {
     let host = app.host.clone();
     let start = json!({
