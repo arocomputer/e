@@ -20,7 +20,7 @@ git diff | e -p "review this diff"
 ```json
 {"type":"turn_start"}
 {"type":"text","delta":"The repo"}
-{"type":"tool_batch","calls":[{"id":1,"name":"read","arguments":{"path":"README"},"category":"read","target":"README"}]}
+{"type":"tool_batch","calls":[{"id":1,"name":"read","arguments":{"path":"README.md"},"category":"read","target":"README.md"}]}
 {"type":"tool_start","id":1}
 {"type":"tool_end","id":1,"outcome":"completed","summary":"12 lines","content":"…"}
 {"type":"usage","input_tokens":1200,"output_tokens":80,"cache_read_tokens":0,"cache_write_5m_tokens":0,"cache_write_1h_tokens":0}

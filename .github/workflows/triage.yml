@@ -38,7 +38,7 @@ jobs:
             add_label area:tui 5319e7 'Terminal interface and rendering' || true
           echo "$files" | grep -Eq '^(sdk/|docs/sdk\.md)' && \
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
-          echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
+          echo "$files" | grep -Eq '^(docs/|README\.md|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
             add_label documentation 0075ca 'Documentation changes' || true
           echo "$files" | grep -q '^benchmarks/' && \
             add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true

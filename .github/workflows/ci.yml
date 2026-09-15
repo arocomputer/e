@@ -75,7 +75,7 @@ jobs:
                 packages=true ;;
             esac
             case "$file" in
-              *.md | README | docs/* | LICENSE | CHANGELOG.md | \
+              *.md | docs/* | LICENSE | CHANGELOG.md | \
               benchmarks/results/* | .gitignore | .gitattributes | .editorconfig | \
               .github/pull_request_template.md | .github/CODEOWNERS | \
               .github/dependabot.yml | channels/*) ;;
