@@ -27,6 +27,21 @@ once. Nothing here is compiled into e.
    `~/.e/auth.json`), and clone the repository the bot should work in.
 3. Copy `.env.example` to `.env` and fill it in.
 
+## Run it
+
+`@intuitums/e-slack` ships with e's releases; its version matches the release
+it came from. It only needs a checkout to work in (`E_CWD`):
+
+```sh
+npm install -g @intuitums/e-slack
+set -a; . ./.env; set +a
+e-slack
+```
+
+`npx @intuitums/e-slack` does the same without a global install.
+
+## Develop
+
 ```sh
 npm install
 npm run typecheck

@@ -67,6 +67,22 @@ class Packages(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Expected"):
             prepare("v1.2.3-rc.1", self.assets, self.root / "dist")
 
+    def test_slack_channel_ships_with_the_release_version(self):
+        output = self.root / "dist"
+        prepare("v1.2.3", self.assets, output)
+        package = json.loads((output / "slack/package.json").read_text())
+        self.assertEqual(package["name"], "@intuitums/e-slack")
+        self.assertEqual(package["version"], "1.2.3")
+        self.assertEqual(package["publishConfig"], {"access": "public", "tag": "latest"})
+        self.assertEqual(package["bin"], {"e-slack": "bin/e-slack.js"})
+        self.assertNotIn("scripts", package)
+        self.assertNotIn("devDependencies", package)
+        self.assertTrue((output / "slack/bin/e-slack.js").is_file())
+        self.assertTrue((output / "slack/src/index.ts").is_file())
+        self.assertTrue((output / "slack/manifest.json").is_file())
+        self.assertTrue((output / "slack/LICENSE").is_file())
+        self.assertEqual(list((output / "slack/src").glob("*.test.ts")), [])
+
     def test_preview_packages_keep_the_channel_and_separate_command(self):
         output = self.root / "dist"
         prepare("v1.2.3-beta.12.gabcdef012345", self.assets, output)
@@ -78,6 +94,10 @@ class Packages(unittest.TestCase):
         self.assertIn('https://github.com/intuitums/e-beta/releases/download/', formula)
         self.assertIn('class EBeta < Formula', formula)
         self.assertIn('=> "e-beta"', formula)
+        wrapper = json.loads((output / "e/package.json").read_text())
+        channel = json.loads((output / "slack/package.json").read_text())
+        self.assertEqual(channel["publishConfig"]["tag"], "beta")
+        self.assertEqual(channel["version"], wrapper["version"])
 
     def test_dev_publishes_npm_without_a_formula(self):
         output = self.root / "dist"

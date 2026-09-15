@@ -304,7 +304,7 @@ jobs:
     needs: [resolve, publish]
     if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
-    # Five packages may each need up to twenty minutes for npm processing.
+    # Six packages may each need up to twenty minutes for npm processing.
     timeout-minutes: 110
     outputs:
       failure: ${{ steps.packages.outputs.failure }}
@@ -343,7 +343,18 @@ jobs:
         env:
           # Remove this secret after all five packages trust this workflow.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: node scripts/packaging/publish-npm.mjs dist
+        run: node scripts/packaging/publish-npm.mjs dist --exclude=slack
+      - name: Publish the Slack channel
+        # `@intuitums/e-slack` ships with the release but is not part of it: it is
+        # the reference bot, so a registry hiccup here must not fail the release,
+        # stop the install channel advancing, or block another package's retry.
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          node scripts/packaging/publish-npm.mjs dist --only=slack
+          npm view "@intuitums/e-slack@$VERSION" version | grep -Fx "$VERSION"
       - name: Keep preview packages off latest
         id: cleanup
         if: needs.resolve.outputs.channel != 'stable'
