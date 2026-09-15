@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       build: ${{ steps.filter.outputs.build }}
+      packages: ${{ steps.filter.outputs.packages }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,9 +45,10 @@ jobs:
           # A listing failure is fail-open: the heavy jobs run. CI is never
           # skipped on uncertainty.
           if [ -n "$PR" ]; then
-            if ! files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename'); then
+            if ! files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | (.filename, .previous_filename // empty)'); then
               echo "file listing failed; running the heavy jobs"
               echo "build=true" >> "$GITHUB_OUTPUT"
+              echo "packages=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           else
@@ -56,18 +58,27 @@ jobs:
           # files, repository metadata. Anything unlisted runs the heavy
           # jobs — an unfamiliar path errs toward testing, not skipping.
           build=false
+          packages=false
           while IFS= read -r file; do
+            # Installer jobs cover package generation, launchers, and ownership.
+            case "$file" in
+              packaging/* | scripts/packaging/* | install.sh | LICENSE | \
+              src/core/update.rs | tests/update.rs | scripts/release-check.sh | \
+              .github/workflows/ci.yml | .github/workflows/release.yml)
+                packages=true ;;
+            esac
             case "$file" in
               *.md | README | docs/* | LICENSE | CHANGELOG.md | \
               benchmarks/results/* | .gitignore | .gitattributes | .editorconfig | \
               .github/pull_request_template.md | .github/CODEOWNERS | \
               .github/dependabot.yml) ;;
-              *) build=true; break ;;
+              *) build=true ;;
             esac
           done <<EOF
           $files
           EOF
           echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
   guard:
     # Audit the security surface before running the repository contract.
@@ -147,6 +158,8 @@ jobs:
           retention-days: 7
 
   packages:
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
     name: Installers (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10

@@ -138,7 +138,11 @@ scripts/packaging/smoke.sh
 ```
 
 The smoke check installs temporary npm and bun packages with scripts disabled.
-It leaves the user's global installations alone. CI runs it on macOS and Linux.
+It leaves the user's global installations alone. CI runs it on macOS and Linux
+when package sources, packaging scripts, the shell installer, package ownership
+code/tests, the license, release qualification, or CI/release workflows change.
+Other PRs and main-branch pushes skip these jobs. Renames check both paths; a
+failed PR file lookup runs the jobs. Release installation checks always run.
 
 The public shell installer URL is `https://e.intuitum.sh/install.sh`. The website
 serves the maintained repository script with a five-minute cache. Release build
