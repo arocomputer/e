@@ -593,11 +593,8 @@ pub struct ProviderError {
     pub provider_code: Option<String>,
 }
 
-/// Error-body wording that marks a hard account limit: retrying cannot
-/// help, so the classifier must say so even when the transport answered
-/// 429/403 — a status-only policy would burn the whole retry ladder on a
-/// wall. Pattern list follows the reference client (pi), which named
-/// OpenCode Zen Go's own limit errors from production experience.
+/// Identify account limits that retries cannot resolve, even with HTTP 429/403.
+/// Includes provider-specific billing error names.
 const QUOTA_EXHAUSTED_PATTERNS: &[&str] = &[
     "GoUsageLimitError",
     "FreeUsageLimitError",
@@ -613,7 +610,7 @@ const QUOTA_EXHAUSTED_PATTERNS: &[&str] = &[
 
 /// Error-body wording that marks a transient failure worth retrying
 /// regardless of the HTTP status it traveled with (gateways wrap 503s in
-/// 400s; streams die with transport phrasing). Also pi's list.
+/// 400s; streams die with transport phrasing).
 const RETRYABLE_TEXT_PATTERNS: &[&str] = &[
     "overloaded",
     "service.?unavailable",

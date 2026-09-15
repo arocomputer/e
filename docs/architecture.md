@@ -16,8 +16,8 @@ terminal-free core
 The single-crate shape is intentional. A new crate needs an independent
 consumer, release/API boundary, platform boundary, or measured build-time
 benefit. The `sdk/` package is that case made explicit: an independent
-consumer of the library target whose release boundary is the point (see
-[decisions/0002-rust-sdk-package.md](decisions/0002-rust-sdk-package.md)).
+consumer of the library target with its own release boundary (see
+[sdk.md](sdk.md)).
 It is a consumer, not a fourth layer. File length alone is a reason to
 extract a module, not a crate.
 
@@ -47,10 +47,3 @@ extract a module, not a crate.
   Startup reads disk only; nothing a package carries runs at install time.
 - Trust gates repository-provided context. It is not an execution sandbox.
   The complete threat model is in [../SECURITY.md](../SECURITY.md).
-
-## Decisions
-
-Short records in `docs/decisions/` preserve why a difficult-to-reverse choice
-was made. They are required for changes to persistence formats, public wire
-protocols, trust boundaries, process architecture, or the single-event-stream
-model. Ordinary features and refactors do not need one.

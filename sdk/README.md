@@ -23,7 +23,5 @@ session.close().await;
 cargo run -p e-sdk --example ask -- "what does this repository do"
 ```
 
-See [docs/sdk.md](../docs/sdk.md) for the surface and its rules, and
-[docs/decisions/0002-rust-sdk-package.md](../docs/decisions/0002-rust-sdk-package.md)
-for why this is a package of its own. Unstable until the first release
-declares a versioning policy.
+See [docs/sdk.md](../docs/sdk.md) for the API, package boundary, and usage rules.
+The API is unstable until its first release declares a versioning policy.

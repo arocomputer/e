@@ -41,7 +41,7 @@ src/core/    the harness, terminal-free
   extensions/     the extension host: subprocesses over a JSONL line
                   protocol (docs/extensions.md) — tools, commands, hooks,
                   events, and the extensions' own ui.*/session.* requests
-                  (HostRequest, answered by the frontend; decision 0005)
+                  (HostRequest, answered by the frontend)
   tools/          read · write · edit · grep (optional `glob` filter) · bash
                   (optional `background`/`handle` for long-lived processes) ·
                   read_result (page into a truncated result by id; the
@@ -65,7 +65,7 @@ src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
 sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a consumer of the library target with its own release boundary
-             (decisions/0002), never a fourth layer
+             (docs/sdk.md), never a fourth layer
 ```
 
 ## Running one thing, not everything
@@ -142,11 +142,9 @@ surface? Route it through `panel.rs` so it can't diverge.
   sovereign home, store-only config writes, where `unsafe` lives, SHA-pinned
   CI actions. If a change legitimately moves a boundary, update the guard in
   the same commit — never work around it.
-- Docs: a choice that is expensive to reverse (a persisted or wire format, a
-  trust boundary, process architecture, a cross-cutting invariant) gets a
-  `docs/decisions/` entry. Everything else is a comment beside the code, or
-  nothing — never a PR summary appended to a doc. When a change makes existing
-  guidance wrong, rewrite it; don't add a second account next to the first.
+- Docs: keep current contracts in the relevant guide and implementation details
+  beside the code. When guidance becomes wrong, rewrite it rather than appending
+  another account. Use Git history for past decisions.
 
 ## Pull requests
 

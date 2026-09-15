@@ -109,8 +109,8 @@ pub enum Kind {
     /// A system lifecycle fact in the reference grammar: `● System: …`.
     System,
     /// An extension's `show`: an optional `● title` row over a body painted
-    /// as text, markdown, or diff rows — the declarative rendering surface
-    /// (decision 0005). `text` is the title, `detail` the body.
+    /// as text, markdown, or diff rows.
+    /// `text` is the title, `detail` the body.
     Show,
 }
 

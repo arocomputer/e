@@ -2957,8 +2957,7 @@ async fn run_scoped(
 
     let (mut cols, mut rows) = terminal::size()?;
     // The launch anchor: the frame paints below where the user launched e,
-    // never over what came before (the main-screen model mirrors pi's
-    // regular mode). A terminal that doesn't answer DSR 6n — a raw pty —
+    // never over what came before. A terminal that doesn't answer DSR 6n — a raw pty —
     // falls back to the screen's bottom row, the common launch spot.
     let anchor = crate::tui::paint::background::query_cursor_row(rows).unwrap_or(rows - 1) as usize;
     let mut painter = Painter::spawn(cols, rows, anchor);

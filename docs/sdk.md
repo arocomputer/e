@@ -14,7 +14,7 @@ surface is unstable (see [compatibility.md](compatibility.md)).
 The SDK is not part of `core/` and not an extension. It is a second in-repo
 consumer of e's library target, given its own release boundary so that
 stabilizing an API is a deliberate act rather than an accident of
-visibility. See [decisions/0002](decisions/0002-rust-sdk-package.md).
+visibility.
 
 ## Building
 
