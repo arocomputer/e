@@ -59,6 +59,25 @@ jobs:
         env:
           GH_TOKEN: ${{ contains(inputs.tag, '-beta.') && secrets.BETA_RELEASE_TOKEN || github.token }}
         run: python3 scripts/release/resolve.py
+  comment-building:
+    name: Report dev build start
+    needs: resolve
+    if: needs.resolve.outputs.channel == 'dev' && needs.resolve.outputs.mode == 'build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Update PR comment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+          REPORT_STAGE: building
+        run: python3 scripts/release/pr_comment.py
+
   qualify:
     needs: resolve
     if: needs.resolve.outputs.mode == 'build'
@@ -261,12 +280,36 @@ jobs:
           retention-days: 14
           overwrite: true
 
+  comment-publishing:
+    name: Report dev publication start
+    needs: [resolve, publish, comment-building]
+    if: ${{ !cancelled() && needs.resolve.outputs.channel == 'dev' && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Update PR comment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+          REPORT_STAGE: publishing
+        run: python3 scripts/release/pr_comment.py
+
   npm:
     name: npm and bun
     needs: [resolve, publish]
     if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Five packages may each need up to twenty minutes for npm processing.
+    timeout-minutes: 110
+    outputs:
+      failure: ${{ steps.packages.outputs.failure }}
+      cleanup: ${{ steps.cleanup.outcome }}
+      verify: ${{ steps.verify.outcome }}
     permissions:
       contents: read
       id-token: write
@@ -296,11 +339,13 @@ jobs:
           fi
           python3 scripts/packaging/prepare.py "$TAG" "$RUNNER_TEMP/npm-assets" dist
       - name: Publish and verify npm packages
+        id: packages
         env:
           # Remove this secret after all five packages trust this workflow.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist
       - name: Keep preview packages off latest
+        id: cleanup
         if: needs.resolve.outputs.channel != 'stable'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -316,6 +361,7 @@ jobs:
           done
 
       - name: Verify registry installation
+        id: verify
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           COMMAND: ${{ needs.resolve.outputs.command }}
@@ -391,13 +437,14 @@ jobs:
 
   deployment:
     name: Report release deployment
-    needs: [resolve, qualify, create, build, publish, npm, homebrew, channel]
+    needs: [resolve, qualify, create, build, publish, npm, homebrew, channel, comment-building, comment-publishing]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       deployments: write
+      pull-requests: write
     steps:
       # Reporting uses this workflow's code, while the deployment records the selected release SHA.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -406,3 +453,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_JOBS: ${{ toJSON(needs) }}
         run: python3 scripts/release/deployment.py
+      - name: Update dev PR outcome
+        if: always() && needs.resolve.outputs.channel == 'dev'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+          REPORT_STAGE: finished
+        run: python3 scripts/release/pr_comment.py
