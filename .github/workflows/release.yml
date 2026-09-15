@@ -35,7 +35,8 @@ jobs:
     if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # GitHub requires push access to inspect unpublished draft releases.
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
