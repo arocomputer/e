@@ -137,16 +137,30 @@ fn print_mode_tells_extensions_there_is_no_ui() {
     let ext = home.dir.join("extensions");
     std::fs::create_dir_all(&ext).unwrap();
     let path = ext.join("asker.sh");
+    // Hold the turn hook until the extension records its reply, before shutdown can race it.
     std::fs::write(
         &path,
-        "#!/bin/sh\nlog=\"$E_HOME/ext.log\"\nwhile IFS= read -r line; do\n\
-         id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9][0-9]*\\),\"method\".*/\\1/p')\n\
-         case \"$line\" in\n\
-         *'\"method\":\"initialize\"'*) printf '%s\\n' \"$line\" | grep -o '\"ui\":[a-z]*' >> \"$log\"; \
-           printf '{\"id\":%s,\"result\":{\"name\":\"asker\"}}\\n' \"$id\"; printf '{\"id\":\"q\",\"method\":\"session.info\",\"params\":{}}\\n' ;;\n\
-         *'\"id\":\"q\"'*) printf 'reply %s\\n' \"$line\" >> \"$log\" ;;\n\
-         *'\"method\":\"shutdown\"'*) exit 0 ;;\n\
-         esac\ndone\n",
+        r#"#!/bin/sh
+log="$E_HOME/ext.log"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\),"method".*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '%s\n' "$line" | grep -o '"ui":[a-z]*' >> "$log"
+      printf '{"id":%s,"result":{"name":"asker","hooks":["before_turn"]}}\n' "$id"
+      ;;
+    *'"method":"hook.before_turn"'*)
+      hook_id=$id
+      printf '{"id":"q","method":"session.info","params":{}}\n'
+      ;;
+    *'"id":"q"'*)
+      printf 'reply %s\n' "$line" >> "$log"
+      printf '{"id":%s,"result":{}}\n' "$hook_id"
+      ;;
+    *'"method":"shutdown"'*) exit 0 ;;
+  esac
+done
+"#,
     )
     .unwrap();
     #[cfg(unix)]
