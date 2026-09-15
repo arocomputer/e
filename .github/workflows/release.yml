@@ -35,7 +35,8 @@ jobs:
     if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # GitHub requires push access to inspect unpublished draft releases.
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -48,6 +49,8 @@ jobs:
         with:
           fetch-depth: 0
       - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release/resolve.py
   qualify:
     needs: resolve
@@ -156,6 +159,7 @@ jobs:
   publish:
     name: Checksums and publish
     needs: [resolve, build]
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.resolve.outputs.mode == 'recover') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -173,8 +177,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          mkdir assets && cd assets
-          gh release download "$TAG" --pattern "e-*.tar.gz"
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          gh release download "$TAG" --pattern "e-*.tar.gz" --dir "$RUNNER_TEMP/release-assets"
+          cd "$RUNNER_TEMP/release-assets"
+          test "$(find . -name 'e-*.tar.gz' | wc -l)" -eq 4
           sha256sum e-*.tar.gz > checksums.txt
 
       - name: Generate CycloneDX SBOM
@@ -182,12 +188,12 @@ jobs:
           cargo install cargo-cyclonedx --version 0.5.9 --locked
           cargo cyclonedx --format json --spec-version 1.5
           # cargo-cyclonedx names the BOM after the crate (e.cdx.json), not bom.json.
-          mv e.cdx.json assets/e-sbom.cdx.json
+          mv e.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: assets/*
+          subject-path: ${{ runner.temp }}/release-assets/*
 
       - name: Upload metadata and publish
         env:
@@ -196,11 +202,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release upload "$TAG" assets/checksums.txt assets/e-sbom.cdx.json --clobber
+          gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
           if [ "$CHANNEL" = stable ]; then
             ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
-            python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > assets/release.json
-            gh release upload "$TAG" assets/release.json --clobber
+            python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
+            gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
             gh release edit "$TAG" --draft=false --latest
           else
             gh release edit "$TAG" --draft=false --prerelease --latest=false
@@ -236,6 +242,20 @@ jobs:
           # Remove this secret after all five packages trust this workflow.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist
+      - name: Keep preview packages off latest
+        if: needs.resolve.outputs.channel != 'stable'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          # npm may assign latest on a package's first publication despite --tag.
+          for package in dist/*/package.json; do
+            name=$(node -p 'require("./" + process.argv[1]).name' "$package")
+            latest=$(npm dist-tag ls "$name" | sed -n 's/^latest: //p')
+            if [ "$latest" = "$VERSION" ]; then
+              npm dist-tag rm "$name" latest
+            fi
+          done
 
   homebrew:
     name: Homebrew tap
