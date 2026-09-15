@@ -251,7 +251,7 @@ jobs:
           # npm may assign latest on a package's first publication despite --tag.
           for package in dist/*/package.json; do
             name=$(node -p 'require("./" + process.argv[1]).name' "$package")
-            latest=$(npm dist-tag ls "$name" --json | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).latest || ""')
+            latest=$(npm dist-tag ls "$name" | sed -n 's/^latest: //p')
             if [ "$latest" = "$VERSION" ]; then
               npm dist-tag rm "$name" latest
             fi
