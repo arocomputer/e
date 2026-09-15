@@ -1,7 +1,7 @@
 //! The first-visit trust panel — three-space prose and a `› ` caret on the
 //! selected choice, asking whether e may load this directory's own
 //! instructions. Shown once per directory; the answer persists in
-//! ~/.e/trust.json. When a broader ancestor makes sense (the top-most
+//! the active home's trust.json. When a broader ancestor makes sense (the top-most
 //! directory under home that contains the workspace — `~/code` for
 //! `~/code/clones/e-1`), a middle choice trusts it wholesale, covering
 //! every workspace inside. Unlike the auth panel's wide value column, the
@@ -36,7 +36,12 @@ impl TrustStage {
     pub fn choices(&self) -> Vec<(String, String)> {
         let mut rows = vec![(
             "Trust this directory".to_string(),
-            "remembered in ~/.e/trust.json".to_string(),
+            if crate::CHANNEL == "stable" {
+                "remembered in ~/.e/trust.json"
+            } else {
+                "remembered in this channel's trust.json"
+            }
+            .to_string(),
         )];
         if let Some(parent) = &self.parent {
             rows.push((

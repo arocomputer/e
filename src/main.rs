@@ -51,7 +51,7 @@ e -v, --version"
 --effort, --ef <level> select reasoning effort for this process\n  \
 --image, -i <path>     attach an image to the first prompt (repeatable)\n  \
 --package, -P <source> load a package for this run only (repeatable)\n  \
---json, -j             machine output (doctor, providers, --print)"
+--json, -j             machine output (doctor, providers, --print, --version)"
     );
     let flags = host.flags();
     let commands = host.commands();

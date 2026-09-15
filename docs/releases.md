@@ -2,6 +2,9 @@
 
 ## Run changes locally
 
+Use Rust for local builds and Python 3.11 or newer for scenario and release tooling.
+PR preview commands also require an authenticated GitHub CLI.
+
 ```sh
 ./x dev /path/to/project
 ./x scenario streaming

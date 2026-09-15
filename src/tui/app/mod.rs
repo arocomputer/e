@@ -3885,7 +3885,7 @@ async fn edit_externally(
 ) {
     let command = crate::core::config::settings::external_editor();
     let Some(program) = command.first().cloned() else {
-        app.notice("no editor: set `editor` in ~/.e/settings.json or $EDITOR".into());
+        app.notice("no editor: set `editor` in this channel's settings.json or $EDITOR".into());
         return;
     };
     let draft = app.editor.expanded_text();

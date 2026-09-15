@@ -97,8 +97,11 @@ jobs:
           else
             printf 'Preview build %s from %s. See CHANGELOG.md at this commit for changes.\n' "$TAG" "$SHA" > notes.md
           fi
-          gh release view "$TAG" >/dev/null 2>&1 || \
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
+          else
             gh release create "$TAG" --draft --target "$SHA" --title "$TAG" --notes-file notes.md
+          fi
 
   build:
     name: Build (${{ matrix.runner }})
