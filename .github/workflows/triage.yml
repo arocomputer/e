@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   paths:
-    name: Triage / Labels
+    name: Labels
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -40,6 +40,8 @@ jobs:
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
           echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
             add_label documentation 0075ca 'Documentation changes' || true
+          echo "$files" | grep -q '^benchmarks/' && \
+            add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true
           # area:infra covers the tooling paths: automation, fuzz targets,
           # the dev shim, and test-only changes.
           echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|bin/|tests/|x$|rust-toolchain.toml)' && \
