@@ -1,0 +1,6 @@
+{
+  "C123:123.456": {
+    "session": "previous-process-session",
+    "path": "/saved/conversation.jsonl"
+  }
+}
