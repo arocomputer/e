@@ -15,10 +15,10 @@ class ReleaseContracts(unittest.TestCase):
 
     def test_display_titles_keep_versions_separate(self):
         for version, title in [
-            ('1.2.3', 'e 1.2.3'),
-            ('1.2.3-beta.12.gabcdef012345', 'e 1.2.3 · Beta 12'),
-            ('1.2.3-dev.9.gabcdef012345', 'e 1.2.3 · Dev 9'),
-            ('1.2.3-pr.42.gabcdef012345', 'e 1.2.3 · PR 42'),
+            ('1.2.3', '1.2.3'),
+            ('1.2.3-beta.12.gabcdef012345', '1.2.3 · Beta 12'),
+            ('1.2.3-dev.9.gabcdef012345', '1.2.3 · Dev 9'),
+            ('1.2.3-pr.42.gabcdef012345', '1.2.3 · PR 42'),
         ]:
             with self.subTest(version=version):
                 release = identity(version)

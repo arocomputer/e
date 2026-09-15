@@ -16,7 +16,7 @@ def identity(version):
     if not match:
         raise ValueError('Expected X.Y.Z or X.Y.Z-{dev,beta,pr}.NUMBER.gCOMMIT')
     channel = match[4] or 'stable'
-    title = 'e ' + '.'.join(match.group(1, 2, 3))
+    title = '.'.join(match.group(1, 2, 3))
     if channel != 'stable':
         label = 'PR' if channel == 'pr' else channel.capitalize()
         title += f' · {label} {match[5]}'
