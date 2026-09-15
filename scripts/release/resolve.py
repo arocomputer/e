@@ -27,10 +27,13 @@ def resolve():
         tag = event['inputs']['tag']
         release = identity(tag)
         assert release['channel'] != 'pr'
-        sha = git('rev-parse', f'refs/tags/{tag}^{{commit}}')
+        metadata = json.loads(subprocess.check_output(
+            ['gh', 'release', 'view', tag, '--json', 'isDraft,targetCommitish'], text=True))
+        # Draft releases may not have a tag until they are published.
+        ref = metadata['targetCommitish'] if metadata['isDraft'] else f'refs/tags/{tag}'
+        sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
         subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
-        draft = subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'isDraft', '--jq', '.isDraft'], text=True).strip()
-        return release | {'sha': sha, 'tag': tag, 'mode': 'recover' if draft == 'true' else 'retry'}
+        return release | {'sha': sha, 'tag': tag, 'mode': 'recover' if metadata['isDraft'] else 'retry'}
     else:
         ref = event.get('inputs', {}).get('commit') or 'origin/main'
         sha, channel = git('rev-parse', '--verify', f'{ref}^{{commit}}'), 'beta'
