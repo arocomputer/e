@@ -86,14 +86,13 @@ fn rpc_stops_cleanly_on_an_oversized_request_line() {
 #[cfg(unix)]
 #[test]
 fn rpc_sigterm_exits_while_waiting_for_input() {
-    let home = std::env::temp_dir().join(format!(
-        "e-cli-rpc-sigterm-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
+    let _guard = common::env_lock();
+    let home = common::Home::new("cli-rpc-sigterm");
+    // A version-1 line runs in the process cwd, which has to be trusted.
+    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home)
+        .env("E_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -123,19 +122,17 @@ fn rpc_sigterm_exits_while_waiting_for_input() {
         .read_to_string(&mut stderr)
         .unwrap();
     assert!(stderr.is_empty(), "stderr: {stderr}");
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn rpc_keeps_one_response_per_input_line_after_a_bad_request() {
-    let home = std::env::temp_dir().join(format!(
-        "e-cli-rpc-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
+    let _guard = common::env_lock();
+    let home = common::Home::new("cli-rpc-lines");
+    // A version-1 line runs in the process cwd, which has to be trusted.
+    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home)
+        .env("E_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -169,8 +166,6 @@ fn rpc_keeps_one_response_per_input_line_after_a_bad_request() {
         .contains("missing field `prompt`"));
     assert_eq!(values[2]["id"], 2);
     assert_eq!(values[2]["error"], "prompt is empty");
-
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
