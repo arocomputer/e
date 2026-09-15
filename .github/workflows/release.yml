@@ -218,6 +218,8 @@ jobs:
 
   website-installer:
     name: Public installer
+    permissions:
+      contents: read
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -230,3 +232,11 @@ jobs:
           E_RELEASE_BASE="https://github.com/intuitums/e/releases/download/$TAG" \
             E_INSTALL_DIR="$RUNNER_TEMP/e-install" sh "$RUNNER_TEMP/install.sh"
           "$RUNNER_TEMP/e-install/e" --version | grep -Fx "e ${TAG#v}"
+      - name: Install the latest release through the default download path
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest=$(gh release view --json tagName --jq .tagName)
+          E_INSTALL_DIR="$RUNNER_TEMP/e-install-latest" sh "$RUNNER_TEMP/install.sh"
+          "$RUNNER_TEMP/e-install-latest/e" --version | grep -Fx "e ${latest#v}"
