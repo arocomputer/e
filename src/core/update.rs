@@ -8,7 +8,8 @@
 //! cargo artifact, and auto-update must never stomp one. So is any platform
 //! off the release matrix (`target()` is `None`): a `cargo install` on musl,
 //! armv7, FreeBSD, … must never be overwritten with a tarball its host
-//! cannot run.
+//! cannot run. Package-managed installs carry an ownership marker beside the
+//! executable; both manual and automatic updates stop before any network request.
 
 use std::path::Path;
 
@@ -71,6 +72,24 @@ pub fn is_dev_build() -> bool {
     std::env::current_exe()
         .map(|p| p.components().any(|c| c.as_os_str() == "target"))
         .unwrap_or(true)
+}
+
+/// Package installers leave ownership beside the real executable, including behind symlinks.
+/// A present but unreadable or unknown marker still prevents self-update.
+pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
+    let executable = executable
+        .canonicalize()
+        .unwrap_or_else(|_| executable.to_owned());
+    let marker = executable.parent()?.join(".e-install-method");
+    match std::fs::read_to_string(marker) {
+        Ok(method) => Some(match method.trim() {
+            "homebrew" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e",
+            "npm" => "Installed with npm or Bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
+            _ => "This installation is package-managed. Update it with its package manager.",
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some("Cannot read installation ownership. Update with your package manager."),
+    }
 }
 
 /// "1.2.3" -> comparable parts; unparseable segments compare as 0.
@@ -293,6 +312,10 @@ pub const NO_RELEASE: &str =
 /// The whole flow for the running binary: check, install if newer. Ok(None)
 /// means already current (or not applicable).
 pub async fn self_update() -> Result<Option<String>, String> {
+    let dest = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(hint) = package_update_hint(&dest) {
+        return Err(hint.into());
+    }
     // A build whose identity is not release SemVer — a source checkout —
     // or whose platform has no release artifact is never replaced by a
     // published release; the check is skipped, not just the install.
@@ -306,6 +329,5 @@ pub async fn self_update() -> Result<Option<String>, String> {
     if !is_newer(&tag, crate::VERSION) {
         return Ok(None);
     }
-    let dest = std::env::current_exe().map_err(|e| e.to_string())?;
     install_from(RELEASES, &tag, &dest).await.map(Some)
 }

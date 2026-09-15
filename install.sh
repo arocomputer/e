@@ -1,7 +1,7 @@
 #!/bin/sh
 # e installer: fetch the latest release binary for this platform, verify its
 # checksum, install to ~/.local/bin (override with E_INSTALL_DIR).
-#   curl -fsSL https://raw.githubusercontent.com/intuitums/e/main/install.sh | sh
+#   curl -fsSL https://e.intuitum.sh/install.sh | sh
 set -eu
 
 repo="intuitums/e"

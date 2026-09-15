@@ -145,3 +145,24 @@ jobs:
           path: target/release/e
           if-no-files-found: error
           retention-days: 7
+
+  packages:
+    name: Installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Verify package contents and native launchers
+        run: |
+          python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
+          node --test scripts/packaging/publish-npm.test.mjs
+          scripts/packaging/smoke.sh

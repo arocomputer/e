@@ -18,7 +18,12 @@ OVERVIEW:
 ///
 
 INSTALL:
- curl -fsSL https://raw.githubusercontent.com/intuitums/e/main/install.sh | sh
+ curl -fsSL https://e.intuitum.sh/install.sh | sh
+
+PACKAGE INSTALLERS (available after the first package-enabled release):
+ brew install intuitums/tap/e
+ npm install -g @intuitums/e
+ bun add -g @intuitums/e
 
 START:
  e
