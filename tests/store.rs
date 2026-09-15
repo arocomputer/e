@@ -308,3 +308,21 @@ fn concurrent_process_updates_preserve_both_snapshots() {
     assert_eq!(after["alpha"], true);
     assert_eq!(after["beta"], true);
 }
+
+/// An empty `E_HOME` is unset, not "the current directory": settings, auth,
+/// and sessions must never land in whatever directory e was launched from.
+#[test]
+fn an_empty_e_home_does_not_point_at_the_current_directory() {
+    let _guard = LOCK.lock().unwrap();
+    std::env::set_var("E_HOME", "");
+    let home = e::core::config::home::home();
+    std::env::remove_var("E_HOME");
+    assert!(home.is_absolute(), "{}", home.display());
+    assert_ne!(home, PathBuf::from(""));
+    assert!(
+        home.file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(".e")),
+        "{}",
+        home.display()
+    );
+}

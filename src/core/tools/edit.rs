@@ -62,7 +62,12 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     } else {
         (text.as_str().into(), old.into(), new.into())
     };
-    let occurrences = subject.matches(&*old).count();
+    // Count overlapping matches: `aa` in `aaa` is ambiguous even though the
+    // non-overlapping count says one.
+    let occurrences = subject
+        .char_indices()
+        .filter(|(at, _)| subject[*at..].starts_with(&*old))
+        .count();
     if occurrences == 0 {
         return err(format!("edit {path}: old_string not found"), path);
     }

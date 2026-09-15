@@ -458,7 +458,14 @@ where
     let Some(command) = args["command"].as_str() else {
         return failure("bash: missing command (or a background `handle` to check)");
     };
-    if args["background"].as_bool().unwrap_or(false) {
+    // Lenient models send `"true"` for a boolean; a dev server run in the
+    // foreground blocks for the whole timeout, so the string counts too.
+    let background = match &args["background"] {
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::String(text) => text.trim().eq_ignore_ascii_case("true"),
+        _ => false,
+    };
+    if background {
         return start_background(command, cwd, &state.background);
     }
     let timeout = match super::integer_arg(args, "timeout") {
@@ -594,7 +601,9 @@ where
         .enumerate()
     {
         if !carries[index].is_empty() {
-            on_output(stream, &String::from_utf8_lossy(&carries[index]));
+            let rest = String::from_utf8_lossy(&carries[index]);
+            retained.extend_from_slice(rest.as_bytes());
+            on_output(stream, &rest);
         }
     }
 
@@ -617,13 +626,18 @@ where
             start += 1;
         }
         let tail = full[start..].to_string();
-        let kept = full.len();
-        let id = state.retain_result(full);
-        let dropped = if total_bytes > kept {
-            format!("; the first {} bytes were not kept", total_bytes - kept)
+        // Bytes dropped by retention are raw bytes against raw bytes: the
+        // decoded copy is shorter by every colour code it shed, and those
+        // were kept.
+        let dropped = if total_bytes > retained.len() {
+            format!(
+                "; the first {} bytes were not kept",
+                total_bytes - retained.len()
+            )
         } else {
             String::new()
         };
+        let id = state.retain_result(full);
         format!(
             "… [truncated: {total_bytes} bytes total, showing the last {}; earlier output: read_result {{\"id\": {id}}}{dropped}]\n{tail}",
             tail.len()
@@ -779,7 +793,12 @@ fn retain_and_publish<F>(
     // on every chunk would make a long stream quadratic.
     const RETAIN_SLACK: usize = 512 * 1024;
     *total_bytes = total_bytes.saturating_add(bytes.len());
-    retained.extend_from_slice(bytes);
+    carry.extend_from_slice(bytes);
+    let text = drain_complete_utf8(carry);
+    // The kept copy is the decoded text, per stream: raw stdout and stderr
+    // bytes interleaved could split one code point around the other
+    // stream's chunk, and a lossy decode of that later reads as garbage.
+    retained.extend_from_slice(text.as_bytes());
     if retained.len() > RETAIN_LIMIT + RETAIN_SLACK {
         let excess = retained.len() - RETAIN_LIMIT;
         retained.drain(..excess);
@@ -792,8 +811,6 @@ fn retain_and_publish<F>(
             .count();
         retained.drain(..orphaned);
     }
-    carry.extend_from_slice(bytes);
-    let text = drain_complete_utf8(carry);
     if !text.is_empty() {
         on_output(stream, &text);
     }

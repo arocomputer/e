@@ -304,3 +304,54 @@ fn background_process_exit_code_is_reported_as_failed() {
     assert!(finished.is_error());
     assert_eq!(finished.summary, "exited 7");
 }
+
+/// Colour codes the model's copy sheds were kept, not dropped: the
+/// truncation notice must not report them as bytes lost to retention.
+#[test]
+fn stripped_colour_is_not_reported_as_dropped_output() {
+    let out = run_cmd(
+        "i=0; while [ $i -lt 5000 ]; do printf '\\033[31mline %s\\033[0m\\n' $i; i=$((i+1)); done",
+        20,
+    );
+    assert!(
+        out.content.starts_with("… [truncated"),
+        "{}",
+        &out.content[..80]
+    );
+    assert!(out.content.contains("read_result"));
+    assert!(
+        !out.content.contains("were not kept"),
+        "nothing left retention: {}",
+        &out.content[..160]
+    );
+}
+
+/// A code point split across a stdout read with a stderr chunk in between
+/// must decode whole in the kept copy, not as two replacement characters.
+#[test]
+fn the_kept_copy_decodes_a_code_point_split_around_the_other_stream() {
+    let out = run_cmd(
+        "printf '\\303'; sleep 0.3; printf x >&2; sleep 0.3; printf '\\251\\n'",
+        10,
+    );
+    assert_eq!(out.outcome, ToolOutcome::Completed);
+    assert!(!out.content.contains('\u{FFFD}'), "{:?}", out.content);
+    assert!(out.content.contains('é'), "{:?}", out.content);
+}
+
+/// Lenient models send `"true"` for a boolean; the command must still run
+/// in the background instead of blocking for its whole timeout.
+#[test]
+fn a_string_true_still_starts_a_background_process() {
+    let started_at = Instant::now();
+    let started = run_bg(serde_json::json!({
+        "command": "sleep 0.2; echo string-flag",
+        "background": "true",
+        "timeout": 5
+    }));
+    assert!(!started.is_error(), "{}", started.content);
+    assert!(started_at.elapsed() < Duration::from_millis(150));
+    let handle = extract_handle(&started);
+    let finished = wait_until_finished(&handle);
+    assert!(finished.content.contains("string-flag"));
+}

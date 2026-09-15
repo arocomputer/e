@@ -222,3 +222,36 @@ async fn a_message_attached_to_the_next_turn_precedes_the_prompt_once() {
     );
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+/// `grep` names the directory it searches, so that directory's own
+/// `AGENTS.md` is in scope — not only its parent's.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_grep_of_a_directory_loads_that_directorys_instructions() {
+    const GREP_DEEP: &str = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
+        "\"function\":{\"name\":\"grep\",\"arguments\":\"{\\\"pattern\\\":\\\"hello\\\",\\\"path\\\":\\\"sub/deep\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let _lock = env_lock();
+    let (port, _server) = serve_sse(&[GREP_DEEP, REPLY]);
+    let home = Home::new("nested-grep");
+    home.auth(r#"{"mock":{"key":"k"}}"#);
+    let ws = workspace("grep");
+    std::env::set_current_dir(&ws).unwrap();
+    e::core::config::trust::set(&ws, true).unwrap();
+
+    let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    agent.submit("search deep".into(), "sys".into());
+    let loaded = run_turn(&mut agent, &mut rx).await;
+    assert_eq!(
+        loaded,
+        vec![
+            ws.join("sub/AGENTS.md").display().to_string(),
+            ws.join("sub/deep/AGENTS.md").display().to_string()
+        ],
+        "the searched directory's own instructions load too"
+    );
+    let _ = std::fs::remove_dir_all(&ws);
+}

@@ -1019,3 +1019,79 @@ fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
     assert!(nodes[0].parent.is_none());
     assert_eq!(nodes[2].parent.as_deref(), Some(nodes[1].id.as_str()));
 }
+
+/// A crash can tear the tail inside a multi-byte character. That is still
+/// one torn record: the session loads, and it stays listed for /resume.
+#[test]
+fn a_tail_torn_inside_a_character_costs_the_record_not_the_session() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "e-session-torn-utf8-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let mut s = SessionLog::create(&cwd, "test/model").unwrap();
+    s.append(&ChatMessage::user("first")).unwrap();
+    s.append(&ChatMessage::assistant("second", Vec::new()))
+        .unwrap();
+    let path = s.path().to_path_buf();
+    drop(s);
+
+    // The crash: cut between the two bytes of `é`.
+    let mut raw = std::fs::read(&path).unwrap();
+    raw.extend_from_slice(
+        b"{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"caf\xC3",
+    );
+    std::fs::write(&path, raw).unwrap();
+
+    let messages = SessionLog::load(&path).unwrap();
+    assert_eq!(messages.len(), 2, "the complete records survive");
+    let listed = session::list(&cwd);
+    assert_eq!(listed.len(), 1, "the session is still offered to /resume");
+    assert_eq!(listed[0].user_turns, 1);
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A last record that kept its bytes but lost its newline is whole; a
+/// resume must start the next record on its own line instead of fusing the
+/// two into one unreadable record.
+#[test]
+fn reopen_restores_the_newline_a_whole_last_record_lost() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "e-session-no-newline-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("E_HOME", &home);
+    let cwd = home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let mut s = SessionLog::create(&cwd, "test/model").unwrap();
+    s.append(&ChatMessage::user("first")).unwrap();
+    s.append(&ChatMessage::assistant("second", Vec::new()))
+        .unwrap();
+    let path = s.path().to_path_buf();
+    drop(s);
+
+    let mut raw = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(raw.pop(), Some('\n'));
+    std::fs::write(&path, raw).unwrap();
+
+    let mut resumed = SessionLog::reopen(&path).unwrap();
+    resumed.append(&ChatMessage::user("third")).unwrap();
+    drop(resumed);
+
+    let messages = SessionLog::load(&path).unwrap();
+    let content: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(content, ["first", "second", "third"]);
+
+    let _ = std::fs::remove_dir_all(home);
+}
