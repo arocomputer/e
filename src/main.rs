@@ -533,6 +533,15 @@ async fn main() -> std::io::Result<()> {
         return e::rpc::serve(host, &options, requests_rx, jobs_rx).await;
     }
     if options.print {
+        // An unattended run has no dialog to answer, so an untrusted workspace
+        // stops it here instead of quietly working without its instructions.
+        if let Some(refusal) =
+            e::core::config::trust::refusal(&std::env::current_dir().unwrap_or_default())
+        {
+            eprintln!("error: {refusal}");
+            host.shutdown().await;
+            std::process::exit(1);
+        }
         let status = print_turn(host.clone(), &options, args).await;
         e::core::tools::kill_tracked_processes();
         host.shutdown().await;
@@ -628,6 +637,16 @@ async fn main() -> std::io::Result<()> {
         eprintln!("--image requires an initial prompt");
         host.shutdown().await;
         std::process::exit(2);
+    }
+    // The trust panel answers a workspace nobody has decided about yet; a
+    // recorded `false` is already an answer, and e only runs trusted.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if e::core::config::trust::status(&cwd) == Some(false) {
+        if let Some(refusal) = e::core::config::trust::refusal(&cwd) {
+            eprintln!("error: {refusal}");
+        }
+        host.shutdown().await;
+        std::process::exit(1);
     }
     let images = match cli::load_images(&options, &selected) {
         Ok(images) => images,

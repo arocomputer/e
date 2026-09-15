@@ -36,6 +36,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Improvements
 
+- **Upgrade:** e refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `e trust [dir]` for a session with no terminal.
+
 - **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 
 - **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the stable home. Set `E_HOME` explicitly to select another dedicated home.
