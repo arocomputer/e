@@ -320,3 +320,21 @@ jobs:
           "$RUNNER_TEMP/e-pinned/$COMMAND" --version | grep -Fx "e ${TAG#v}"
           E_INSTALL_DIR="$RUNNER_TEMP/e-current" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL"
           "$RUNNER_TEMP/e-current/$COMMAND" --version
+
+  deployment:
+    name: Report release deployment
+    needs: [resolve, qualify, create, build, publish, npm, homebrew, channel]
+    if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      # Reporting uses this workflow's code, while the deployment records the selected release SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record channel outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+        run: python3 scripts/release/deployment.py
