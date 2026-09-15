@@ -40,7 +40,7 @@ and its limits are recorded in
 e → extension, requests (each carries an `id` to answer with):
 
 ```
-{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
+{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts","pane","widget","render"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
 {"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--project","../app"],"flags":{"project":"../app"}}}
 {"id":3,"method":"tool_call","params":{"name":"greet","arguments":{...}}}
 {"id":4,"method":"command","params":{"name":"ping","args":"rest of the line"}}
@@ -49,6 +49,7 @@ e → extension, requests (each carries an `id` to answer with):
 {"id":7,"method":"hook.before_turn","params":{"prompt":"the user's message"}}
 {"id":8,"method":"hook.tool_result","params":{"name":"bash","content":"…","is_error":false}}
 {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
+{"id":11,"method":"hook.render","params":{"kind":"tool","name":"bash","content":"…"}}
 {"id":10,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 ```
 
@@ -59,6 +60,10 @@ e → extension, notifications (no `id`, no reply):
 {"method":"flags","params":{"flags":{…}}}
 {"method":"ui.key","params":{"key":"down"}}          while your interactive panel is open
 {"method":"ui.panel_closed","params":{}}             the user closed it
+{"method":"pane.select","params":{"pane":"diff","section":"files","id":"a.rs"}}   the side pane's cursor moved
+{"method":"pane.activate","params":{"pane":"diff","section":"files","id":"a.rs"}} Enter on a pane item
+{"method":"pane.key","params":{"pane":"diff","key":"x"}}                          a pane chord e did not use
+{"method":"pane.closed","params":{"pane":"diff"}}                                 the user closed the pane
 {"method":"shutdown"}
 ```
 
@@ -94,7 +99,8 @@ top-level key:
  "commands":[{"name":"ping","description":"check the extension"}],
  "flags":[{"name":"project","type":"string","description":"relaunch in this directory"},
            {"name":"plan","type":"boolean","description":"plan mode"}],
- "hooks":["tool_call","input","before_turn","tool_result","compact_summary"],
+ "hooks":["tool_call","input","before_turn","tool_result","compact_summary","render"],
+ "renders":["tool:bash","assistant"],
  "events":["session_start","turn_start","tool_end"],
  "shortcuts":[{"key":"ctrl+alt+g","description":"greet"}]}
 ```
@@ -168,6 +174,9 @@ user"}`, and optionally `{"session_name":"name shown in /resume"}`.
 **shortcut** → the same result shape as a command. Sent to the extension
 that declared the chord; see [Shortcuts](#shortcuts).
 
+**pane.select / pane.activate / pane.key / pane.closed** are notifications
+from the side pane; see [The side pane](#the-side-pane).
+
 **hook.before_turn** → `{"system_suffix":"a paragraph appended to the
 system prompt for this turn","message":{"content":"…","internal":true}}`.
 The suffix is appended, never a replacement: the system prompt is the
@@ -181,6 +190,16 @@ or `{}` to keep it. Runs after every tool, before the result is shown,
 stored, or sent — redaction and trimming live here. Extensions see each
 other's rewrites in declaration order. A rewrite also drops the tool's
 richer `display` text, so the viewer shows exactly what you let through.
+
+**hook.render** → `{"body":"…","format":"text"|"markdown"|"diff"}` or `{}`
+to leave the entry as e paints it. Declare `renders` in the manifest to be
+asked: `"tool:bash"` (or `"tool:*"`) for a tool's finished result, which
+the body then replaces in the ctrl+o viewer, and `"assistant"` for a
+completed reply, whose markdown the body replaces in the transcript.
+Params are `{kind: "tool"|"assistant", name, content}`; extensions see
+each other's answers in declaration order, and a slow one changes
+nothing. This is pi's message renderer without the cells: you say what to
+show, e paints it.
 
 **hook.compact_summary** → `{"summary":"…"}` or `{}`. The generated summary
 is about to replace the older conversation; this is the last word on it.
@@ -256,15 +275,23 @@ ui.show     {title?, body, format}               → {}            a transcript 
 ui.select   {title, options:[…]}                 → {value, label} | {cancelled:true}
 ui.confirm  {title, message?}                    → {confirmed}
 ui.input    {title, placeholder?, prefill?, secret?} → {text} | {cancelled:true}
-ui.status   {text | null}                        → {}            your slot on the status row (40 columns)
+ui.status   {text | null, key?}                  → {}            your slot on the status row (40 columns);
+                                                                 `key` keeps several
+ui.activity {text | null, key?}                  → {}            your text on the activity row below the
+                                                                 transcript (`Thinking (3s) …`), 40 columns
 ui.compose  {text}                               → {}            put text in the composer
 ui.panel    {title, lines, interactive?} | null  → {}            a footer panel; null closes yours
+ui.editor   {title, text?, placeholder?}         → {text} | {cancelled:true}   a multi-line answer
+ui.widget   {lines | null, key?}                 → {}            rows above the composer; null removes
+ui.pane     {id?, title?, side?, hint?, sections} | null → {}    a side pane; null closes yours
 ```
 
 `select` options are strings or `{label, description?, value?}` objects;
 the picker is the same one `/` opens. `confirm` is a Yes/No picker.
 `input` takes over the composer until Enter or Esc; `secret` masks it and
-the text never reaches input hooks or the model.
+the text never reaches input hooks or the model. `editor` is the same
+field for several lines: shift+enter breaks a line, ctrl+g hands the
+draft to the user's external editor, Enter answers.
 
 `panel` lines are strings, or arrays of `{text, token}` spans painted with
 the theme's colour for `token` (`dim`, `accent`, `success`, `warning`,
@@ -276,6 +303,60 @@ the keyboard: every key arrives as `{"method":"ui.key","params":{"key":
 the panel and ctrl+c stays e's) and you redraw by sending `ui.panel`
 again. That is pi's custom component, declaratively: you own the state
 and the keys, e owns the frame.
+
+`activity` is the row that reads `Thinking (3s) (↑1k ↓20)` during a turn:
+your text joins it through the `{activity}` token of the user's template
+(`docs/layout.md`) and stands alone there between turns — a test count,
+a build step, a clock.
+
+`widget` rows use the same span grammar and sit above the composer, every
+extension's together in key order, eight rows at most; `{"lines": null}`
+removes one. `status` with a `key` keeps several slots per extension; the
+status row's template (`docs/layout.md`) joins them with `{status}` or
+picks one extension's with `{status:<name>}`.
+
+### The side pane
+
+`ui.pane` opens a pane beside the conversation — the surface a diff
+review, a plan, a test runner, or a log wants. You send content; e owns
+the split, focus, scrolling, the cursor, selection, and the mouse, so
+every pane navigates alike and none can paint outside its column.
+
+```json
+{"id": "diff", "title": "Changes", "side": "right", "sections": [
+  {"kind": "list", "id": "files", "selected": "src/main.rs",
+   "items": [{"id": "src/main.rs", "label": "src/main.rs", "detail": "+12 -3"}]},
+  {"kind": "diff", "id": "patch", "body": "diff --git a/src/main.rs …"}
+]}
+```
+
+Sections are `list` (selectable rows: `{id, label, detail?, token?}`, or
+plain strings), `diff` (a unified diff, painted in e's row grammar),
+`text`, `markdown`, and `rows` (the panel's span lines). Lists show eight
+rows and scroll; the other kinds share the remaining height. The whole
+pane holds 256 KiB; past that the rest is dropped and the last row says
+so. Send `ui.pane` again with the same `id` to refresh — the user's place
+in every section that kept its `id` is preserved — and `null` to close.
+
+What the user does comes back as notifications:
+
+```
+{"method":"pane.select",  "params":{"pane":"diff","section":"files","id":"src/main.rs"}}  the cursor moved to an item
+{"method":"pane.activate","params":{"pane":"diff","section":"files","id":"src/main.rs"}}  Enter on an item
+{"method":"pane.key",     "params":{"pane":"diff","key":"x"}}                               a chord e did not use
+{"method":"pane.closed",  "params":{"pane":"diff"}}                                         the user closed it
+```
+
+The keys e uses while the pane has focus: `↑`/`↓` and `j`/`k`, `PageUp`,
+`PageDown`, `Home`, `End`, `←`/`→` to scroll a wide diff, `Tab` between
+sections, `Enter` (on a list: activate and move to the next section; on
+anything else: attach the selected rows to the composer as a snapshot),
+`Shift` with a movement or a mouse drag to select rows, `Esc` back to
+the first section and then close. The layout's focus chord (`ctrl+t` by
+default) moves between the conversation and the pane; on a terminal too
+narrow to split, the focused one fills the screen and the status row
+says how to reach the other. `side` is a proposal: the user's
+`~/.e/layout.json` decides where every pane goes and how wide it is.
 
 ```
 session.send      {content, internal?, run?, when?} → {}  internal: model sees it, transcript does not;
@@ -350,7 +431,7 @@ docs/extensions/
   project.mjs    a startup-hook directory router (e --project <path>)
   mcp.mjs        one MCP stdio server's tools as extension tools
   scaffold.mjs   an optional wire-protocol helper (not required, never installed)
-  plan.mjs       a plan mode on the new surface: session.tools, a shortcut,
+  plan.mjs       a plan mode on the new surface: session.tools, a shortcut, a pane,
                  ui.select, a status slot, and a panel
 ```
 

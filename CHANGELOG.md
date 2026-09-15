@@ -97,6 +97,23 @@
   theme; requests are bounded and answered "no ui" under `e rpc`. Version-1
   extensions are unchanged. `docs/extensions/plan.mjs` shows the surface;
   the scaffold gains promise-returning `ui` and `session` helpers.
+- The frame is regions an extension or the user can set (decision 0007).
+  `ui.pane` opens a side pane beside the conversation — a selectable
+  list, a diff, text, markdown, or themed rows — and e owns focus,
+  scrolling, selection, the mouse, and the split; what the user does
+  comes back as `pane.select`, `pane.activate`, `pane.key`, and
+  `pane.closed`, and Enter attaches the selected rows to the composer.
+  `ui.widget` puts rows above the composer; `ui.status` takes a `key` for
+  several slots. `~/.e/layout.json` decides where every pane goes and how
+  wide it is, the chord that moves focus (`ctrl+t`), whether the banner
+  shows, and what the status row says, as templates of tokens (`{model}`,
+  `{effort}`, `{context}`, `{cwd}`, `{session}`, `{status}`), and the
+  activity row (`Thinking (3s) (↑1k ↓20)`) the same way (`{phase}`,
+  `{elapsed}`, `{tokens}`, `{activity}`), with `ui.activity` giving
+  extensions a place on it. `e docs layout` carries the guide. A `render` hook lets an extension re-render
+  a tool's finished result or a completed reply from data (`renders:
+  ["tool:bash", "assistant"]`), and `ui.editor` asks for a multi-line
+  answer.
 - Packages: `e install <source>` clones a git repository (or references a
   local directory) shaped like `~/.e/` — `extensions/`, `skills/`,
   `prompts/`, `themes/` — under `~/.e/packages/<host>/<path>`, records it in
@@ -107,6 +124,14 @@
   listed package missing on disk is reported at startup; startup itself never
   touches the network. The `$` picker labels package skills `Package`.
   `e docs packages` carries the guide.
+- Packages from npm: `e install npm:<name>[@version]` installs with your own
+  `npm` into `~/.e/packages/npm/`, lifecycle scripts always off, and the
+  `e-package` keyword lists a package in the catalog (`site/packages/`). A
+  git package with a `package.json` gets its dependencies installed the same
+  way. A `packages` entry may be an object with `source` and per-kind glob
+  filters (`"extensions": ["!extensions/legacy.mjs"]`) so part of a package
+  stays unloaded. `e packages init <dir>` starts a package to publish, and
+  trusting a repository installs what its `.e/packages` lists.
 - `/diff` ships as an optional extension (`packages/diff`), not part of the e binary. Build `e-diff`, drop it in `~/.e/extensions/`, and the command prints the continuous Git review — file summaries, per-file patches, syntax colors, and word-level changes — into the transcript. `/diff <path>` reviews one file. See `docs/diff.md`.
 - Ctrl+O adopts fx's full-output reader layout: spliced tool details, vertical rails, and a navigation footer. Review folds each detail to three lines; `→` expands to Full. Scroll with the keyboard or mouse; returning to the bottom resumes following new output.
 - Extensions can live in directories under `~/.e/extensions/`, keeping their entry point and helper files together.

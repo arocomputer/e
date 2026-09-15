@@ -33,6 +33,7 @@ mod clipboard;
 
 mod events;
 mod extui;
+pub(crate) use extui::chord_of;
 mod login;
 mod menus;
 mod viewer;
@@ -53,6 +54,8 @@ struct ActiveTurn {
     error_summary: Option<String>,
     /// tool id → stable group block, so lifecycle events update in place.
     tool_blocks: std::collections::HashMap<u64, usize>,
+    /// tool id → the tool's name, for the `render` hook's subject.
+    tool_names: std::collections::HashMap<u64, String>,
     /// Batch members not yet terminal, including pending calls.
     pending_tools: usize,
     /// Set when the turn was stopped because the device slept past the
@@ -110,6 +113,14 @@ enum AppJob {
     },
     /// A /reload finished: the restarted extension host.
     Reloaded(std::sync::Arc<crate::core::extensions::ExtensionHost>),
+    /// An extension's `render` hook answered for a finished entry. Tagged
+    /// with the session epoch; a late answer for a session that moved on
+    /// is dropped.
+    Rendered {
+        target: RenderTarget,
+        show: crate::core::extensions::Show,
+        epoch: u64,
+    },
     /// The background updater installed a new version.
     Updated(String),
     /// Clipboard content read asynchronously, tied to the draft that requested it.
@@ -122,6 +133,16 @@ enum AppJob {
     },
     /// A provider model-list refresh finished; rebuild an open picker.
     CatalogRefreshed,
+}
+
+/// Which finished entry a `render` hook answer belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderTarget {
+    /// A tool's stored output, by output id.
+    Tool(u64),
+    /// A completed reply, by transcript index and its length when asked,
+    /// so a rebuilt transcript never takes a stale body.
+    Assistant { index: usize, len: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -315,8 +336,21 @@ struct App {
     ui_prompt: Option<extui::UiPrompt>,
     /// Each extension's `ui.status` text, by extension name.
     ext_status: std::collections::BTreeMap<String, String>,
+    /// Each extension's `ui.activity` text, the `{activity}` token of the
+    /// row below the transcript.
+    ext_activity: std::collections::BTreeMap<String, String>,
     /// The extension panel below the composer, one slot.
     ext_panel: Option<extui::ExtPanel>,
+    /// The side pane an extension opened, one at a time.
+    pane: Option<crate::tui::pane::Pane>,
+    /// Set by each paint: the pane is open but off screen (too narrow,
+    /// unfocused), so the status row says how to reach it.
+    pane_hidden: bool,
+    /// Extensions' widget rows above the composer, by `extension/key`.
+    widgets: std::collections::BTreeMap<String, Vec<Vec<extui::Span>>>,
+    /// Where the regions go and what the status row says
+    /// (`~/.e/layout.json`), reread with the theme and keymap.
+    layout: crate::core::config::layout::Layout,
     /// ctrl+g was pressed: the frame loop hands the terminal to the
     /// external editor before its next select.
     external_edit: bool,
@@ -331,9 +365,64 @@ impl App {
         crate::tui::transcript::diff_row_style(theme, line)
     }
 
-    /// Ordinary chat joins the transcript and composer into one frame.
+    /// Ordinary chat joins the transcript and composer into one frame. With
+    /// a pane open the conversation and the pane share the width at a fixed
+    /// height, so pane scrolling never moves the conversation; a terminal
+    /// too narrow to split shows whichever has focus.
     fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
         self.pump_ui_queue();
+        let Some(pane) = self.pane.as_ref() else {
+            self.pane_hidden = false;
+            return self.conversation_frame(width, height);
+        };
+        let split = pane.split(width, &self.layout);
+        let focused = pane.focused;
+        let side = pane.side(&self.layout);
+        let theme = self.theme.clone();
+        self.pane_hidden = split.is_none() && !focused;
+        let Some((conversation_width, pane_width)) = split else {
+            if focused {
+                if let Some(pane) = self.pane.as_mut() {
+                    return pane.render(&theme, width, height);
+                }
+            }
+            let mut rows = self.conversation_frame(width, height);
+            if rows.len() > height {
+                rows.drain(..rows.len() - height);
+            }
+            return rows;
+        };
+        let pane_rows = match self.pane.as_mut() {
+            Some(pane) => pane.render(&theme, pane_width, height),
+            None => return self.conversation_frame(width, height),
+        };
+        let mut conversation = self.conversation_frame(conversation_width, height);
+        if conversation.len() > height {
+            conversation.drain(..conversation.len() - height);
+        }
+        conversation.resize(height, String::new());
+        let divider = self.theme.fg("border", " │ ");
+        let pad = |row: &str, to: usize| {
+            let row = crate::tui::markdown::clip_styled(row, to);
+            let padding = to.saturating_sub(crate::tui::markdown::visible_width(&row));
+            format!("{row}{}", " ".repeat(padding))
+        };
+        conversation
+            .into_iter()
+            .zip(pane_rows)
+            .map(|(conversation, pane)| match side {
+                crate::core::config::layout::Side::Right => {
+                    format!("{}{divider}{pane}", pad(&conversation, conversation_width))
+                }
+                crate::core::config::layout::Side::Left => {
+                    format!("{}{divider}{conversation}", pad(&pane, pane_width))
+                }
+            })
+            .collect()
+    }
+
+    /// The transcript and composer as one column.
+    fn conversation_frame(&mut self, width: usize, height: usize) -> Vec<String> {
         let mut lines = self.transcript_frame(width);
         let dock_start = lines.len();
         lines.extend(self.composer_frame(width, height));
@@ -357,6 +446,12 @@ impl App {
             .transcript
             .render_animated(&self.theme, width, blink_on);
         let dock_start = lines.len();
+        let activity = self
+            .ext_activity
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ");
         if let Some(s) = &self.active {
             if self.rendering_delayed {
                 lines.push(String::new());
@@ -365,7 +460,11 @@ impl App {
                     self.theme
                         .fg("warning", &format!("{dot} Rendering delayed")),
                 );
-            } else if let Some(label) = s.turn.label(s.started.elapsed().as_secs()) {
+            } else if let Some(label) = s.turn.label_with(
+                s.started.elapsed().as_secs(),
+                &self.layout.activity,
+                &activity,
+            ) {
                 lines.push(String::new());
                 if s.turn.recovered.is_some() {
                     // A brief, non-blinking confirmation — not an ongoing
@@ -405,6 +504,10 @@ impl App {
         }
         if self.active.is_some() {
             lines.resize(lines.len().max(dock_start + 2), String::new());
+        } else if !activity.is_empty() {
+            // Between turns the row is the extensions' alone.
+            lines.push(String::new());
+            lines.push(self.theme.fg("dim", &activity));
         }
         lines
     }
@@ -419,6 +522,9 @@ impl App {
             // row; a longer draft scrolls behind the ┃↑ marker.
             let cap = (height / 2 + 1).max(3);
             let mut composer = self.editor.render(&self.theme, width, cap);
+            // Extensions' widget rows sit above everything the composer
+            // owns: chrome, like the attachment labels.
+            lines.extend(self.widget_rows(width));
             if !self.composer_images.is_empty() {
                 // Attachment labels are chrome, not editable prompt text.
                 // The existing dim token is the palette's light gray.
@@ -497,7 +603,6 @@ impl App {
         } else if let Some(panel) = &self.ext_panel {
             lines.extend(panel.render(&self.theme, width));
         }
-        let data = self.status_data();
         let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
             if p.interactive {
                 extui::HINT_PANEL_INTERACTIVE
@@ -510,7 +615,15 @@ impl App {
             .as_ref()
             .map(|_| crate::tui::settingspanel::HINT)
             .or_else(|| self.menu.as_ref().map(|m| m.hint))
-            .or_else(|| self.ui_input_open().then_some(extui::HINT_INPUT))
+            .or_else(|| {
+                self.ui_input_open().then(|| {
+                    if self.ui_editor_open() {
+                        extui::HINT_EDITOR
+                    } else {
+                        extui::HINT_INPUT
+                    }
+                })
+            })
             .or(ext_panel_hint)
             .map(|h| crate::tui::menu::degrade_hint(h, width));
         // A framed surface's bottom divider sits directly above the hint
@@ -521,24 +634,131 @@ impl App {
             || self.menu.is_some()
             || self.ui_input_open()
             || self.ext_panel.is_some();
-        // Extensions' status slots share the right-hand overlay spot; a
-        // transient app overlay (copied, clipboard) takes precedence while shown.
-        let ext_status = (!self.ext_status.is_empty()).then(|| {
-            self.ext_status
-                .values()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" · ")
-        });
+        // The row's two sides come from the layout's templates; a transient
+        // app overlay (armed exit, clipboard) takes the right side while
+        // shown, and a hidden pane says how to reach it.
+        let (left, right) = self.status_segments();
+        let hidden_pane = self
+            .pane
+            .as_ref()
+            .filter(|_| self.pane_hidden)
+            .map(|p| format!("{} pane · {}", p.title, self.layout.focus));
         let overlay = self
             .overlay
-            .as_deref()
-            .or(self.clipboard_reading.then_some("reading clipboard…"))
-            .or(ext_status.as_deref());
-        let footer = statusline(&self.theme, &data, overlay, hint, panel_open, width);
+            .clone()
+            .or(self
+                .clipboard_reading
+                .then(|| "reading clipboard…".to_string()))
+            .or(hidden_pane)
+            .or(right);
+        let footer = statusline(
+            &self.theme,
+            &left,
+            overlay.as_deref(),
+            hint,
+            panel_open,
+            width,
+        );
         lines.extend(footer);
 
         lines
+    }
+
+    /// The status row's segments, left and right, from the layout's
+    /// templates and everything they can name.
+    fn status_segments(&self) -> (Vec<String>, Option<String>) {
+        let data = self.status_data();
+        let lookup = |token: &str| -> String {
+            match token {
+                "model" => data
+                    .model
+                    .as_deref()
+                    .map(crate::core::output::compact_model_label)
+                    .unwrap_or_default(),
+                "effort" => data.effort.clone().unwrap_or_default(),
+                "context" => match data.context_total.filter(|t| *t > 0) {
+                    Some(total) => {
+                        let percent = (data.context_used * 100) / total;
+                        if percent >= 1 {
+                            format!("{percent}%")
+                        } else {
+                            String::new()
+                        }
+                    }
+                    None => String::new(),
+                },
+                "cwd" => title_path_from(
+                    &self.agent.cwd(),
+                    &std::env::var("HOME").unwrap_or_default(),
+                ),
+                "session" => self.agent.session_name().unwrap_or_default(),
+                "status" => self
+                    .ext_status
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                other => match other.strip_prefix("status:") {
+                    Some(name) => self
+                        .ext_status
+                        .iter()
+                        .filter(|(slot, _)| {
+                            slot.as_str() == name
+                                || slot
+                                    .strip_prefix(name)
+                                    .is_some_and(|rest| rest.starts_with('/'))
+                        })
+                        .map(|(_, text)| text.clone())
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    None => String::new(),
+                },
+            }
+        };
+        let expand = |templates: &[String]| -> Vec<String> {
+            templates
+                .iter()
+                .filter_map(|t| crate::core::config::layout::expand(t, &lookup))
+                .collect()
+        };
+        let left = expand(&self.layout.status_left);
+        let right = expand(&self.layout.status_right);
+        let right = (!right.is_empty()).then(|| right.join(" · "));
+        (left, right)
+    }
+
+    /// A mouse event while a pane is open: inside the pane it navigates,
+    /// on the conversation it hands focus back.
+    fn pane_mouse(&mut self, mut event: crossterm::event::MouseEvent, width: usize) {
+        if self.trust.is_some() || self.auth.is_some() || self.settings.is_some() {
+            return;
+        }
+        let Some(pane) = self.pane.as_mut() else {
+            return;
+        };
+        let column = event.column as usize;
+        match pane.split(width, &self.layout) {
+            Some((conversation_width, pane_width)) => {
+                let (start, end) = match pane.side(&self.layout) {
+                    crate::core::config::layout::Side::Right => {
+                        (conversation_width + 3, conversation_width + 3 + pane_width)
+                    }
+                    crate::core::config::layout::Side::Left => (0, pane_width),
+                };
+                if column < start || column >= end {
+                    if matches!(event.kind, crossterm::event::MouseEventKind::Down(_)) {
+                        pane.focused = false;
+                    }
+                    return;
+                }
+                event.column = (column - start) as u16;
+            }
+            None if !pane.focused => return,
+            None => {}
+        }
+        let action = pane.mouse(event);
+        self.menu = None;
+        self.pane_action(action);
     }
 
     /// Shared model and context inputs for the composer and transcript footers.
@@ -1118,6 +1338,7 @@ impl App {
         // behind a surface that is gone.
         self.cancel_ui_prompt();
         self.close_ext_panel(true);
+        self.close_pane(true);
         self.auth = None;
         self.trust = None;
         self.queue_review = None;
@@ -1610,8 +1831,10 @@ impl App {
                 self.agent.adopt_session_name(None);
                 self.session_epoch += 1;
                 self.transcript.clear();
-                self.transcript
-                    .push(Block::new(Kind::Banner, crate::VERSION));
+                if self.layout.banner {
+                    self.transcript
+                        .push(Block::new(Kind::Banner, crate::VERSION));
+                }
                 set_tab_title(&tab_title(&title_path(), None));
                 extui::shutdown_then_start(self, "new");
             }
@@ -1638,9 +1861,12 @@ impl App {
             }
             "/reload" => self.reload(),
             "/trust" => match crate::core::config::trust::set(&self.agent.cwd(), true) {
-                Ok(()) => self.notice(
-                    "directory trusted — its AGENTS.md and .e skills/prompts now load".into(),
-                ),
+                Ok(()) => {
+                    self.notice(
+                        "directory trusted — its AGENTS.md and .e skills/prompts now load".into(),
+                    );
+                    self.install_project_packages();
+                }
                 Err(e) => self.notice(format!("trust: {e}")),
             },
             _ if trimmed.starts_with('/') => {
@@ -1950,6 +2176,70 @@ impl App {
         id
     }
 
+    /// Ask the extensions that render `subject` for a body to show instead
+    /// of `content`, off the loop; the answer comes back as a job.
+    fn request_render(&self, subject: &str, name: &str, content: &str, target: RenderTarget) {
+        if !self.host.renders(subject) {
+            return;
+        }
+        let host = self.host.clone();
+        let results = self.results.clone();
+        let epoch = self.session_epoch;
+        let (subject, name, content) = (subject.to_string(), name.to_string(), content.to_string());
+        crate::core::config::home::spawn(async move {
+            if let Some(show) = host.hook_render(&subject, &name, &content).await {
+                let _ = results
+                    .send(AppJob::Rendered {
+                        target,
+                        show,
+                        epoch,
+                    })
+                    .await;
+            }
+        });
+    }
+
+    /// A `render` answer lands: a tool's stored output takes the body (a
+    /// diff in e's row grammar), a reply takes it as its markdown.
+    fn apply_render(
+        &mut self,
+        target: RenderTarget,
+        show: crate::core::extensions::Show,
+        epoch: u64,
+    ) {
+        if epoch != self.session_epoch {
+            return;
+        }
+        let body = crate::core::tools::sanitize_display(&show.body);
+        match target {
+            RenderTarget::Tool(id) => {
+                let body = match show.format {
+                    crate::core::extensions::Format::Diff => {
+                        crate::core::tools::diffview::from_unified(&body)
+                    }
+                    _ => body,
+                };
+                if let Some(entry) = self.outputs.iter_mut().find(|(oid, _, _)| *oid == id) {
+                    entry.2 = body;
+                    self.viewer_cache = None;
+                }
+            }
+            RenderTarget::Assistant { index, len } => {
+                if let Some(block) = self.transcript.blocks.get_mut(index) {
+                    if block.kind == Kind::Assistant && block.text.len() == len {
+                        block.text = match show.format {
+                            crate::core::extensions::Format::Diff => {
+                                format!("```diff\n{body}\n```")
+                            }
+                            _ => body,
+                        };
+                        block.touch();
+                    }
+                }
+            }
+        }
+    }
+
     fn output_body(outputs: &[(u64, String, String)], id: u64) -> Option<&str> {
         outputs
             .iter()
@@ -1961,6 +2251,47 @@ impl App {
     /// that is the extension host (restarted) and the theme (re-resolved) —
     /// skills, prompts, AGENTS.md, settings, and models.json are read fresh
     /// on every use already.
+    /// A just-trusted repository's `.e/packages` may list packages not on
+    /// disk: install them now, in the background, and say so — the one
+    /// moment trust and a network fetch belong together. The result lands
+    /// as a notice; `/reload` picks the packages up.
+    fn install_project_packages(&mut self) {
+        let cwd = self.agent.cwd().to_path_buf();
+        let missing = crate::core::resources::packages::project_missing(&cwd);
+        if missing.is_empty() {
+            return;
+        }
+        self.notice(format!(
+            "installing {} from .e/packages…",
+            match missing.len() {
+                1 => "1 package".to_string(),
+                n => format!("{n} packages"),
+            }
+        ));
+        let results = self.results.clone();
+        let epoch = self.session_epoch;
+        crate::core::config::home::spawn(async move {
+            let outcomes = crate::core::resources::packages::install_project(&cwd).await;
+            let failed = outcomes.iter().filter(|r| r.is_err()).count();
+            let lines: Vec<String> = outcomes
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|e| e))
+                .collect();
+            let notice = if failed == 0 {
+                format!("{} — /reload to use them", lines.join("; "))
+            } else {
+                format!("{} — fix and run `e install`", lines.join("; "))
+            };
+            let result = crate::core::extensions::CommandResult {
+                notice: Some(notice),
+                show: None,
+                prompt: None,
+                session_name: None,
+            };
+            let _ = results.send(AppJob::Command { result, epoch }).await;
+        });
+    }
+
     fn reload(&mut self) {
         if self.agent.is_streaming() {
             self.notice("wait for the turn to finish before /reload".into());
@@ -1995,7 +2326,10 @@ impl App {
             self.menu = None;
         }
         self.ext_panel = None;
+        self.pane = None;
+        self.widgets.clear();
         self.ext_status.clear();
+        self.ext_activity.clear();
         let old = self.host.clone();
         let jobs = self.jobs.clone();
         let results = self.results.clone();
@@ -2055,6 +2389,7 @@ impl App {
     /// open to no overrides — never an error that blocks typing.
     fn apply_keymap(&mut self) {
         self.keymap = crate::core::config::keybindings::load();
+        self.layout = crate::core::config::layout::load();
     }
 
     /// Refresh cached sign-in, effort, and layout preferences from disk.
@@ -2688,7 +3023,12 @@ async fn run_scoped(
         ui_queue: extui::UiQueue::new(),
         ui_prompt: None,
         ext_status: std::collections::BTreeMap::new(),
+        ext_activity: std::collections::BTreeMap::new(),
         ext_panel: None,
+        pane: None,
+        pane_hidden: false,
+        widgets: std::collections::BTreeMap::new(),
+        layout: crate::core::config::layout::load(),
         external_edit: false,
     };
     app.editor
@@ -2701,8 +3041,10 @@ async fn run_scoped(
             "path": app.agent.session_path().map(|p| p.display().to_string()),
         }),
     );
-    app.transcript
-        .push(Block::new(Kind::Banner, crate::VERSION));
+    if app.layout.banner {
+        app.transcript
+            .push(Block::new(Kind::Banner, crate::VERSION));
+    }
     for warning in model::config_warnings() {
         app.notice(format!("warning: {warning}"));
     }
@@ -2816,6 +3158,8 @@ async fn run_scoped(
                                 crossterm::event::MouseEventKind::ScrollDown => app.scroll_viewer(true, 3, cols as usize, rows as usize),
                                 _ => {}
                             }
+                        } else {
+                            app.pane_mouse(event, cols as usize);
                         }
                     },
                     TermEvent::Resize(c, r) => {
@@ -2840,6 +3184,36 @@ async fn run_scoped(
 
                         } else if ctrl && k.code == KeyCode::Char('o') {
                             app.viewer = Some(Viewer::new());
+                        } else if app.pane.is_some()
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                            && app.pending_key.is_none()
+                            && extui::chord_of(&k).as_deref() == Some(app.layout.focus.as_str())
+                        {
+                            // The layout's focus chord moves between the
+                            // conversation and the pane.
+                            if let Some(pane) = app.pane.as_mut() {
+                                pane.focused = !pane.focused;
+                            }
+                        } else if app.pane.as_ref().is_some_and(|p| p.focused)
+                            && app.menu.is_none()
+                            && app.settings.is_none()
+                            && app.auth.is_none()
+                            && app.trust.is_none()
+                            && !app.ui_input_open()
+                            && !(ctrl && k.code == KeyCode::Char('c'))
+                        {
+                            // The pane owns the keyboard: e navigates it,
+                            // and chords it does not use go to the owner.
+                            // ctrl+c stays e's.
+                            let width = cols as usize;
+                            if let Some(pane) = app.pane.as_mut() {
+                                let action = pane.key(k, width);
+                                app.pane_action(action);
+                            }
                         } else if app.ext_panel.as_ref().is_some_and(|p| p.interactive)
                             && app.menu.is_none()
                             && app.settings.is_none()
@@ -2882,7 +3256,9 @@ async fn run_scoped(
                                         Err(e) => app.notice(format!("trust: {e}")),
                                         Ok(()) => {
                                             app.trust = None;
-                                            if !trusted {
+                                            if trusted {
+                                                app.install_project_packages();
+                                            } else {
                                                 app.notice("working untrusted — project AGENTS.md and .e skills/prompts ignored (/trust to allow)".into());
                                             }
                                             // An open -r picker still owns
@@ -3123,7 +3499,7 @@ async fn run_scoped(
                             && app.settings.is_none()
                             && app.auth.is_none()
                             && app.trust.is_none()
-                            && !app.ui_input_open()
+                            && (!app.ui_input_open() || app.ui_editor_open())
                             && app.pending_key.is_none()
                         {
                             // Deferred to the top of the loop: the terminal
@@ -3208,6 +3584,9 @@ async fn run_scoped(
                     }
                     Some(AppJob::Completions { command, prefix, items }) => {
                         app.show_completions(&command, &prefix, items);
+                    }
+                    Some(AppJob::Rendered { target, show, epoch }) => {
+                        app.apply_render(target, show, epoch);
                     }
                     Some(AppJob::InputVerdict { sequence, text, images, verdict }) => {
                         // A later hook may finish first; hold it until every
@@ -3389,7 +3768,7 @@ async fn run_scoped(
                 }
             }
         }
-        let capture_mouse = app.viewer.is_some();
+        let capture_mouse = app.viewer.is_some() || app.pane.is_some();
         if capture_mouse != mouse_enabled {
             if capture_mouse {
                 let _ = execute!(std::io::stdout(), EnableMouseCapture);
@@ -3416,7 +3795,10 @@ async fn run_scoped(
             } else {
                 app.frame(cols as usize, rows as usize)
             };
-            painter.frame_in_view(frame, app.viewer.is_some());
+            // A split beside a pane is a fixed-height frame: it paints on
+            // the alternate screen, like the viewer, so the transcript and
+            // the terminal's scrollback come back untouched when it closes.
+            painter.frame_in_view(frame, app.viewer.is_some() || app.pane.is_some());
             next_paint = now + FRAME_INTERVAL;
             paint_deferred = false;
         } else {
@@ -4318,7 +4700,12 @@ mod tests {
             ui_queue: extui::UiQueue::new(),
             ui_prompt: None,
             ext_status: std::collections::BTreeMap::new(),
+            ext_activity: std::collections::BTreeMap::new(),
             ext_panel: None,
+            pane: None,
+            pane_hidden: false,
+            widgets: std::collections::BTreeMap::new(),
+            layout: crate::core::config::layout::Layout::default(),
             external_edit: false,
         }
     }
@@ -4513,6 +4900,310 @@ mod tests {
             app.menu.is_none(),
             "an empty host offers no further completions"
         );
+    }
+
+    #[test]
+    fn a_pane_splits_the_frame_where_the_layout_says_and_answers_its_owner() {
+        let mut app = session_app();
+        app.layout = crate::core::config::layout::parse(
+            r#"{"panes":{"diff":{"side":"left","width":40}},"split_min":100}"#,
+        )
+        .unwrap();
+        let (request, reply) = fake_request(
+            "diff",
+            "ui.pane",
+            serde_json::json!({"id": "diff", "title": "Changes", "side": "right", "sections": [
+                {"kind": "list", "id": "files", "items": [{"id": "a.rs", "label": "a.rs", "detail": "+1 -0"}]},
+                {"kind": "diff", "id": "patch", "body": "@@ -1 +1 @@\n-x\n+y\n"}
+            ]}),
+        );
+        app.on_host_request(request);
+        assert!(reply.blocking_recv().unwrap().is_ok());
+        let frame = app.frame(120, 20);
+        assert_eq!(frame.len(), 20, "a split is a fixed-height frame");
+        let plain: Vec<String> = frame
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        // The layout put the pane on the left at 40%: 48 columns, then the
+        // divider, then the conversation.
+        assert!(plain[1].starts_with("Changes"), "{:?}", plain[1]);
+        assert!(plain[1].contains(" │ "), "{:?}", plain[1]);
+        assert_eq!(
+            plain[1].split(" │ ").next().unwrap().chars().count(),
+            48,
+            "{:?}",
+            plain[1]
+        );
+        assert!(plain.iter().any(|r| r.contains("+ y")), "{plain:?}");
+        // Too narrow to split: the focused pane fills the frame.
+        let narrow = app.frame(80, 20);
+        assert!(crate::core::tools::strip_ansi(&narrow[1]).starts_with("Changes"));
+        app.pane.as_mut().unwrap().focused = false;
+        let narrow = app.frame(80, 20);
+        let plain: Vec<String> = narrow
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        assert!(
+            !plain[1].starts_with("Changes"),
+            "unfocused, the conversation shows"
+        );
+        assert!(
+            plain.iter().any(|r| r.contains("Changes pane · ctrl+t")),
+            "the status row says how to reach the hidden pane: {plain:?}"
+        );
+        // A refresh keeps the pane; another extension's pane replaces it;
+        // null from the owner closes.
+        let (request, _) = fake_request(
+            "diff",
+            "ui.pane",
+            serde_json::json!({"id": "diff", "sections": [{"kind": "text", "body": "clean"}]}),
+        );
+        app.on_host_request(request);
+        assert_eq!(app.pane.as_ref().unwrap().sections.len(), 1);
+        let (request, _) = fake_request(
+            "plan",
+            "ui.pane",
+            serde_json::json!({"sections": [{"kind": "text", "body": "steps"}]}),
+        );
+        app.on_host_request(request);
+        assert_eq!(app.pane.as_ref().unwrap().extension, "plan");
+        let (request, _) = fake_request("diff", "ui.pane", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.pane.is_some(), "only the owner closes a pane");
+        let (request, _) = fake_request("plan", "ui.pane", serde_json::Value::Null);
+        app.on_host_request(request);
+        assert!(app.pane.is_none());
+        let (request, reply) = fake_request("plan", "ui.pane", serde_json::json!({"sections": []}));
+        app.on_host_request(request);
+        assert!(
+            reply.blocking_recv().unwrap().is_err(),
+            "a pane needs sections"
+        );
+    }
+
+    /// The exact request the diff package sends, painted at a real size:
+    /// every row of the split carries the divider and the pane.
+    #[test]
+    fn a_package_shaped_pane_paints_every_row_of_the_split() {
+        let mut app = session_app();
+        let (request, _) = fake_request(
+            "diff",
+            "ui.pane",
+            serde_json::json!({"id":"diff","title":"3 files changed +6 -4","side":"right","sections":[
+                {"kind":"list","id":"files","items":[
+                    {"id":"list.txt","label":"list.txt","detail":"+1 -1"},
+                    {"id":"main.rs","label":"main.rs","detail":"+5 -3"},
+                    {"id":"notes.txt","label":"notes.txt","detail":"new"}],"selected":"list.txt"},
+                {"kind":"diff","id":"patch","body":"diff --git a/list.txt b/list.txt\nindex de98044..6372083 100644\n--- a/list.txt\n+++ b/list.txt\n@@ -1,3 +1,3 @@\n a\n-b\n c\n+d"}]}),
+        );
+        app.on_host_request(request);
+        let frame = app.frame(130, 32);
+        assert_eq!(frame.len(), 32);
+        let plain: Vec<String> = frame
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        for (i, row) in plain.iter().enumerate() {
+            assert!(row.contains(" │ "), "row {i} lost the divider: {row:?}");
+            assert!(
+                row.chars().count() <= 130,
+                "row {i} is wider than the terminal: {row:?}"
+            );
+            // What the painter does with every row, styled.
+            let styled = &frame[i];
+            assert!(
+                crate::tui::markdown::visible_width(styled) <= 130,
+                "row {i} measures wider than the terminal: {styled:?}"
+            );
+            let _ = crate::tui::markdown::clip_styled(styled, 130);
+        }
+        assert!(
+            plain[3].contains("list.txt") && plain[3].ends_with("+1 -1"),
+            "{:?}",
+            plain[3]
+        );
+        assert!(plain.iter().any(|r| r.contains("2 - b")), "{plain:?}");
+    }
+
+    #[test]
+    fn a_render_answer_rewrites_its_entry_and_a_stale_one_is_dropped() {
+        let mut app = session_app();
+        let id = app.remember_output("bash".into(), "raw output".into());
+        let diff = crate::core::extensions::Show {
+            title: String::new(),
+            body: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".into(),
+            format: crate::core::extensions::Format::Diff,
+        };
+        app.apply_render(RenderTarget::Tool(id), diff.clone(), app.session_epoch);
+        let body = App::output_body(&app.outputs, id).unwrap();
+        assert!(
+            body.contains("1 - old") && body.contains("1 + new"),
+            "{body:?}"
+        );
+        // A reply, only when it is still the reply that was asked about.
+        app.transcript
+            .push(Block::new(Kind::Assistant, "plain reply"));
+        let index = app.transcript.blocks.len() - 1;
+        let markdown = crate::core::extensions::Show {
+            title: String::new(),
+            body: "**bold reply**".into(),
+            format: crate::core::extensions::Format::Markdown,
+        };
+        app.apply_render(
+            RenderTarget::Assistant { index, len: 3 },
+            markdown.clone(),
+            app.session_epoch,
+        );
+        assert_eq!(
+            app.transcript.blocks[index].text, "plain reply",
+            "length mismatch"
+        );
+        app.apply_render(
+            RenderTarget::Assistant {
+                index,
+                len: "plain reply".len(),
+            },
+            markdown.clone(),
+            app.session_epoch + 1,
+        );
+        assert_eq!(
+            app.transcript.blocks[index].text, "plain reply",
+            "epoch mismatch"
+        );
+        app.apply_render(
+            RenderTarget::Assistant {
+                index,
+                len: "plain reply".len(),
+            },
+            markdown,
+            app.session_epoch,
+        );
+        assert_eq!(app.transcript.blocks[index].text, "**bold reply**");
+    }
+
+    #[test]
+    fn the_activity_row_follows_its_template_and_carries_extension_text() {
+        let mut app = session_app();
+        // Between turns: only the extensions' text, dim, below the transcript.
+        let (request, _) = fake_request(
+            "tests",
+            "ui.activity",
+            serde_json::json!({"text": "3 tests running"}),
+        );
+        app.on_host_request(request);
+        let plain: Vec<String> = app
+            .transcript_frame(80)
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        assert_eq!(plain.last().map(String::as_str), Some("3 tests running"));
+        // During a turn the template composes the row; the user's template
+        // can drop the clock and the tokens.
+        app.active = Some(ActiveTurn {
+            block: None,
+            thinking_block: None,
+            turn: Turn::new(),
+            started: Instant::now(),
+            error: None,
+            error_summary: None,
+            sleep_stopped: false,
+            tool_blocks: std::collections::HashMap::new(),
+            tool_names: std::collections::HashMap::new(),
+            pending_tools: 0,
+            cost_usd: None,
+        });
+        if let Some(turn) = app.active.as_mut() {
+            turn.turn.note_usage(1_000, 20);
+        }
+        let row = |app: &mut App| -> String {
+            let rows = app.transcript_frame(80);
+            crate::core::tools::strip_ansi(rows.last().unwrap())
+                .trim()
+                .to_string()
+        };
+        assert_eq!(row(&mut app), "• Thinking (0s) (↑1k ↓20) · 3 tests running");
+        app.layout.activity = "{phase} — {activity}".into();
+        assert_eq!(row(&mut app), "• Thinking — 3 tests running");
+        let (request, _) = fake_request("tests", "ui.activity", serde_json::json!({"text": null}));
+        app.on_host_request(request);
+        assert_eq!(row(&mut app), "• Thinking —");
+    }
+
+    #[test]
+    fn an_editor_prompt_takes_a_multi_line_answer() {
+        let mut app = session_app();
+        let (request, reply) = fake_request(
+            "notes",
+            "ui.editor",
+            serde_json::json!({"title": "Commit message", "text": "first line"}),
+        );
+        app.on_host_request(request);
+        assert!(app.ui_editor_open() && app.ui_input_open());
+        assert_eq!(app.editor.text(), "first line");
+        assert!(app.answer_ui_input("first line\nsecond line"));
+        let answer = reply.blocking_recv().unwrap().unwrap();
+        assert_eq!(answer["text"], "first line\nsecond line");
+        assert!(!app.ui_input_open());
+    }
+
+    #[test]
+    fn widgets_sit_above_the_composer_and_keyed_status_fills_the_template() {
+        let mut app = session_app();
+        let (request, _) = fake_request(
+            "plan",
+            "ui.widget",
+            serde_json::json!({"key": "steps", "lines": [[{"text": "1/3 steps", "token": "accent"}], "next: tests"]}),
+        );
+        app.on_host_request(request);
+        let (request, _) = fake_request(
+            "plan",
+            "ui.widget",
+            serde_json::json!({"key": "clock", "lines": ["12:00"]}),
+        );
+        app.on_host_request(request);
+        let plain: Vec<String> = app
+            .frame(80, 20)
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        // Widgets stack in key order: plan/clock before plan/steps.
+        let clock = plain.iter().position(|r| r == "12:00").unwrap();
+        assert_eq!(plain[clock + 1], "1/3 steps");
+        assert_eq!(plain[clock + 2], "next: tests");
+        assert!(
+            plain[clock + 3..].iter().any(|r| r.starts_with('┃')),
+            "above the composer: {plain:?}"
+        );
+        let (request, _) = fake_request(
+            "plan",
+            "ui.widget",
+            serde_json::json!({"key": "clock", "lines": null}),
+        );
+        app.on_host_request(request);
+        assert_eq!(app.widgets.len(), 1);
+
+        // Two keyed slots on one extension, joined on the status row; the
+        // template can name one extension's alone.
+        for (key, text) in [("mode", "plan mode"), ("left", "2 steps left")] {
+            let (request, _) = fake_request(
+                "plan",
+                "ui.status",
+                serde_json::json!({"key": key, "text": text}),
+            );
+            app.on_host_request(request);
+        }
+        let (request, _) = fake_request("other", "ui.status", serde_json::json!({"text": "busy"}));
+        app.on_host_request(request);
+        let (_, right) = app.status_segments();
+        assert_eq!(right.as_deref(), Some("busy · 2 steps left · plan mode"));
+        app.layout.status_right = vec!["{status:plan}".into()];
+        let (_, right) = app.status_segments();
+        assert_eq!(right.as_deref(), Some("2 steps left · plan mode"));
+        app.layout.status_left = vec!["{cwd}".into(), "{model} / {effort}".into()];
+        let (left, _) = app.status_segments();
+        assert!(!left.is_empty() && !left[0].is_empty(), "{left:?}");
     }
 
     #[test]

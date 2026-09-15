@@ -5,12 +5,14 @@
 //!
 //! Everything an extension shows is data painted by e through the theme:
 //! a `show` becomes a transcript block, a `select` the ordinary picker, a
-//! `panel` a footer surface framed like every other one, a `status` a
-//! bounded slot on the status row. Modal requests (`select`, `confirm`,
-//! `input`) queue first-come across extensions; one is open at a time,
-//! and Esc answers it "cancelled". Text is sanitized before paint and
-//! styled only through theme tokens, so an extension can neither emit an
-//! escape sequence nor use a colour the user's theme does not define.
+//! `panel` a footer surface framed like every other one, a `pane` a side
+//! pane beside the conversation (`tui/surfaces/pane.rs`), a `widget` rows
+//! above the composer, a `status` a bounded slot on the status row. Modal
+//! requests (`select`, `confirm`, `input`) queue first-come across
+//! extensions; one is open at a time, and Esc answers it "cancelled".
+//! Text is sanitized before paint and styled only through theme tokens, so
+//! an extension can neither emit an escape sequence nor use a colour the
+//! user's theme does not define.
 
 use std::collections::VecDeque;
 
@@ -20,9 +22,13 @@ use serde_json::{json, Value};
 use super::*;
 use crate::core::extensions::{CommandResult, HostRequest, Show};
 use crate::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+pub(crate) use crate::tui::pane::Span;
+use crate::tui::pane::{spans_of, Action, Pane};
 
 /// Widest a `ui.status` slot paints; longer text ends in an ellipsis.
 const STATUS_COLUMNS: usize = 40;
+/// Most rows every extension's widgets may take above the composer.
+const WIDGET_MAX_ROWS: usize = 8;
 /// Most rows a `ui.panel` may carry; the rest are dropped with a last row
 /// saying so, since a panel is a glance, not a document.
 const PANEL_MAX_LINES: usize = 200;
@@ -30,14 +36,10 @@ const PANEL_MAX_LINES: usize = 200;
 const TITLE_COLUMNS: usize = 60;
 
 pub(super) const HINT_INPUT: &str = "Enter Answer     Esc Cancel";
+pub(super) const HINT_EDITOR: &str =
+    "Enter Answer     Shift+Enter Newline     Ctrl+G Editor     Esc Cancel";
 pub(super) const HINT_PANEL: &str = "Esc Close";
 pub(super) const HINT_PANEL_INTERACTIVE: &str = "Keys go to the extension     Esc Close";
-
-/// One themed run of text on a panel row.
-pub(super) struct Span {
-    pub text: String,
-    pub token: Option<String>,
-}
 
 /// An extension's footer panel: one slot, last writer wins. Interactive
 /// panels receive keys as `ui.key` notifications until closed.
@@ -75,11 +77,13 @@ pub(super) enum UiPrompt {
     Select(HostRequest),
     /// The picker holds Yes/No; Enter answers `confirmed`.
     Confirm(HostRequest),
-    /// The composer is the answer field.
+    /// The composer is the answer field. `multiline` is `ui.editor`:
+    /// shift+enter breaks a line, ctrl+g opens the external editor.
     Input {
         request: HostRequest,
         title: String,
         placeholder: String,
+        multiline: bool,
     },
 }
 
@@ -97,7 +101,7 @@ impl UiPrompt {
 /// A canonical chord for a key event — the keybindings grammar plus the
 /// keys the composer never binds (`escape`, `tab`, `space`, paging) so an
 /// interactive panel can see them. None for keys without a name.
-pub(super) fn chord_of(event: &KeyEvent) -> Option<String> {
+pub(crate) fn chord_of(event: &KeyEvent) -> Option<String> {
     use crate::core::config::keybindings::{base_name, chord_string};
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
@@ -153,36 +157,7 @@ fn panel_lines(value: &Value) -> Vec<Vec<Span>> {
     let Some(lines) = value.as_array() else {
         return Vec::new();
     };
-    let mut out: Vec<Vec<Span>> = lines
-        .iter()
-        .take(PANEL_MAX_LINES)
-        .map(|line| match line {
-            Value::String(text) => vec![Span {
-                text: flat(text),
-                token: None,
-            }],
-            Value::Array(spans) => spans
-                .iter()
-                .filter_map(|span| {
-                    let text = span
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .or_else(|| span.as_str())?;
-                    Some(Span {
-                        text: flat(text),
-                        token: span
-                            .get("token")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                    })
-                })
-                .collect(),
-            other => vec![Span {
-                text: flat(&other.to_string()),
-                token: None,
-            }],
-        })
-        .collect();
+    let mut out: Vec<Vec<Span>> = lines.iter().take(PANEL_MAX_LINES).map(spans_of).collect();
     if lines.len() > PANEL_MAX_LINES {
         out.push(vec![Span {
             text: format!("… {} more lines not shown", lines.len() - PANEL_MAX_LINES),
@@ -202,6 +177,18 @@ impl App {
     /// Whether the composer is currently an extension's answer field.
     pub(super) fn ui_input_open(&self) -> bool {
         matches!(self.ui_prompt, Some(UiPrompt::Input { .. }))
+    }
+
+    /// Whether the open answer field is a `ui.editor`, which may hand the
+    /// draft to the external editor.
+    pub(super) fn ui_editor_open(&self) -> bool {
+        matches!(
+            self.ui_prompt,
+            Some(UiPrompt::Input {
+                multiline: true,
+                ..
+            })
+        )
     }
 
     /// Whether some other surface owns the footer, so a modal must wait.
@@ -298,24 +285,33 @@ impl App {
                 );
                 self.ui_prompt = Some(UiPrompt::Confirm(request));
             }
-            "ui.input" => {
+            "ui.input" | "ui.editor" => {
+                let multiline = request.method == "ui.editor";
                 let placeholder = one_line(&text_of(&request.params, "placeholder"), TITLE_COLUMNS);
-                let prefill = text_of(&request.params, "prefill");
-                let secret = request
-                    .params
-                    .get("secret")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
+                // `ui.editor` seeds the draft from `text`; `ui.input` from
+                // `prefill`.
+                let prefill = if multiline {
+                    text_of(&request.params, "text")
+                } else {
+                    text_of(&request.params, "prefill")
+                };
+                let secret = !multiline
+                    && request
+                        .params
+                        .get("secret")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                 self.editor.set_text(&prefill);
                 self.editor.mask = secret;
                 self.ui_prompt = Some(UiPrompt::Input {
                     request,
                     title: if title.is_empty() {
-                        "Input".to_string()
+                        if multiline { "Editor" } else { "Input" }.to_string()
                     } else {
                         title
                     },
                     placeholder,
+                    multiline,
                 });
             }
             _ => request.respond(Err("not a modal request".into())),
@@ -373,10 +369,12 @@ impl App {
         else {
             return Vec::new();
         };
-        let hint = if placeholder.is_empty() {
-            "type an answer, then Enter".to_string()
-        } else {
+        let hint = if !placeholder.is_empty() {
             placeholder.clone()
+        } else if self.ui_editor_open() {
+            "type or paste, shift+enter for a new line, then Enter".to_string()
+        } else {
+            "type an answer, then Enter".to_string()
         };
         crate::tui::panel::frame(
             &self.theme,
@@ -384,6 +382,60 @@ impl App {
             self.theme.fg("userMessageText", title),
             vec![format!("  {}", self.theme.fg("dim", &hint))],
         )
+    }
+
+    /// Close the side pane; `tell` notifies its owner (`pane.closed`).
+    pub(super) fn close_pane(&mut self, tell: bool) {
+        if let Some(pane) = self.pane.take() {
+            if tell {
+                self.host.notify_extension(
+                    &pane.extension,
+                    "pane.closed",
+                    json!({"pane": pane.id}),
+                );
+            }
+        }
+    }
+
+    /// What a pane's key or mouse asked of the app: an attachment lands in
+    /// the composer, a selection or activation goes to the owner as data.
+    pub(super) fn pane_action(&mut self, action: Action) {
+        let Some(pane) = &self.pane else { return };
+        let (extension, id) = (pane.extension.clone(), pane.id.clone());
+        match action {
+            Action::None => {}
+            Action::Close => self.close_pane(true),
+            Action::Attach { label, content } => {
+                self.editor
+                    .insert_attachment(&label, &format!("\n{content}\n"));
+            }
+            Action::Select { section, id: item } => self.host.notify_extension(
+                &extension,
+                "pane.select",
+                json!({"pane": id, "section": section, "id": item}),
+            ),
+            Action::Activate { section, id: item } => self.host.notify_extension(
+                &extension,
+                "pane.activate",
+                json!({"pane": id, "section": section, "id": item}),
+            ),
+            Action::Key(chord) => self.host.notify_extension(
+                &extension,
+                "pane.key",
+                json!({"pane": id, "key": chord}),
+            ),
+        }
+    }
+
+    /// The widget rows above the composer, every extension's in name
+    /// order, bounded.
+    pub(super) fn widget_rows(&self, width: usize) -> Vec<String> {
+        self.widgets
+            .values()
+            .flatten()
+            .take(WIDGET_MAX_ROWS)
+            .map(|spans| crate::tui::pane::paint_spans(&self.theme, spans, width))
+            .collect()
     }
 
     /// Close the extension panel; `tell` notifies its owner (`ui.panel_closed`).
@@ -460,21 +512,103 @@ impl App {
                 self.transcript.push(Block::show(show));
                 request.ok();
             }
-            "ui.select" | "ui.confirm" | "ui.input" => {
+            "ui.select" | "ui.confirm" | "ui.input" | "ui.editor" => {
                 self.ui_queue.push_back(request);
                 self.pump_ui_queue();
             }
             "ui.status" => {
-                let extension = request.extension.clone();
+                // One slot per extension, or several under `key`; the
+                // status template's `{status}` joins them all and
+                // `{status:<name>}` picks one extension's.
+                let slot = match params.get("key").and_then(Value::as_str) {
+                    Some(key) if !key.trim().is_empty() => {
+                        format!("{}/{}", request.extension, flat(key))
+                    }
+                    _ => request.extension.clone(),
+                };
                 match params.get("text") {
                     Some(Value::String(text)) if !text.trim().is_empty() => {
                         self.ext_status.insert(
-                            extension,
+                            slot,
                             one_line(&crate::core::tools::sanitize_display(text), STATUS_COLUMNS),
                         );
                     }
                     _ => {
-                        self.ext_status.remove(&extension);
+                        self.ext_status.remove(&slot);
+                    }
+                }
+                request.ok();
+            }
+            "ui.activity" => {
+                // The `{activity}` token of the row below the transcript,
+                // one slot per extension or several under `key`.
+                let slot = match params.get("key").and_then(Value::as_str) {
+                    Some(key) if !key.trim().is_empty() => {
+                        format!("{}/{}", request.extension, flat(key))
+                    }
+                    _ => request.extension.clone(),
+                };
+                match params.get("text") {
+                    Some(Value::String(text)) if !text.trim().is_empty() => {
+                        self.ext_activity.insert(
+                            slot,
+                            one_line(&crate::core::tools::sanitize_display(text), STATUS_COLUMNS),
+                        );
+                    }
+                    _ => {
+                        self.ext_activity.remove(&slot);
+                    }
+                }
+                request.ok();
+            }
+            "ui.widget" => {
+                // Rows above the composer, keyed so an extension can keep
+                // several; null lines remove one. Bounded across all.
+                let slot = match params.get("key").and_then(Value::as_str) {
+                    Some(key) if !key.trim().is_empty() => {
+                        format!("{}/{}", request.extension, flat(key))
+                    }
+                    _ => request.extension.clone(),
+                };
+                match params.get("lines") {
+                    Some(Value::Array(lines)) if !lines.is_empty() => {
+                        let rows: Vec<Vec<Span>> =
+                            lines.iter().take(WIDGET_MAX_ROWS).map(spans_of).collect();
+                        self.widgets.insert(slot, rows);
+                    }
+                    _ => {
+                        self.widgets.remove(&slot);
+                    }
+                }
+                request.ok();
+            }
+            "ui.pane" => {
+                if params.is_null() {
+                    let owns = self
+                        .pane
+                        .as_ref()
+                        .is_some_and(|p| p.extension == request.extension);
+                    if owns {
+                        self.close_pane(false);
+                    }
+                    request.ok();
+                    return;
+                }
+                let Some(fresh) = Pane::from_request(&request.extension, &params) else {
+                    request.respond(Err("a pane needs at least one section".into()));
+                    return;
+                };
+                match self.pane.as_mut() {
+                    // The same pane again: new content, the user's place kept.
+                    Some(open) if open.extension == fresh.extension && open.id == fresh.id => {
+                        open.update(fresh);
+                    }
+                    _ => {
+                        // Another pane is replaced, and its owner told.
+                        if self.pane.is_some() {
+                            self.close_pane(true);
+                        }
+                        self.pane = Some(fresh);
                     }
                 }
                 request.ok();

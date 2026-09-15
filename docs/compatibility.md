@@ -16,11 +16,19 @@ against so changes to them are deliberate rather than accidental.
   `format_version: 1`. Readers accept unversioned files, preserve unknown
   keys, and quarantine corrupt input before creating a replacement. An older
   e will not write over a file carrying a newer or invalid format version.
+- **Layout:** `~/.e/layout.json` (`panes`, `split_min`, `focus`, `banner`,
+  `status.left`, `status.right`) is documented in [layout.md](layout.md);
+  unknown keys are ignored and a malformed file falls back to the
+  defaults.
 - **Packages:** the `packages` list in `settings.json` holds source strings
-  as typed (`git:host/user/repo[@ref]`, a git URL, or a directory path), and
-  git packages live under `~/.e/packages/<host>/<path>`. Both are documented
-  in [packages.md](packages.md); a reader that meets an entry it cannot
-  parse reports it and loads the rest.
+  as typed (`npm:name[@version]`, `git:host/user/repo[@ref]`, a git URL, or
+  a directory path), or objects carrying a `source` plus per-kind filter
+  lists (`extensions`, `skills`, `prompts`, `themes`); npm packages live
+  under `~/.e/packages/npm/node_modules/<name>`, git packages under
+  `~/.e/packages/<host>/<path>`. All are documented in
+  [packages.md](packages.md) and pinned by
+  `tests/fixtures/config/settings-v1-packages.json`; a reader that meets an
+  entry it cannot parse reports it and loads the rest.
 - **Extensions:** the JSONL protocol is versioned independently. e sends its
   protocol number during `initialize`; additive fields do not change the
   number, while incompatible wire changes require a new protocol version.

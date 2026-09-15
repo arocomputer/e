@@ -22,8 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::protocol::{
     self, BeforeTurnResult, CommandResult, CompactSummaryResult, Completion, Completions,
-    HookVerdict, Incoming, InjectedMessage, InputVerdict, Manifest, Relaunch, StartupResult,
-    ToolLabel, ToolResult, ToolResultPatch,
+    HookVerdict, Incoming, InjectedMessage, InputVerdict, Manifest, Relaunch, RenderResult, Show,
+    StartupResult, ToolLabel, ToolResult, ToolResultPatch,
 };
 use crate::core::config::home;
 
@@ -1050,6 +1050,55 @@ impl ExtensionHost {
         current
     }
 
+    /// Whether any extension asked to render `subject` — `tool:<name>` or
+    /// `assistant` — through its `render` hook.
+    pub fn renders(&self, subject: &str) -> bool {
+        self.extensions
+            .iter()
+            .any(|e| Self::wants_render(&e.manifest, subject))
+    }
+
+    fn wants_render(manifest: &Manifest, subject: &str) -> bool {
+        manifest.hooks.iter().any(|h| h == "render")
+            && manifest.renders.iter().any(|r| {
+                r == subject || (r == "tool:*" && subject.starts_with("tool:")) || r == "*"
+            })
+    }
+
+    /// Ask every extension that renders `subject`, in order, for the body
+    /// to show instead of `content`; each sees the previous answer. None
+    /// when nobody changed anything. `kind` is `tool` or `assistant`,
+    /// `name` the tool (empty for a reply).
+    pub async fn hook_render(&self, subject: &str, name: &str, content: &str) -> Option<Show> {
+        let mut current: Option<Show> = None;
+        let kind = subject.split(':').next().unwrap_or(subject);
+        for ext in &self.extensions {
+            if !Self::wants_render(&ext.manifest, subject) {
+                continue;
+            }
+            let text = current.as_ref().map(|s| s.body.as_str()).unwrap_or(content);
+            if let Ok(value) = self
+                .request(
+                    ext,
+                    "hook.render",
+                    json!({"kind": kind, "name": name, "content": text}),
+                    HOOK_TIMEOUT,
+                )
+                .await
+            {
+                let result: RenderResult = serde_json::from_value(value).unwrap_or_default();
+                if let Some(body) = result.body {
+                    current = Some(Show {
+                        title: String::new(),
+                        body,
+                        format: result.format,
+                    });
+                }
+            }
+        }
+        current
+    }
+
     /// Let every extension with the `compact_summary` hook edit the summary
     /// about to replace the conversation, in order. None when unchanged.
     pub async fn hook_compact_summary(&self, summary: &str) -> Option<String> {
@@ -1236,8 +1285,18 @@ impl Drop for PendingGuard {
 /// matching the directory name, then a sole executable.
 fn discover() -> Vec<PathBuf> {
     let mut paths = scan(&home::extensions_dir());
-    for dir in crate::core::resources::packages::dirs("extensions") {
-        paths.extend(scan(&dir));
+    for (dir, filter) in crate::core::resources::packages::dirs("extensions") {
+        // A package's filter names the top-level file or bundle directory,
+        // never the entry point inside a bundle.
+        paths.extend(scan(&dir).into_iter().filter(|path| {
+            let top = path
+                .strip_prefix(&dir)
+                .ok()
+                .and_then(|rel| rel.components().next())
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .unwrap_or_default();
+            filter.allows("extensions", &top)
+        }));
     }
     paths
 }
