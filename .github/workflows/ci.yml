@@ -62,9 +62,9 @@ jobs:
           while IFS= read -r file; do
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
-              packaging/* | scripts/packaging/* | install.sh | LICENSE | \
+              packaging/* | scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
               src/core/update.rs | tests/update.rs | scripts/release-check.sh | \
-              .github/workflows/ci.yml | .github/workflows/release.yml)
+              .github/workflows/ci.yml | .github/workflows/release.yml | .github/workflows/preview.yml)
                 packages=true ;;
             esac
             case "$file" in

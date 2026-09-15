@@ -1,0 +1,7 @@
+{
+  "origin": "synthetic",
+  "responses": [
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
+    "data: {\"choices\":[{\"delta\":{\"content\":\"the file has two lines\"}}]}\n\ndata: [DONE]\n\n"
+  ]
+}

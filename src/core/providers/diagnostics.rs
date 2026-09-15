@@ -57,6 +57,8 @@ pub struct ConfigurationDiagnostic {
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub version: String,
+    pub channel: String,
+    pub commit: String,
     pub target: String,
     pub working_directory: String,
     pub default_model: String,
@@ -129,6 +131,8 @@ pub fn report(host: &crate::core::extensions::ExtensionHost) -> Report {
     let home = crate::core::config::home::home();
     Report {
         version: crate::VERSION.into(),
+        channel: crate::CHANNEL.into(),
+        commit: crate::COMMIT.into(),
         target: crate::core::update::target()
             .unwrap_or("none (no release for this platform)")
             .into(),
@@ -178,6 +182,8 @@ pub fn render(report: &Report) -> String {
     let mut lines = vec![
         "e doctor".into(),
         format!("version: e {}", sanitize_line(&report.version)),
+        format!("channel: {}", report.channel),
+        format!("commit: {}", report.commit),
         format!("target: {}", sanitize_line(&report.target)),
         format!("working directory: {}", report.working_directory),
         format!("home: {}", report.e_home),

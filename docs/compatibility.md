@@ -67,6 +67,8 @@ On Unix, e creates its state directories with `0700` and session logs with
 the e home directory to `0700`, protecting older files underneath it without
 rewriting their contents. Reopening an older session sets its file to `0600`.
 Stricter owner permissions are preserved, including read-only directories.
+Stable uses `~/.e`, dev/local uses `~/.e-dev`, beta uses `~/.e-beta`, and PR
+builds use `~/.e-pr/COMMIT`. `E_HOME` overrides the channel default.
 Use a dedicated directory for `E_HOME`; it is private application state, not a
 shared workspace. Files copied outside that directory are not migrated.
 Credential staging files start at `0600`, before any secret is written.

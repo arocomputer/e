@@ -10,6 +10,9 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### New features
 
+- Test current work with dev and beta installers or a pinned PR build. Preview channels have separate state and update within their channel.
+- Run a checkout with `./x dev` and inspect repeatable terminal scenarios with `./x scenario`. Build diagnostics include the channel and source commit.
+
 - Install e through brew, npm, or bun. Releases publish the native packages automatically; package-managed installations use their package manager for updates.
 - Install resource packages from git, npm, local directories, or checksum-verified release archives. `e packages` lists them, `e remove` removes them, and `e packages init` creates a package to share.
 - Load a package for one run with `--package` (`-P`), share project packages through `.e/packages`, and filter which extensions, skills, prompts, or themes a package loads. npm lifecycle scripts stay disabled.
@@ -28,6 +31,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Use the updated model catalogs, including GPT-6 Astra and the GPT-5.6 models. ChatGPT subscription discovery follows its live model picker.
 
 ### Improvements
+
+- **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the stable home. Set `E_HOME` explicitly to select another dedicated home.
 
 - **Upgrade:** `/diff` is now the separate [e-diff](https://github.com/fschrhunt/e-diff) package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
 - **Upgrade:** `e ask` is removed. Use `e -p` for a headless turn or `e rpc` for JSONL automation. Piped stdin requires a supported headless mode.

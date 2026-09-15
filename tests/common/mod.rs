@@ -150,3 +150,14 @@ pub fn request_json(sent: &str) -> serde_json::Value {
     serde_json::from_str(sent.split("\r\n\r\n").nth(1).expect("request has a body"))
         .expect("request body is JSON")
 }
+
+/// Decode reviewed response recordings; `serve_sse` still owns the loopback transport.
+pub fn provider_recording(json: &str) -> Vec<String> {
+    let data: serde_json::Value = serde_json::from_str(json).unwrap();
+    data["responses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|body| body.as_str().unwrap().to_owned())
+        .collect()
+}

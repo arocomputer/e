@@ -129,7 +129,7 @@ impl App {
             Ok(()) => {
                 self.auth = Some(AuthStage::Done {
                     ok: true,
-                    message: format!("{secret_for} key saved to ~/.e/auth.json"),
+                    message: format!("{secret_for} key saved to this channel's auth.json"),
                     back,
                 });
                 // An API-key sign-in is a sign-in: emit the same typed

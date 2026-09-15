@@ -26,10 +26,12 @@
 pub mod core;
 pub mod tui;
 
-/// The build's user-facing version, kept in sync with the `version` in
-/// `Cargo.toml` — `scripts/release-check.sh` requires both to equal the
-/// release tag before a `vX.Y.Z` tag can publish.
-pub const VERSION: &str = "0.0.1";
+/// Release identity supplied by the release workflow; local Cargo builds keep the manifest version.
+pub const VERSION: &str = env!("E_VERSION");
+/// Update and state boundary. Local and PR builds never follow a release channel.
+pub const CHANNEL: &str = env!("E_CHANNEL");
+/// Exact source revision for published builds, or `local` for ordinary Cargo builds.
+pub const COMMIT: &str = env!("E_COMMIT");
 
 /// The client name e identifies itself with to gateways that recognize their
 /// callers (sent as the provider's declared `client_header`, e.g. OpenCode's

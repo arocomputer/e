@@ -1396,7 +1396,8 @@ async fn google_max_tokens_maps_to_length() {
 async fn unexpected_eof_is_an_error_not_a_silent_done() {
     let _lock = env_lock();
     // A partial stream that closes without [DONE].
-    let body = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n";
+    let recording = common::provider_recording(include_str!("fixtures/providers/interrupted.json"));
+    let body = recording[0].as_str();
     let (port, _server) = serve_sse(&[body]);
     let home = Home::new("eof");
     home.auth(r#"{"mock":{"key":"k"}}"#);

@@ -112,7 +112,11 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 theme,
                 *selected == 1,
                 "Sign in with an API key",
-                "stored in ~/.e/auth.json",
+                if crate::CHANNEL == "stable" {
+                    "stored in ~/.e/auth.json"
+                } else {
+                    "stored in this channel's auth.json"
+                },
                 width,
             ),
             String::new(),

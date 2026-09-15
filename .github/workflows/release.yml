@@ -1,25 +1,57 @@
 name: Release
 
-# A version tag qualifies and builds four release binaries, then publishes
-# checksums, an SBOM, and build provenance, then updates the package installers.
+# Stable tags and beta candidates qualify here; dev follows successful main CI.
 on:
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
+      action:
+        description: Publish a beta candidate or retry existing release packages
+        type: choice
+        options: [beta, retry]
+        default: beta
+      commit:
+        description: Beta source commit already on main (defaults to main)
+        type: string
       tag:
-        description: Retry package publishing for an existing stable release (vX.Y.Z)
-        required: true
+        description: Existing version tag for a package retry
         type: string
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-publishing
+  queue: max
+  cancel-in-progress: false
 
 jobs:
+  resolve:
+    name: Select release
+    if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
+      command: ${{ steps.release.outputs.command }}
+      sha: ${{ steps.release.outputs.sha }}
+      mode: ${{ steps.release.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: release
+        run: python3 scripts/release/resolve.py
   qualify:
-    if: github.event_name == 'push'
+    needs: resolve
+    if: needs.resolve.outputs.mode == 'build'
     name: Qualify tag
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -28,15 +60,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Verify
+        env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           ./x check
-          ./x release-check "${{ github.ref_name }}"
+          ./x ui
+          E_BUILD_CHANNEL="$CHANNEL" ./x release-check "$TAG"
 
   create:
     name: Draft release
-    needs: qualify
+    needs: [resolve, qualify]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -44,20 +82,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Draft
         env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          SHA: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          # Publish exactly this version's summary and grouped changes.
-          ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --draft --title "$TAG" --notes-file notes.md
+          if [ "$CHANNEL" = stable ]; then
+            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
+          else
+            printf 'Preview build %s from %s. See CHANGELOG.md at this commit for changes.\n' "$TAG" "$SHA" > notes.md
+          fi
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
+          else
+            gh release create "$TAG" --draft --target "$SHA" --title "$TAG" --notes-file notes.md
+          fi
 
   build:
     name: Build (${{ matrix.runner }})
-    needs: create
+    needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
@@ -75,11 +123,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Build
         env:
+          E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
+          E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           for target in ${{ matrix.targets }}; do
             rustup target add "$target"
@@ -95,14 +148,14 @@ jobs:
               sha256sum "e-$host.tar.gz" > checksums.txt 2>/dev/null || \
                 shasum -a 256 "e-$host.tar.gz" > checksums.txt
               install_dir=$(mktemp -d)
-              E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh
-              "$install_dir/e" --version | grep -Fx "e ${TAG#v}"
+              E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh --channel "$E_BUILD_CHANNEL" --version "$E_BUILD_VERSION"
+              "$install_dir/${{ needs.resolve.outputs.command }}" --version | grep -Fx "e ${TAG#v}"
               ;;
           esac
 
   publish:
     name: Checksums and publish
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -112,11 +165,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Download and checksum every artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           mkdir assets && cd assets
           gh release download "$TAG" --pattern "e-*.tar.gz"
@@ -136,19 +191,25 @@ jobs:
 
       - name: Upload metadata and publish
         env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          SHA: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           gh release upload "$TAG" assets/checksums.txt assets/e-sbom.cdx.json --clobber
-          gh release edit "$TAG" --draft=false
+          if [ "$CHANNEL" = stable ]; then
+            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
+            python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > assets/release.json
+            gh release upload "$TAG" assets/release.json --clobber
+            gh release edit "$TAG" --draft=false --latest
+          else
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          fi
 
   npm:
     name: npm and bun
-    needs: publish
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
-    concurrency:
-      group: npm-publishing
-      cancel-in-progress: false
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -157,7 +218,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -165,10 +226,9 @@ jobs:
       - name: Prepare verified packages
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          python3 -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", os.environ["TAG"])'
-          test "$(gh release view "$TAG" --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
           gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
           python3 scripts/packaging/prepare.py "$TAG" assets dist
       - name: Publish and verify npm packages
@@ -181,24 +241,20 @@ jobs:
     name: Homebrew tap
     permissions:
       contents: read
-    needs: publish
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
-    concurrency:
-      group: homebrew-publishing
-      cancel-in-progress: false
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.resolve.outputs.sha }}
       - name: Prepare verified formula
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          python3 -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", os.environ["TAG"])'
-          test "$(gh release view "$TAG" --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
           gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
           python3 scripts/packaging/prepare.py "$TAG" assets dist
       - name: Check publishing access
@@ -213,30 +269,34 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       - name: Publish formula
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: scripts/packaging/publish-brew.sh dist/e.rb tap
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: scripts/packaging/publish-brew.sh "dist/${{ needs.resolve.outputs.command }}.rb" tap
 
-  website-installer:
-    name: Public installer
-    permissions:
-      contents: read
-    needs: publish
+  channel:
+    name: Advance channel and verify website installer
+    needs: [resolve, publish, npm, homebrew]
+    if: ${{ !cancelled() && needs.npm.result == 'success' && needs.homebrew.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - name: Install the published release through the website
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
-          E_RELEASE_BASE="https://github.com/intuitums/e/releases/download/$TAG" \
-            E_INSTALL_DIR="$RUNNER_TEMP/e-install" sh "$RUNNER_TEMP/install.sh"
-          "$RUNNER_TEMP/e-install/e" --version | grep -Fx "e ${TAG#v}"
-      - name: Install the latest release through the default download path
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - name: Advance channel
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: python3 scripts/release/channel.py "$TAG"
+      - name: Install through website
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          COMMAND: ${{ needs.resolve.outputs.command }}
         run: |
-          latest=$(gh release view --json tagName --jq .tagName)
-          E_INSTALL_DIR="$RUNNER_TEMP/e-install-latest" sh "$RUNNER_TEMP/install.sh"
-          "$RUNNER_TEMP/e-install-latest/e" --version | grep -Fx "e ${latest#v}"
+          curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
+          E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL" --version "${TAG#v}"
+          "$RUNNER_TEMP/e-pinned/$COMMAND" --version | grep -Fx "e ${TAG#v}"
+          E_INSTALL_DIR="$RUNNER_TEMP/e-current" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL"
+          "$RUNNER_TEMP/e-current/$COMMAND" --version

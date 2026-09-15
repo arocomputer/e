@@ -121,7 +121,9 @@ surface? Route it through `panel.rs` so it can't diverge.
   labels it `breaking` — the one label no path can apply for you.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
-- `~/.e/` is the only home e reads. Never reach into another tool's directory.
+- Resolve the active home through `core/config/home.rs`: stable uses `~/.e/`,
+  previews use their channel home, and `E_HOME` overrides either. Never read
+  another tool's directory.
 - A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/
   themes/`), no manifest. New resource kinds join that list; package
   discovery stays convention, not configuration.

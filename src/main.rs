@@ -51,7 +51,7 @@ e -v, --version"
 --effort, --ef <level> select reasoning effort for this process\n  \
 --image, -i <path>     attach an image to the first prompt (repeatable)\n  \
 --package, -P <source> load a package for this run only (repeatable)\n  \
---json, -j             machine output (doctor, providers, --print)"
+--json, -j             machine output (doctor, providers, --print, --version)"
     );
     let flags = host.flags();
     let commands = host.commands();
@@ -265,7 +265,14 @@ fn with_subcommand_usage(message: String, args: &[String]) -> String {
 async fn main() -> std::io::Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if cli::has_flag(&args, &["--version", "-v"]) {
-        println!("e {}", e::VERSION);
+        if cli::has_flag(&args, &["--json"]) {
+            println!(
+                "{}",
+                serde_json::json!({"version": e::VERSION, "channel": e::CHANNEL, "commit": e::COMMIT})
+            );
+        } else {
+            println!("e {}", e::VERSION);
+        }
         return Ok(());
     }
     // Diagnostics are deliberately extension-free: launching a user-owned
@@ -490,7 +497,9 @@ async fn main() -> std::io::Result<()> {
             host.shutdown().await;
             return Ok(());
         }
-        if !e::core::update::is_release_version(e::VERSION) {
+        if !["stable", "dev", "beta"].contains(&e::CHANNEL)
+            || !e::core::update::is_release_version(e::VERSION)
+        {
             println!(
                 "e {} is not a release build — update from source, not e update",
                 e::VERSION
