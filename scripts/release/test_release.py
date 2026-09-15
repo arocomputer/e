@@ -13,6 +13,18 @@ class ReleaseContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 identity(invalid)
 
+    def test_display_titles_keep_versions_separate(self):
+        for version, title in [
+            ('1.2.3', 'e 1.2.3'),
+            ('1.2.3-beta.12.gabcdef012345', 'e 1.2.3 · Beta 12'),
+            ('1.2.3-dev.9.gabcdef012345', 'e 1.2.3 · Dev 9'),
+            ('1.2.3-pr.42.gabcdef012345', 'e 1.2.3 · PR 42'),
+        ]:
+            with self.subTest(version=version):
+                release = identity(version)
+                self.assertEqual(release['title'], title)
+                self.assertEqual(release['version'], version)
+
     def test_release_asset_preserves_grouped_markdown_and_continuations(self):
         result = parse('2026-09-15\n\n### Easier testing\n\nTry a preview.\n\n### New features\n- Run `e-dev`\n  alongside stable.\n### Improvements\n- **Upgrade:** Sign in separately.\n### Fixes\n- Keep updates in their channel.')
         self.assertEqual(result['title'], 'Easier testing')

@@ -39,6 +39,7 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
+      title: ${{ steps.release.outputs.title }}
       channel: ${{ steps.release.outputs.channel }}
       command: ${{ steps.release.outputs.command }}
       sha: ${{ steps.release.outputs.sha }}
@@ -87,6 +88,7 @@ jobs:
 
       - name: Draft
         env:
+          TITLE: ${{ needs.resolve.outputs.title }}
           CHANNEL: ${{ needs.resolve.outputs.channel }}
           SHA: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
@@ -100,7 +102,7 @@ jobs:
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
           else
-            gh release create "$TAG" --draft --target "$SHA" --title "$TAG" --notes-file notes.md
+            gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
           fi
 
   build:

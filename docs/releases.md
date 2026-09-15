@@ -28,6 +28,10 @@ when the scenario command finishes.
 
 ## Release channels
 
+GitHub titles use `e X.Y.Z` for stable releases and `e X.Y.Z · Beta N` or
+`e X.Y.Z · Dev N` for previews. Tags and package versions retain the full
+channel, sequence, and commit identifier used by installers.
+
 | Channel | Trigger | Executable | Default state |
 | --- | --- | --- | --- |
 | stable | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |

@@ -16,7 +16,11 @@ def identity(version):
     if not match:
         raise ValueError('Expected X.Y.Z or X.Y.Z-{dev,beta,pr}.NUMBER.gCOMMIT')
     channel = match[4] or 'stable'
-    return {'version': version.removeprefix('v'), 'channel': channel,
+    title = 'e ' + '.'.join(match.group(1, 2, 3))
+    if channel != 'stable':
+        label = 'PR' if channel == 'pr' else channel.capitalize()
+        title += f' · {label} {match[5]}'
+    return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
             'command': 'e' if channel == 'stable' else f'e-{channel}',
             'npm_tag': 'latest' if channel == 'stable' else channel}
 
