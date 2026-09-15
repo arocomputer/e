@@ -19,10 +19,12 @@ fn store_path() -> std::path::PathBuf {
 /// Model ids each provider reported, from the cache. A new model a gateway
 /// ships appears here on the next refresh — no e release involved. A
 /// discovered id takes its facts (window, effort, thinking, pricing) from
-/// models.dev; a window the gateway itself reports wins over that.
+/// models.dev; a window the gateway itself reports wins over that. Explicit
+/// provider image settings remain final for discovered ids too.
 pub(super) fn remote_overlay(
     models: &mut Vec<Model>,
     context_overrides: &std::collections::HashSet<(String, String)>,
+    image_overrides: &std::collections::HashMap<String, bool>,
     facts: &FactsMap,
 ) {
     let object = crate::core::config::store::read_object(&store_path()).unwrap_or_default();
@@ -118,6 +120,9 @@ pub(super) fn remote_overlay(
                     };
                     if let Some(facts) = facts.get(&(provider.clone(), id.to_string())) {
                         modelsdev::apply(&mut model, facts);
+                    }
+                    if let Some(image_input) = image_overrides.get(&provider) {
+                        model.image_input = *image_input;
                     }
                     if let Some(window) = item["context_window"].as_u64() {
                         model.context_window = window;
@@ -465,7 +470,12 @@ mod tests {
             .unwrap();
 
             let mut models = vec![seeded_model("acme", CatalogStrategy::None)];
-            remote_overlay(&mut models, &Default::default(), &Default::default());
+            remote_overlay(
+                &mut models,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            );
             assert_eq!(
                 models.len(),
                 1,
@@ -484,7 +494,12 @@ mod tests {
             .unwrap();
 
             let mut models = vec![seeded_model("acme", CatalogStrategy::Openai)];
-            remote_overlay(&mut models, &Default::default(), &Default::default());
+            remote_overlay(
+                &mut models,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            );
             assert!(
                 models.iter().any(|m| m.id == "discovered-model"),
                 "a provider without catalog: none should still pick up cached models"

@@ -1986,6 +1986,71 @@ fn models_json_wins_over_models_dev_facts_and_inherits_the_rest() {
     assert_eq!(opus.effort, vec!["low".to_string(), "xhigh".to_string()]);
 }
 
+/// A partial declaration of a non-seed id inherits facts before user values.
+#[test]
+fn models_dev_facts_survive_partial_non_seed_declarations() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-non-seed");
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-new-6"}]}}"#,
+    );
+    home.write(
+        "models-dev.json",
+        r#"{"providers":{"anthropic":{"claude-new-6":{
+        "context_window":1000000,"effort":["low","high"],"image_input":true,
+        "supports_tools":false,"pricing":{"input_per_million":10,"output_per_million":50}
+    }}}}"#,
+    );
+    home.write(
+        "models.json",
+        r#"{"providers":{"anthropic":{"models":[{"id":"claude-new-6","max_output":8192}]}}}"#,
+    );
+    let model = catalog::catalog()
+        .into_iter()
+        .find(|m| m.provider == "anthropic" && m.id == "claude-new-6")
+        .unwrap();
+    assert_eq!(model.context_window, 1_000_000);
+    assert_eq!(model.effort, vec!["low", "high"]);
+    assert_eq!(model.thinking, Thinking::Adaptive);
+    assert!(model.image_input);
+    assert!(!model.supports_tools);
+    assert_eq!(model.pricing.unwrap().input_per_million, 10.0);
+    assert_eq!(model.max_output, Some(8192));
+}
+
+/// Explicit provider image settings beat feed facts for discovered ids.
+#[test]
+fn models_dev_facts_respect_provider_image_overrides() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-image-override");
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-new-6"}]}}"#,
+    );
+    for enabled in [false, true] {
+        home.write(
+            "models-dev.json",
+            serde_json::json!({
+                "providers": {"anthropic": {"claude-new-6": {"image_input": !enabled}}}
+            })
+            .to_string(),
+        );
+        home.write(
+            "models.json",
+            serde_json::json!({
+                "providers": {"anthropic": {"image_input": enabled}}
+            })
+            .to_string(),
+        );
+        let model = catalog::catalog()
+            .into_iter()
+            .find(|m| m.provider == "anthropic" && m.id == "claude-new-6")
+            .unwrap();
+        assert_eq!(model.image_input, enabled);
+    }
+}
+
 #[test]
 fn partial_override_inherits_the_builtin() {
     let _lock = env_lock();

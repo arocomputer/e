@@ -305,6 +305,8 @@ pub fn catalog() -> Vec<Model> {
     // Keep the source of a resolved window long enough for the remote overlay
     // to distinguish a built-in fallback from the user's final value.
     let mut context_overrides = std::collections::HashSet::new();
+    // Discovery must distinguish an explicit image setting from a default.
+    let mut image_overrides = std::collections::HashMap::new();
     if let Ok(json) = std::fs::read_to_string(home::home().join("models.json")) {
         if let Ok(file) = serde_json::from_str::<ModelsFile>(&json) {
             for (provider, entry) in file.providers {
@@ -348,6 +350,9 @@ pub fn catalog() -> Vec<Model> {
                 else {
                     continue;
                 };
+                if let Some(image_input) = entry.image_input {
+                    image_overrides.insert(provider.clone(), image_input);
+                }
                 // Provider fields describe one deployment and apply to its
                 // built-in seed models too — transport, capabilities, and
                 // the defaults (window, output ceiling, effort, thinking,
@@ -416,14 +421,35 @@ pub fn catalog() -> Vec<Model> {
                             pricing,
                         ),
                     };
-                    // Whatever the file leaves unsaid comes from the model as
-                    // assembled so far — seed plus feed facts plus this
-                    // entry's provider-level values — so correcting one field
-                    // never rolls the others back to the seed.
+                    // Inherit the assembled seed, or start a non-seed id from
+                    // its feed facts. Explicit values below win in either case.
                     let existing = models
                         .iter()
                         .find(|m| m.provider == provider && m.id == id)
-                        .cloned();
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            let mut model = Model {
+                                provider: provider.clone(),
+                                id: id.clone(),
+                                base_url: base.clone(),
+                                api,
+                                catalog: catalog_strategy,
+                                responses_mount,
+                                provider_supports_tools,
+                                provider_image_input,
+                                effort: Vec::new(),
+                                thinking: Thinking::Manual,
+                                context_window: 200_000,
+                                max_output: None,
+                                supports_tools: provider_supports_tools,
+                                image_input: provider_image_input,
+                                pricing: None,
+                            };
+                            if let Some(facts) = facts.get(&(provider.clone(), id.clone())) {
+                                modelsdev::apply(&mut model, facts);
+                            }
+                            model
+                        });
                     let has_context_override = window.is_some() || entry.context_window.is_some();
                     let resolved = Model {
                         provider: provider.clone(),
@@ -440,10 +466,7 @@ pub fn catalog() -> Vec<Model> {
                             // …then the per-provider default from the file…
                             (Some(e), _) if !e.is_empty() => e.clone(),
                             // …then the model's own effort.
-                            _ => existing
-                                .as_ref()
-                                .map(|m| m.effort.clone())
-                                .unwrap_or_default(),
+                            _ => existing.effort,
                         },
                         thinking: match (&thinking, &entry.thinking) {
                             (Some(t), _) | (_, Some(t)) => match Thinking::parse(t) {
@@ -453,30 +476,21 @@ pub fn catalog() -> Vec<Model> {
                                 None => continue,
                             },
                             // …then the model's own declaration.
-                            _ => existing
-                                .as_ref()
-                                .map(|m| m.thinking)
-                                .unwrap_or(Thinking::Manual),
+                            _ => existing.thinking,
                         },
                         context_window: window
                             .or(entry.context_window)
-                            .or_else(|| existing.as_ref().map(|m| m.context_window))
-                            .unwrap_or(200_000),
-                        max_output: max_output
-                            .or(entry.max_output)
-                            .or_else(|| existing.as_ref().and_then(|m| m.max_output)),
+                            .unwrap_or(existing.context_window),
+                        max_output: max_output.or(entry.max_output).or(existing.max_output),
                         supports_tools: supports_tools
                             .or(entry.supports_tools)
-                            .or_else(|| existing.as_ref().map(|m| m.supports_tools))
-                            .unwrap_or(true),
+                            .unwrap_or(existing.supports_tools),
                         image_input: image_input
                             .or(entry.image_input)
-                            .or_else(|| existing.as_ref().map(|m| m.image_input))
-                            .or_else(|| builtin.map(|provider| provider.image_input))
-                            .unwrap_or(false),
+                            .unwrap_or(existing.image_input),
                         pricing: pricing
                             .or_else(|| entry.pricing.clone())
-                            .or_else(|| existing.as_ref().and_then(|m| m.pricing.clone())),
+                            .or(existing.pricing),
                     };
                     models.retain(|m| !(m.provider == resolved.provider && m.id == resolved.id));
                     if has_context_override {
@@ -491,7 +505,7 @@ pub fn catalog() -> Vec<Model> {
     // It adds unclaimed ids (with their feed facts) and replaces seed windows
     // with live reports, but never replaces a context window the user
     // explicitly declared.
-    remote_overlay(&mut models, &context_overrides, &facts);
+    remote_overlay(&mut models, &context_overrides, &image_overrides, &facts);
     models
 }
 

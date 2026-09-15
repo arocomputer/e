@@ -58,6 +58,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Fixes
 
+- Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
 - RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.
 - Slack restores conversations from saved paths after restart and keeps extension questions and answers with their owning thread.
 - The GitHub channel requires repository write permission before execution and replies correctly to inline PR review comments.

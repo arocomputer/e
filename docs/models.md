@@ -70,8 +70,9 @@ built-in's provider and id replaces it — the file wins, like themes.
   capabilities, set at provider or model level. A model declared without tool
   support is sent no schemas and cannot execute a tool even if it emits one.
   Live-discovered ids take what models.dev states for them, else the
-  provider-level defaults — never an arbitrary declared sibling model's
-  override.
+  provider-level defaults, never an arbitrary declared sibling model's
+  override. An explicit provider `image_input` setting wins over feed facts
+  for discovered ids too.
 - `pricing` declares USD rates per million uncached input and output tokens.
   Optional cache-read, five-minute cache-write, and one-hour cache-write rates
   keep prompt caching priced separately. An omitted cache rate falls back to
@@ -117,4 +118,5 @@ Precedence, lowest to highest: the built-in seed, the models.dev facts, a
 window the gateway itself reports, and `models.json`. A seed is only the
 offline fallback; a wrong fact is fixed upstream, not pinned in e. An
 explicit `models.json` value is final and survives every refresh and e
-update, and a partial entry inherits the facts for what it leaves unsaid.
+update, and a partial entry inherits the facts for what it leaves unsaid,
+including when the model has no built-in seed.
