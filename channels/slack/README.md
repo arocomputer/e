@@ -25,7 +25,9 @@ once. Nothing here is compiled into e.
    and socket mode need no request URL.
 2. Install e on the machine, sign in to a provider (`e auth` or a key in
    `~/.e/auth.json`), and clone the repository the bot should work in.
-3. Copy `.env.example` to `.env` and fill it in.
+3. Trust the checkout (`e trust`) so the repository's own `AGENTS.md`, skills,
+   and prompts load: the bot has no terminal to answer the trust panel with.
+4. Copy `.env.example` to `.env` and fill it in.
 
 ```sh
 npm install
@@ -34,6 +36,32 @@ npm test
 set -a; . ./.env; set +a
 npm start
 ```
+
+## Run it on a server
+
+`Dockerfile` builds the bot with e from the release, so the host needs neither
+Node nor a checkout of e:
+
+```sh
+docker build -t e-slack channels/slack
+docker volume create e-slack-home
+
+# Once: trust the checkout and sign in. e's home is the volume, so both stick.
+docker run --rm -it --user "$(id -u):$(id -g)" \
+  -v e-slack-home:/home/e -v "$PWD:/work" --entrypoint e e-slack trust
+docker run --rm -it --user "$(id -u):$(id -g)" \
+  -v e-slack-home:/home/e --entrypoint e e-slack   # then /login
+
+docker run -d --restart unless-stopped --name e-slack \
+  --user "$(id -u):$(id -g)" --env-file .env -e E_CWD=/work \
+  -v e-slack-home:/home/e -v "$PWD:/work" e-slack
+```
+
+`--user` is what keeps the files the agent writes in the checkout owned by you
+rather than root. `-v "$PWD:/work"` must be the repository the bot should work
+in. Instead of signing in, a provider key in the environment works
+(`ANTHROPIC_API_KEY`, and the other names in the registry's `key_env` fields).
+Build with `--build-arg E_VERSION=0.1.0` to pin the e release the bot drives.
 
 ## What it does
 

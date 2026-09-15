@@ -59,6 +59,12 @@ progress is posted as it happens, the reply when the turn ends, and
 extension questions become a message with buttons. See its README for the
 app manifest and the three Slack credentials, and how to run it.
 
+On a server, `channels/slack/Dockerfile` builds an image carrying e from the
+release and the bot from the repository. Mount the checkout at `/work` and e's
+home on a volume, and record the trust decision once (`e trust`): a channel has
+no terminal, so nothing else can answer the panel that gates the repository's
+own instructions.
+
 ## GitHub
 
 `channels/github/e.yml` is a workflow that runs on issue and pull-request
