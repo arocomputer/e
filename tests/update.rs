@@ -201,3 +201,30 @@ async fn latest_tag_reads_the_published_tag() {
     assert_eq!(tag.as_deref(), Some("v9.9.9"));
     server.join().unwrap();
 }
+
+#[test]
+fn package_ownership_survives_binary_symlinks() {
+    use e::core::update::package_update_hint;
+    let _lock = common::env_lock();
+    let home = common::Home::new("package-ownership");
+    let binary = home.dir.join("e");
+    std::fs::write(&binary, b"binary").unwrap();
+    assert_eq!(package_update_hint(&binary), None);
+    let marker = home.dir.join(".e-install-method");
+    std::fs::write(&marker, "homebrew\n").unwrap();
+    assert!(package_update_hint(&binary)
+        .unwrap()
+        .contains("brew upgrade intuitums/tap/e"));
+    #[cfg(unix)]
+    {
+        let alias = home.dir.join("alias");
+        std::os::unix::fs::symlink(&binary, &alias).unwrap();
+        assert_eq!(package_update_hint(&alias), package_update_hint(&binary));
+    }
+    std::fs::write(&marker, "npm\n").unwrap();
+    assert!(package_update_hint(&binary)
+        .unwrap()
+        .contains("bun add -g @intuitums/e"));
+    std::fs::write(&marker, "unknown\n").unwrap();
+    assert!(package_update_hint(&binary).is_some());
+}

@@ -1,10 +1,16 @@
 name: Release
 
 # A version tag qualifies and builds four release binaries, then publishes
-# checksums, an SBOM, and build provenance. install.sh consumes the binaries.
+# checksums, an SBOM, and build provenance, then updates the package installers.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Retry package publishing for an existing stable release (vX.Y.Z)
+        required: true
+        type: string
 
 permissions: {}
 
@@ -13,6 +19,7 @@ concurrency:
 
 jobs:
   qualify:
+    if: github.event_name == 'push'
     name: Qualify tag
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -134,3 +141,102 @@ jobs:
         run: |
           gh release upload "$TAG" assets/checksums.txt assets/e-sbom.cdx.json --clobber
           gh release edit "$TAG" --draft=false
+
+  npm:
+    name: npm and bun
+    needs: publish
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    concurrency:
+      group: npm-publishing
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Prepare verified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", os.environ["TAG"])'
+          test "$(gh release view "$TAG" --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
+          python3 scripts/packaging/prepare.py "$TAG" assets dist
+      - name: Publish and verify npm packages
+        env:
+          # Remove this secret after all five packages trust this workflow.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: node scripts/packaging/publish-npm.mjs dist
+
+  homebrew:
+    name: Homebrew tap
+    permissions:
+      contents: read
+    needs: publish
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    concurrency:
+      group: homebrew-publishing
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - name: Prepare verified formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", os.environ["TAG"])'
+          test "$(gh release view "$TAG" --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
+          python3 scripts/packaging/prepare.py "$TAG" assets dist
+      - name: Check publishing access
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: test -n "$TAP_TOKEN" || { echo 'Configure HOMEBREW_TAP_TOKEN before publishing.'; exit 1; }
+      - name: Check out tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: intuitums/homebrew-tap
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Publish formula
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: scripts/packaging/publish-brew.sh dist/e.rb tap
+
+  website-installer:
+    name: Public installer
+    permissions:
+      contents: read
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Install the published release through the website
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
+          E_RELEASE_BASE="https://github.com/intuitums/e/releases/download/$TAG" \
+            E_INSTALL_DIR="$RUNNER_TEMP/e-install" sh "$RUNNER_TEMP/install.sh"
+          "$RUNNER_TEMP/e-install/e" --version | grep -Fx "e ${TAG#v}"
+      - name: Install the latest release through the default download path
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest=$(gh release view --json tagName --jq .tagName)
+          E_INSTALL_DIR="$RUNNER_TEMP/e-install-latest" sh "$RUNNER_TEMP/install.sh"
+          "$RUNNER_TEMP/e-install-latest/e" --version | grep -Fx "e ${latest#v}"
