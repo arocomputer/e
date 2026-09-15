@@ -2,6 +2,7 @@
 	"name": "fireworks",
 	"display": "Fireworks",
 	"base_url": "https://api.fireworks.ai/inference/v1",
+	"models_dev": "fireworks-ai",
 	"api": "openai-completions",
 	"auth": {
 		"key": true,

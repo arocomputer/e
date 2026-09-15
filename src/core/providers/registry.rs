@@ -112,6 +112,12 @@ pub struct Provider {
     pub client_header: Option<String>,
     #[serde(default)]
     pub session_header: Option<String>,
+    /// This provider's id on models.dev, when it differs from `name`
+    /// (Together is `togetherai` there). An empty string opts the provider
+    /// out of the feed: the codex deployment shares ids with the OpenAI
+    /// platform but not its windows or effort levels.
+    #[serde(default)]
+    pub models_dev: Option<String>,
     #[serde(default)]
     pub models: Vec<ModelDecl>,
 }
@@ -168,6 +174,16 @@ fn default_true() -> bool {
 }
 
 impl Provider {
+    /// The models.dev provider whose facts describe this deployment, or
+    /// None when it has opted out.
+    pub fn models_dev_id(&self) -> Option<&str> {
+        match self.models_dev.as_deref() {
+            Some("") => None,
+            Some(id) => Some(id),
+            None => Some(&self.name),
+        }
+    }
+
     /// The wire dialect this provider speaks. `all()` validates the string
     /// at startup, so an unknown value never reaches this match silently.
     // Fail-fast for a data bug (registry JSON vs. code) at startup, before

@@ -32,6 +32,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Give `/compact` a focus to guide its checkpoint. Filter `/resume` and `/tree` by typing.
 - Select Inline or Fullscreen TUI mode in `/settings`. `tool_label_rows` controls the height of command labels, and `paste_placeholder` controls pasted-text collapse.
 - Use the updated model catalogs, including GPT-6 Astra and the GPT-5.6 models. ChatGPT subscription discovery follows its live model picker.
+- New models arrive with their facts, not just their ids. e reads models.dev in the same background refresh as the providers' own lists, caches a trimmed copy in `~/.e/models-dev.json`, and sets context windows, effort levels, the Anthropic thinking shape, image and tool support, and pricing on built-in and discovered models. Seeds are the offline fallback; `models.json` still wins.
 
 ### Improvements
 
@@ -58,6 +59,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Fixes
 
+- Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
 - RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.
 - Slack restores conversations from saved paths after restart and keeps extension questions and answers with their owning thread.
 - The GitHub channel requires repository write permission before execution and replies correctly to inline PR review comments.
