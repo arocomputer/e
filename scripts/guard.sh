@@ -25,10 +25,11 @@ prod_rs() {
   done
 }
 
-# 1. Network surface. e talks to its sign-in and model providers and nothing
-#    else — in the shipped binary (src/) or its dev tooling (scripts/). A new
-#    host means a new place user data can go — add it here deliberately or
-#    the build fails.
+# 1. Network surface. e talks to its sign-in and model providers, and to
+#    models.dev for model facts (decision 0008, an unauthenticated GET that
+#    carries no user data), and nothing else — in the shipped binary (src/)
+#    or its dev tooling (scripts/). A new host means a new place user data
+#    can go — add it here deliberately or the build fails.
 # Numeric loopback is used by tests/ui/run.py's synthetic streaming server.
 allowed_hosts="localhost 127.0.0.1 models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com www.npmjs.com github.com registry.npmjs.org e.intuitum.sh ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
 found_hosts=$(

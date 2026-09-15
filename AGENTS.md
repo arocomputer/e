@@ -30,7 +30,8 @@ src/core/    the harness, terminal-free
                   splitter · api/{completions,responses,anthropic,google}.rs ·
                   registry.rs + data/*.json (providers are data: gateway,
                   dialect, auth surface, seed models) · catalog/ (assembly,
-                  availability, scope; remote.rs = the live /models sync)
+                  availability, scope; remote.rs = the live /models sync;
+                  modelsdev.rs = model facts from models.dev)
   auth/           credentials (mod.rs) · login.rs (OAuth, device-code, API keys)
   config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·

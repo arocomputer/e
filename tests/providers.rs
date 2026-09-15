@@ -1896,6 +1896,161 @@ fn models_json_context_window_wins_over_the_remote_cache() {
     assert_eq!(model.context_window, 1_050_000);
 }
 
+/// models.dev supplies what a gateway's bare id list cannot. A discovered
+/// id gets its window, effort levels, thinking shape, and pricing from the
+/// cached facts; a seed's values are replaced by newer ones; a fact the
+/// feed does not state leaves the seed alone.
+#[test]
+fn models_dev_facts_complete_discovered_ids_and_refresh_seeds() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-facts");
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-new-6"}]}}"#,
+    );
+    home.write(
+        "models-dev.json",
+        r#"{"checked_at":1,"providers":{"anthropic":{
+            "claude-new-6":{"context_window":1000000,"effort":["low","high","max"],
+                "pricing":{"input_per_million":10.0,"output_per_million":50.0,"cache_read_per_million":1.0}},
+            "claude-opus-5":{"effort":["low","medium","high","xhigh","max"]},
+            "claude-haiku-4-5":{"context_window":200000,"budget_thinking":true}
+        }}}"#,
+    );
+    let catalog = catalog::catalog();
+    let find = |id: &str| {
+        catalog
+            .iter()
+            .find(|m| m.provider == "anthropic" && m.id == id)
+            .unwrap_or_else(|| panic!("{id} in the catalog"))
+    };
+
+    let new = find("claude-new-6");
+    assert_eq!(new.context_window, 1_000_000);
+    assert_eq!(
+        new.effort,
+        vec!["low".to_string(), "high".to_string(), "max".to_string()]
+    );
+    assert_eq!(
+        new.thinking,
+        Thinking::Adaptive,
+        "effort levels mean adaptive thinking"
+    );
+    assert_eq!(new.pricing.as_ref().unwrap().input_per_million, 10.0);
+    assert_eq!(
+        new.api,
+        Api::Anthropic,
+        "transport still comes from the provider"
+    );
+
+    let opus = find("claude-opus-5");
+    assert_eq!(
+        opus.effort.len(),
+        5,
+        "the feed's newer effort list replaces the seed's"
+    );
+    assert_eq!(
+        opus.context_window, 1_000_000,
+        "an unstated fact keeps the seed's value"
+    );
+
+    let haiku = find("claude-haiku-4-5");
+    assert_eq!(haiku.thinking, Thinking::Manual);
+    assert_eq!(
+        haiku.max_output,
+        Some(8192),
+        "the feed never touches the output ceiling"
+    );
+}
+
+/// The user's file is final: an explicit value beats the feed, and a
+/// partial entry inherits the feed's facts for what it leaves unsaid
+/// rather than rolling back to the seed.
+#[test]
+fn models_json_wins_over_models_dev_facts_and_inherits_the_rest() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-precedence");
+    home.write(
+        "models.json",
+        r#"{"providers":{"anthropic":{"models":[{"id":"claude-opus-5","context_window":123456}]}}}"#,
+    );
+    home.write(
+        "models-dev.json",
+        r#"{"providers":{"anthropic":{"claude-opus-5":{"context_window":1000000,"effort":["low","xhigh"]}}}}"#,
+    );
+    let opus = catalog::catalog()
+        .into_iter()
+        .find(|m| m.provider == "anthropic" && m.id == "claude-opus-5")
+        .unwrap();
+    assert_eq!(opus.context_window, 123_456);
+    assert_eq!(opus.effort, vec!["low".to_string(), "xhigh".to_string()]);
+}
+
+/// A partial declaration of a non-seed id inherits facts before user values.
+#[test]
+fn models_dev_facts_survive_partial_non_seed_declarations() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-non-seed");
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-new-6"}]}}"#,
+    );
+    home.write(
+        "models-dev.json",
+        r#"{"providers":{"anthropic":{"claude-new-6":{
+        "context_window":1000000,"effort":["low","high"],"image_input":true,
+        "supports_tools":false,"pricing":{"input_per_million":10,"output_per_million":50}
+    }}}}"#,
+    );
+    home.write(
+        "models.json",
+        r#"{"providers":{"anthropic":{"models":[{"id":"claude-new-6","max_output":8192}]}}}"#,
+    );
+    let model = catalog::catalog()
+        .into_iter()
+        .find(|m| m.provider == "anthropic" && m.id == "claude-new-6")
+        .unwrap();
+    assert_eq!(model.context_window, 1_000_000);
+    assert_eq!(model.effort, vec!["low", "high"]);
+    assert_eq!(model.thinking, Thinking::Adaptive);
+    assert!(model.image_input);
+    assert!(!model.supports_tools);
+    assert_eq!(model.pricing.unwrap().input_per_million, 10.0);
+    assert_eq!(model.max_output, Some(8192));
+}
+
+/// Explicit provider image settings beat feed facts for discovered ids.
+#[test]
+fn models_dev_facts_respect_provider_image_overrides() {
+    let _lock = env_lock();
+    let home = Home::new("models-dev-image-override");
+    home.write(
+        "models-store.json",
+        r#"{"anthropic":{"models":[{"id":"claude-new-6"}]}}"#,
+    );
+    for enabled in [false, true] {
+        home.write(
+            "models-dev.json",
+            serde_json::json!({
+                "providers": {"anthropic": {"claude-new-6": {"image_input": !enabled}}}
+            })
+            .to_string(),
+        );
+        home.write(
+            "models.json",
+            serde_json::json!({
+                "providers": {"anthropic": {"image_input": enabled}}
+            })
+            .to_string(),
+        );
+        let model = catalog::catalog()
+            .into_iter()
+            .find(|m| m.provider == "anthropic" && m.id == "claude-new-6")
+            .unwrap();
+        assert_eq!(model.image_input, enabled);
+    }
+}
+
 #[test]
 fn partial_override_inherits_the_builtin() {
     let _lock = env_lock();

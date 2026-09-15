@@ -5,6 +5,7 @@
 //! built-in seeds but not explicit user overrides. Failures stay silent so an
 //! offline launch does not care.
 
+use super::modelsdev::{self, FactsMap};
 use super::{catalog, Model, Thinking};
 
 /// How long a provider's fetched model list stays fresh (the reference's
@@ -16,10 +17,15 @@ fn store_path() -> std::path::PathBuf {
 }
 
 /// Model ids each provider reported, from the cache. A new model a gateway
-/// ships appears here on the next refresh — no e release involved.
+/// ships appears here on the next refresh — no e release involved. A
+/// discovered id takes its facts (window, effort, thinking, pricing) from
+/// models.dev; a window the gateway itself reports wins over that. Explicit
+/// provider image settings remain final for discovered ids too.
 pub(super) fn remote_overlay(
     models: &mut Vec<Model>,
     context_overrides: &std::collections::HashSet<(String, String)>,
+    image_overrides: &std::collections::HashMap<String, bool>,
+    facts: &FactsMap,
 ) {
     let object = crate::core::config::store::read_object(&store_path()).unwrap_or_default();
     for (provider, entry) in object {
@@ -90,34 +96,48 @@ pub(super) fn remote_overlay(
                         }
                     }
                 }
-                None => models.push(Model {
-                    provider: provider.clone(),
-                    id: id.to_string(),
-                    base_url: base.clone(),
-                    api,
-                    catalog: catalog_strategy,
-                    responses_mount,
-                    provider_supports_tools: supports_tools,
-                    provider_image_input: image_input,
-                    effort: Vec::new(),
-                    thinking: Thinking::Manual,
-                    context_window: item["context_window"].as_u64().unwrap_or(200_000),
-                    max_output: None,
-                    // The endpoint reports only id/window, so inherit the
-                    // deployment-wide defaults retained independently from
-                    // any declared sibling model's override.
-                    supports_tools,
-                    image_input,
-                    pricing: None,
-                }),
+                None => {
+                    let mut model = Model {
+                        provider: provider.clone(),
+                        id: id.to_string(),
+                        base_url: base.clone(),
+                        api,
+                        catalog: catalog_strategy,
+                        responses_mount,
+                        provider_supports_tools: supports_tools,
+                        provider_image_input: image_input,
+                        effort: Vec::new(),
+                        thinking: Thinking::Manual,
+                        context_window: 200_000,
+                        max_output: None,
+                        // The endpoint reports only id/window, so start from
+                        // the deployment-wide defaults retained independently
+                        // from any declared sibling model's override; the
+                        // feed's facts refine them.
+                        supports_tools,
+                        image_input,
+                        pricing: None,
+                    };
+                    if let Some(facts) = facts.get(&(provider.clone(), id.to_string())) {
+                        modelsdev::apply(&mut model, facts);
+                    }
+                    if let Some(image_input) = image_overrides.get(&provider) {
+                        model.image_input = *image_input;
+                    }
+                    if let Some(window) = item["context_window"].as_u64() {
+                        model.context_window = window;
+                    }
+                    models.push(model);
+                }
             }
         }
     }
 }
 
 /// Refresh the cached model lists from every signed-in provider that serves
-/// the standard `GET {base}/models`. Silent on failure — an offline launch
-/// must not care. Skips providers refreshed within the freshness window.
+/// the standard `GET {base}/models`, and the models.dev facts beside them.
+/// Silent on failure — an offline launch must not care. Skips providers
+/// refreshed within the freshness window.
 pub async fn refresh_remote() {
     refresh_remote_within(REMOTE_REFRESH_MS).await
 }
@@ -169,6 +189,11 @@ pub async fn refresh_remote_within(max_age_ms: u64) {
                 p.responses_mount,
             ));
         }
+    }
+    // The facts feed is worth fetching only when there is a provider to
+    // apply it to; with nothing signed in, nothing is listed either.
+    if !providers.is_empty() {
+        modelsdev::refresh(max_age_ms).await;
     }
     for (provider, base, api, catalog_strategy, responses_mount) in providers {
         if catalog_strategy == crate::core::providers::registry::CatalogStrategy::None {
@@ -445,7 +470,12 @@ mod tests {
             .unwrap();
 
             let mut models = vec![seeded_model("acme", CatalogStrategy::None)];
-            remote_overlay(&mut models, &Default::default());
+            remote_overlay(
+                &mut models,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            );
             assert_eq!(
                 models.len(),
                 1,
@@ -464,7 +494,12 @@ mod tests {
             .unwrap();
 
             let mut models = vec![seeded_model("acme", CatalogStrategy::Openai)];
-            remote_overlay(&mut models, &Default::default());
+            remote_overlay(
+                &mut models,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            );
             assert!(
                 models.iter().any(|m| m.id == "discovered-model"),
                 "a provider without catalog: none should still pick up cached models"
