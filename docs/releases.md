@@ -111,6 +111,19 @@ refuse to move their latest version backward. A registry outage fails its job;
 rerun the failed job after service recovers. There is no cross-registry atomic
 transaction.
 
+Users install and update through the same channel:
+
+| Channel | Install | Update |
+| --- | --- | --- |
+| curl | `curl -fsSL https://e.intuitum.sh/install.sh` piped to `sh` | `e update` |
+| npm | `npm install -g @intuitums/e` | `npm install -g @intuitums/e@latest` |
+| bun | `bun add -g @intuitums/e` | `bun add -g @intuitums/e@latest` |
+| brew | `brew install intuitums/tap/e` | `brew update`, then `brew upgrade intuitums/tap/e` |
+
+Run `e --version` to verify the installed version. Binary packages support macOS
+and glibc Linux on ARM64 and x86-64. The website setup guide covers initial
+installation and connecting a model at `https://e.intuitum.sh/docs`.
+
 Package installers place `.e-install-method` beside the executable. Both automatic
 and manual self-update stop before network access when that marker exists;
 `e update` tells users to use their package manager. The first packaged release

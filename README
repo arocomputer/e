@@ -25,6 +25,15 @@ PACKAGE INSTALLERS (available after the first package-enabled release):
  npm install -g @intuitums/e
  bun add -g @intuitums/e
 
+UPDATE (use the method you installed with):
+ curl or release archive: e update
+ npm: npm install -g @intuitums/e@latest
+ bun: bun add -g @intuitums/e@latest
+ brew: brew update && brew upgrade intuitums/tap/e
+
+VERIFY:
+ e --version
+
 START:
  e
  e "why is this function 400 lines long"
