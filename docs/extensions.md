@@ -79,8 +79,10 @@ A request from the extension carries the extension's own `id` — any JSON
 value — and is answered with it: `{"id":"q1","result":{…}}` or
 `{"id":"q1","error":"…"}`. The two id spaces never meet; direction tells
 them apart. `capabilities` lists the families this e speaks; `ui` says
-whether a person can answer `ui.*` requests (false under `e rpc`, where
-every one is answered `{"error":"no ui"}` at once).
+whether someone can answer `ui.*` requests: false under `e -p`, where every
+one is answered `{"error":"no ui"}` at once, and true under `e rpc`, whose
+client may relay questions to a person (docs/automation.md) — there the
+display-only requests are still refused, so handle the error either way.
 
 ## Results by method
 

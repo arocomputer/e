@@ -25,6 +25,7 @@ jobs:
     outputs:
       build: ${{ steps.filter.outputs.build }}
       packages: ${{ steps.filter.outputs.packages }}
+      channels: ${{ steps.filter.outputs.channels }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,6 +50,7 @@ jobs:
               echo "file listing failed; running the heavy jobs"
               echo "build=true" >> "$GITHUB_OUTPUT"
               echo "packages=true" >> "$GITHUB_OUTPUT"
+              echo "channels=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           else
@@ -59,7 +61,12 @@ jobs:
           # jobs — an unfamiliar path errs toward testing, not skipping.
           build=false
           packages=false
+          channels=false
           while IFS= read -r file; do
+            # The reference channels have their own checks.
+            case "$file" in
+              channels/* | tests/fixtures/channels/* | .github/workflows/ci.yml) channels=true ;;
+            esac
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
               packaging/* | scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
@@ -71,7 +78,7 @@ jobs:
               *.md | README | docs/* | LICENSE | CHANGELOG.md | \
               benchmarks/results/* | .gitignore | .gitattributes | .editorconfig | \
               .github/pull_request_template.md | .github/CODEOWNERS | \
-              .github/dependabot.yml) ;;
+              .github/dependabot.yml | channels/*) ;;
               *) build=true ;;
             esac
           done <<EOF
@@ -79,6 +86,7 @@ jobs:
           EOF
           echo "build=$build" >> "$GITHUB_OUTPUT"
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
+          echo "channels=$channels" >> "$GITHUB_OUTPUT"
 
   guard:
     # Enforce fast contributor checks on every PR, including docs-only changes.
@@ -188,3 +196,23 @@ jobs:
           python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
           node --test scripts/packaging/publish-npm.test.mjs
           scripts/packaging/smoke.sh
+
+  channels:
+    needs: changes
+    if: needs.changes.outputs.channels == 'true'
+    name: Channels
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Check the Slack channel
+        working-directory: channels/slack
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Check the GitHub channel
+        run: python3 -m unittest discover -s channels/github -p 'test_*.py'

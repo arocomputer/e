@@ -20,6 +20,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Extension commands support argument hints and completions. Hooks can shape input, turns, tool results, rendering, and compaction summaries. Session requests can steer, name, interrupt, compact, or narrow a session's tools.
 - Keep extension entry points and helper files together in bundle directories. Examples cover planning, delegated agents, project startup, and MCP tools.
 - Run a headless turn with `e -p`; add `--json` for session events. `e rpc` accepts a built-in tool allowlist and returns the saved session path.
+- `e rpc` is a session server: `session.create` opens a conversation against any working directory, `session.prompt` streams its events tagged with the session and request and answers with the turn result, and sessions run side by side. Steer, interrupt, compact, fork, export, resume saved sessions, list models, and change model or effort between turns. Extension questions reach the client as `ask` lines to answer. Version-1 one-shot lines keep working unchanged.
+- Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Embed e with the `e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
@@ -54,6 +56,10 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Startup and long-session rendering have performance budgets. Terminal-frame checks cover tool trees, composer placement, errors, and review colors.
 
 ### Fixes
+
+- RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.
+- Slack restores conversations from saved paths after restart and keeps extension questions and answers with their owning thread.
+- The GitHub channel requires repository write permission before execution and replies correctly to inline PR review comments.
 
 - Cancelled turns skip queued tools, and late events cannot mutate a newer turn. Continuous output no longer prevents shell timeouts.
 - Tool batches use bounded concurrency and preserve provider order for calls that name the same file.

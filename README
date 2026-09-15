@@ -50,6 +50,8 @@ SAFETY:
 
 REFERENCE:
  - [Extensions](https://github.com/intuitums/e/blob/main/docs/extensions.md)
+ - [Automation: e -p and the e rpc session server](https://github.com/intuitums/e/blob/main/docs/automation.md)
+ - [Channels: Slack, GitHub, Linear](https://github.com/intuitums/e/blob/main/docs/channels.md)
  - [SDK](https://github.com/intuitums/e/blob/main/docs/sdk.md)
  - [Agent guide](https://github.com/intuitums/e/blob/main/AGENTS.md)
  - [Security](https://github.com/intuitums/e/blob/main/SECURITY.md)

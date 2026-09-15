@@ -3,7 +3,7 @@
 e is one primary Rust crate with two directional layers:
 
 ```text
-CLI / TUI
+CLI / TUI          e rpc (JSONL session server)
     │ subscribes to one ordered SessionEvent stream
     ▼
 terminal-free core
@@ -35,7 +35,10 @@ extract a module, not a crate.
   other writers. The sidecar stays on disk; ownership ends when the handle closes.
 - `ChatMessage` carries a tagged `MessageKind`. Only assistant records hold
   tool calls; tool records require a call id. Existing JSONL formats still load.
-- `core/` is terminal-free. Terminal behavior stays in `tui/`.
+- `core/` is terminal-free. Terminal behavior stays in `tui/`; the headless
+  server stays in `rpc/`. Both are frontends of the same core, and a
+  channel (a Slack bot, a CI job; docs/channels.md) is a client of `e rpc`,
+  never a module of e.
 - Provider differences terminate at the dialect seam; the agent loop consumes
   one request and event vocabulary.
 - User-controlled behavior is file-backed or supplied by the extension

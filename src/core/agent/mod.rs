@@ -889,6 +889,18 @@ impl Agent {
         Ok(true)
     }
 
+    /// Select one of the model's effort levels for this run only — nothing
+    /// is written to settings. `e rpc` changes a session's effort this way:
+    /// one client's session must not rewrite the user's saved preference.
+    /// False when the model does not accept the value.
+    pub fn set_run_effort(&mut self, effort: &str) -> bool {
+        if !self.model.effort.iter().any(|level| level == effort) {
+            return false;
+        }
+        self.options.effort_override = Some(effort.to_string());
+        true
+    }
+
     /// The settings panel wrote the persisted effort directly. Stop applying
     /// an older launch/runtime override so the new value takes effect now.
     pub fn use_saved_effort(&mut self) {

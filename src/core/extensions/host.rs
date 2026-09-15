@@ -249,7 +249,7 @@ impl ExtensionHost {
     /// directory and command line are the extensions'. `notices` receives
     /// extension `notify` messages and startup diagnostics for the transcript.
     /// `requests` receives the extensions' own `ui.*` / `session.*`
-    /// requests; `None` is a headless host (`e rpc`, the SDK, tests) where
+    /// requests; `None` is a headless host (`e -p`, the SDK, tests) where
     /// every such request is answered "no ui" at once and `initialize` says so.
     pub async fn start(
         notices: mpsc::Sender<String>,
@@ -1635,7 +1635,7 @@ async fn spawn(
     let init = json!({
         "protocol": protocol::PROTOCOL_VERSION,
         "capabilities": protocol::CAPABILITIES,
-        // Whether `ui.*` requests can reach a person; false under `e rpc`.
+        // Whether `ui.*` requests can reach someone; false under `e -p`.
         "ui": ui,
         "e_version": crate::VERSION,
         "cwd": cwd.display().to_string(),

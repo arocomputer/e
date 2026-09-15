@@ -36,3 +36,7 @@ workspaces.py
 
 # Scratch notes (TODO.md lives here) — never ships.
 /.context/
+
+# Channel adapters: dependencies and their thread state
+channels/**/node_modules/
+channels/**/e-slack-state.json

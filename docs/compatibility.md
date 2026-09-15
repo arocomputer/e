@@ -29,6 +29,13 @@ against so changes to them are deliberate rather than accidental.
   [packages.md](packages.md) and pinned by
   `tests/fixtures/config/settings-v1-packages.json`; a reader that meets an
   entry it cannot parse reports it and loads the rest.
+- **`e rpc`:** the headless session protocol reports `protocol: 2` in
+  `hello`. A line without `method` is the version-1 one-shot request and
+  keeps its flat response. Methods, parameters, result fields, and the
+  `session`/`request` tags on event lines are a supported contract once
+  documented in [automation.md](automation.md); new methods and fields are
+  additive and do not change the number, a change to an existing shape
+  does. `tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
 - **Extensions:** the JSONL protocol is versioned independently. e sends its
   protocol number during `initialize`; additive fields do not change the
   number, while incompatible wire changes require a new protocol version.

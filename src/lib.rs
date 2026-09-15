@@ -1,7 +1,8 @@
 //! e — a coding agent for your terminal.
 //!
-//! `core/` is the small, terminal-free harness. `tui/` is
-//! the terminal frontend, grouped as paint / content / surfaces / app.
+//! `core/` is the small, terminal-free harness. `tui/` is the terminal
+//! frontend, grouped as paint / content / surfaces / app. `rpc/` is the
+//! headless one: the JSONL session server behind `e rpc`.
 //!
 //! The library target exists so the binary and integration tests share one
 //! implementation, with the `sdk/` package (e-sdk) as a third in-repo
@@ -24,6 +25,7 @@
 )]
 
 pub mod core;
+pub mod rpc;
 pub mod tui;
 
 /// Release identity supplied by the release workflow; local Cargo builds keep the manifest version.
