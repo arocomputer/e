@@ -1,5 +1,5 @@
 //! The extension surface, frontend side: the `ui.*` and `session.*`
-//! requests an extension sends (decision 0005), answered here on the
+//! requests an extension sends, answered here on the
 //! user's behalf, plus the lifecycle events the frontend alone can emit
 //! (session start and shutdown, model and effort changes).
 //!

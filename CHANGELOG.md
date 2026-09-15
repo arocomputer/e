@@ -80,8 +80,8 @@
   the prompt can come from stdin. `e -p --json` streams every session event
   as a JSON line and ends with the same result object `e rpc` returns. See
   `docs/automation.md`.
-- The extension surface grows to pi's reach, across the process boundary
-  (decision 0005). Extensions can subscribe to lifecycle events
+- The extension surface grows to pi's reach, across the process boundary.
+  Extensions can subscribe to lifecycle events
   (`session_start`, `turn_start`, `tool_end`, `compact_end`, `model_change`,
   …), shape a turn with `before_turn` (a system-prompt paragraph and a
   message), `tool_result` (redaction), and `compact_summary` hooks, give
@@ -97,7 +97,7 @@
   theme; requests are bounded and answered "no ui" under `e rpc`. Version-1
   extensions are unchanged. `docs/extensions/plan.mjs` shows the surface;
   the scaffold gains promise-returning `ui` and `session` helpers.
-- The frame is regions an extension or the user can set (decision 0007).
+- The frame is regions an extension or the user can set.
   `ui.pane` opens a side pane beside the conversation — a selectable
   list, a diff, text, markdown, or themed rows — and e owns focus,
   scrolling, selection, the mouse, and the split; what the user does

@@ -31,9 +31,7 @@ Extensions can:
 Everything an extension shows is data that e paints through the user's
 theme. An extension never emits terminal bytes and never runs inside e —
 that is the difference from pi's in-process API, and the reason a crashed
-or hostile extension is a notice rather than a broken terminal. The design
-and its limits are recorded in
-[decisions/0005](decisions/0005-extension-surface.md).
+or hostile extension is a notice rather than a broken terminal.
 
 ## Wire protocol (version 1 + capabilities)
 
@@ -384,8 +382,7 @@ the request advertises. It resets on `/new` and resume.
 
 Not offered, on purpose: rewriting the provider request or its headers,
 replacing the system prompt, custom providers, replacing the session
-(`/new`, `/resume`, `/tree` are the user's), and per-token streams. Each
-is explained in [decisions/0005](decisions/0005-extension-surface.md).
+(`/new`, `/resume`, `/tree` are the user's), and per-token streams.
 
 ## Shortcuts
 

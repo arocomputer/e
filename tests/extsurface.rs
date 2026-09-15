@@ -1,4 +1,4 @@
-//! The extension surface beyond version 1 (decision 0005), against a real
+//! The extension surface beyond version 1, against a real
 //! subprocess: event subscriptions, the before_turn / tool_result /
 //! compact_summary hooks, tool labels, shortcuts, and the extension's own
 //! `ui.*` / `session.*` requests — answered by whoever holds the request

@@ -101,8 +101,7 @@ confirmed deletion but fail closed on other metadata errors.
 The Cargo library target lets the binary, the integration tests, and the
 `sdk/` package share code. Its public Rust items are not a stable third-party
 API in themselves. The supported Rust SDK is the separate `e-sdk` package in
-`sdk/` (see [sdk.md](sdk.md) and
-[decisions/0002-rust-sdk-package.md](decisions/0002-rust-sdk-package.md)): the
+`sdk/` (see [sdk.md](sdk.md)): the
 API it consumes becomes its documented contract, and its first release
 declares the semantic-versioning policy. Until then its surface is unstable.
 
@@ -113,4 +112,4 @@ Changes to a supported contract need all of the following in one pull request:
 1. a compatibility fixture or contract test;
 2. migration behavior for existing user data or extensions;
 3. documentation and a changelog entry;
-4. an architecture decision when the change is difficult to reverse.
+4. updated contract documentation in the relevant guide.
