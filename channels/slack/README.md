@@ -14,11 +14,15 @@ once. Nothing here is compiled into e.
 
 ## Setup
 
-1. Create a Slack app with socket mode on. Bot token scopes:
-   `app_mentions:read`, `channels:history`, `groups:history`, `chat:write`,
-   `reactions:read`. Subscribe to the bot events `app_mention` and
-   `message.channels` (and `message.groups` for private channels). Enable
-   interactivity (socket mode needs no request URL).
+1. Create the app from `manifest.json` (api.slack.com/apps → *Create New App*
+   → *From an app manifest*). It turns on socket mode and interactivity and
+   carries the bot token scopes `app_mentions:read`, `channels:history`,
+   `groups:history`, `chat:write`, and `reactions:read`, and the bot events
+   `app_mention`, `message.channels`, and `message.groups`. Upload
+   `../../assets/icon.svg` and `../../assets/logo.svg` as the app icon, then
+   generate an app-level token with `connections:write` (*Basic Information* →
+   *App-Level Tokens*) — the manifest cannot mint one for you. Interactivity
+   and socket mode need no request URL.
 2. Install e on the machine, sign in to a provider (`e auth` or a key in
    `~/.e/auth.json`), and clone the repository the bot should work in.
 3. Copy `.env.example` to `.env` and fill it in.
