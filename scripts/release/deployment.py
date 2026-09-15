@@ -11,10 +11,12 @@ def report(needs, repository, server, run_id):
     channel = release['channel']
     assert channel in ('stable', 'beta', 'dev')
     environment = 'production' if channel == 'stable' else channel
-    success = all(needs[job]['result'] == 'success' for job in ('npm', 'homebrew', 'channel'))
+    required = ('npm',) if channel == 'dev' else ('npm', 'homebrew', 'channel')
+    success = all(needs[job]['result'] == 'success' for job in required)
     state = 'success' if success else 'error' if any(job['result'] == 'cancelled' for job in needs.values()) else 'failure'
     run_url = f'{server}/{repository}/actions/runs/{run_id}'
-    release_url = f'{server}/{repository}/releases/tag/{release["tag"]}'
+    release_url = (f'https://www.npmjs.com/package/@intuitums/e/v/{release["version"]}' if channel == 'dev'
+                   else f'{server}/{release["repository"]}/releases/tag/{release["tag"]}')
 
     def post(path, data):
         """Send structured JSON through stdin so metadata never becomes shell code."""

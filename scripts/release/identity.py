@@ -22,7 +22,8 @@ def identity(version):
         title += f' · {label} {match[5]}'
     return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
             'command': 'e' if channel == 'stable' else f'e-{channel}',
-            'npm_tag': 'latest' if channel == 'stable' else channel}
+            'npm_tag': 'latest' if channel == 'stable' else channel,
+            'repository': 'intuitums/e-beta' if channel == 'beta' else 'intuitums/e' if channel == 'stable' else ''}
 
 
 def version_key(version):

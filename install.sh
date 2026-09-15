@@ -14,12 +14,25 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel) channel=${2:?channel required}; shift 2 ;;
     --version) version=${2:?version required}; shift 2 ;;
-    *) echo 'usage: install.sh [--channel stable|dev|beta] [--version X.Y.Z]' >&2; exit 2 ;;
+    *) echo 'usage: install.sh [--channel stable|beta] [--version X.Y.Z]' >&2; exit 2 ;;
   esac
 done
-case "$channel" in stable) command=e ;; dev|beta) command="e-$channel" ;; *) echo 'unknown channel' >&2; exit 2 ;; esac
+case "$channel" in
+  stable) command=e ;;
+  beta) command=e-beta; repo=intuitums/e-beta ;;
+  dev)
+    # Local release qualification still tests the freshly built dev binary.
+    if [ -n "${E_RELEASE_BASE:-}" ]; then command=e-dev
+    else echo 'Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev' >&2; exit 2; fi ;;
+  *) echo 'unknown channel' >&2; exit 2 ;; esac
 if [ -z "$version" ] && [ "$channel" != stable ]; then
-  version=$(curl -fsSL "https://github.com/$repo/releases/download/channel-$channel/version.txt")
+  # Keep the previous beta channel usable until its successor is published.
+  status=$(curl -sSL -w '\n%{http_code}' "https://github.com/$repo/releases/latest/download/version.txt")
+  case "$status" in
+    *200) version=$(printf '%s\n' "$status" | sed '$d') ;;
+    *404) version=$(curl -fsSL https://github.com/intuitums/e/releases/download/channel-beta/version.txt); repo=intuitums/e ;;
+    *) echo 'Could not resolve the beta version' >&2; exit 1 ;;
+  esac
 fi
 if [ -n "$version" ]; then
   version=${version#v}
@@ -56,7 +69,17 @@ base="https://github.com/$repo/releases/latest/download"
 if [ -n "$version" ]; then base="https://github.com/$repo/releases/download/v$version"; fi
 base=${E_RELEASE_BASE:-$base}
 
-curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
+# Pinned beta archives published before the repository split remain in the source repository.
+downloaded=false
+if [ "$channel" = beta ] && [ -z "${E_RELEASE_BASE:-}" ]; then
+  status=$(curl -sSL -o "$tmp/e.tar.gz" -w '%{http_code}' "$base/e-$target.tar.gz")
+  case "$status" in
+    200) downloaded=true ;;
+    404) base="https://github.com/intuitums/e/releases/download/v$version" ;;
+    *) echo 'Could not download the beta archive' >&2; exit 1 ;;
+  esac
+fi
+[ "$downloaded" = true ] || curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
   echo "no release published yet — install.sh works once the first release exists" >&2
   echo "build from source: cargo install --git https://github.com/intuitums/e" >&2
   exit 1

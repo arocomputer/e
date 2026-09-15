@@ -211,6 +211,10 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&binary, b"binary").unwrap();
     assert_eq!(package_update_hint(&binary), None);
     let marker = home.dir.join(".e-install-method");
+    std::fs::write(&marker, "homebrew-dev\n").unwrap();
+    assert!(package_update_hint(&binary)
+        .unwrap()
+        .contains("npm install -g @intuitums/e@dev"));
     std::fs::write(&marker, "homebrew\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()

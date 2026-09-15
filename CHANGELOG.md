@@ -10,7 +10,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### New features
 
-- Test current work with dev and beta installers or a pinned PR build. Preview channels have separate state and update within their channel.
+- Test current work with dev npm/bun packages, beta installers, or a pinned PR build. Preview channels have separate state.
 - Run a checkout with `./x dev` and inspect repeatable terminal scenarios with `./x scenario`. Build diagnostics include the channel and source commit.
 
 - Install e through brew, npm, or bun. Releases publish the native packages automatically; package-managed installations use their package manager for updates.
@@ -31,6 +31,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Use the updated model catalogs, including GPT-6 Astra and the GPT-5.6 models. ChatGPT subscription discovery follows its live model picker.
 
 ### Improvements
+
+- **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 
 - **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the stable home. Set `E_HOME` explicitly to select another dedicated home.
 

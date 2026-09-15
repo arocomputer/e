@@ -14,7 +14,7 @@ class RetryTests(unittest.TestCase):
         event = {'inputs': {'action': 'retry', 'tag': tag}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \
                 patch('resolve.Path.read_text', return_value=json.dumps(event)), \
-                patch('resolve.subprocess.check_output', return_value=json.dumps({'isDraft': True, 'targetCommitish': sha})), \
+                patch('resolve.subprocess.check_output', return_value=json.dumps({'isDraft': True, 'targetCommitish': 'beta-repository-main', 'body': f'Source: https://github.com/intuitums/e/commit/{sha}'})), \
                 patch('resolve.git', return_value=sha) as git, \
                 patch('resolve.subprocess.run') as run:
             result = resolve()
@@ -22,6 +22,15 @@ class RetryTests(unittest.TestCase):
         run.assert_called_once_with(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
         self.assertEqual(result['mode'], 'recover')
         self.assertEqual(result['sha'], sha)
+
+    def test_dev_retry_requires_the_original_run(self):
+        event = {'inputs': {'action': 'retry', 'tag': 'v1.2.3-dev.12.gabcdef012345'}}
+        with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \
+                patch('resolve.Path.read_text', return_value=json.dumps(event)), \
+                patch('resolve.subprocess.check_output') as gh:
+            with self.assertRaisesRegex(AssertionError, 'original Actions run'):
+                resolve()
+        gh.assert_not_called()
 
 
 if __name__ == '__main__':

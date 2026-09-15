@@ -99,6 +99,8 @@ def prepare(tag, assets, output):
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
+    if channel == "dev":
+        return
     formula = [
         f"class {'E' if channel == 'stable' else 'E' + channel.capitalize()} < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
@@ -115,7 +117,7 @@ def prepare(tag, assets, output):
             formula.extend(
                 [
                     f"    on_{ruby_cpu} do",
-                    f'      url "https://github.com/intuitums/e/releases/download/{tag}/{filename}"',
+                    f'      url "https://github.com/{release["repository"]}/releases/download/{tag}/{filename}"',
                     f'      sha256 "{checksums[filename]}"',
                     "    end",
                 ]

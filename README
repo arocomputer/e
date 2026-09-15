@@ -60,6 +60,6 @@ REFERENCE:
 
 Run `./x dev /path/to/project` from a checkout, or install a published preview
 with `npm install -g @intuitums/e@dev` and run `e-dev`. Beta uses `@beta` and
-`e-beta`. Curl and brew support separate preview installations. Preview channels
+`e-beta`. Curl and brew support separate beta installations; dev uses npm or bun. Preview channels
 have separate state and stay on their channel when updating.
 See [releases and testing](docs/releases.md) for all installers and PR builds.

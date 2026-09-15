@@ -2,6 +2,7 @@
 """Select a trusted source commit and emit workflow outputs without publishing anything."""
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 import tomllib
@@ -26,13 +27,20 @@ def resolve():
     elif mode == 'retry':
         tag = event['inputs']['tag']
         release = identity(tag)
-        assert release['channel'] != 'pr'
+        assert release['channel'] in ('stable', 'beta'), 'Rerun the original Actions run to retry a dev build'
         metadata = json.loads(subprocess.check_output(
-            ['gh', 'release', 'view', tag, '--json', 'isDraft,targetCommitish'], text=True))
+            ['gh', 'release', 'view', tag, '--repo', release['repository'], '--json', 'isDraft,targetCommitish,body'], text=True))
         # Draft releases may not have a tag until they are published.
-        ref = metadata['targetCommitish'] if metadata['isDraft'] else f'refs/tags/{tag}'
+        if release['channel'] == 'beta':
+            source = re.search(r'^Source: https://github.com/intuitums/e/commit/([a-f0-9]{40})$', metadata['body'], re.M)
+            assert source, 'Beta release is missing its source commit'
+            ref = source[1]
+        else:
+            ref = metadata['targetCommitish'] if metadata['isDraft'] else f'refs/tags/{tag}'
         sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
         subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
+        if release['channel'] == 'beta':
+            assert release['version'].endswith(f'.g{sha[:12]}'), 'Beta source does not match its version'
         return release | {'sha': sha, 'tag': tag, 'mode': 'recover' if metadata['isDraft'] else 'retry'}
     else:
         ref = event.get('inputs', {}).get('commit') or 'origin/main'

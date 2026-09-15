@@ -14,6 +14,10 @@
 use std::path::Path;
 
 const RELEASES: &str = "https://github.com/intuitums/e/releases";
+const BETA_RELEASES: &str = "https://github.com/intuitums/e-beta/releases";
+const BETA_API_LATEST: &str = "https://api.github.com/repos/intuitums/e-beta/releases/latest";
+const DEV_UPDATE: &str =
+    "Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev";
 const API_LATEST: &str = "https://api.github.com/repos/intuitums/e/releases/latest";
 
 /// Release assets redirect to GitHub's download hosts. This client carries
@@ -84,7 +88,7 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
             "homebrew-beta" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e-beta",
-            "homebrew-dev" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e-dev",
+            "homebrew-dev" => DEV_UPDATE,
             "npm-beta" => "Update with: npm install -g @intuitums/e@beta or bun add -g @intuitums/e@beta",
             "npm-dev" => "Update with: npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev",
             "homebrew" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e",
@@ -147,21 +151,8 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 pub async fn latest_tag() -> Result<Option<String>, String> {
     match crate::CHANNEL {
         "stable" => latest_tag_from(API_LATEST).await,
-        "dev" | "beta" => {
-            let bytes = fetch(&format!(
-                "{RELEASES}/download/channel-{}/version.txt",
-                crate::CHANNEL
-            ))
-            .await?;
-            let tag = String::from_utf8(bytes)
-                .map_err(|e| e.to_string())?
-                .trim()
-                .to_owned();
-            if !release_parts(&tag).is_some_and(|(_, channel, _)| channel == crate::CHANNEL) {
-                return Err("invalid channel release pointer".into());
-            }
-            Ok(Some(tag))
-        }
+        "beta" => latest_tag_from(BETA_API_LATEST).await,
+        "dev" => Err(DEV_UPDATE.into()),
         _ => Ok(None),
     }
 }
@@ -362,5 +353,10 @@ pub async fn self_update() -> Result<Option<String>, String> {
     if !is_newer(&tag, crate::VERSION) {
         return Ok(None);
     }
-    install_from(RELEASES, &tag, &dest).await.map(Some)
+    let base = if crate::CHANNEL == "beta" {
+        BETA_RELEASES
+    } else {
+        RELEASES
+    };
+    install_from(base, &tag, &dest).await.map(Some)
 }
