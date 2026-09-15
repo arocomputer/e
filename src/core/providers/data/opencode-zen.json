@@ -2,6 +2,7 @@
 	"name": "opencode-zen",
 	"display": "OpenCode Zen",
 	"base_url": "https://opencode.ai/zen/v1",
+	"models_dev": "opencode",
 	"api": "openai-completions",
 	"auth": {
 		"key": true,

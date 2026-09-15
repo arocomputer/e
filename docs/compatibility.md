@@ -55,7 +55,8 @@ network side effect.
 Compatibility fixtures under `tests/fixtures/` are release artifacts in
 source form. Once committed for a release, they are not rewritten: newer
 readers must continue to load them or intentionally document the migration.
-Regenerable caches such as `models-store.json` are internal and are not a
+Regenerable caches such as `models-store.json` and `models-dev.json` are
+internal and are not a
 persisted compatibility contract.
 
 Session sidecars now use OS-held locks. Stop older e processes before

@@ -2,6 +2,7 @@
 	"name": "together",
 	"display": "Together",
 	"base_url": "https://api.together.xyz/v1",
+	"models_dev": "togetherai",
 	"api": "openai-completions",
 	"auth": {
 		"key": true,
