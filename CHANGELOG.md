@@ -22,6 +22,7 @@
 
 ### New features
 
+- The new e logo and rounded-square icon are available as SVGs in `assets/`.
 - The benchmark suite measures the real launches: boot-to-first-frame on a
   populated home (skills, a package with a live extension, prompt history),
   a cold launch with the binary evicted from the file cache, and `e -c`
