@@ -541,9 +541,13 @@ impl Server {
             .map(PathBuf::from);
         let resumed = match &resume {
             Some(path) => {
-                // Ownership first: a file another e is appending to must not
-                // be replayed into a second, diverging history.
-                let session = SessionLog::reopen(path).map_err(|e| format!("resume: {e}"))?;
+                // Only a writer takes ownership and repairs the log. A
+                // memory-only resume reads the intact history without writes.
+                let session = if options.no_save {
+                    None
+                } else {
+                    Some(SessionLog::reopen(path).map_err(|e| format!("resume: {e}"))?)
+                };
                 let messages = SessionLog::load(path).map_err(|e| format!("resume: {e}"))?;
                 Some((session, messages, log::name_of(path)))
             }
@@ -556,7 +560,7 @@ impl Server {
         let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((session, messages, name)) = resumed {
             agent.load_history(messages);
-            agent.set_session(Some(session));
+            agent.set_session(session);
             agent.adopt_session_name(name);
         }
         if let Some(name) = params.get("name").and_then(Value::as_str) {
@@ -671,7 +675,7 @@ impl Server {
     /// own when the original persists. The two grow apart from here.
     fn fork(&mut self, params: &Value) -> Result<Value, String> {
         let slot = self.slot(params)?;
-        let (history, model, options, name) = {
+        let (history, model, mut options, name, effort) = {
             let agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
             if agent.is_streaming() {
                 return Err("a turn is running; fork between turns".into());
@@ -681,8 +685,10 @@ impl Server {
                 agent.model.clone(),
                 slot.options.clone(),
                 agent.session_name(),
+                agent.effort(),
             )
         };
+        options.effort_override = effort;
         let log = if options.save_session {
             let cwd = options.cwd.clone().unwrap_or_default();
             Some(

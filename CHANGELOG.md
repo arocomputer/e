@@ -57,6 +57,10 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Fixes
 
+- RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.
+- Slack restores conversations from saved paths after restart and keeps extension questions and answers with their owning thread.
+- The GitHub channel requires repository write permission before execution and replies correctly to inline PR review comments.
+
 - Cancelled turns skip queued tools, and late events cannot mutate a newer turn. Continuous output no longer prevents shell timeouts.
 - Tool batches use bounded concurrency and preserve provider order for calls that name the same file.
 - Session recovery repairs torn final records and unfinished calls. Resume locks history before reading; corrupt parent links fail even on inactive branches.

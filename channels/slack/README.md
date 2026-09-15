@@ -6,9 +6,11 @@ the repository checkout the bot runs in. Tool progress is posted as it
 happens, the reply when the turn ends, and when an extension asks a
 question the thread gets buttons.
 
-It is one file, `src/index.ts`, and it depends on two things: Slack's Bolt
-framework and a spawned `e rpc` (`docs/automation.md`). Nothing here is
-compiled into e. Copy it and change what your team wants posted.
+`src/index.ts` handles Slack messages, `rpc.ts` speaks JSONL, and
+`threads.ts` owns the connections and saved log paths. Each active thread
+has its own `e rpc` process, including its extensions. Extension questions
+therefore have one owning thread even when several conversations run at
+once. Nothing here is compiled into e.
 
 ## Setup
 
@@ -24,6 +26,7 @@ compiled into e. Copy it and change what your team wants posted.
 ```sh
 npm install
 npm run typecheck
+npm test
 set -a; . ./.env; set +a
 npm start
 ```
@@ -38,8 +41,11 @@ npm start
 - `stop` in the thread interrupts the running turn.
 - An extension's `ui.confirm` or `ui.select` becomes a message with buttons;
   `ui.input` and `ui.editor` are answered by the next message in the thread.
-- The thread → session map is saved to `E_SLACK_STATE`, so after a restart
-  the next message in an old thread resumes its session from disk.
+- The thread's log path is saved to `E_SLACK_STATE`. After a restart, its
+  next message starts a new process and resumes that path. Old state files
+  still load; their process-local session IDs are discarded.
+- Question buttons retain the owning connection, so two processes can use
+  the same ask number without sending an answer to the wrong conversation.
 
 Everything the bot posts comes from `e rpc` events; it never parses
 terminal output and never reads `~/.e` itself.

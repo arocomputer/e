@@ -317,6 +317,55 @@ fn saved_sessions_are_listed_and_resume_with_their_history() {
     server.join().unwrap();
 }
 
+/// Reading a saved conversation must not acquire a writer or repair its tail.
+#[test]
+fn memory_only_resume_leaves_the_saved_file_untouched() {
+    let _lock = env_lock();
+    let home = mock_home("rpc-read-only", 1);
+    let ws = workspace("read-only");
+    let path = home.dir.join("saved.jsonl");
+    let original = concat!(
+        "{\"type\":\"session\",\"id\":\"legacy\",\"cwd\":\"/tmp\",\"created\":1,\"model\":\"mock/test\"}\n",
+        "{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"saved message\"}}\n",
+        "{\"torn\":"
+    );
+    std::fs::write(&path, original).unwrap();
+    for (flags, save) in [(&[][..], false), (&["--no-save"][..], true)] {
+        let mut rpc = Rpc::spawn(&home, flags);
+        let session = rpc.create(&ws, json!({"resume": path, "save": save}));
+        let info = rpc.call("i", "session.info", json!({"session": session}));
+        assert_eq!(info["result"]["messages"], 1);
+        assert!(info["result"]["path"].is_null());
+        assert!(rpc.finish().success());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+}
+
+/// A fork inherits the effort currently selected, including session.set changes.
+#[test]
+fn a_fork_keeps_the_current_effort() {
+    let _lock = env_lock();
+    let home = mock_home("rpc-fork-effort", 1);
+    home.write("models.json", r#"{"providers":{"mock":{"base_url":"http://127.0.0.1:1","api":"completions","models":[{"id":"test","effort":["low","high"]}]}}}"#);
+    let ws = workspace("fork-effort");
+    let mut rpc = Rpc::spawn(&home, &["--no-extensions"]);
+    let session = rpc.create(&ws, json!({"effort": "high"}));
+    let changed = rpc.call(
+        "s",
+        "session.set",
+        json!({"session": session, "effort": "low"}),
+    );
+    assert_eq!(changed["result"]["effort"], "low");
+    let fork = rpc.call("f", "session.fork", json!({"session": session}));
+    let info = rpc.call(
+        "i",
+        "session.info",
+        json!({"session": fork["result"]["session"]}),
+    );
+    assert_eq!(info["result"]["effort"], "low");
+    assert!(rpc.finish().success());
+}
+
 #[test]
 fn a_version_one_line_answers_flat_and_streams_nothing() {
     let _lock = env_lock();

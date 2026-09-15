@@ -7,7 +7,8 @@
 #
 # The checkout is e's working directory, so `AGENTS.md` and the repo's
 # files are in play like they are in the terminal. Tools run as the runner
-# user inside the job; nothing is written back unless the prompt asks and
+# user inside the job. Only repository writers may start a run. Nothing is
+# written back unless the prompt asks and
 # a later step pushes it.
 name: e
 
@@ -27,10 +28,26 @@ jobs:
     if: startsWith(github.event.comment.body, '/e ')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Authorize commenter
+        id: caller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          caller=$(python3 -c 'import json,os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["comment"]["user"]["login"])')
+          permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$caller/permission" --jq '.permission')
+          case "$permission" in
+            admin|maintain|write) ;;
+            *) echo "Repository write permission is required to run e." >&2; exit 1 ;;
+          esac
+          number=$(python3 -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); print((e.get("issue") or e["pull_request"])["number"])')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # For a PR comment, work on the PR's head, not the default branch.
-          ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.ref }}
+          ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.event.pull_request.head.sha || github.ref }}
+          persist-credentials: false
 
       - name: Install e
         run: curl -fsSL https://e.intuitum.sh/install.sh | sh
@@ -59,9 +76,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPLY: ${{ steps.turn.outputs.reply }}
           COST: ${{ steps.turn.outputs.cost }}
+          NUMBER: ${{ steps.caller.outputs.number }}
         run: |
           body="$REPLY"
           if [ -n "$COST" ]; then
             body=$(printf '%s\n\n_%s_' "$body" "$COST")
           fi
-          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "$body"
+          gh issue comment "$NUMBER" --repo "${{ github.repository }}" --body "$body"

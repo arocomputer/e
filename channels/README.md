@@ -7,7 +7,7 @@ compiled into e, and nothing here is required to run it. The pattern they
 share is described in `docs/channels.md`.
 
 ```
-slack/     a Slack bot — one thread, one e session (TypeScript, Bolt)
+slack/     a Slack bot: one process and session per thread (TypeScript, Bolt)
 github/    a GitHub Actions workflow answering `/e` on issues and PRs
 ```
 

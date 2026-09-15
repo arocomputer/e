@@ -1,102 +1,16 @@
 /**
- * e for Slack: one thread, one e session, over a spawned `e rpc`.
- *
- * Two halves. `Rpc` speaks the JSONL protocol (docs/automation.md): it
- * writes requests, resolves their responses by id, and routes event lines
- * to whoever owns the session they name. The Bolt app maps Slack threads
- * to sessions and turns events into messages. Nothing else — copy this and
- * change what your team wants posted.
+ * e for Slack: each thread owns an e rpc process and session. Questions
+ * and replies stay with that thread even while other threads run turns.
+ * Copy this and change what your team wants posted.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
-import { readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import bolt from "@slack/bolt";
+import { Rpc, type Json } from "./rpc.ts";
+import { Threads, type Connection } from "./threads.ts";
 
 const { App } = bolt;
-
-type Json = Record<string, unknown>;
-
-// ---------------------------------------------------------------- e rpc
-
-/** A spawned `e rpc` and the pipes to it. */
-class Rpc {
-  private child: ChildProcess;
-  private next = 1;
-  private pending = new Map<string, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
-  /** Event lines by session id; a turn's owner registers here. */
-  readonly listeners = new Map<string, (event: Json) => void>();
-  /** `ask` lines: an extension's question for a person. */
-  onAsk: (ask: Json) => void = () => {};
-
-  constructor(bin: string, args: string[]) {
-    this.child = spawn(bin, [...args, "rpc"], { stdio: ["pipe", "pipe", "inherit"] });
-    createInterface({ input: this.child.stdout! }).on("line", (line) => this.receive(line));
-    this.child.on("exit", (code) => {
-      for (const p of this.pending.values()) p.reject(new Error(`e rpc exited (${code})`));
-      this.pending.clear();
-    });
-  }
-
-  private receive(line: string) {
-    let msg: Json;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (typeof msg.type === "string") {
-      if (msg.type === "ask") this.onAsk(msg);
-      else if (typeof msg.session === "string") this.listeners.get(msg.session)?.(msg);
-      return;
-    }
-    const p = this.pending.get(String(msg.id));
-    if (!p) return;
-    this.pending.delete(String(msg.id));
-    if (msg.error) p.reject(new Error(String(msg.error)));
-    else p.resolve((msg.result ?? {}) as Json);
-  }
-
-  /** One request, one response. A prompt resolves when its turn ends. */
-  call(method: string, params: Json = {}): Promise<Json> {
-    const id = `r${this.next++}`;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin!.write(JSON.stringify({ id, method, params }) + "\n");
-    });
-  }
-
-  async close() {
-    try {
-      await this.call("shutdown");
-    } catch {
-      // Already gone.
-    }
-  }
-}
-
-// ---------------------------------------------------------------- state
-
-/** Thread → session. Saved so a restart resumes old threads from disk. */
-interface Thread {
-  session?: string;
-  path?: string;
-}
-
-const STATE = process.env.E_SLACK_STATE ?? "./e-slack-state.json";
-const threads = new Map<string, Thread>(loadState());
-
-function loadState(): [string, Thread][] {
-  try {
-    return Object.entries(JSON.parse(readFileSync(STATE, "utf8")));
-  } catch {
-    return [];
-  }
-}
-
-function saveState() {
-  writeFileSync(STATE, JSON.stringify(Object.fromEntries(threads), null, 2));
-}
 
 // ---------------------------------------------------------------- app
 
@@ -106,11 +20,7 @@ const env = (name: string) => {
   return v;
 };
 
-const cwd = env("E_CWD");
-const rpc = new Rpc(process.env.E_BIN ?? "e", []);
-const hello = await rpc.call("hello", { ask: true });
-console.log(`e ${hello.version} (${hello.channel}), protocol ${hello.protocol}`);
-
+const cwd = resolve(env("E_CWD"));
 const app = new App({
   token: env("SLACK_BOT_TOKEN"),
   signingSecret: env("SLACK_SIGNING_SECRET"),
@@ -118,19 +28,12 @@ const app = new App({
   socketMode: true,
 });
 
-/** The session for a thread, creating or resuming it. */
-async function sessionFor(key: string, name: string): Promise<string> {
-  const known = threads.get(key);
-  if (known?.session) return known.session;
-  const params: Json = { cwd, save: true, name };
-  if (process.env.E_MODEL) params.model = process.env.E_MODEL;
-  if (known?.path) params.resume = known.path;
-  const created = await rpc.call("session.create", params);
-  const session = String(created.session);
-  threads.set(key, { session, path: known?.path });
-  saveState();
-  return session;
-}
+const threads = new Threads(
+  process.env.E_SLACK_STATE ?? "./e-slack-state.json",
+  () => new Rpc(process.env.E_BIN ?? "e", [], cwd),
+  { cwd, ...(process.env.E_MODEL ? { model: process.env.E_MODEL } : {}) },
+  (key, rpc, ask) => relayAsk(key, rpc, ask),
+);
 
 /** Text a person wants to read about a finished tool call. */
 function toolLine(batch: Map<number, Json>, end: Json): string | null {
@@ -161,7 +64,7 @@ interface Post {
 
 /** Run one prompt on a thread's session, posting as it goes. */
 async function runTurn(key: string, name: string, prompt: string, post: Post) {
-  const session = await sessionFor(key, name);
+  const { rpc, session } = await threads.get(key, name);
   const batch = new Map<number, Json>();
   rpc.listeners.set(session, (event) => {
     switch (event.type) {
@@ -180,6 +83,7 @@ async function runTurn(key: string, name: string, prompt: string, post: Post) {
   });
   try {
     const result = await rpc.call("session.prompt", { session, prompt });
+    if (typeof result.path === "string") threads.save(key, result.path);
     if (result.error) {
       await post(`:x: ${result.error}`);
       return;
@@ -193,11 +97,7 @@ async function runTurn(key: string, name: string, prompt: string, post: Post) {
     const cost = result.cost_usd;
     if (typeof cost === "number") await post(`_$${cost.toFixed(4)}_`);
     const created = await rpc.call("session.info", { session });
-    const thread = threads.get(key);
-    if (thread && created.path) {
-      thread.path = String(created.path);
-      saveState();
-    }
+    if (created.path) threads.save(key, String(created.path));
   } catch (error) {
     await post(`:x: ${(error as Error).message}`);
   } finally {
@@ -206,37 +106,36 @@ async function runTurn(key: string, name: string, prompt: string, post: Post) {
 }
 
 // A message in a thread while an extension waits for text answers it.
-const textAsks = new Map<string, number>();
+type Answer = (result: Json) => Promise<unknown>;
+const textAsks = new Map<string, Answer>();
+const buttonAsks = new Map<string, Answer>();
 
-rpc.onAsk = (ask) => {
+/** Route a question through the connection owned by this thread. */
+function relayAsk(key: string, rpc: Connection, ask: Json) {
   const n = Number(ask.ask);
   const params = (ask.params ?? {}) as Json;
   const title = String(params.title ?? ask.method);
-  // Which thread asked? The extension host does not say; the most recent
-  // turn's thread is the best single-thread answer. Multi-thread deployments
-  // should key sessions to threads here.
-  const key = lastThread;
-  if (!key) {
-    void rpc.call("ask.reply", { ask: n });
-    return;
-  }
+  const answer: Answer = (result) => rpc.call("ask.reply", { ask: n, result });
+  const token = randomUUID();
   const [channel, thread_ts] = key.split(":");
   const post = (text: string, blocks?: unknown[]) =>
     app.client.chat.postMessage({ channel, thread_ts, text, blocks: blocks as never });
   switch (ask.method) {
     case "ui.confirm":
+      buttonAsks.set(token, answer);
       void post(title, [
         { type: "section", text: { type: "mrkdwn", text: `*${title}*\n${params.message ?? ""}` } },
         {
           type: "actions",
           elements: [
-            { type: "button", text: { type: "plain_text", text: "Yes" }, style: "primary", action_id: "ask_yes", value: String(n) },
-            { type: "button", text: { type: "plain_text", text: "No" }, action_id: "ask_no", value: String(n) },
+            { type: "button", text: { type: "plain_text", text: "Yes" }, style: "primary", action_id: "ask_yes", value: token },
+            { type: "button", text: { type: "plain_text", text: "No" }, action_id: "ask_no", value: token },
           ],
         },
       ]);
       break;
     case "ui.select": {
+      buttonAsks.set(token, answer);
       const options = ((params.options ?? []) as (string | Json)[]).slice(0, 5).map((o) => {
         const label = typeof o === "string" ? o : String(o.label);
         const value = typeof o === "string" ? o : String(o.value ?? o.label);
@@ -244,7 +143,7 @@ rpc.onAsk = (ask) => {
           type: "button",
           text: { type: "plain_text", text: label.slice(0, 75) },
           action_id: `ask_pick_${value}`,
-          value: JSON.stringify({ n, value, label }),
+          value: JSON.stringify({ token, value, label }),
         };
       });
       void post(title, [
@@ -255,25 +154,31 @@ rpc.onAsk = (ask) => {
     }
     default:
       // ui.input / ui.editor: the next message in the thread is the answer.
-      textAsks.set(key, n);
+      textAsks.set(key, answer);
       void post(`*${title}* — reply in this thread${params.placeholder ? ` (${params.placeholder})` : ""}`);
   }
-};
+}
 
-let lastThread: string | null = null;
+/** A button can answer only the process and question that created it. */
+async function answerButton(token: string, result: Json) {
+  const answer = buttonAsks.get(token);
+  if (!answer) return;
+  buttonAsks.delete(token);
+  await answer(result);
+}
 
 app.action("ask_yes", async ({ ack, action }) => {
   await ack();
-  await rpc.call("ask.reply", { ask: Number((action as unknown as Json).value), result: { confirmed: true } });
+  await answerButton(String((action as unknown as Json).value), { confirmed: true });
 });
 app.action("ask_no", async ({ ack, action }) => {
   await ack();
-  await rpc.call("ask.reply", { ask: Number((action as unknown as Json).value), result: { confirmed: false } });
+  await answerButton(String((action as unknown as Json).value), { confirmed: false });
 });
 app.action(/^ask_pick_/, async ({ ack, action }) => {
   await ack();
-  const { n, value, label } = JSON.parse(String((action as unknown as Json).value));
-  await rpc.call("ask.reply", { ask: n, result: { value, label } });
+  const { token, value, label } = JSON.parse(String((action as unknown as Json).value));
+  await answerButton(token, { value, label });
 });
 
 function stripMention(text: string): string {
@@ -284,7 +189,6 @@ app.event("app_mention", async ({ event, client }) => {
   const channel = event.channel;
   const thread_ts = event.thread_ts ?? event.ts;
   const key = `${channel}:${thread_ts}`;
-  lastThread = key;
   const post: Post = (text, blocks) =>
     client.chat.postMessage({ channel, thread_ts, text, blocks: blocks as never });
   const prompt = stripMention(event.text ?? "");
@@ -302,20 +206,19 @@ app.message(async ({ message, client }) => {
   const channel = String(m.channel);
   const thread_ts = String(m.thread_ts);
   const key = `${channel}:${thread_ts}`;
-  const known = threads.get(key);
-  if (!known) return;
+  if (!threads.has(key)) return;
   const text = stripMention(String(m.text ?? ""));
   if (!text) return;
-  lastThread = key;
   const pendingAsk = textAsks.get(key);
   if (pendingAsk !== undefined) {
     textAsks.delete(key);
-    await rpc.call("ask.reply", { ask: pendingAsk, result: { text } });
+    await pendingAsk({ text });
     return;
   }
   const post: Post = (t, blocks) => client.chat.postMessage({ channel, thread_ts, text: t, blocks: blocks as never });
-  if (text.toLowerCase() === "stop" && known.session) {
-    await rpc.call("session.interrupt", { session: known.session });
+  if (text.toLowerCase() === "stop") {
+    const { rpc, session } = await threads.get(key, `slack ${channel}/${thread_ts}`);
+    await rpc.call("session.interrupt", { session });
     return;
   }
   await runTurn(key, `slack ${channel}/${thread_ts}`, text, post);
@@ -323,7 +226,7 @@ app.message(async ({ message, client }) => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
-    await rpc.close();
+    await threads.close();
     process.exit(0);
   });
 }

@@ -116,7 +116,8 @@ shutdown           {}                            → {}               then the p
 - `resume` is a saved session's path, from `session.list` or an earlier
   result. With `save` true the conversation continues in that file, locked
   for this process while the session is open; with `save` false the history
-  is loaded and the file is left as it was.
+  is loaded without opening a writer, repairing the file, or taking a
+  session lock. `--no-save` also keeps resume read-only.
 - `name` labels the session (`session.list` shows it).
 
 `session.prompt` takes `images`, a list of PNG, JPEG, GIF, or WebP paths
@@ -125,7 +126,8 @@ shutdown           {}                            → {}               then the p
 `session.set` changes the model or effort for the following turns without
 touching the user's saved settings. `session.fork` copies the branch into
 a session of its own — a file of its own when the original persists — so
-the two grow apart from there.
+the two grow apart from there. A fork inherits the current model and effort,
+including changes made with `session.set`.
 
 ### Extensions
 
@@ -141,6 +143,10 @@ terminal. When an extension asks the person something (`ui.confirm`,
 {"type":"ask","ask":1,"extension":"deploy","method":"ui.confirm","params":{"title":"Deploy?","message":"to prod"}}
 {"id":"r1","method":"ask.reply","params":{"ask":1,"result":{"confirmed":true}}}
 ```
+
+`ask` lines belong to the process, not a named session. A client relaying
+questions to separate conversations must dedicate one RPC process to each,
+as the Slack channel does. Do not infer the owner from the most recent prompt.
 
 Without `hello`, or with `ask` false, questions are refused `no ui` at once,
 as `e -p` refuses them. `ui.notify` and `ui.show` become `notice` lines

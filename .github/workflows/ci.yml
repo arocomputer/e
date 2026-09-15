@@ -63,9 +63,9 @@ jobs:
           packages=false
           channels=false
           while IFS= read -r file; do
-            # The reference channels are typechecked on their own.
+            # The reference channels have their own checks.
             case "$file" in
-              channels/*) channels=true ;;
+              channels/* | tests/fixtures/channels/* | .github/workflows/ci.yml) channels=true ;;
             esac
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
@@ -208,8 +208,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - name: Typecheck the Slack channel
+      - name: Check the Slack channel
         working-directory: channels/slack
         run: |
           npm ci
           npm run typecheck
+          npm test
+      - name: Check the GitHub channel
+        run: python3 -m unittest discover -s channels/github -p 'test_*.py'

@@ -21,15 +21,17 @@ channels/github/    a GitHub Actions workflow answering `/e` on issues and PRs
 
 Every channel does the same five things.
 
-1. **Spawn `e rpc`** once, with the pipes kept open, and say `hello`. Pass
-   `--no-save` or `--no-tools` if the deployment wants them; those bounds
-   hold for every session the client creates.
+1. **Spawn `e rpc`** with the pipes kept open, and say `hello`. When relaying
+   extension questions, use one process per conversation: `ask` lines do
+   not carry a session ID. A client without interactive extensions can
+   share one process across sessions. Pass `--no-save` or `--no-tools` if
+   the deployment wants them; those bounds hold for every session.
 2. **Map a conversation to a session.** A Slack thread, a Linear issue, or
    a PR is one `session.create` with the repository's checkout as `cwd`,
    `save: true` so the conversation survives a restart, and a `name` the
-   team recognizes. Keep the mapping (thread id to session id and path) in
-   the channel's own store; after a restart, `session.create` with `resume`
-   brings the thread back with its history.
+   team recognizes. Keep session IDs in memory and save the mapping from
+   thread ID to log path. After a restart, `session.create` with `resume`
+   brings the thread back with its history and a new session ID.
 3. **Turn a message into a prompt.** `session.prompt` with the text. While
    the turn runs, the `tool_batch` and `tool_end` events are what a person
    wants to see in the thread ("Reading src/main.rs", "Ran tests"); `text`
@@ -51,7 +53,8 @@ is a method.
 
 `channels/slack/` is the reference: a Bolt app in socket mode, so it needs
 no public URL. It answers when mentioned in a channel and continues in the
-thread; each thread is one e session against the checkout in `E_CWD`. Tool
+thread; each thread owns one process and session against the checkout in
+`E_CWD`. Tool
 progress is posted as it happens, the reply when the turn ends, and
 extension questions become a message with buttons. See its README for the
 three Slack credentials and how to run it.
@@ -59,7 +62,9 @@ three Slack credentials and how to run it.
 ## GitHub
 
 `channels/github/e.yml` is a workflow that runs on issue and pull-request
-comments containing `/e`. It checks out the repository, installs e, and runs
+comments containing `/e`. It first verifies that the commenter has repository
+write, maintain, or admin permission. Only then does it check out the repository,
+install e, and run
 `e -p --json` with the comment as the prompt, posting the reply as a comment.
 One turn per comment is the right shape for CI: nothing long-lived, the
 checkout is the working directory, and the provider key is a repository
