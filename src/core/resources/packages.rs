@@ -293,9 +293,16 @@ fn split_rev(rest: &str) -> (String, Option<String>) {
         Some(at) => (&rest[..at + 3], &rest[at + 3..]),
         None => ("", rest),
     };
-    // A `user@` authority sits before the first `/` or `:`; a ref sits
-    // after the path. Only an `@` beyond the authority is a ref marker.
-    let authority_end = remainder.find(['/', ':']).unwrap_or(remainder.len());
+    // A `user@` (or `user:password@`) authority sits before the path; a ref
+    // sits after it. Only an `@` beyond the authority is a ref marker. With
+    // a scheme the authority runs to the first `/` — a `:` inside it is a
+    // port or a password. Without one (scp form) it ends at the first `:`.
+    let authority_end = if scheme.is_empty() {
+        remainder.find(['/', ':'])
+    } else {
+        remainder.find('/')
+    }
+    .unwrap_or(remainder.len());
     match remainder[authority_end..].rfind('@') {
         Some(at) => {
             let at = authority_end + at;
@@ -594,11 +601,9 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
             ));
             let _ = std::fs::remove_dir_all(&dir);
             npm_install(&dir, &source)?;
-            once_roots()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(dir.clone());
-            return Ok(dir.join("node_modules").join(name));
+            // The loadable root is the package itself, not the prefix;
+            // `forget_once` finds the prefix again from the root.
+            dir.join("node_modules").join(name)
         }
         Source::Git { url, rev, .. } => {
             let dir = std::env::temp_dir().join(format!(
@@ -648,17 +653,22 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
 }
 
 /// Remove the temporary clones `use_once` made. Local directories are
-/// untouched.
+/// untouched. An npm root sits inside its throwaway prefix, so the
+/// directory removed is the ancestor this process created under the
+/// temporary directory, not necessarily the root itself.
 pub fn forget_once() {
     let roots = std::mem::take(&mut *once_roots().lock().unwrap_or_else(|e| e.into_inner()));
     let prefix = format!("e-package-{}-", std::process::id());
+    let temp = std::env::temp_dir();
     for root in roots {
-        let temporary = root
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
-            && root.starts_with(std::env::temp_dir());
-        if temporary {
-            let _ = std::fs::remove_dir_all(&root);
+        let temporary = root.ancestors().find(|dir| {
+            dir.parent() == Some(temp.as_path())
+                && dir
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+        });
+        if let Some(dir) = temporary {
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 }
@@ -885,15 +895,19 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
     let source = Source::parse(spec)?;
     let identity = source.identity();
     let mut entries = settings_entries();
-    let before = entries.len();
-    entries.retain(|entry| {
-        Source::parse(&entry.source)
-            .map(|s| s.identity() != identity)
-            .unwrap_or(true)
+    // The recorded spec names the directory on disk; the argument only has
+    // to name the same package (identity folds case, scheme, and `.git`).
+    let mut installed = None;
+    entries.retain(|entry| match Source::parse(&entry.source) {
+        Ok(recorded) if recorded.identity() == identity => {
+            installed = Some(recorded);
+            false
+        }
+        _ => true,
     });
-    if entries.len() == before {
+    let Some(source) = installed else {
         return Err(format!("{spec} is not installed"));
-    }
+    };
     set_entries(&entries).map_err(|e| format!("could not update settings.json: {e}"))?;
     let root = source.root();
     if let Source::Npm { name, .. } = &source {
@@ -1312,6 +1326,20 @@ mod tests {
         assert_eq!(rev.as_deref(), Some("main"));
         let (_, _, _, rev) = git_parts("git:ssh://git@github.com:22/intuitums/e-diff@release/1.0");
         assert_eq!(rev.as_deref(), Some("release/1.0"));
+    }
+
+    #[test]
+    fn credentials_in_a_url_authority_are_not_a_ref() {
+        // GitLab's deploy-token form: the `@` after the password ends the
+        // authority, and the `:` inside the credentials is not the path.
+        let (url, host, path, rev) = git_parts("https://oauth2:TOKEN@gitlab.com/group/repo.git");
+        assert_eq!(url, "https://oauth2:TOKEN@gitlab.com/group/repo.git");
+        assert_eq!(host, "gitlab.com");
+        assert_eq!(path, "group/repo");
+        assert_eq!(rev, None);
+        let (url, _, _, rev) = git_parts("https://oauth2:TOKEN@gitlab.com/group/repo.git@v2");
+        assert_eq!(url, "https://oauth2:TOKEN@gitlab.com/group/repo.git");
+        assert_eq!(rev.as_deref(), Some("v2"));
     }
 
     #[test]

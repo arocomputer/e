@@ -1355,7 +1355,11 @@ pub async fn send_request_within(
         Ok(Ok(response)) => Ok(response),
         Ok(Err(e)) => {
             let message = format!("request failed: {}", transport_error_chain(&e));
-            if e.is_connect() || e.is_builder() {
+            if e.is_builder() {
+                // The request could not be built (a malformed base URL, an
+                // invalid header) — no retry ladder changes that.
+                Err(ProviderError::rejected(message))
+            } else if e.is_connect() {
                 Err(ProviderError::network(message))
             } else {
                 // A loss while sending or awaiting headers does not prove

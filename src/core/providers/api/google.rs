@@ -188,8 +188,10 @@ pub async fn run(
             let cached = meta["cachedContentTokenCount"].as_u64().unwrap_or(0);
             usage = Some(Usage {
                 input: total.saturating_sub(cached),
-                output: meta["candidatesTokenCount"].as_u64().unwrap_or(0)
-                    + meta["thoughtsTokenCount"].as_u64().unwrap_or(0),
+                output: meta["candidatesTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .saturating_add(meta["thoughtsTokenCount"].as_u64().unwrap_or(0)),
                 cache_read: cached,
                 ..Usage::default()
             });
@@ -224,7 +226,12 @@ pub async fn run(
                             .map(String::from)
                             .unwrap_or_else(|| synthesize_call_id(&name)),
                         name,
-                        arguments: part["functionCall"]["args"].to_string(),
+                        // `args` is optional on the wire; a call without it
+                        // is a call with no arguments, not the string "null".
+                        arguments: match &part["functionCall"]["args"] {
+                            args if args.is_object() => args.to_string(),
+                            _ => "{}".into(),
+                        },
                         signature: part["thoughtSignature"].as_str().map(String::from),
                     };
                     if !call.name.is_empty() {

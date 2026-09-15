@@ -67,7 +67,13 @@ fn parse(name: String, raw: &str) -> Template {
     let mut description = String::new();
     let mut argument_hint = String::new();
     let mut content = raw;
-    if let Some(rest) = raw.strip_prefix("---\n") {
+    // A file saved with CRLF endings opens `---\r\n`; the front matter is
+    // still front matter.
+    let opening = raw.strip_prefix("---").and_then(|rest| {
+        rest.strip_prefix("\r\n")
+            .or_else(|| rest.strip_prefix('\n'))
+    });
+    if let Some(rest) = opening {
         if let Some(end) = rest.find("\n---") {
             for line in rest[..end].lines() {
                 if let Some(v) = line.strip_prefix("description:") {
@@ -76,7 +82,7 @@ fn parse(name: String, raw: &str) -> Template {
                     argument_hint = v.trim().to_string();
                 }
             }
-            content = rest[end + 4..].trim_start_matches('\n');
+            content = rest[end + 4..].trim_start_matches(['\r', '\n']);
         }
     }
     Template {

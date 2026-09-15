@@ -473,6 +473,16 @@ async fn main() -> std::io::Result<()> {
         }
     }
     if args.first().map(String::as_str) == Some("rpc") {
+        // `rpc` rode in behind an extension flag, so the raw scan above
+        // could not see it and the host was started with a UI channel. No
+        // frontend will ever read it: answer each request the way a
+        // headless host would, instead of letting extensions hang on it.
+        tokio::spawn(async move {
+            let mut requests_rx = requests_rx;
+            while let Some(request) = requests_rx.recv().await {
+                request.respond(Err("no ui".into()));
+            }
+        });
         return rpc(host, &options).await;
     }
     if options.print {

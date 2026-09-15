@@ -409,8 +409,7 @@ impl SessionLog {
     /// so an old session reads as the same straight line it always was.
     /// Reject broken links and cycles on every branch before exposing nodes.
     pub fn nodes(path: &Path) -> std::io::Result<Vec<Node>> {
-        let reader = BufReader::new(File::open(path)?);
-        let lines: Vec<String> = reader.lines().collect::<std::io::Result<_>>()?;
+        let lines = lines_lossy(path)?;
         let last_nonempty = lines.iter().rposition(|l| !l.trim().is_empty());
         let mut out: Vec<Node> = Vec::new();
         let mut previous: Option<String> = None;
@@ -509,7 +508,21 @@ impl SessionLog {
             let mode = file.metadata()?.permissions().mode() & 0o600;
             file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
-        file.set_len(intact_len(path)?)?;
+        let intact = intact_len(path)?;
+        file.set_len(intact)?;
+        // A last record that kept its bytes but lost its newline is whole;
+        // the next append must still start a line of its own, or the two
+        // fuse into one unreadable record.
+        if intact > 0 {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut tail = [0u8; 1];
+            let mut reader = File::open(path)?;
+            reader.seek(SeekFrom::Start(intact - 1))?;
+            reader.read_exact(&mut tail)?;
+            if tail != *b"\n" {
+                (&file).write_all(b"\n")?;
+            }
+        }
         let current = SessionLog::nodes(path)
             .ok()
             .and_then(|nodes| nodes.last().map(|n| n.id.clone()));
@@ -559,6 +572,18 @@ fn intact_len(path: &Path) -> std::io::Result<u64> {
         Ok(_) => Ok(bytes.len() as u64),
         Err(_) => Ok(start as u64),
     }
+}
+
+/// The file's lines as text. Records are written as UTF-8 JSON, so bytes
+/// that do not decode only ever come from a tail torn mid-character;
+/// decoding them lossily lets that one line fail to parse like any other
+/// torn record instead of making the whole file unreadable.
+fn lines_lossy(path: &Path) -> std::io::Result<Vec<String>> {
+    let bytes = std::fs::read(path)?;
+    Ok(bytes
+        .split(|b| *b == b'\n')
+        .map(|line| String::from_utf8_lossy(line).into_owned())
+        .collect())
 }
 
 fn validate_format(version: u32) -> std::io::Result<()> {
@@ -640,10 +665,9 @@ pub fn responses_in(path: &Path) -> Vec<ResponseMeta> {
 /// The latest persisted display name in a session file, if any — the name a
 /// resume must adopt so the session doesn't drift from its log.
 pub fn name_of(path: &Path) -> Option<String> {
-    let reader = BufReader::new(File::open(path).ok()?);
     let mut name = None;
-    for line in reader.lines() {
-        if let Ok(Entry::Name { name: n }) = serde_json::from_str(&line.ok()?) {
+    for line in lines_lossy(path).ok()? {
+        if let Ok(Entry::Name { name: n }) = serde_json::from_str(&line) {
             name = Some(n);
         }
     }
@@ -742,14 +766,12 @@ fn info(path: &Path, expected_cwd: Option<&Path>) -> Option<SessionInfo> {
         #[serde(rename = "name")]
         Name { name: String },
     }
-    let reader = BufReader::new(File::open(path).ok()?);
     let mut message_count = 0usize;
     let mut user_turns = 0usize;
     let mut name = None;
     let mut session_cwd = None;
     let mut title: Option<String> = None;
-    for line in reader.lines() {
-        let line = line.ok()?;
+    for line in lines_lossy(path).ok()? {
         match serde_json::from_str::<LeanEntry>(&line) {
             Ok(LeanEntry::Header {
                 cwd,

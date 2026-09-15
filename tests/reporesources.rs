@@ -158,3 +158,21 @@ fn multi_line_frontmatter_descriptions_fold_into_the_catalog() {
 fn repo_e(f: &Fixtures) -> std::path::PathBuf {
     f.repo.join(".e")
 }
+
+/// A template saved with CRLF line endings still has front matter: the
+/// description reaches the picker and the `---` block is not submitted as
+/// part of the prompt.
+#[test]
+fn crlf_front_matter_is_still_front_matter() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let f = fixtures();
+    write_prompt(
+        &f.home,
+        "win",
+        "---\r\ndescription: from windows\r\nargument-hint: <file>\r\n---\r\nreview $1\r\n",
+    );
+    let template = e::core::resources::prompts::find("win", &f.repo).unwrap();
+    assert_eq!(template.description, "from windows");
+    assert_eq!(template.argument_hint, "<file>");
+    assert_eq!(template.content, "review $1");
+}

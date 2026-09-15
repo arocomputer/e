@@ -147,3 +147,60 @@ fn read_result_survives_every_tool_narrowing() {
     assert!(e::core::tools::always_available("read_result"));
     assert!(!e::core::tools::always_available("bash"));
 }
+
+/// `read_result` reads its window the way `read` does: a numeric string or
+/// an integral float is the number it spells, never silently the first
+/// window again.
+#[test]
+fn read_result_accepts_numeric_strings_and_integral_floats() {
+    let runtime = ToolRuntime::default();
+    let output = run(
+        &runtime,
+        "bash",
+        r#"{"command":"seq 1 100000 | sed 's/^/line /'"}"#,
+    );
+    let id = result_id(&output.content);
+    let by_string = run(
+        &runtime,
+        "read_result",
+        &format!(r#"{{"id":{id},"offset":"64","limit":"16"}}"#),
+    );
+    assert!(
+        by_string.content.starts_with("ine 10\nline 11"),
+        "{}",
+        by_string.content
+    );
+    let by_float = run(
+        &runtime,
+        "read_result",
+        &format!(r#"{{"id":{id},"offset":64.0,"limit":16.0}}"#),
+    );
+    assert_eq!(by_float.content, by_string.content);
+    let bad = run(
+        &runtime,
+        "read_result",
+        &format!(r#"{{"id":{id},"offset":"sixty"}}"#),
+    );
+    assert_eq!(bad.outcome, ToolOutcome::Failed);
+    assert!(bad.content.contains("offset must be"), "{}", bad.content);
+}
+
+/// A limit smaller than the next character still returns that character:
+/// an empty window that points at its own offset would loop forever.
+#[test]
+fn read_result_never_returns_an_empty_window_before_the_end() {
+    let runtime = ToolRuntime::default();
+    let output = run(&runtime, "bash", r#"{"command":"yes é | head -c 40000"}"#);
+    let id = result_id(&output.content);
+    let tiny = run(
+        &runtime,
+        "read_result",
+        &format!(r#"{{"id":{id},"limit":1}}"#),
+    );
+    assert!(tiny.content.starts_with("é\n"), "{:?}", tiny.content);
+    assert!(
+        tiny.content.contains("continue with offset 2"),
+        "{}",
+        tiny.content
+    );
+}

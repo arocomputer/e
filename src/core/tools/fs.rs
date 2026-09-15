@@ -105,6 +105,26 @@ pub fn read(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput 
 /// one line cannot improve the result and turns a hostile file into an OOM.
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
+/// The payload of the `InvalidData` error `bounded_line` returns for a line
+/// over the cap, so a caller can tell it from undecodable bytes: the reader
+/// has already moved past the whole line either way.
+#[derive(Debug)]
+struct OversizedLine;
+
+impl std::fmt::Display for OversizedLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line exceeds {MAX_LINE_BYTES} bytes")
+    }
+}
+
+impl std::error::Error for OversizedLine {}
+
+fn is_oversized(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<OversizedLine>())
+}
+
 fn bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     let mut bytes = Vec::new();
     loop {
@@ -126,10 +146,7 @@ fn bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
             if end.is_none() {
                 drain_line_remainder(reader);
             }
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("line exceeds {MAX_LINE_BYTES} bytes"),
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, OversizedLine));
         }
         bytes.extend_from_slice(&available[..take]);
         reader.consume(take);
@@ -201,8 +218,24 @@ fn read_window(
         if returned >= limit {
             break;
         }
-        let Some(line) = bounded_line(&mut reader)? else {
-            break;
+        let line = match bounded_line(&mut reader) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            // A line over the cap is one line the window cannot show, not a
+            // file it cannot read: before the window it is skipped like any
+            // other, inside it the window ends at it (or, as the first line,
+            // names the offset that skips it).
+            Err(error) if is_oversized(&error) => {
+                line_number += 1;
+                if line_number < first {
+                    continue;
+                }
+                if returned == 0 {
+                    return Err(oversized_window(line_number, MAX_LINE_BYTES, "line cap"));
+                }
+                return Ok((output, Some(line_number)));
+            }
+            Err(error) => return Err(error),
         };
         line_number += 1;
         if line_number < first {
@@ -210,10 +243,7 @@ fn read_window(
         }
         let entry = format!("{line_number}\t{line}");
         if returned == 0 && entry.len() > WINDOW_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("line {line_number} exceeds the {WINDOW_BYTES} byte read window; line not returned; skip it with offset {}", line_number + 1),
-            ));
+            return Err(oversized_window(line_number, WINDOW_BYTES, "read window"));
         }
         if returned > 0 && output.len() + 1 + entry.len() > WINDOW_BYTES {
             return Ok((output, Some(line_number)));
@@ -225,6 +255,18 @@ fn read_window(
         returned += 1;
     }
     Ok((output, None))
+}
+
+/// The error for a first line the window cannot return, naming the offset
+/// that skips it.
+fn oversized_window(line_number: u64, bytes: usize, what: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "line {line_number} exceeds the {bytes} byte {what}; line not returned; skip it with offset {}",
+            line_number + 1
+        ),
+    )
 }
 
 pub fn write_schema() -> Value {

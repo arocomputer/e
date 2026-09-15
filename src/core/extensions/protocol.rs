@@ -430,8 +430,29 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
             });
         }
     }
+    // Notifications are routed by method before any id is read: a
+    // `tool.update` that echoes the call's id at the top level is still a
+    // progress chunk, not an answer to a pending request.
+    match value.get("method").and_then(Value::as_str) {
+        Some("notify") => {
+            let message = value["params"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            return (!message.is_empty()).then_some(Incoming::Notify { message });
+        }
+        Some("tool.update") => {
+            let id = value["params"]["id"].as_u64()?;
+            let stream = serde_json::from_value(value["params"]["stream"].clone()).ok()?;
+            let chunk = value["params"]["chunk"].as_str()?.to_string();
+            return (!chunk.is_empty()).then_some(Incoming::ToolUpdate { id, stream, chunk });
+        }
+        _ => {}
+    }
     if let Some(id) = value.get("id").and_then(Value::as_u64) {
-        if let Some(err) = value.get("error") {
+        // `"error": null` beside a result is the JSON-RPC habit for
+        // success, not a failure called "null".
+        if let Some(err) = value.get("error").filter(|err| !err.is_null()) {
             let message = err
                 .as_str()
                 .map(String::from)
@@ -446,23 +467,6 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
             id,
             result: Ok(result),
         });
-    }
-    if value.get("method").and_then(Value::as_str) == Some("notify") {
-        let message = value["params"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        if !message.is_empty() {
-            return Some(Incoming::Notify { message });
-        }
-    }
-    if value.get("method").and_then(Value::as_str) == Some("tool.update") {
-        let id = value["params"]["id"].as_u64()?;
-        let stream = serde_json::from_value(value["params"]["stream"].clone()).ok()?;
-        let chunk = value["params"]["chunk"].as_str()?.to_string();
-        if !chunk.is_empty() {
-            return Some(Incoming::ToolUpdate { id, stream, chunk });
-        }
     }
     None
 }
@@ -493,6 +497,32 @@ mod tests {
         let bare: FlagDecl = serde_json::from_str(r#"{"name":"dry"}"#).unwrap();
         assert_eq!(bare.default, None);
         assert_eq!(bare.flag_type, "boolean");
+    }
+
+    #[test]
+    fn a_null_error_beside_a_result_is_a_success() {
+        match parse_incoming(r#"{"id":3,"result":{"ok":true},"error":null}"#).unwrap() {
+            Incoming::Response { id, result } => {
+                assert_eq!(id, 3);
+                assert_eq!(result.unwrap()["ok"], true);
+            }
+            other => panic!("unexpected incoming message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_update_with_a_top_level_id_is_still_a_tool_update() {
+        let parsed = parse_incoming(
+            r#"{"id":7,"method":"tool.update","params":{"id":7,"stream":"stdout","chunk":"x"}}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(parsed, Incoming::ToolUpdate { id: 7, .. }),
+            "read as a response: {parsed:?}"
+        );
+        let parsed =
+            parse_incoming(r#"{"id":8,"method":"notify","params":{"message":"hi"}}"#).unwrap();
+        assert!(matches!(parsed, Incoming::Notify { .. }), "{parsed:?}");
     }
 
     #[test]

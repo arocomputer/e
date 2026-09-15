@@ -619,6 +619,22 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
     let prompts = e::core::resources::prompts::list(&home.dir);
     assert!(prompts.iter().any(|p| p.name == "npmhi"));
 
+    // `--package npm:…`: the package itself is the root the loaders read,
+    // not the throwaway prefix around it, and the prefix goes at exit.
+    let once = block(packages::use_once("npm:e-npm-one")).unwrap();
+    assert!(once.join("prompts/npmhi.md").is_file());
+    assert!(
+        packages::dirs("prompts")
+            .iter()
+            .any(|(dir, _)| dir.starts_with(&once)),
+        "the one-run package's prompts are not loaded: {:?}",
+        packages::dirs("prompts")
+    );
+    let prefix = once.parent().unwrap().parent().unwrap().to_path_buf();
+    packages::forget_once();
+    assert!(!prefix.exists(), "the throwaway prefix is gone");
+    assert!(root.join("prompts/npmhi.md").is_file(), "the install stays");
+
     // A newer version on the registry: `e install` brings it current.
     drop(registry);
     let registry = Registry::serve("e-npm-one", "1.1.0", package_tarball("one", "1.1.0"));
