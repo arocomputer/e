@@ -10,3 +10,10 @@ Keep the proportions and spacing intact. Scale the SVGs rather than redrawing
 the rectangles. The website copies live in the intuitum-sh repository at
 `public/e/icon.svg` and `src/app/(sub)/e/brand-mark.tsx`; keep them aligned when
 changing the artwork.
+
+## Themes
+
+`themes/dark.json` and `themes/light.json` are the two bundled palettes,
+compiled into the binary by `src/tui/paint/theme.rs` and served verbatim by
+`e docs theme-dark` / `theme-light`. They live here, not under `src/tui/`, so
+the terminal-free core can embed them without naming the frontend.

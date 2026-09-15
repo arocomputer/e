@@ -4,8 +4,8 @@
 
 use std::sync::Mutex;
 
-use e::core::config::keybindings::{self, Keymap};
 use e::tui::content::composer::Key;
+use e::tui::keybindings::{self, Keymap};
 
 // E_HOME is process-global; serialize the tests that set it.
 static ENV_LOCK: Mutex<()> = Mutex::new(());

@@ -134,10 +134,11 @@ impl Theme {
     }
 }
 
-/// The two palettes are compiled into the binary — no runtime files, no
-/// themes directory. The raw JSON is exposed so tests can assert on it.
-pub const LIGHT_JSON: &str = include_str!("theme_light.json");
-pub const DARK_JSON: &str = include_str!("theme_dark.json");
+/// The two palettes are compiled into the binary from `assets/themes/` — no
+/// runtime files, no themes directory. `e docs theme-dark` serves the same
+/// files, and the raw JSON is exposed so tests can assert on it.
+pub const LIGHT_JSON: &str = include_str!("../../../assets/themes/light.json");
+pub const DARK_JSON: &str = include_str!("../../../assets/themes/dark.json");
 
 pub fn bundled_json(light: bool) -> &'static str {
     if light {

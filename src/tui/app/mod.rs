@@ -222,7 +222,7 @@ struct App {
     /// The composer's chord overrides from `~/.e/keybindings.json`. Reread
     /// alongside the theme — startup, /settings close, /reload — never
     /// mid-keystroke.
-    keymap: crate::core::config::keybindings::Keymap,
+    keymap: crate::tui::keybindings::Keymap,
     transcript: Transcript,
     editor: Editor,
     /// Images attached to the current composer draft by ctrl+v.
@@ -2392,7 +2392,7 @@ impl App {
     /// Re-read `~/.e/keybindings.json`. A malformed or missing file fails
     /// open to no overrides — never an error that blocks typing.
     fn apply_keymap(&mut self) {
-        self.keymap = crate::core::config::keybindings::load();
+        self.keymap = crate::tui::keybindings::load();
         self.layout = crate::core::config::layout::load();
     }
 
@@ -2805,7 +2805,7 @@ fn rewind_target(
 /// swallows the chord, `None` means "not mentioned"); anything left
 /// unmentioned falls through to e's built-in bindings below, so an empty or
 /// missing file reproduces this function's behavior exactly.
-fn key_of(event: &KeyEvent, keymap: &crate::core::config::keybindings::Keymap) -> Option<Key> {
+fn key_of(event: &KeyEvent, keymap: &crate::tui::keybindings::Keymap) -> Option<Key> {
     // Crossterm can report Command/Super through the enhanced keyboard
     // protocol. Never degrade an unhandled modified key to printable text.
     if event
@@ -2817,8 +2817,8 @@ fn key_of(event: &KeyEvent, keymap: &crate::core::config::keybindings::Keymap) -
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let shift = event.modifiers.contains(KeyModifiers::SHIFT);
-    if let Some(base) = crate::core::config::keybindings::base_name(event.code) {
-        let chord = crate::core::config::keybindings::chord_string(ctrl, alt, shift, &base);
+    if let Some(base) = crate::tui::keybindings::base_name(event.code) {
+        let chord = crate::core::config::chord::chord_string(ctrl, alt, shift, &base);
         if let Some(bound) = keymap.lookup(&chord) {
             return bound;
         }
@@ -2957,7 +2957,7 @@ async fn run_scoped(
     // timeout) and falls back to COLORFGBG, then dark.
     let detected = crate::tui::background::detect_light().unwrap_or(false);
     let theme = crate::tui::theme::resolve(&crate::core::config::settings::theme(), detected);
-    let keymap = crate::core::config::keybindings::load();
+    let keymap = crate::tui::keybindings::load();
 
     let (mut cols, mut rows) = terminal::size()?;
     // The launch anchor: the frame paints below where the user launched e,
@@ -4122,7 +4122,7 @@ mod tests {
 
     #[test]
     fn key_of_matches_the_built_in_bindings_when_the_keymap_is_empty() {
-        let keymap = crate::core::config::keybindings::Keymap::empty();
+        let keymap = crate::tui::keybindings::Keymap::empty();
         let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
         assert!(matches!(key_of(&ctrl_w, &keymap), Some(Key::KillWord)));
         let plain_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
@@ -4150,7 +4150,7 @@ mod tests {
         std::env::set_var("E_HOME", &dir);
         std::fs::write(dir.join("keybindings.json"), r#"{"ctrl+w": "home"}"#).unwrap();
 
-        let keymap = crate::core::config::keybindings::load();
+        let keymap = crate::tui::keybindings::load();
         let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
         assert!(
             matches!(key_of(&ctrl_w, &keymap), Some(Key::Home)),
@@ -4174,7 +4174,7 @@ mod tests {
         // rather than falling through to the default.
         std::fs::write(dir.join("keybindings.json"), r#"{"ctrl+j": "none"}"#).unwrap();
 
-        let keymap = crate::core::config::keybindings::load();
+        let keymap = crate::tui::keybindings::load();
         let ctrl_j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL);
         assert!(key_of(&ctrl_j, &keymap).is_none());
 
@@ -4650,7 +4650,7 @@ mod tests {
         let (results, _) = tokio::sync::mpsc::channel(1);
         App {
             theme: crate::tui::theme::load_bundled(false).unwrap(),
-            keymap: crate::core::config::keybindings::Keymap::empty(),
+            keymap: crate::tui::keybindings::Keymap::empty(),
             transcript: Transcript::default(),
             editor: Editor::new(),
             composer_images: Vec::new(),
