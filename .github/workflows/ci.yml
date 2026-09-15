@@ -160,7 +160,8 @@ jobs:
   packages:
     needs: changes
     if: needs.changes.outputs.packages == 'true'
-    name: Installers (${{ matrix.os }})
+    # A skipped matrix is not expanded, so keep the check name static.
+    name: Installers
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
