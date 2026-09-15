@@ -81,13 +81,21 @@ jobs:
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
   guard:
-    # Audit the security surface before running the repository contract.
+    # Enforce fast contributor checks on every PR, including docs-only changes.
     name: Guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Check changed content
+        run: python3 scripts/hooks/check.py HEAD^
+
+      - name: Test contributor hooks
+        run: python3 -m unittest discover -s scripts/hooks -p 'test_*.py'
 
       - name: Audit
         run: ./scripts/guard.sh
