@@ -1,0 +1,13 @@
+{"id":"hello","method":"hello","params":{"ask":true}}
+{"id":"models","method":"models.list"}
+{"id":"create","method":"session.create","params":{"cwd":"$CWD","model":"mock/test","save":false,"name":"fixture"}}
+{"id":"info","method":"session.info","params":{"session":"$SESSION"}}
+{"id":"prompt","method":"session.prompt","params":{"session":"$SESSION","prompt":"say ok"}}
+{"id":"messages","method":"session.messages","params":{"session":"$SESSION"}}
+{"id":"set","method":"session.set","params":{"session":"$SESSION","model":"mock/test"}}
+{"id":"fork","method":"session.fork","params":{"session":"$SESSION"}}
+{"id":"export","method":"session.export","params":{"session":"$SESSION","path":"$CWD/fixture.html"}}
+{"id":"list","method":"session.list","params":{"cwd":"$CWD"}}
+{"id":"close","method":"session.close","params":{"session":"$SESSION"}}
+{"id":"one-shot","prompt":"say ok","model":"mock/test"}
+{"id":"bye","method":"shutdown"}

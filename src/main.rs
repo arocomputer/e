@@ -15,9 +15,9 @@
 
 use std::io::IsTerminal as _;
 
-use e::core::agent::{Agent, AgentOptions, SessionEvent};
+use e::core::agent::{Agent, SessionEvent};
 use e::core::cli::{self, Options};
-use e::core::providers::catalog::{self as model, Model};
+use e::core::providers::catalog::{self as model};
 use e::tui::app;
 
 /// Print the usage text shared by `e --help` and `e help`, including any
@@ -29,7 +29,7 @@ usage:\n  e [message]           start a session (optionally with a first prompt;
 e -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
 e -c, --continue      continue this directory's most recent session\n  \
 e -r, --resume        pick a session to resume\n  \
-e rpc                 JSONL request/response protocol on stdin/stdout\n  \
+e rpc                 headless session server: JSONL over stdin/stdout\n                        (sessions, streaming events; `e docs automation`)\n  \
 e docs [topic]        print a built-in format guide\n  \
 e update              update e to the latest release\n  \
 e install [source]    install a package, or make every listed one current\n  \
@@ -289,10 +289,10 @@ async fn main() -> std::io::Result<()> {
         Some("doctor" | "providers" | "install" | "remove" | "packages")
     );
     // Extensions' own requests (`ui.*`, `session.*`) travel this channel
-    // to the terminal frontend. Headless runs (`e rpc`) start the host
-    // without it, so `initialize` tells extensions there is no UI.
-    let headless =
-        cli::leading_subcommand(&args) == Some("rpc") || cli::has_flag(&args, &["--print", "-p"]);
+    // to whoever answers them: the terminal frontend, or `e rpc`, which
+    // relays questions to its client. `e -p` starts the host without it,
+    // so `initialize` tells extensions there is no UI.
+    let headless = cli::has_flag(&args, &["--print", "-p"]);
     let (requests_tx, requests_rx) =
         tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
     // `--package <source>` packages join this run before extensions start,
@@ -473,17 +473,7 @@ async fn main() -> std::io::Result<()> {
         }
     }
     if args.first().map(String::as_str) == Some("rpc") {
-        // `rpc` rode in behind an extension flag, so the raw scan above
-        // could not see it and the host was started with a UI channel. No
-        // frontend will ever read it: answer each request the way a
-        // headless host would, instead of letting extensions hang on it.
-        tokio::spawn(async move {
-            let mut requests_rx = requests_rx;
-            while let Some(request) = requests_rx.recv().await {
-                request.respond(Err("no ui".into()));
-            }
-        });
-        return rpc(host, &options).await;
+        return e::rpc::serve(host, &options, requests_rx, jobs_rx).await;
     }
     if options.print {
         let status = print_turn(host.clone(), &options, args).await;
@@ -568,7 +558,7 @@ async fn main() -> std::io::Result<()> {
         .await;
     }
 
-    let selected = match resolve_model(&options) {
+    let selected = match cli::resolve_model(&options) {
         Ok(model) => model,
         Err(message) => {
             eprintln!("{message}");
@@ -582,7 +572,7 @@ async fn main() -> std::io::Result<()> {
         host.shutdown().await;
         std::process::exit(2);
     }
-    let images = match load_images(&options, &selected) {
+    let images = match cli::load_images(&options, &selected) {
         Ok(images) => images,
         Err(message) => {
             eprintln!("{message}");
@@ -596,7 +586,7 @@ async fn main() -> std::io::Result<()> {
             continue_session: options.continue_session,
             resume_session: options.resume_session,
             model: selected,
-            agent: agent_options(&options),
+            agent: cli::agent_options(&options),
             images,
         },
         host,
@@ -607,185 +597,6 @@ async fn main() -> std::io::Result<()> {
     .await;
     e::core::resources::packages::forget_once();
     outcome
-}
-
-fn resolve_model(options: &Options) -> Result<Model, String> {
-    let selected = match options.model.as_deref() {
-        Some(query) => model::resolve(query).ok_or_else(|| {
-            format!(
-                "model `{query}` is unavailable; sign in to its provider or choose a model from /model"
-            )
-        })?,
-        None => model::default_model(),
-    };
-    if let Some(effort) = options.effort.as_deref() {
-        if !selected.effort.iter().any(|level| level == effort) {
-            let supported = if selected.effort.is_empty() {
-                "none".to_string()
-            } else {
-                selected.effort.join(", ")
-            };
-            return Err(format!(
-                "model `{}` does not support effort `{effort}` (supported: {supported})",
-                model::slug(&selected)
-            ));
-        }
-    }
-    Ok(selected)
-}
-
-fn agent_options(options: &Options) -> AgentOptions {
-    AgentOptions {
-        save_session: !options.no_save,
-        tool_mode: options.tool_mode,
-        effort_override: options.effort.clone(),
-        allowed_tools: None,
-        ..AgentOptions::default()
-    }
-}
-
-fn load_images(
-    options: &Options,
-    model: &Model,
-) -> Result<Vec<e::core::providers::ImageInput>, String> {
-    if !options.images.is_empty() && !model.image_input {
-        return Err(format!(
-            "model `{}` is not declared image-capable",
-            model::slug(model)
-        ));
-    }
-    e::core::providers::ImageInput::from_paths(&options.images)
-}
-
-#[derive(serde::Deserialize)]
-struct RpcRequest {
-    prompt: String,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    effort: Option<String>,
-    #[serde(default)]
-    tool_mode: Option<String>,
-    /// A positive tool allowlist for this turn: the turn sees only these
-    /// built-ins. `None` is the full toolset; composes under `tool_mode`.
-    #[serde(default)]
-    tools: Option<Vec<String>>,
-    #[serde(default)]
-    save: bool,
-    #[serde(default)]
-    images: Vec<String>,
-}
-
-fn rpc_options(defaults: &Options, request: &RpcRequest) -> Result<Options, String> {
-    let requested_tools = match request.tool_mode.as_deref() {
-        None | Some("all") => e::core::cli::ToolMode::All,
-        Some("none") => e::core::cli::ToolMode::None,
-        Some(other) => return Err(format!("unknown tool_mode `{other}`")),
-    };
-    let mut options = defaults.clone();
-    options.model = request.model.clone().or(options.model);
-    options.effort = request.effort.clone().or(options.effort);
-    options.no_save = defaults.no_save || !request.save;
-    options.images = request.images.clone();
-    options.tool_mode = defaults.tool_mode.restrict(requested_tools);
-    Ok(options)
-}
-
-#[derive(Default)]
-struct TurnAccumulator {
-    output: String,
-    error: Option<String>,
-    error_details: Option<e::core::agent::failure::ErrorDetails>,
-    warnings: Vec<String>,
-    aborted: bool,
-    terminal: bool,
-    usage: e::core::providers::Usage,
-    tool_calls: u64,
-    tool_failures: u64,
-}
-
-impl TurnAccumulator {
-    fn with_warnings(warnings: Vec<String>) -> Self {
-        Self {
-            warnings,
-            ..Self::default()
-        }
-    }
-
-    fn observe(&mut self, event: &SessionEvent) {
-        match event {
-            SessionEvent::TextDelta(delta) => self.output.push_str(delta),
-            SessionEvent::ToolBatchStart { calls } => self.tool_calls += calls.len() as u64,
-            SessionEvent::ToolEnd { outcome, .. } if outcome.is_error() => {
-                self.tool_failures += 1;
-            }
-            SessionEvent::Compacted { response, .. } => {
-                if let Some(usage) = response.usage {
-                    self.usage.add(usage);
-                }
-            }
-            SessionEvent::Usage { usage, .. } => self.usage.add(*usage),
-            SessionEvent::Warning(warning) => self.warnings.push(warning.clone()),
-            SessionEvent::Retry {
-                attempt,
-                limit,
-                delay_secs,
-                cause,
-                reason,
-            } => self.warnings.push(format!(
-                "{} — retrying ({attempt}/{limit}) in {delay_secs}s: {reason}",
-                cause.label()
-            )),
-            SessionEvent::ErrorDetails(details) => {
-                self.error_details = Some(details.as_ref().clone())
-            }
-            SessionEvent::Error(message) => self.error = Some(message.clone()),
-            SessionEvent::TurnEnd { aborted } => {
-                self.aborted = *aborted;
-                self.terminal = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn finish(&mut self) {
-        if !self.terminal && self.error.is_none() {
-            self.error = Some("agent event stream closed before turn completion".into());
-        }
-    }
-
-    fn json(
-        &self,
-        selected_model: &str,
-        effort: Option<&str>,
-        pricing: Option<&e::core::providers::catalog::Pricing>,
-    ) -> serde_json::Value {
-        let final_output = if self.error.is_none() && !self.aborted {
-            self.output.as_str()
-        } else {
-            ""
-        };
-        serde_json::json!({
-            "output": self.output,
-            "final_output": final_output,
-            "model": selected_model,
-            "effort": effort,
-            "aborted": self.aborted,
-            "error": self.error,
-            "error_details": self.error_details,
-            "warnings": self.warnings,
-            "usage": {
-                "input_tokens": self.usage.input,
-                "output_tokens": self.usage.output,
-                "cache_read_tokens": self.usage.cache_read,
-                "cache_write_5m_tokens": self.usage.cache_write_5m,
-                "cache_write_1h_tokens": self.usage.cache_write_1h,
-                "prompt_tokens": self.usage.prompt_tokens(),
-            },
-            "cost_usd": pricing.map(|rates| rates.estimate(self.usage)),
-            "tools": {"calls": self.tool_calls, "failures": self.tool_failures},
-        })
-    }
 }
 
 /// `e -p [prompt]`: one headless turn. The prompt is the positional text,
@@ -824,18 +635,18 @@ async fn print_turn(
         return fail("-p needs a prompt: an argument, or text on stdin".into());
     }
     let cwd = std::env::current_dir().unwrap_or_default();
-    let selected = match resolve_model(options) {
+    let selected = match cli::resolve_model(options) {
         Ok(selected) => selected,
         Err(error) => return fail(error),
     };
-    let images = match load_images(options, &selected) {
+    let images = match cli::load_images(options, &selected) {
         Ok(images) => images,
         Err(error) => return fail(error),
     };
     let slug = model::slug(&selected);
     let pricing = selected.pricing.clone();
     let system = e::core::agent::context::system_prompt(&cwd);
-    let (mut agent, mut events) = Agent::with_options(selected, agent_options(options));
+    let (mut agent, mut events) = Agent::with_options(selected, cli::agent_options(options));
     let effort = agent.effort();
     agent.set_host(host);
     agent.submit_message(
@@ -843,7 +654,7 @@ async fn print_turn(
         system,
     );
 
-    let mut result = TurnAccumulator::with_warnings(model::config_warnings());
+    let mut result = e::rpc::TurnAccumulator::with_warnings(model::config_warnings());
     let mut stdout = std::io::stdout();
     let mut printed_any = false;
     while let Some(event) = events.recv().await {
@@ -875,7 +686,7 @@ async fn print_turn(
         }
     }
     result.finish();
-    let failed = result.error.is_some() || result.aborted;
+    let failed = result.failed();
     if json {
         let mut body = result.json(&slug, effort.as_deref(), pricing.as_ref());
         body["type"] = serde_json::Value::from("result");
@@ -897,213 +708,8 @@ async fn print_turn(
     i32::from(failed)
 }
 
-/// Bound on one RPC request line — generous for pasted prompt text (images
-/// travel as file paths, not inline bytes) but never unbounded: an
-/// unterminated or malicious client must not grow this long-lived
-/// process's memory without limit. Matches read_bounded_line's fail-fast
-/// contract: hitting it ends the loop rather than skipping the line, since
-/// a still-growing line with no newline yet cannot be safely resynced past.
-const MAX_RPC_LINE_BYTES: usize = 10 * 1024 * 1024;
-
-#[cfg(unix)]
-struct RpcSignals {
-    terminate: tokio::signal::unix::Signal,
-    hangup: tokio::signal::unix::Signal,
-}
-
-#[cfg(unix)]
-impl RpcSignals {
-    fn new() -> std::io::Result<Self> {
-        use tokio::signal::unix::{signal, SignalKind};
-        Ok(Self {
-            terminate: signal(SignalKind::terminate())?,
-            hangup: signal(SignalKind::hangup())?,
-        })
-    }
-
-    async fn recv(&mut self) -> i32 {
-        tokio::select! {
-            _ = self.terminate.recv() => 143,
-            _ = self.hangup.recv() => 129,
-        }
-    }
-}
-
-/// Stop owned shell groups before extension cleanup. `process::exit` is
-/// intentional: Tokio's blocking stdin reader cannot be cancelled while RPC
-/// is idle, so returning from main could leave signal shutdown hung forever.
-#[cfg(unix)]
-async fn exit_rpc_on_signal(
-    host: &e::core::extensions::ExtensionHost,
-    agent: Option<&mut Agent>,
-    status: i32,
-) -> ! {
-    e::core::tools::kill_tracked_processes();
-    if let Some(agent) = agent {
-        agent.interrupt();
-    }
-    host.shutdown().await;
-    std::process::exit(status);
-}
-
-/// A deliberately small machine protocol: sequential JSONL requests in,
-/// exactly one JSON object out for each line. The extension host is reused,
-/// while each request gets an isolated Agent and is memory-only by default.
-async fn rpc(
-    host: std::sync::Arc<e::core::extensions::ExtensionHost>,
-    defaults: &Options,
-) -> std::io::Result<()> {
-    let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-    #[cfg(unix)]
-    let mut signals = RpcSignals::new()?;
-    loop {
-        #[cfg(unix)]
-        let line_result = tokio::select! {
-            line = e::core::extensions::read_bounded_line(&mut reader, MAX_RPC_LINE_BYTES) => line,
-            status = signals.recv() => exit_rpc_on_signal(&host, None, status).await,
-        };
-        #[cfg(not(unix))]
-        let line_result =
-            e::core::extensions::read_bounded_line(&mut reader, MAX_RPC_LINE_BYTES).await;
-        let line = match line_result {
-            Ok(Some(line)) => line,
-            Ok(None) => break,
-            Err(error) => {
-                // Fatal, same as a too-large extension line is fatal to its
-                // reader: an oversized or unterminated line leaves the
-                // stream mid-line with no safe resync point, so one error
-                // response goes out and the process stops serving rather
-                // than risk parsing the remainder of a giant line as if it
-                // were fresh requests.
-                println!(
-                    "{}",
-                    serde_json::json!({"id": null, "error": format!("invalid request: {error}")})
-                );
-                break;
-            }
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(error) => {
-                println!(
-                    "{}",
-                    serde_json::json!({"id": null, "error": format!("invalid request: {error}")})
-                );
-                continue;
-            }
-        };
-        let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
-        let request: RpcRequest = match serde_json::from_value(value) {
-            Ok(request) => request,
-            Err(error) => {
-                println!(
-                    "{}",
-                    serde_json::json!({"id": request_id, "error": format!("invalid request: {error}")})
-                );
-                continue;
-            }
-        };
-        if let Some(unknown) = request
-            .tools
-            .as_ref()
-            .and_then(|names| names.iter().find(|name| !e::core::tools::is_builtin(name)))
-        {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "id": request_id,
-                    "error": format!("unknown built-in tool in allowlist: `{unknown}`")
-                })
-            );
-            continue;
-        }
-        let options = match rpc_options(defaults, &request) {
-            Ok(options) => options,
-            Err(error) => {
-                println!("{}", serde_json::json!({"id": request_id, "error": error}));
-                continue;
-            }
-        };
-        if request.prompt.trim().is_empty() {
-            println!(
-                "{}",
-                serde_json::json!({"id": request_id, "error": "prompt is empty"})
-            );
-            continue;
-        }
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let selected = match resolve_model(&options) {
-            Ok(selected) => selected,
-            Err(error) => {
-                println!("{}", serde_json::json!({"id": request_id, "error": error}));
-                continue;
-            }
-        };
-        let images = match load_images(&options, &selected) {
-            Ok(images) => images,
-            Err(error) => {
-                println!("{}", serde_json::json!({"id": request_id, "error": error}));
-                continue;
-            }
-        };
-        let slug = model::slug(&selected);
-        let pricing = selected.pricing.clone();
-        let mut agent_opts = agent_options(&options);
-        agent_opts.allowed_tools = request.tools.clone();
-        // The turn uses e's ordinary system prompt. The generic tool policy
-        // suffix records any request allowlist without adding a persona.
-        let system = e::core::agent::context::system_prompt(&cwd);
-        let (mut agent, mut events) = Agent::with_options(selected, agent_opts);
-        let effort = agent.effort();
-        agent.set_host(host.clone());
-        agent.submit_message(
-            e::core::providers::ChatMessage::user_with_images(request.prompt, images),
-            system,
-        );
-
-        let mut result = TurnAccumulator::with_warnings(model::config_warnings());
-        loop {
-            #[cfg(unix)]
-            let event = tokio::select! {
-                event = events.recv() => event,
-                status = signals.recv() => {
-                    exit_rpc_on_signal(&host, Some(&mut agent), status).await
-                }
-            };
-            #[cfg(not(unix))]
-            let event = events.recv().await;
-            let Some(event) = event else {
-                break;
-            };
-            result.observe(&event);
-            if result.terminal {
-                break;
-            }
-        }
-        result.finish();
-        let mut body = result.json(&slug, effort.as_deref(), pricing.as_ref());
-        body["id"] = request_id;
-        // The saved session's JSONL path, when this turn persisted one: the
-        // whole transcript — every tool call and its output — lives there, so
-        // a caller that needs more than the final text can read it. Null when
-        // the turn ran memory-only (`save` false).
-        body["session"] = agent
-            .session_path()
-            .map(|p| serde_json::Value::from(p.display().to_string()))
-            .unwrap_or(serde_json::Value::Null);
-        println!("{body}");
-    }
-    e::core::tools::kill_tracked_processes();
-    host.shutdown().await;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use e::core::cli::{Options, ToolMode};
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
     }
@@ -1122,36 +728,6 @@ mod tests {
         let error = super::auth_status_requested(&args(&["auth", "openai-codex"])).unwrap_err();
         assert!(error.contains("usage: e auth"));
         assert!(error.contains("/login <provider>"));
-    }
-
-    #[test]
-    fn rpc_cannot_relax_process_safety_flags() {
-        let defaults = Options {
-            no_save: true,
-            tool_mode: ToolMode::None,
-            ..Options::default()
-        };
-        let request = super::RpcRequest {
-            prompt: "hello".into(),
-            model: None,
-            effort: None,
-            tool_mode: Some("all".into()),
-            tools: None,
-            save: true,
-            images: Vec::new(),
-        };
-        let resolved = super::rpc_options(&defaults, &request).unwrap();
-        assert!(resolved.no_save);
-        assert_eq!(resolved.tool_mode, ToolMode::None);
-    }
-
-    #[test]
-    fn headless_stream_requires_a_terminal_event() {
-        let mut result = super::TurnAccumulator::default();
-        result.observe(&e::core::agent::SessionEvent::TextDelta("partial".into()));
-        result.finish();
-        assert!(result.error.is_some());
-        assert_eq!(result.output, "partial");
     }
 
     #[test]

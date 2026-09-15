@@ -1,0 +1,67 @@
+# e on GitHub: answer `/e <prompt>` on issues and pull requests.
+#
+# Copy this file to .github/workflows/e.yml in your repository, add a
+# provider key as a repository secret (ANTHROPIC_API_KEY here; any provider
+# e knows works the same way — see `e docs models`), and comment `/e what
+# does this change do?` on a PR. One comment, one headless turn, one reply.
+#
+# The checkout is e's working directory, so `AGENTS.md` and the repo's
+# files are in play like they are in the terminal. Tools run as the runner
+# user inside the job; nothing is written back unless the prompt asks and
+# a later step pushes it.
+name: e
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  answer:
+    if: startsWith(github.event.comment.body, '/e ')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For a PR comment, work on the PR's head, not the default branch.
+          ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.ref }}
+
+      - name: Install e
+        run: curl -fsSL https://e.intuitum.sh/install.sh | sh
+
+      - name: Run one turn
+        id: turn
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COMMENT: ${{ github.event.comment.body }}
+        run: |
+          prompt="${COMMENT#/e }"
+          # --json gives every event and a final result line; the reply is
+          # final_output. Save the whole stream as a job artifact if you want
+          # the tool trace; the comment gets the reply and the cost.
+          ~/.local/bin/e -p --json --no-save "$prompt" > events.jsonl || true
+          tail -n 1 events.jsonl > result.json
+          {
+            echo 'reply<<EOF'
+            python3 -c 'import json,sys; r=json.load(open("result.json")); print(r.get("final_output") or ("error: "+str(r.get("error"))))'
+            echo 'EOF'
+            echo "cost=$(python3 -c 'import json; r=json.load(open("result.json")); c=r.get("cost_usd"); print("" if c is None else f"${c:.4f}")')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPLY: ${{ steps.turn.outputs.reply }}
+          COST: ${{ steps.turn.outputs.cost }}
+        run: |
+          body="$REPLY"
+          if [ -n "$COST" ]; then
+            body=$(printf '%s\n\n_%s_' "$body" "$COST")
+          fi
+          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "$body"

@@ -1,0 +1,18 @@
+{
+  "name": "e-slack",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Slack bot that runs e: one thread, one session, over `e rpc`",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

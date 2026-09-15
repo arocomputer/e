@@ -1,0 +1,74 @@
+# Channels
+
+A channel puts e where a team already works: a Slack thread, a Linear
+issue, a GitHub pull request. e does not ship channels inside the binary.
+Each one is a small program of its own that spawns `e rpc`, maps the
+platform's conversations to e sessions, and relays events back — the same
+way the terminal frontend is a consumer of the core, not part of it. This
+keeps the binary every developer installs free of Slack tokens, webhooks,
+and bot frameworks, and lets a company write its channel in whatever
+language its glue code already uses.
+
+The protocol is [automation.md](automation.md). Reference channels live
+under [`channels/`](../channels/) in the repository:
+
+```
+channels/slack/     a Slack bot: one thread, one session (TypeScript)
+channels/github/    a GitHub Actions workflow answering `/e` on issues and PRs
+```
+
+## The shape of a channel
+
+Every channel does the same five things.
+
+1. **Spawn `e rpc`** once, with the pipes kept open, and say `hello`. Pass
+   `--no-save` or `--no-tools` if the deployment wants them; those bounds
+   hold for every session the client creates.
+2. **Map a conversation to a session.** A Slack thread, a Linear issue, or
+   a PR is one `session.create` with the repository's checkout as `cwd`,
+   `save: true` so the conversation survives a restart, and a `name` the
+   team recognizes. Keep the mapping (thread id to session id and path) in
+   the channel's own store; after a restart, `session.create` with `resume`
+   brings the thread back with its history.
+3. **Turn a message into a prompt.** `session.prompt` with the text. While
+   the turn runs, the `tool_batch` and `tool_end` events are what a person
+   wants to see in the thread ("Reading src/main.rs", "Ran tests"); `text`
+   deltas accumulate into the reply. The response line carries the final
+   text, usage, and cost.
+4. **Relay questions.** With `hello {ask: true}`, an extension's
+   `ui.confirm` or `ui.select` arrives as an `ask` line. Post it as a
+   message with buttons, and answer with `ask.reply` when someone clicks.
+   Until then the tool waits.
+5. **Stop.** `session.interrupt` for a cancel reaction, `session.close`
+   when a thread is archived, and stdin EOF or `shutdown` when the channel
+   process stops.
+
+A channel never parses terminal output and never touches `~/.e` itself.
+Everything it needs — models, sessions, history, an HTML export to attach —
+is a method.
+
+## Slack
+
+`channels/slack/` is the reference: a Bolt app in socket mode, so it needs
+no public URL. It answers when mentioned in a channel and continues in the
+thread; each thread is one e session against the checkout in `E_CWD`. Tool
+progress is posted as it happens, the reply when the turn ends, and
+extension questions become a message with buttons. See its README for the
+three Slack credentials and how to run it.
+
+## GitHub
+
+`channels/github/e.yml` is a workflow that runs on issue and pull-request
+comments containing `/e`. It checks out the repository, installs e, and runs
+`e -p --json` with the comment as the prompt, posting the reply as a comment.
+One turn per comment is the right shape for CI: nothing long-lived, the
+checkout is the working directory, and the provider key is a repository
+secret. A run that needs the conversation to continue across comments can
+use `e rpc` with `save: true` and cache `~/.e/sessions` between runs.
+
+## Linear and the rest
+
+A Linear channel is the Slack channel with a webhook instead of a socket:
+an issue is a session, a comment is a prompt, and the reply is a comment.
+Nothing in e distinguishes the platforms; the difference is entirely in
+the adapter. Write it against `channels/slack/` as the pattern.

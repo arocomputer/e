@@ -339,6 +339,60 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
     Ok(out)
 }
 
+use crate::core::providers::catalog;
+
+/// The model a run uses: the requested query, or the configured default;
+/// with an explicit effort checked against what that model declares.
+/// Shared by the terminal, `e -p`, and `e rpc` so one message describes an
+/// unavailable model everywhere.
+pub fn resolve_model(options: &Options) -> Result<catalog::Model, String> {
+    let selected = match options.model.as_deref() {
+        Some(query) => catalog::resolve(query).ok_or_else(|| {
+            format!(
+                "model `{query}` is unavailable; sign in to its provider or choose a model from /model"
+            )
+        })?,
+        None => catalog::default_model(),
+    };
+    if let Some(effort) = options.effort.as_deref() {
+        if !selected.effort.iter().any(|level| level == effort) {
+            let supported = if selected.effort.is_empty() {
+                "none".to_string()
+            } else {
+                selected.effort.join(", ")
+            };
+            return Err(format!(
+                "model `{}` does not support effort `{effort}` (supported: {supported})",
+                catalog::slug(&selected)
+            ));
+        }
+    }
+    Ok(selected)
+}
+
+pub fn agent_options(options: &Options) -> crate::core::agent::AgentOptions {
+    crate::core::agent::AgentOptions {
+        save_session: !options.no_save,
+        tool_mode: options.tool_mode,
+        effort_override: options.effort.clone(),
+        allowed_tools: None,
+        ..crate::core::agent::AgentOptions::default()
+    }
+}
+
+pub fn load_images(
+    options: &Options,
+    model: &catalog::Model,
+) -> Result<Vec<crate::core::providers::ImageInput>, String> {
+    if !options.images.is_empty() && !model.image_input {
+        return Err(format!(
+            "model `{}` is not declared image-capable",
+            catalog::slug(model)
+        ));
+    }
+    crate::core::providers::ImageInput::from_paths(&options.images)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

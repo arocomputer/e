@@ -65,11 +65,18 @@ src/tui/     the frontend (short paths re-export from the groups)
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows) · extui.rs (answering
                   extensions: modals, panels, status slots, session control)
+src/rpc/     the headless frontend: `e rpc`, a JSONL session server over
+             stdin/stdout (docs/automation.md) — mod.rs (sessions, methods,
+             the serve loop, extension questions relayed as `ask`) ·
+             result.rs (the turn result `-p --json` and rpc both report)
 src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
 sdk/         e-sdk, the in-process Rust surface (docs/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a consumer of the library target with its own release boundary
              (docs/sdk.md), never a fourth layer
+channels/    reference clients of `e rpc` (docs/channels.md): slack/ (a Bolt
+             bot, TypeScript) · github/ (an Actions workflow). Not compiled
+             into e; a channel is a program that spawns it, never a module
 ```
 
 ## Running one thing, not everything
@@ -115,8 +122,8 @@ surface? Route it through `panel.rs` so it can't diverge.
 - One event stream. The frontend subscribes once; text, tools, usage, errors all
   arrive on it in order (`SessionEvent`). Compaction and continuation belong
   to the core. Frontends never reset running state or resubmit stranded prompts.
-- Hit every consumer. The core has three frontends — the TUI, `e rpc`, and
-  `sdk/` — and four provider dialects. A change to the turn loop, events, or
+- Hit every consumer. The core has three frontends — the TUI, `e rpc`
+  (`src/rpc/`), and `sdk/` — and four provider dialects. A change to the turn loop, events, or
   tools needs a decision per frontend, and a provider-shaped change a decision
   per dialect, even when the decision is "no change here". Persisted and
   user-facing contracts (CLI, sessions, configuration, the extension protocol)

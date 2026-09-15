@@ -18,7 +18,11 @@ pub const TOPICS: &[(&str, &str)] = &[
     ),
     (
         "automation",
-        "JSON output and the long-lived JSONL RPC protocol",
+        "e -p JSON output and the e rpc session server protocol",
+    ),
+    (
+        "channels",
+        "put e in Slack, GitHub, or Linear as a client of e rpc",
     ),
     (
         "packages",
@@ -62,6 +66,7 @@ pub fn body(topic: &str) -> Option<&'static str> {
         "themes" => include_str!("../../../docs/themes.md"),
         "models" => include_str!("../../../docs/models.md"),
         "automation" => include_str!("../../../docs/automation.md"),
+        "channels" => include_str!("../../../docs/channels.md"),
         "packages" => include_str!("../../../docs/packages.md"),
         "sdk" => include_str!("../../../docs/sdk.md"),
         "prompt-templates" => include_str!("../../../docs/prompt-templates.md"),
