@@ -29,7 +29,8 @@ def resolve():
         assert release['channel'] != 'pr'
         sha = git('rev-parse', f'refs/tags/{tag}^{{commit}}')
         subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
-        return release | {'sha': sha, 'tag': tag, 'mode': 'retry'}
+        draft = subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'isDraft', '--jq', '.isDraft'], text=True).strip()
+        return release | {'sha': sha, 'tag': tag, 'mode': 'recover' if draft == 'true' else 'retry'}
     else:
         ref = event.get('inputs', {}).get('commit') or 'origin/main'
         sha, channel = git('rev-parse', '--verify', f'{ref}^{{commit}}'), 'beta'
