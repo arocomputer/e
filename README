@@ -35,16 +35,9 @@ SAFETY:
 ///
 
 REFERENCE:
- - [Models](https://github.com/intuitums/e/blob/main/docs/models.md)
- - [Architecture](https://github.com/intuitums/e/blob/main/docs/architecture.md)
- - [Compatibility](https://github.com/intuitums/e/blob/main/docs/compatibility.md)
- - [Decisions](https://github.com/intuitums/e/blob/main/docs/decisions)
  - [Extensions](https://github.com/intuitums/e/blob/main/docs/extensions.md)
  - [SDK](https://github.com/intuitums/e/blob/main/docs/sdk.md)
- - [Skills](https://github.com/intuitums/e/blob/main/docs/skills.md)
- - [Packages](https://github.com/intuitums/e/blob/main/docs/packages.md)
- - [Themes](https://github.com/intuitums/e/blob/main/docs/themes.md)
- - [Releases](https://github.com/intuitums/e/blob/main/docs/releases.md)
+ - [Agent guide](https://github.com/intuitums/e/blob/main/AGENTS.md)
  - [Security](https://github.com/intuitums/e/blob/main/SECURITY.md)
  - [Contributing](https://github.com/intuitums/e/blob/main/CONTRIBUTING.md)
- - [Agent guide](https://github.com/intuitums/e/blob/main/AGENTS.md)
+ - [Every guide](https://github.com/intuitums/e/tree/main/docs)
