@@ -3,7 +3,10 @@
 # from the release, the channel from this directory. Build from the repository:
 #
 #   docker build -t e-slack channels/slack
-FROM node:24-slim
+#
+# Debian 13 rather than the default bookworm base: the released Linux binaries
+# link against glibc 2.39, which bookworm's 2.36 is too old for.
+FROM node:24-trixie-slim
 
 # git is what e's tools need on a checkout; curl and ca-certificates are for the
 # installer.
@@ -18,14 +21,17 @@ RUN apt-get update \
 ENV E_HOME=/home/e
 RUN mkdir -p /home/e && chmod 0777 /home/e
 
-# The e release the bot drives. Empty means the latest stable release.
+# The e release the bot drives: `stable` or `beta`, and empty for the latest
+# of that channel. The channel matters as much as the version — a beta version
+# is only valid against the beta channel.
+ARG E_CHANNEL=stable
 ARG E_VERSION=""
 RUN set -eux; \
     curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \
     if [ -n "$E_VERSION" ]; then \
-      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --version "$E_VERSION"; \
+      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --channel "$E_CHANNEL" --version "$E_VERSION"; \
     else \
-      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh; \
+      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --channel "$E_CHANNEL"; \
     fi; \
     rm -f /tmp/install.sh; \
     e --version
