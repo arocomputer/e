@@ -8,16 +8,20 @@ native binary and installer before publication.
 
 ## Writing release notes
 
-Use the same layout as [fx's changelog](https://github.com/vercel-labs/fx/blob/main/CHANGELOG.md):
+Each release has a version, publication date, short title, and a brief introduction.
+Use e's own wording and describe what changed for someone using the terminal.
 
-- Open with a short bold paragraph about what users can now do.
-- Group changes under `### Breaking changes`, `### New features`,
-  `### Improvements`, `### Bug fixes`, and `### Security`, in that order.
-  Omit empty groups.
-- Write short, flat bullets about behavior. Keep migration instructions and
-  important limits; leave implementation inventories and test reports in PRs.
-- Add new work to the matching group under `## Unreleased`. Do not prepend
-  another chronological batch of notes.
+- Keep the version heading exactly `## X.Y.Z` so release extraction can find it.
+  Put the date on the next nonempty line and the release title in a `###` heading.
+- Use `### New features`, `### Improvements`, and `### Fixes`, in that order.
+  Omit empty groups. Keep bullets short and describe observable behavior.
+- Put breaking changes first under Improvements, prefixed with **Upgrade:** and
+  the replacement command or migration step. Prefix security fixes with **Security:**.
+- Keep `## Unreleased` in the repository only, with no invented publication date.
+  Add changes to its existing groups rather than appending chronological batches.
+- The website uses the same release title and groups, with a shorter selection of
+  changes where useful. It shows published releases only, newest first, using
+  GitHub's publication date. Do not add a separate page title or introduction.
 
 The GitHub release uses the version section verbatim, without its heading or
 an appended install block. Installation belongs in the README; artifact
@@ -29,7 +33,7 @@ version sections rather than publishing fallback text.
 1. Review `Unreleased` against the changes actually shipping. Do not include
    unreleased work when editing an older release's notes.
 2. Rename `## Unreleased` to `## X.Y.Z` and open a new empty `## Unreleased`
-   above it. Version headings do not include dates.
+   above it. Add the publication date below the version heading.
 3. Bump `VERSION` in `src/lib.rs` and `version` in `Cargo.toml` to `X.Y.Z`,
    updating `Cargo.lock` as needed.
 4. Preview the release body and qualify the candidate:

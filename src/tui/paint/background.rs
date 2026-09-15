@@ -8,8 +8,7 @@
 //!   color first (the terminal's real RGB), then the `COLORFGBG` env
 //!   report, then dark.
 //! - `query_cursor_row`: the launch anchor for the main-screen renderer —
-//!   e paints below where the user launched it (pi's regular-mode
-//!   behavior), which needs the cursor row. DSR 6n answers it. No reply
+//!   e paints below where the user launched it, which needs the cursor row. DSR 6n answers it. No reply
 //!   (raw pty, exotic terminal) falls back to the screen's bottom row at
 //!   the caller.
 //!
@@ -205,7 +204,7 @@ fn parse_color_spec(spec: &str) -> Option<(u8, u8, u8)> {
     None
 }
 
-/// WCAG relative luminance; a background is "light" at >= 0.5 (matches Pi).
+/// WCAG relative luminance; a background is "light" at >= 0.5.
 fn is_light_rgb(r: u8, g: u8, b: u8) -> bool {
     let lin = |c: u8| {
         let v = c as f64 / 255.0;

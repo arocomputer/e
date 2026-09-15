@@ -67,10 +67,6 @@ It applies on the next open, at both depths. The defaults are
 `Full detail · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close`.
 The rail connector renders in the theme's `muted` tone.
 
-The reference layout is in
-[fx's transcript footer](https://github.com/vercel-labs/fx/blob/8f2271f89466133b9ad3c591b5a6d5199444c7e7/src/ui/footer/paint_plan.zig).
-e implements the layout in Rust, without importing fx's implementation.
-
 ## Pasted text
 
 Long pastes collapse into a marker such as
