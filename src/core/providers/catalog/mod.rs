@@ -1,14 +1,16 @@
 //! The model catalog: which models exist, what they speak, and resolving a
-//! pick to a Model. Built-ins come from the provider registry (data),
-//! live remote sync (`remote.rs`) adds ids and refreshes seed context windows,
-//! and explicit `~/.e/models.json` values win over both. The active model
-//! comes from `~/.e/settings.json` `{"model": "provider/id"}` or a `/model`
-//! switch at runtime.
+//! pick to a Model. Built-ins come from the provider registry (data), the
+//! models.dev facts (`modelsdev.rs`) bring their windows, effort levels,
+//! and pricing up to date, live remote sync (`remote.rs`) adds the ids each
+//! provider actually serves, and explicit `~/.e/models.json` values win over
+//! all of it. The active model comes from `~/.e/settings.json`
+//! `{"model": "provider/id"}` or a `/model` switch at runtime.
 
 use serde::Deserialize;
 
 use crate::core::config::home;
 
+mod modelsdev;
 mod remote;
 use remote::remote_overlay;
 pub use remote::{refresh_remote, refresh_remote_within, REMOTE_REFRESH_MS};
@@ -293,6 +295,13 @@ pub fn config_warnings() -> Vec<String> {
 /// the same rule as themes: never override what the user declared.
 pub fn catalog() -> Vec<Model> {
     let mut models = builtin_catalog();
+    // Seeds are a snapshot of the feed; the cached feed is newer.
+    let facts = modelsdev::facts();
+    for model in &mut models {
+        if let Some(facts) = facts.get(&(model.provider.clone(), model.id.clone())) {
+            modelsdev::apply(model, facts);
+        }
+    }
     // Keep the source of a resolved window long enough for the remote overlay
     // to distinguish a built-in fallback from the user's final value.
     let mut context_overrides = std::collections::HashSet::new();
@@ -407,7 +416,14 @@ pub fn catalog() -> Vec<Model> {
                             pricing,
                         ),
                     };
-                    let declared = builtin.and_then(|p| p.models.iter().find(|decl| decl.id == id));
+                    // Whatever the file leaves unsaid comes from the model as
+                    // assembled so far — seed plus feed facts plus this
+                    // entry's provider-level values — so correcting one field
+                    // never rolls the others back to the seed.
+                    let existing = models
+                        .iter()
+                        .find(|m| m.provider == provider && m.id == id)
+                        .cloned();
                     let has_context_override = window.is_some() || entry.context_window.is_some();
                     let resolved = Model {
                         provider: provider.clone(),
@@ -423,8 +439,11 @@ pub fn catalog() -> Vec<Model> {
                             (_, e) if !e.is_empty() => e.clone(),
                             // …then the per-provider default from the file…
                             (Some(e), _) if !e.is_empty() => e.clone(),
-                            // …then the built-in's own effort.
-                            _ => declared.map(|d| d.effort.clone()).unwrap_or_default(),
+                            // …then the model's own effort.
+                            _ => existing
+                                .as_ref()
+                                .map(|m| m.effort.clone())
+                                .unwrap_or_default(),
                         },
                         thinking: match (&thinking, &entry.thinking) {
                             (Some(t), _) | (_, Some(t)) => match Thinking::parse(t) {
@@ -433,34 +452,31 @@ pub fn catalog() -> Vec<Model> {
                                 // not make `doctor` or startup unusable.
                                 None => continue,
                             },
-                            // …then the built-in's own declaration.
-                            _ => declared
-                                .map(|d| Thinking::from_decl(d.thinking.as_deref()))
+                            // …then the model's own declaration.
+                            _ => existing
+                                .as_ref()
+                                .map(|m| m.thinking)
                                 .unwrap_or(Thinking::Manual),
                         },
                         context_window: window
                             .or(entry.context_window)
-                            .or_else(|| declared.map(|d| d.context_window))
+                            .or_else(|| existing.as_ref().map(|m| m.context_window))
                             .unwrap_or(200_000),
                         max_output: max_output
                             .or(entry.max_output)
-                            .or_else(|| declared.and_then(|d| d.max_output)),
+                            .or_else(|| existing.as_ref().and_then(|m| m.max_output)),
                         supports_tools: supports_tools
                             .or(entry.supports_tools)
-                            .or_else(|| declared.map(|d| d.supports_tools))
+                            .or_else(|| existing.as_ref().map(|m| m.supports_tools))
                             .unwrap_or(true),
                         image_input: image_input
                             .or(entry.image_input)
-                            .or_else(|| {
-                                builtin.map(|provider| {
-                                    provider.image_input
-                                        || declared.is_some_and(|model| model.image_input)
-                                })
-                            })
+                            .or_else(|| existing.as_ref().map(|m| m.image_input))
+                            .or_else(|| builtin.map(|provider| provider.image_input))
                             .unwrap_or(false),
                         pricing: pricing
                             .or_else(|| entry.pricing.clone())
-                            .or_else(|| declared.and_then(|d| d.pricing.clone())),
+                            .or_else(|| existing.as_ref().and_then(|m| m.pricing.clone())),
                     };
                     models.retain(|m| !(m.provider == resolved.provider && m.id == resolved.id));
                     if has_context_override {
@@ -472,9 +488,10 @@ pub fn catalog() -> Vec<Model> {
         }
     }
     // The overlay runs last so it can attach to user-declared providers too.
-    // It adds unclaimed ids and replaces seed windows with live reports, but
-    // never replaces a context window the user explicitly declared.
-    remote_overlay(&mut models, &context_overrides);
+    // It adds unclaimed ids (with their feed facts) and replaces seed windows
+    // with live reports, but never replaces a context window the user
+    // explicitly declared.
+    remote_overlay(&mut models, &context_overrides, &facts);
     models
 }
 

@@ -60,17 +60,18 @@ built-in's provider and id replaces it — the file wins, like themes.
 - `effort` on a model object declares its reasoning levels, in cycle order —
   shift+tab walks exactly this list (e.g. `["low", "medium", "high",
   "xhigh"]`). A model entry without `effort` inherits its provider default,
-  then its built-in declaration; otherwise it has no reasoning knob. Levels
-  are the exact strings sent as `reasoning_effort` (or the dialect's equivalent), so they
-  must match what the backend accepts —
-  e.g. opencode-go's `glm-5.3-flash` takes `["low", "high", "max"]` (no
-  `medium`), a set the gateway does not advertise and e cannot infer, so it is
-  declared here.
+  then what models.dev states for the id, then its built-in declaration;
+  otherwise it has no reasoning knob. Levels are the exact strings sent as
+  `reasoning_effort` (or the dialect's equivalent), so they must match what
+  the backend accepts — e.g. opencode-go's `glm-5.3-flash` takes `["low",
+  "high", "max"]` (no `medium`), a set the gateway's own list does not
+  advertise.
 - `supports_tools` (default `true`) and `image_input` (default `false`) are
   capabilities, set at provider or model level. A model declared without tool
   support is sent no schemas and cannot execute a tool even if it emits one.
-  Live-discovered ids inherit the provider-level defaults, never an arbitrary
-  declared sibling model's override.
+  Live-discovered ids take what models.dev states for them, else the
+  provider-level defaults — never an arbitrary declared sibling model's
+  override.
 - `pricing` declares USD rates per million uncached input and output tokens.
   Optional cache-read, five-minute cache-write, and one-hour cache-write rates
   keep prompt caching priced separately. An omitted cache rate falls back to
@@ -101,6 +102,19 @@ appear as soon as the local server answers `/models`.
 Signed-in providers are asked for their model list (`GET {base}/models`)
 in the background — at launch, after a sign-in, and when `/models` opens —
 so a model a gateway ships today appears today, no e release involved.
-Windows the gateway reports replace built-in seed values. New models default
-to 200k when the gateway omits a window. An explicit `models.json` window
-wins over both and survives catalog refreshes and e updates.
+
+Most of those lists carry nothing but ids. The facts come from
+[models.dev](https://models.dev), the community catalog opencode and pi
+generate their provider files from: it is fetched in the same refresh,
+trimmed to e's providers, and cached in `~/.e/models-dev.json`. For every
+model it knows — built-in seed or freshly discovered id — it sets the
+context window, the effort levels, whether reasoning is adaptive or a
+token budget (the Anthropic thinking shape), image and tool support, and
+pricing. It never adds ids: which models a provider serves is the
+provider's word. It does not set `max_output`.
+
+Precedence, lowest to highest: the built-in seed, the models.dev facts, a
+window the gateway itself reports, and `models.json`. A seed is only the
+offline fallback; a wrong fact is fixed upstream, not pinned in e. An
+explicit `models.json` value is final and survives every refresh and e
+update, and a partial entry inherits the facts for what it leaves unsaid.

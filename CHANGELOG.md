@@ -31,6 +31,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Give `/compact` a focus to guide its checkpoint. Filter `/resume` and `/tree` by typing.
 - Select Inline or Fullscreen TUI mode in `/settings`. `tool_label_rows` controls the height of command labels, and `paste_placeholder` controls pasted-text collapse.
 - Use the updated model catalogs, including GPT-6 Astra and the GPT-5.6 models. ChatGPT subscription discovery follows its live model picker.
+- New models arrive with their facts, not just their ids. e reads models.dev in the same background refresh as the providers' own lists, caches a trimmed copy in `~/.e/models-dev.json`, and sets context windows, effort levels, the Anthropic thinking shape, image and tool support, and pricing on built-in and discovered models. Seeds are the offline fallback; `models.json` still wins.
 
 ### Improvements
 

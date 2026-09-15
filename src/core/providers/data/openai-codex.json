@@ -2,6 +2,7 @@
 	"name": "openai-codex",
 	"display": "OpenAI Codex",
 	"base_url": "https://chatgpt.com/backend-api",
+	"models_dev": "",
 	"api": "codex-responses",
 	"responses_mount": "codex",
 	"tier": "native",
