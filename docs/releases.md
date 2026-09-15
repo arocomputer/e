@@ -140,8 +140,11 @@ gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo intuitums/e
 ```
 
 On macOS use `shasum -a 256`. To retry a partial package publication, run Release
-with action `retry` and the existing version tag. This downloads the published
-archives instead of rebuilding. npm compares the existing package's integrity;
+with action `retry` and the existing version tag. This downloads the existing
+archives instead of rebuilding. For a draft whose builds finished, retry regenerates
+checksums, the SBOM, and provenance in an isolated temporary directory, then
+publishes the draft before updating packages. Incomplete drafts fail until all
+four archives exist. npm compares the existing package's integrity;
 a different tarball under the same version fails. Each registry can fail
 independently; rerun failed publication after recovery. There is no transaction
 across registries.
