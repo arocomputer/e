@@ -416,6 +416,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                         rx = nrx;
                         handle = nhandle;
                         assembly_bytes = 0;
+                        step_usage = None;
                         continue 'stream;
                     }
                     // Safe to retry only when the cause itself is
@@ -446,8 +447,11 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                         rx = nrx;
                         handle = nhandle;
                         // A fresh attempt streams its arguments from
-                        // scratch; the liveness counter follows.
+                        // scratch; the liveness counter follows, and so
+                        // does usage — a count the failed attempt
+                        // reported before dying is not this attempt's.
                         assembly_bytes = 0;
+                        step_usage = None;
                         continue 'stream;
                     }
                     // A mid-reply loss under the window resumes
@@ -1091,7 +1095,13 @@ async fn load_nested_instructions(
             continue;
         }
         let mut chain: Vec<PathBuf> = Vec::new();
-        let mut dir = full.parent();
+        // A grep path is the directory searched, so its own AGENTS.md is
+        // in scope; the file tools name a file, whose parent is.
+        let mut dir = if call.name == "grep" {
+            Some(full.as_path())
+        } else {
+            full.parent()
+        };
         while let Some(d) = dir {
             if d == cwd || !d.starts_with(cwd) {
                 break;

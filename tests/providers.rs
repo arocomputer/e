@@ -922,7 +922,7 @@ async fn responses_codex_oauth_mount_sends_prompt_cache_key() {
         system: "sys".into(),
         messages: history_messages(&case.history),
         effort: case.effort.map(str::to_string),
-        session_id: String::new(),
+        session_id: "sess-stable".into(),
         tools: vec![read_tool()],
     };
 
@@ -937,10 +937,137 @@ async fn responses_codex_oauth_mount_sends_prompt_cache_key() {
     );
     assert!(sent[0].contains("chatgpt-account-id: acct-1"));
     let body = request_json(&sent[0]);
-    assert!(
-        body["prompt_cache_key"].is_string(),
-        "the codex OAuth mount must send the cache key: {body}"
+    // The key pins the conversation to one upstream prefix cache, so it is
+    // the session's id — a fresh value per request would miss the cache on
+    // every step of a tool loop.
+    assert_eq!(
+        body["prompt_cache_key"], "sess-stable",
+        "the codex OAuth mount must send the session as the cache key: {body}"
     );
+    assert!(
+        sent[0].contains("session-id: sess-stable"),
+        "the session header follows the key"
+    );
+}
+
+/// The Responses API's other failure frame is a top-level `error` event
+/// after which the body just ends. Left unread it would pass for a stall
+/// and be retried; it must surface the provider's message and code.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_error_events_fail_the_stream_with_their_message() {
+    let _lock = env_lock();
+    let body = concat!(
+        "data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",",
+        "\"message\":\"Too many requests\",\"sequence_number\":1}\n\n",
+    );
+    let (port, _server) = serve_sse(&[body]);
+    let home = Home::new("responses-error-event");
+    home.auth(r#"{"openai":{"key":"k"}}"#);
+    let error = collect_error(Request {
+        model: test_model("openai", port, Api::Responses),
+        system: "sys".into(),
+        messages: vec![ChatMessage::user("hi")],
+        effort: None,
+        session_id: String::new(),
+        tools: Vec::new(),
+    })
+    .await;
+    assert_eq!(error.message, "Too many requests");
+    assert_eq!(error.cause, FailureCause::RateLimited);
+}
+
+/// A reply that ran out of tokens while reasoning leaves a reasoning item
+/// with no output after it. Replayed on its own the API rejects the whole
+/// request, so the next turn must leave it out.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_leaves_out_a_reasoning_item_nothing_followed() {
+    use e::core::agent::{Agent, SessionEvent};
+
+    let _lock = env_lock();
+    let first = concat!(
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"BLOB\",\"summary\":[]}}\n\n",
+        "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+    );
+    let second = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+    );
+    let (port, server) = serve_sse(&[first, second]);
+    let home = Home::new("reasoning-orphan");
+    home.auth(r#"{"openai":{"key":"k"}}"#);
+
+    let (mut agent, mut rx) = Agent::new(test_model("openai", port, Api::Responses));
+    for prompt in ["think", "again"] {
+        agent.submit(prompt.into(), "sys".into());
+        while let Some(event) = rx.recv().await {
+            if let SessionEvent::TurnEnd { .. } = event {
+                break;
+            }
+        }
+    }
+
+    let sent = server.join().unwrap();
+    assert_eq!(sent.len(), 2);
+    let body = request_json(&sent[1]);
+    let kinds: Vec<&str> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["type"].as_str())
+        .collect();
+    assert!(
+        !kinds.contains(&"reasoning"),
+        "an orphaned reasoning item was replayed: {kinds:?}"
+    );
+}
+
+/// Gemini may omit `args` on a call to a tool without parameters; that is a
+/// call with no arguments, not one whose arguments are the string "null".
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn google_calls_without_args_carry_an_empty_object() {
+    let _lock = env_lock();
+    let body =
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"read\"}}]},\"finishReason\":\"STOP\"}]}\n\n";
+    let (port, _server) = serve_sse(&[body]);
+    let home = Home::new("google-no-args");
+    home.auth(r#"{"google":{"key":"g-test"}}"#);
+    let request = Request {
+        model: test_model("google", port, Api::Google),
+        system: "sys".into(),
+        messages: vec![ChatMessage::user("hi")],
+        effort: None,
+        session_id: String::new(),
+        tools: vec![read_tool()],
+    };
+    let (_text, _reasoning, calls, _usage, _finish) = collect_stream(request).await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].arguments, "{}");
+}
+
+/// A request that cannot even be built (a malformed base URL) is not a
+/// network loss: no retry ladder changes it, so it must not be retryable.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unbuildable_request_is_rejected_not_retried() {
+    let _lock = env_lock();
+    let home = Home::new("bad-base-url");
+    home.auth(r#"{"openai":{"key":"k"}}"#);
+    let mut model = test_model("openai", 1, Api::Completions);
+    model.base_url = "not a url".into();
+    let error = collect_error(Request {
+        model,
+        system: "sys".into(),
+        messages: vec![ChatMessage::user("hi")],
+        effort: None,
+        session_id: String::new(),
+        tools: Vec::new(),
+    })
+    .await;
+    assert_eq!(error.cause, FailureCause::Rejected, "{}", error.message);
+    assert!(!error.cause.is_retryable());
 }
 
 #[allow(clippy::await_holding_lock)]

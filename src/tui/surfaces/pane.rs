@@ -117,6 +117,9 @@ pub struct Section {
     horizontal: usize,
     /// Rows painted last frame, for paging and the mouse.
     rows: usize,
+    /// Rows the wrapped content came to last frame (text and markdown),
+    /// so the cursor can travel the whole of it, not just one page.
+    painted: usize,
     /// The frame row the section's body started on last frame.
     start: usize,
 }
@@ -219,6 +222,7 @@ impl Section {
             scroll: 0,
             horizontal: 0,
             rows: 1,
+            painted: 1,
             start: 0,
         };
         if let (Content::List(items), Some(selected)) = (
@@ -240,7 +244,7 @@ impl Section {
             Content::Diff(rows) => rows.len(),
             Content::Rows(rows) => rows.len(),
             // Wrapped at paint time; the row count is remembered then.
-            Content::Text(_) | Content::Markdown(_) => self.rows.max(1),
+            Content::Text(_) | Content::Markdown(_) => self.painted.max(1),
         }
     }
 
@@ -263,6 +267,9 @@ impl Section {
         self.scroll = old.scroll;
         self.horizontal = old.horizontal;
         self.anchor = old.anchor;
+        // A fresh section has not been painted; without the old length the
+        // clamp below would send a scrolled text section back to its top.
+        self.painted = old.painted;
         if let (Content::List(items), Some(before)) = (&self.content, old.selected()) {
             if let Some(index) = items.iter().position(|item| item.id == before.id) {
                 self.cursor = index;
@@ -774,8 +781,7 @@ impl Pane {
             }
             // Text and markdown keep their painted length for paging.
             if matches!(section.content, Content::Text(_) | Content::Markdown(_)) {
-                section.rows = rows.max(1);
-                let _ = painted.len();
+                section.painted = painted.len().max(1);
             }
         }
         if self.clipped {
@@ -968,6 +974,48 @@ mod tests {
         assert!(plain.iter().any(|r| r.contains("- two")), "{plain:?}");
         assert!(plain.iter().any(|r| r.contains("+ three")), "{plain:?}");
         assert_eq!(plain[13], HINT);
+    }
+
+    #[test]
+    fn a_text_section_scrolls_through_all_of_its_rows() {
+        let body: String = (1..=40).map(|n| format!("line {n}\n")).collect();
+        let mut pane = Pane::from_request(
+            "notes",
+            &json!({"id": "notes", "title": "Notes", "sections": [{"kind": "text", "body": body}]}),
+        )
+        .unwrap();
+        let theme = crate::tui::theme::resolve("dark", false);
+        // The first paint learns the wrapped length; before it the section
+        // is one row tall.
+        pane.render(&theme, 40, 12);
+        for _ in 0..30 {
+            pane.key(key(KeyCode::Down), 40);
+        }
+        let plain: Vec<String> = pane
+            .render(&theme, 40, 12)
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        assert!(
+            plain.iter().any(|r| r.trim() == "line 31"),
+            "the cursor never left the first page: {plain:?}"
+        );
+        // A refresh with the same content keeps the place.
+        let fresh = Pane::from_request(
+            "notes",
+            &json!({"id": "notes", "title": "Notes", "sections": [{"kind": "text", "body": body}]}),
+        )
+        .unwrap();
+        pane.update(fresh);
+        let plain: Vec<String> = pane
+            .render(&theme, 40, 12)
+            .iter()
+            .map(|r| crate::core::tools::strip_ansi(r))
+            .collect();
+        assert!(
+            plain.iter().any(|r| r.trim() == "line 31"),
+            "the refresh reset the scroll: {plain:?}"
+        );
     }
 
     #[test]

@@ -34,7 +34,9 @@ pub fn home() -> PathBuf {
     if let Ok(path) = SCOPED_HOME.try_with(Clone::clone) {
         return path;
     }
-    if let Ok(custom) = std::env::var("E_HOME") {
+    // An empty `E_HOME` is unset, not "the current directory": the same
+    // rule `user_home` applies to `HOME`.
+    if let Some(custom) = std::env::var("E_HOME").ok().filter(|h| !h.is_empty()) {
         return PathBuf::from(custom);
     }
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());

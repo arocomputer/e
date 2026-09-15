@@ -22,9 +22,16 @@ pub async fn run(
 ) -> Result<StreamEnd, ProviderError> {
     // Responses-API items: messages, function calls, and their outputs.
     let mut input: Vec<serde_json::Value> = Vec::new();
+    // Reasoning items wait for the assistant output they produced: the API
+    // rejects a reasoning item "without its required following item", and
+    // a reply that ran out of tokens while thinking left exactly that.
+    let mut pending_reasoning: Vec<serde_json::Value> = Vec::new();
     for m in &request.messages {
         match m.role() {
             "assistant" => {
+                if !m.content.is_empty() || !m.tool_calls().is_empty() {
+                    input.append(&mut pending_reasoning);
+                }
                 if !m.content.is_empty() {
                     input.push(json!({
                         "type": "message", "role": "assistant",
@@ -45,16 +52,20 @@ pub async fn run(
                 // stored under the same role would 400 here.
                 if let Ok(item) = serde_json::from_str::<serde_json::Value>(&m.content) {
                     if item["type"].as_str() == Some("reasoning") {
-                        input.push(item);
+                        pending_reasoning.push(item);
                     }
                 }
             }
-            "tool" => input.push(json!({
-                "type": "function_call_output",
-                "call_id": m.tool_call_id().cloned().unwrap_or_default(),
-                "output": m.content,
-            })),
+            "tool" => {
+                pending_reasoning.clear();
+                input.push(json!({
+                    "type": "function_call_output",
+                    "call_id": m.tool_call_id().cloned().unwrap_or_default(),
+                    "output": m.content,
+                }));
+            }
             role => {
+                pending_reasoning.clear();
                 let mut content = Vec::new();
                 if !m.content.is_empty() {
                     content.push(json!({"type": "input_text", "text": m.content}));
@@ -115,7 +126,18 @@ pub async fn run(
             let account = authorization.account_id.as_deref().ok_or_else(|| {
                 ProviderError::auth("Codex Responses authorization has no account id")
             })?;
-            let session_id = uuid::Uuid::new_v4().to_string();
+            // The cache key and session header pin the conversation to one
+            // upstream prefix cache; a fresh value per request would miss
+            // it on every step of a tool loop. A request without a session
+            // (a headless one-off) gets one key for the process.
+            let session_id = if request.session_id.is_empty() {
+                static PROCESS_SESSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+                PROCESS_SESSION
+                    .get_or_init(|| uuid::Uuid::new_v4().to_string())
+                    .clone()
+            } else {
+                request.session_id.clone()
+            };
             body["prompt_cache_key"] = json!(session_id);
             http()?
                 .post(format!("{}/codex/responses", request.model.base_url))
@@ -123,7 +145,7 @@ pub async fn run(
                 .header("originator", "e")
                 .header("OpenAI-Beta", "responses=experimental")
                 .header("session-id", &session_id)
-                .header("x-client-request-id", &session_id)
+                .header("x-client-request-id", uuid::Uuid::new_v4().to_string())
         }
         crate::core::providers::registry::ResponsesMount::Platform => {
             http()?.post(format!("{}/responses", request.model.base_url))
@@ -325,6 +347,14 @@ pub async fn run(
                     return Err(ProviderError::frame(message, cause)
                         .with_response(sse.response.clone())
                         .with_code(value["response"]["error"]["code"].as_str()));
+                }
+                // The API's other failure frame: a top-level event carrying
+                // `code` and `message`, after which the body just ends.
+                // Left unread it would pass for a stall and be retried.
+                "error" => {
+                    return Err(
+                        ProviderError::from_error_frame(&value).with_response(sse.response.clone())
+                    );
                 }
                 _ => {}
             }

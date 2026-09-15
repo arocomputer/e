@@ -371,3 +371,56 @@ fn oversized_first_read_line_is_rejected_with_a_next_line_offset() {
     assert_eq!(next.content, "2\tnext");
     std::fs::remove_dir_all(ws).unwrap();
 }
+
+/// A line over the 64 KiB line cap is one line the window cannot show, not
+/// a file `read` cannot open: lines before the window skip it, a window
+/// starting on it names the offset past it, and a window reaching it ends
+/// there with the lines before it intact.
+#[test]
+fn a_line_over_the_line_cap_costs_that_line_not_the_file() {
+    let ws = workspace("line-cap");
+    let huge = "x".repeat(70_000);
+    std::fs::write(ws.join("head.txt"), format!("{huge}\nsecond\nthird\n")).unwrap();
+    let skipped = tools::run("read", r#"{"path":"head.txt","offset":2}"#, &ws);
+    assert!(!skipped.is_error(), "{}", skipped.content);
+    assert_eq!(skipped.content, "2\tsecond\n3\tthird");
+    let first = tools::run("read", r#"{"path":"head.txt"}"#, &ws);
+    assert!(first.is_error());
+    assert!(
+        first.content.contains("line 1 exceeds"),
+        "{}",
+        first.content
+    );
+    assert!(first.content.contains("offset 2"), "{}", first.content);
+
+    std::fs::write(ws.join("mid.txt"), format!("first\n{huge}\nthird\n")).unwrap();
+    let cut = tools::run("read", r#"{"path":"mid.txt"}"#, &ws);
+    assert!(!cut.is_error(), "{}", cut.content);
+    assert!(cut.content.starts_with("1\tfirst\n"), "{}", cut.content);
+    assert!(
+        cut.content.contains("continue with offset 2"),
+        "{}",
+        cut.content
+    );
+    let rest = tools::run("read", r#"{"path":"mid.txt","offset":3}"#, &ws);
+    assert_eq!(rest.content, "3\tthird");
+    std::fs::remove_dir_all(ws).unwrap();
+}
+
+/// `aa` in `aaa` is ambiguous even though the non-overlapping count is one;
+/// the edit must ask for more context instead of rewriting the first spot.
+#[test]
+fn edit_counts_overlapping_occurrences_as_ambiguous() {
+    let ws = workspace("overlap");
+    std::fs::write(ws.join("f.txt"), "aaa\n").unwrap();
+    tools::run("read", r#"{"path":"f.txt"}"#, &ws);
+    let out = tools::run(
+        "edit",
+        r#"{"path":"f.txt","old_string":"aa","new_string":"b"}"#,
+        &ws,
+    );
+    assert!(out.is_error(), "{}", out.content);
+    assert!(out.content.contains("occurs 2 times"), "{}", out.content);
+    assert_eq!(std::fs::read_to_string(ws.join("f.txt")).unwrap(), "aaa\n");
+    std::fs::remove_dir_all(ws).unwrap();
+}

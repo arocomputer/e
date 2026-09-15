@@ -253,7 +253,7 @@ async fn codex_login_inner(
         Credential::OAuth {
             access: access.to_string(),
             refresh: refresh.to_string(),
-            expires: auth::now_ms() + expires_in * 1000,
+            expires: auth::now_ms().saturating_add(expires_in.saturating_mul(1000)),
             account_id,
         },
     )
@@ -482,11 +482,13 @@ async fn xai_login_inner(
 
     let device_code = required(&device, "device_code")?;
     let user_code = required(&device, "user_code")?;
-    let verify_url = device
+    let verify_url = match device
         .get("verification_uri_complete")
         .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or(required(&device, "verification_uri")?);
+    {
+        Some(complete) => complete.to_string(),
+        None => required(&device, "verification_uri")?,
+    };
     if !verify_url.starts_with("https://") {
         return Err("untrusted verification URI in xAI response".into());
     }
@@ -654,7 +656,7 @@ pub async fn codex_access(provider: &str) -> Result<(String, String), String> {
         Credential::OAuth {
             access: access.to_string(),
             refresh: refresh.to_string(),
-            expires: auth::now_ms() + expires_in * 1000,
+            expires: auth::now_ms().saturating_add(expires_in.saturating_mul(1000)),
             account_id: Some(account.clone()),
         },
     )

@@ -44,12 +44,25 @@ pub fn read_result(args: &Value, _cwd: &std::path::Path, state: &super::ToolRunt
             display: None,
         };
     };
-    let limit = args["limit"]
-        .as_u64()
-        .map(|n| n as usize)
-        .filter(|n| *n > 0)
-        .unwrap_or(MAX_BYTES)
-        .min(MAX_BYTES);
+    let bad_arguments = |message: String| ToolOutput {
+        content: format!("read_result: {message}"),
+        outcome: ToolOutcome::Failed,
+        summary: "bad arguments".into(),
+        display: None,
+    };
+    // The same lenient integer reading as `read`: a numeric string or an
+    // integral float silently ignored would re-serve the first window.
+    let limit = match super::integer_arg(args, "limit") {
+        Ok(limit) => limit
+            .map(|n| n.min(MAX_BYTES as u64) as usize)
+            .filter(|n| *n > 0)
+            .unwrap_or(MAX_BYTES),
+        Err(message) => return bad_arguments(message),
+    };
+    let offset = match super::integer_arg(args, "offset") {
+        Ok(offset) => offset.unwrap_or(0),
+        Err(message) => return bad_arguments(message),
+    };
     if let Some(query) = args["query"].as_str().filter(|q| !q.is_empty()) {
         let mut out = String::new();
         let mut matches = 0usize;
@@ -81,23 +94,31 @@ pub fn read_result(args: &Value, _cwd: &std::path::Path, state: &super::ToolRunt
             display: None,
         };
     }
-    let offset = args["offset"].as_u64().map(|n| n as usize).unwrap_or(0);
     let total = full.len();
-    if offset >= total {
+    let Some(offset) = usize::try_from(offset).ok().filter(|o| *o < total) else {
         return ToolOutput {
             content: format!("offset {offset} is past the end of result {id} ({total} bytes)"),
             outcome: ToolOutcome::Failed,
             summary: "past the end".into(),
             display: None,
         };
-    }
+    };
     let mut start = offset;
     while !full.is_char_boundary(start) {
         start -= 1;
     }
+    // The window ends on a character boundary; when the limit lands inside
+    // the very first character, the window grows to include it rather than
+    // shrinking to nothing and pointing at its own offset.
     let mut end = (start + limit).min(total);
     while !full.is_char_boundary(end) {
         end -= 1;
+    }
+    while end <= start {
+        end += 1;
+        while !full.is_char_boundary(end) {
+            end += 1;
+        }
     }
     let mut content = full[start..end].to_string();
     content.push_str(&format!(

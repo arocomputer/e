@@ -1046,6 +1046,9 @@ impl App {
         self.transcript.clear();
         self.outputs.clear();
         self.viewer = None;
+        // The projection is keyed by the transcript's shape, which another
+        // session can share; the cache must not outlive the transcript.
+        self.viewer_cache = None;
         let mut restored_calls = std::collections::HashMap::<String, (usize, u64)>::new();
         let mut restored_id = 0u64;
         // Consecutive tool batches with no assistant voice between them were
@@ -1831,6 +1834,7 @@ impl App {
                 self.agent.adopt_session_name(None);
                 self.session_epoch += 1;
                 self.transcript.clear();
+                self.viewer_cache = None;
                 if self.layout.banner {
                     self.transcript
                         .push(Block::new(Kind::Banner, crate::VERSION));
@@ -2959,7 +2963,8 @@ async fn run_scoped(
     // The launch anchor: the frame paints below where the user launched e,
     // never over what came before. A terminal that doesn't answer DSR 6n — a raw pty —
     // falls back to the screen's bottom row, the common launch spot.
-    let anchor = crate::tui::paint::background::query_cursor_row(rows).unwrap_or(rows - 1) as usize;
+    let anchor = crate::tui::paint::background::query_cursor_row(rows)
+        .unwrap_or(rows.saturating_sub(1)) as usize;
     let mut painter = Painter::spawn(cols, rows, anchor);
     let (mut agent, mut session_events) = Agent::with_options(model, agent_options.clone());
     let (logins_tx, mut logins_rx) =

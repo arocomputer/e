@@ -337,7 +337,11 @@ impl ExtensionHost {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    let _ = notices.send(format!("extension {name}: {reason}")).await;
+                    // Nobody drains the notices until the frontend runs (or
+                    // ever, headless): an awaited send on a channel a
+                    // chatty extension's stderr already filled would hold
+                    // startup forever. Post-spawn notices never block.
+                    let _ = notices.try_send(format!("extension {name}: {reason}"));
                 }
             }
         }

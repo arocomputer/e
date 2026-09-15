@@ -72,6 +72,12 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - **Security:** new credentials and sessions are private from creation. Unix homes use `0700`, session files use `0600`, and reopening older sessions tightens permissions.
 - **Security:** model output, tool labels, draft text, trust paths, and extension notices cannot inject terminal controls. Git review disables external helpers and does not write the index.
 - **Security:** file writes detect replacement during staging, remove partial new files after failure, and fail freshness checks on metadata errors.
+- `--package npm:<name>` loads the package it installed. Git URLs with `user:password@` credentials parse as one source, `e remove` finds a clone recorded under different case, prompt templates with CRLF endings keep their front matter, and an empty `E_HOME` no longer means the current directory.
+- Responses streams surface a top-level `error` event instead of stalling, keep one cache key per session on the Codex mount, and leave out a reasoning item that no output followed. Gemini calls without `args` carry `{}`; a request that cannot be built is not retried.
+- `read` pages past a line over the 64 KiB cap instead of failing the file, `read_result` accepts numeric strings and never returns an empty window, `edit` counts overlapping matches as ambiguous, and bash keeps a code point split around the other stream, reports dropped bytes correctly, accepts `"background": "true"`, and keeps text before a trailing carriage return.
+- A session tail torn inside a character still loads and lists, and resuming after a lost final newline starts the next record on its own line. A `grep` of a directory loads that directory's `AGENTS.md`. Usage from a failed attempt no longer stands in for the retry's.
+- Extensions: `"error": null` beside a result is success, a `tool.update` carrying a top-level id stays a progress chunk, a failed start no longer blocks startup behind a full notice channel, and `rpc` behind an extension flag answers `ui.*` requests headlessly.
+- Pane text and markdown sections scroll through all of their rows, loose list items keep every paragraph, and the Ctrl+O review no longer shows a previous session's rows after `/resume`.
 
 ## 0.0.1
 

@@ -734,7 +734,16 @@ pub fn render_markdown(theme: &Theme, markdown: &str, width: usize) -> Vec<Strin
                 push_block(&mut out, rows);
                 inline.clear();
             }
-            Event::Start(Tag::Paragraph) => inline.clear(),
+            Event::Start(Tag::Paragraph) => {
+                // A loose item's later paragraphs continue the item: its
+                // text waits for `End(Item)`, so clearing here would drop
+                // every paragraph but the last.
+                if item_stack.is_empty() {
+                    inline.clear();
+                } else if !inline.trim().is_empty() {
+                    inline.push('\n');
+                }
+            }
             Event::End(TagEnd::Paragraph) => {
                 if !item_stack.is_empty() {
                     // handled at item end via `inline`

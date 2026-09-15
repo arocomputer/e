@@ -591,7 +591,12 @@ pub(crate) use fs::glob_regex;
 pub fn resolve_carriage_returns(text: &str) -> String {
     text.replace("\r\n", "\n")
         .split('\n')
-        .map(|line| line.rsplit('\r').next().unwrap_or(line))
+        .map(|line| {
+            // A bare `\r` at the end only returns the cursor; the text
+            // before it is still on screen.
+            let line = line.trim_end_matches('\r');
+            line.rsplit('\r').next().unwrap_or(line)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -976,6 +981,19 @@ fn schema_object(name: &str, description: &str, properties: Value, required: &[&
 
 #[cfg(test)]
 mod tests {
+
+    /// A bare `\r` at the end returns the cursor; the text before it stays.
+    #[test]
+    fn a_trailing_carriage_return_keeps_its_line() {
+        assert_eq!(
+            super::resolve_carriage_returns("downloading 100%\r"),
+            "downloading 100%"
+        );
+        assert_eq!(
+            super::resolve_carriage_returns("10%\r50%\r100%\r\ndone"),
+            "100%\ndone"
+        );
+    }
 
     /// Integer coercion must preserve exact bounds, including JSON u64 values.
     #[test]

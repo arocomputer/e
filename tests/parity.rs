@@ -1164,3 +1164,24 @@ fn extension_show_blocks_paint_text_markdown_and_diff_through_the_theme() {
     let rows = md.lines_for_test(&theme, 80);
     assert_eq!(rows[0], format!("  {}", heading_style(1, "Head")));
 }
+
+#[test]
+fn a_loose_list_item_keeps_every_paragraph() {
+    let t = dark();
+    let out = render_markdown(
+        &t,
+        "- **Step one**\n\n  Details about step one.\n- Step two\n",
+        60,
+    )
+    .join("\n");
+    assert!(out.contains("Step one"), "{out:?}");
+    assert!(
+        out.contains("Details about step one."),
+        "the item's second paragraph was dropped: {out:?}"
+    );
+    assert!(out.contains("Step two"), "{out:?}");
+    let first = out.find("Step one").unwrap();
+    let details = out.find("Details").unwrap();
+    let second = out.find("Step two").unwrap();
+    assert!(first < details && details < second, "{out:?}");
+}
