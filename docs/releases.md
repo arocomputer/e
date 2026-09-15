@@ -60,12 +60,12 @@ line in `checksums.txt`. A checksum detects corruption; provenance verifies
 that GitHub Actions built the artifact from this repository's release
 workflow.
 
-## Homebrew, npm, and Bun
+## Homebrew, npm, and bun
 
 A published stable release starts the Homebrew and npm jobs in `release.yml`.
 They verify all four archives against `checksums.txt`, then generate the formula
 and npm packages from that tag. The npm package has platform-specific optional
-dependencies and a shell launcher. It works with npm and Bun without lifecycle
+dependencies and a shell launcher. It works with npm and bun without lifecycle
 scripts or a JavaScript runtime at launch.
 
 The jobs publish `intuitums/homebrew-tap` and these public npm packages:
@@ -124,7 +124,7 @@ node --test scripts/packaging/publish-npm.test.mjs
 scripts/packaging/smoke.sh
 ```
 
-The smoke check installs temporary npm and Bun packages with scripts disabled.
+The smoke check installs temporary npm and bun packages with scripts disabled.
 It leaves the user's global installations alone. CI runs it on macOS and Linux.
 
 The public shell installer URL is `https://e.intuitum.sh/install.sh`. The website

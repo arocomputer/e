@@ -22,7 +22,7 @@
 
 ### New features
 
-- Release automation publishes Homebrew and npm packages. Bun installs the same npm package. Package-managed binaries defer updates to their package manager.
+- Release automation publishes Homebrew and npm packages. bun installs the same npm package. Package-managed binaries defer updates to their package manager.
 
 - The new e logo and rounded-square icon are available as SVGs in `assets/`.
 - The benchmark suite measures the real launches: boot-to-first-frame on a

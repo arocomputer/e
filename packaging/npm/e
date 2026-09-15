@@ -1,5 +1,5 @@
 #!/bin/sh
-# Locate the platform dependency installed by npm or Bun, then hand over the terminal.
+# Locate the platform dependency installed by npm or bun, then hand over the terminal.
 set -eu
 entry=$0
 while [ -L "$entry" ]; do

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install generated tarballs through npm and Bun with lifecycle scripts disabled.
+# Install generated tarballs through npm and bun with lifecycle scripts disabled.
 set -eu
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
@@ -35,4 +35,4 @@ globalBinDir = "$scratch/bun/bin"
 CFG
 bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/intuitums-e-1.2.3.tgz"
 test "$("$scratch/bun/bin/e" 'argument with spaces')" = 'argument with spaces'
-echo 'npm and Bun launch the native dependency without lifecycle scripts'
+echo 'npm and bun launch the native dependency without lifecycle scripts'

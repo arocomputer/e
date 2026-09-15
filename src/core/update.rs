@@ -84,7 +84,7 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
             "homebrew" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e",
-            "npm" => "Installed with npm or Bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
+            "npm" => "Installed with npm or bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
             _ => "This installation is package-managed. Update it with its package manager.",
         }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
