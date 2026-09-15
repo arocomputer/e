@@ -239,3 +239,24 @@ production and beta entries link to their release repository; dev entries link
 to the exact npm version. Documentation-only
 skips and invalid release selections do not create deployment entries. Reporting
 starts with runs using this workflow; earlier releases are not backfilled.
+
+### Dev PR notifications
+
+Each dev deployment updates one `github-actions[bot]` comment on the merged PR
+whose merge commit matches the selected source. The comment moves through
+Building, Publishing, and Ready or Failed. Direct pushes have no PR comment;
+Actions summaries and deployment history still report the outcome. Unmerged PR
+previews remain separate from dev deployments.
+
+Ready comments include commands pinned to the verified npm version. Failure
+comments identify the failed stage and link to the workflow attempt. Comment
+reporting has its own limited token permissions, does not run PR code, and cannot
+block package publication. Older runs or stages cannot replace newer results.
+
+npm can accept an upload before its registry metadata becomes available. The
+publisher waits up to twenty minutes per package, then checks its tarball
+integrity. It never republishes an accepted upload in the same attempt. A rerun
+recognizes an already staged version and resumes waiting. A processing timeout
+means availability is unconfirmed; check npm package status and rerun failed jobs.
+Authentication errors and checksum mismatches fail immediately. The npm job allows
+110 minutes for all five packages and installation verification.
