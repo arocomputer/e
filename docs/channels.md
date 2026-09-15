@@ -63,6 +63,12 @@ The channel publishes with e's releases as `@intuitums/e-slack`, so
 `npx @intuitums/e-slack` runs it against any checkout without cloning this
 repository. Its version matches the release it came from.
 
+On a server, `channels/slack/Dockerfile` builds an image carrying e from the
+release and the bot from the repository. Mount the checkout at `/work` and e's
+home on a volume, and record the trust decision once (`e trust`): a channel has
+no terminal, so nothing else can answer the panel that gates the repository's
+own instructions.
+
 ## GitHub
 
 `channels/github/e.yml` is a workflow that runs on issue and pull-request
