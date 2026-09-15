@@ -228,3 +228,27 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&marker, "unknown\n").unwrap();
     assert!(package_update_hint(&binary).is_some());
 }
+
+/// Preview updates compare sequence numbers while preserving the installed channel.
+#[test]
+fn preview_updates_never_switch_channels() {
+    use e::core::update::is_newer;
+    assert!(is_newer(
+        "v0.0.2-dev.12.gabcdef012345",
+        "0.0.2-dev.9.gabcdef012345"
+    ));
+    assert!(!is_newer(
+        "v0.0.2-dev.9.gabcdef012345",
+        "0.0.2-dev.12.gabcdef012345"
+    ));
+    assert!(!is_newer("v0.0.3", "0.0.2-beta.9.gabcdef012345"));
+    assert!(!is_newer(
+        "v0.0.3-dev.12.gabcdef012345",
+        "0.0.2-beta.9.gabcdef012345"
+    ));
+    assert!(!is_newer("v0.0.3-dev.12.gabcdef012345", "0.0.2"));
+    assert!(!is_newer(
+        "v0.0.3-pr.12.gabcdef012345",
+        "0.0.2-pr.9.gabcdef012345"
+    ));
+}

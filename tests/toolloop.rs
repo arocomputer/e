@@ -16,16 +16,9 @@ use e::core::providers::catalog::Api;
 async fn agent_runs_a_tool_then_replies() {
     let _lock = env_lock();
     // First request → ask to read hello.txt; second → a plain reply.
-    let first = concat!(
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
-        "\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\n",
-        "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n",
-        "data: [DONE]\n\n",
-    );
-    let second = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"the file has two lines\"}}]}\n\n",
-        "data: [DONE]\n\n",
-    );
+    let recording = common::provider_recording(include_str!("fixtures/providers/tool-loop.json"));
+    let first = recording[0].as_str();
+    let second = recording[1].as_str();
     let (port, server) = serve_sse(&[first, second]);
     let home = Home::new("toolloop");
     home.auth(r#"{"mock":{"key":"k"}}"#);

@@ -40,7 +40,7 @@ bounds; timed steps still pace typing and resizing to exercise live transitions.
 
 ## Inspect or add scenarios
 
-`run.py` owns the isolated provider and input steps. `checks.py` owns assertions.
+`provider.py` owns the loopback provider shared with `./x scenario`; `run.py` owns input steps. `checks.py` owns assertions.
 They share `scripts/term.py` with existing replay tooling rather than introducing
 a second terminal emulator. Checks inspect each completed frame, not just whether
 a success marker occurred somewhere in the raw output.

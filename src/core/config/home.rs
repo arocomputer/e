@@ -1,4 +1,4 @@
-//! The e home: `~/.e/`, the single place all of e's state lives.
+//! Resolve the active channel's private state, with an explicit E_HOME override.
 //!
 //! Its formats are open conventions other tools can read: AGENTS.md, SKILL.md
 //! directories, and JSONL sessions. e does not read another tool's
@@ -38,7 +38,17 @@ pub fn home() -> PathBuf {
         return PathBuf::from(custom);
     }
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join(".e")
+    let directory = PathBuf::from(base).join(match crate::CHANNEL {
+        "dev" | "local" => ".e-dev",
+        "beta" => ".e-beta",
+        "pr" => ".e-pr",
+        _ => ".e",
+    });
+    if crate::CHANNEL == "pr" {
+        directory.join(crate::COMMIT)
+    } else {
+        directory
+    }
 }
 
 /// The user's home directory, when the platform declares one — the single

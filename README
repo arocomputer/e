@@ -55,3 +55,11 @@ REFERENCE:
  - [Security](https://github.com/intuitums/e/blob/main/SECURITY.md)
  - [Contributing](https://github.com/intuitums/e/blob/main/CONTRIBUTING.md)
  - [Every guide](https://github.com/intuitums/e/tree/main/docs)
+
+## Development and preview builds
+
+Run `./x dev /path/to/project` from a checkout, or install a published preview
+with `npm install -g @intuitums/e@dev` and run `e-dev`. Beta uses `@beta` and
+`e-beta`. Curl and brew support separate preview installations. Preview channels
+have separate state and stay on their channel when updating.
+See [releases and testing](docs/releases.md) for all installers and PR builds.

@@ -16,17 +16,20 @@ PLATFORMS = {
     "linux-x64": "x86_64-unknown-linux-gnu",
 }
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/release"))
+from identity import identity
+
 
 
 def prepare(tag, assets, output):
     """Require four verified binaries; derive every package version from the release tag."""
-    if not re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag):
-        raise ValueError("Expected a stable vX.Y.Z release tag")
-    version = tag[1:]
-    if tuple(map(int, version.split("."))) < (0, 0, 2):
-        raise ValueError(
-            "v0.0.1 predates package-manager update protection; publish a newer release"
-        )
+    release = identity(tag)
+    version, channel, command = (release[key] for key in ("version", "channel", "command"))
+    if version == "0.0.1":
+        raise ValueError("v0.0.1 predates package-manager update protection")
+    if channel == "pr":
+        raise ValueError("PR builds cannot be published as packages")
+    marker_suffix = "" if channel == "stable" else f"-{channel}"
     checksums = {}
     for line in (assets / "checksums.txt").read_text().splitlines():
         digest, filename = line.split()
@@ -45,7 +48,7 @@ def prepare(tag, assets, output):
         "license": "MIT",
         "homepage": "https://e.intuitum.sh",
         "repository": {"type": "git", "url": "git+https://github.com/intuitums/e.git"},
-        "publishConfig": {"access": "public"},
+        "publishConfig": {"access": "public", "tag": release["npm_tag"]},
     }
     for platform, target in PLATFORMS.items():
         folder = output / platform
@@ -60,7 +63,7 @@ def prepare(tag, assets, output):
             ):
                 shutil.copyfileobj(source, dest)
         (folder / "bin/e").chmod(0o755)
-        (folder / "bin/.e-install-method").write_text("npm\n")
+        (folder / "bin/.e-install-method").write_text(f"npm{marker_suffix}\n")
         os_name, cpu = platform.split("-")
         manifest = dict(
             common,
@@ -81,7 +84,7 @@ def prepare(tag, assets, output):
         common,
         name="@intuitums/e",
         description="A small, extensible coding agent for your terminal",
-        bin={"e": "bin/e"},
+        bin={command: "bin/e"},
         files=["bin"],
         optionalDependencies={
             f"@intuitums/e-{platform}": version for platform in PLATFORMS
@@ -90,10 +93,14 @@ def prepare(tag, assets, output):
     (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
     (folder / "README.md").write_text(
-        "# e\n\nInstall with `npm install -g @intuitums/e` or `bun add -g @intuitums/e`.\n\nRun `e` to start. See https://e.intuitum.sh/docs for setup.\n\nIncludes native binaries for macOS and glibc Linux on ARM64 and x86-64.\nNo install scripts or JavaScript runtime are needed to run the binary.\n"
+        f"# e\n\nInstall with `npm install -g @intuitums/e@{release['npm_tag']}` or "
+        f"`bun add -g @intuitums/e@{release['npm_tag']}`.\n\nRun `{command}` to start. "
+        "See https://e.intuitum.sh/docs for setup.\n\n"
+        "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
+        "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
     formula = [
-        "class E < Formula",
+        f"class {'E' if channel == 'stable' else 'E' + channel.capitalize()} < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
         '  homepage "https://e.intuitum.sh"',
         f'  version "{version}"',
@@ -118,18 +125,18 @@ def prepare(tag, assets, output):
         [
             "  def install",
             '    libexec.install "e"',
-            '    (libexec/".e-install-method").write "homebrew\\n"',
-            '    bin.install_symlink libexec/"e"',
+            f'    (libexec/".e-install-method").write "homebrew{marker_suffix}\\n"',
+            f'    bin.install_symlink libexec/"e" => "{command}"',
             "  end",
             "",
             "  test do",
-            '    assert_equal "e #{version}", shell_output("#{bin}/e --version").strip',
+            f'    assert_equal "e #{{version}}", shell_output("#{{bin}}/{command} --version").strip',
             "  end",
             "end",
             "",
         ]
     )
-    (output / "e.rb").write_text("\n".join(formula))
+    (output / f"{command}.rb").write_text("\n".join(formula))
 
 
 if __name__ == "__main__":

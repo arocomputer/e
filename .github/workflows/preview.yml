@@ -1,0 +1,72 @@
+name: Preview
+
+# Explicit requests only. PR code gets a read-only token and no publishing secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to build
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ inputs.pr }}
+        run: |
+          case "$PR" in ''|*[!0-9]*) exit 1 ;; esac
+          sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+  build:
+    name: Preview (${{ matrix.target }})
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - name: Build pinned preview
+        env:
+          E_BUILD_CHANNEL: pr
+          E_BUILD_COMMIT: ${{ needs.source.outputs.sha }}
+          SEQUENCE: ${{ github.run_number }}
+          PR: ${{ inputs.pr }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 scripts/release/identity.py --channel pr --sequence "$SEQUENCE" > preview.json
+          export E_BUILD_VERSION=$(python3 -c 'import json; print(json.load(open("preview.json"))["version"])')
+          rustup target add "$TARGET"
+          cargo build --release --locked --target "$TARGET"
+          mkdir preview
+          cp "target/$TARGET/release/e" preview/e
+          cp preview.json preview/
+          cd preview
+          sha256sum e > checksums.txt 2>/dev/null || shasum -a 256 e > checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e-pr-${{ inputs.pr }}-${{ matrix.target }}
+          path: preview/
+          retention-days: 14

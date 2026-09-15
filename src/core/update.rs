@@ -4,7 +4,7 @@
 //! setting). The swap is an atomic rename next to the running binary; the
 //! new version takes effect on the next start, which the notice says.
 //!
-//! Dev builds are exempt: a binary living under a `target/` directory is a
+//! Local Cargo builds are exempt: a binary living under a `target/` directory is a
 //! cargo artifact, and auto-update must never stomp one. So is any platform
 //! off the release matrix (`target()` is `None`): a `cargo install` on musl,
 //! armv7, FreeBSD, … must never be overwritten with a tarball its host
@@ -83,6 +83,10 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     let marker = executable.parent()?.join(".e-install-method");
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
+            "homebrew-beta" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e-beta",
+            "homebrew-dev" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e-dev",
+            "npm-beta" => "Update with: npm install -g @intuitums/e@beta or bun add -g @intuitums/e@beta",
+            "npm-dev" => "Update with: npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev",
             "homebrew" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e",
             "npm" => "Installed with npm or bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
             _ => "This installation is package-managed. Update it with its package manager.",
@@ -92,48 +96,74 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     }
 }
 
-/// "1.2.3" -> comparable parts; unparseable segments compare as 0.
-fn parts(version: &str) -> [u64; 3] {
-    let mut out = [0u64; 3];
-    for (i, piece) in version
-        .trim_start_matches('v')
-        .split('.')
-        .take(3)
-        .enumerate()
-    {
-        out[i] = piece.parse().unwrap_or(0);
+/// Parse supported release identities without crossing channels or accepting arbitrary tags.
+fn release_parts(version: &str) -> Option<([u64; 3], &str, u64)> {
+    let version = version.strip_prefix('v').unwrap_or(version);
+    let (base, preview) = version.split_once('-').unwrap_or((version, ""));
+    let values: Vec<_> = base.split('.').collect();
+    if values.len() != 3 {
+        return None;
     }
-    out
+    let number = |s: &str| -> Option<u64> {
+        if s.is_empty()
+            || (s.len() > 1 && s.starts_with('0'))
+            || !s.bytes().all(|c| c.is_ascii_digit())
+        {
+            return None;
+        }
+        s.parse().ok()
+    };
+    let base = [number(values[0])?, number(values[1])?, number(values[2])?];
+    if preview.is_empty() {
+        return Some((base, "stable", 0));
+    }
+    let parts: Vec<_> = preview.split('.').collect();
+    if parts.len() != 3 || !["dev", "beta", "pr"].contains(&parts[0]) {
+        return None;
+    }
+    let hash = parts[2].strip_prefix('g')?;
+    if hash.len() != 12 || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some((base, parts[0], number(parts[1])?))
 }
 
-/// True when the version is release SemVer — three numeric segments — the
-/// same shape `scripts/release-check.sh` demands of a `vX.Y.Z` tag. Anything
-/// else (a checkout stamped `dev`, a hand-edited identity) is not a release
-/// and must never update itself or check for updates.
+/// Published stable, dev, and beta versions can update; PR identities stay pinned.
 pub fn is_release_version(v: &str) -> bool {
-    let v = v.trim_start_matches('v');
-    let mut segs = v.split('.');
-    let three = [segs.next(), segs.next(), segs.next()];
-    segs.next().is_none()
-        && three
-            .iter()
-            .all(|s| s.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())))
+    release_parts(v).is_some_and(|(_, channel, _)| channel != "pr")
 }
 
+/// Compare only releases in the same channel, never switching a user's installation.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
-    // A build whose version is not release SemVer never rolls itself
-    // forward: a source checkout must update via cargo, not over itself.
-    if !is_release_version(current) {
-        return false;
+    match (release_parts(candidate), release_parts(current)) {
+        (Some((a, ac, an)), Some((b, bc, bn))) if ac == bc && ac != "pr" => (a, an) > (b, bn),
+        _ => false,
     }
-    parts(candidate) > parts(current)
 }
 
 /// The latest release tag ("v0.4.1"), from the GitHub API.
 /// `None` — no release published — means nothing to update to, which the
 /// flow reads as already current, not a failure.
 pub async fn latest_tag() -> Result<Option<String>, String> {
-    latest_tag_from(API_LATEST).await
+    match crate::CHANNEL {
+        "stable" => latest_tag_from(API_LATEST).await,
+        "dev" | "beta" => {
+            let bytes = fetch(&format!(
+                "{RELEASES}/download/channel-{}/version.txt",
+                crate::CHANNEL
+            ))
+            .await?;
+            let tag = String::from_utf8(bytes)
+                .map_err(|e| e.to_string())?
+                .trim()
+                .to_owned();
+            if !release_parts(&tag).is_some_and(|(_, channel, _)| channel == crate::CHANNEL) {
+                return Err("invalid channel release pointer".into());
+            }
+            Ok(Some(tag))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// `latest_tag` against an explicit API URL, so tests can serve the API.
@@ -316,10 +346,13 @@ pub async fn self_update() -> Result<Option<String>, String> {
     if let Some(hint) = package_update_hint(&dest) {
         return Err(hint.into());
     }
-    // A build whose identity is not release SemVer — a source checkout —
-    // or whose platform has no release artifact is never replaced by a
-    // published release; the check is skipped, not just the install.
-    if !is_release_version(crate::VERSION) || target().is_none() {
+    // Local and PR builds stay pinned. Published builds follow only their
+    // own channel, and unsupported platforms never download another target.
+    if !["stable", "dev", "beta"].contains(&crate::CHANNEL)
+        || is_dev_build()
+        || !is_release_version(crate::VERSION)
+        || target().is_none()
+    {
         return Ok(None);
     }
     // No published release: nothing exists to update to — already current.

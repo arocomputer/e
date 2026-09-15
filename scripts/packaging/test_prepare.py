@@ -63,9 +63,20 @@ class Packages(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "predates"):
             prepare("v0.0.1", self.assets, self.root / "dist")
 
-    def test_prerelease_cannot_be_published_as_stable(self):
-        with self.assertRaisesRegex(ValueError, "stable"):
+    def test_unknown_prerelease_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Expected"):
             prepare("v1.2.3-rc.1", self.assets, self.root / "dist")
+
+    def test_preview_packages_keep_the_channel_and_separate_command(self):
+        output = self.root / "dist"
+        prepare("v1.2.3-beta.12.gabcdef012345", self.assets, output)
+        wrapper = json.loads((output / "e/package.json").read_text())
+        self.assertEqual(wrapper["publishConfig"]["tag"], "beta")
+        self.assertEqual(wrapper["bin"], {"e-beta": "bin/e"})
+        self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm-beta\n")
+        formula = (output / "e-beta.rb").read_text()
+        self.assertIn('class EBeta < Formula', formula)
+        self.assertIn('=> "e-beta"', formula)
 
 
 if __name__ == "__main__":

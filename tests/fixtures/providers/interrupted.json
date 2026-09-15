@@ -1,0 +1,6 @@
+{
+  "origin": "synthetic",
+  "responses": [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+  ]
+}
