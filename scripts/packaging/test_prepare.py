@@ -75,8 +75,17 @@ class Packages(unittest.TestCase):
         self.assertEqual(wrapper["bin"], {"e-beta": "bin/e"})
         self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm-beta\n")
         formula = (output / "e-beta.rb").read_text()
+        self.assertIn('https://github.com/intuitums/e-beta/releases/download/', formula)
         self.assertIn('class EBeta < Formula', formula)
         self.assertIn('=> "e-beta"', formula)
+
+    def test_dev_publishes_npm_without_a_formula(self):
+        output = self.root / "dist"
+        prepare("v1.2.3-dev.12.gabcdef012345", self.assets, output)
+        package = json.loads((output / "e/package.json").read_text())
+        self.assertEqual(package["publishConfig"]["tag"], "dev")
+        self.assertEqual(package["bin"], {"e-dev": "bin/e"})
+        self.assertEqual(list(output.glob("*.rb")), [])
 
 
 if __name__ == "__main__":

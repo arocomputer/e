@@ -28,8 +28,9 @@ when the scenario command finishes.
 
 ## Release channels
 
-GitHub titles use `X.Y.Z` for stable releases and `X.Y.Z · Beta N` or
-`X.Y.Z · Dev N` for previews. Tags and package versions retain the full
+Production releases live in `intuitums/e`. Beta binaries live in
+`intuitums/e-beta`, with titles `X.Y.Z · Beta N`. Dev publishes npm packages
+under `@dev`, with no GitHub Release. Tags and package versions retain the
 channel, sequence, and commit identifier used by installers.
 
 | Channel | Trigger | Executable | Default state |
@@ -46,12 +47,12 @@ version, channel, and full source commit. Preview identities use
 Release workflow run number. PR builds use that workflow's run number.
 `e --version --json` and `e doctor` report the build identity.
 
-Dev and beta are GitHub prereleases and never become GitHub's latest stable
-release. The `channel-dev` and `channel-beta` releases contain only a moving
-`version.txt` pointer. The pointer advances after npm and brew both publish.
-Versioned artifacts remain attached to their own release. Older retries cannot
-move package tags, formulas, or channel pointers backward. PR and local builds
-never self-update. Stable, dev, and beta self-updates stay in their own channel.
+The beta repository's latest release advances after npm and brew publish.
+Its `version.txt` asset supplies curl's current beta version. No new channel-pointer
+releases are created. Older retries cannot move package tags, formulas, or the
+latest beta backward. PR and local builds never self-update. Curl installations
+follow production or beta within their channel; package installations update
+through their package manager.
 
 Each home owns its credentials, settings, sessions, and extensions. Sign in
 separately in a new channel. State isolation does not isolate project edits;
@@ -66,17 +67,32 @@ bun add -g @intuitums/e@beta
 brew install intuitums/tap/e-beta
 ```
 
-Use `dev` instead of `beta` for development builds. Stable remains the default:
+For dev, use `npm install -g @intuitums/e@dev` or
+`bun add -g @intuitums/e@dev`, then run `e-dev`. Dev is not published to curl
+or Homebrew. Stable remains the default:
 no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
-Curl and brew support side-by-side installations. npm and bun replace the
+Curl and brew support side-by-side production and beta installations. npm and bun replace the
 installed version of `@intuitums/e` when switching its tag. Package installs
 carry channel-specific ownership markers; e directs updates to that manager.
 
 To reinstall an older version with curl, pass `--version X.Y.Z`; a preview also
-needs `--channel beta` or `--channel dev` and its full preview version. npm and
+needs `--channel beta` and its full preview version. npm and
 bun accept an exact package version after `@`. Use curl in a separate directory
 for a historical brew build. An older curl build follows newer releases again
 unless auto-update is disabled in its settings.
+
+### Existing preview installations
+
+Earlier beta archives remain in `intuitums/e`. The curl installer falls back to
+those archives for pinned historical versions and uses the previous beta pointer
+until the first release exists in `intuitums/e-beta`. Reinstall beta with the
+command above once to adopt the new self-update source. Historical binaries
+cannot learn a new update URL by themselves.
+
+Existing dev binaries and the `e-dev` Homebrew formula remain available as
+historical builds, but receive no further releases. Use npm or bun for current
+dev builds. Remove a previous curl or brew installation before switching if its
+`e-dev` command takes precedence on PATH. State remains in `~/.e-dev`.
 
 ## Try a PR before merging
 
@@ -129,17 +145,23 @@ entry. New releases need no separate website copy or deployment.
 
 ## Verification and retrying publication
 
-Release builds use the committed lockfile. Each release has four archives,
+Release builds use the committed lockfile. Each build has four archives,
 `checksums.txt`, a CycloneDX SBOM, and GitHub build-provenance attestations.
 The workflow smoke-tests native binaries and the shell installer before
-publication, then tests pinned and channel installs through the public website.
+publication. Production and beta test pinned and channel installs through the
+public website. Dev verifies an exact-version npm install. Actions retains build
+archives and metadata for 14 days; npm retains the published dev packages.
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
 gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo intuitums/e
 ```
 
-On macOS use `shasum -a 256`. To retry a partial package publication, run Release
+On macOS use `shasum -a 256`. To retry dev publication, rerun failed jobs in the original
+Actions run with `gh run rerun RUN_ID --failed` while its verified assets remain available. This keeps its version
+and source unchanged. Dev is not accepted by the manual `retry` action.
+
+To retry a partial package publication, run Release
 with action `retry` and the existing version tag. This downloads the existing
 archives instead of rebuilding. For a draft whose builds finished, retry regenerates
 checksums, the SBOM, and provenance in an isolated temporary directory, then
@@ -161,6 +183,13 @@ or workflow sources change. Docs-only main changes do not publish dev builds.
 Release installation checks always run. Preview builds require an explicit request.
 
 ## Publishing credentials
+
+Beta publishing uses `BETA_RELEASE_TOKEN`, a fine-grained token with Contents
+read/write on `intuitums/e-beta`. Save it as a repository secret in `intuitums/e`.
+The beta repository needs an initial commit so GitHub can attach release tags.
+Release bodies record the source commit in `intuitums/e`; retries validate that
+commit is reachable from main. GitHub's ordinary workflow token handles
+production releases in the source repository.
 
 Homebrew uses `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to Contents
 read/write on `intuitums/homebrew-tap`. Deploy keys are disabled by repository
@@ -203,8 +232,10 @@ maps to the stable installer channel; package tags and update commands keep thei
 existing names. The release workflow records its selected source commit, not the
 branch used to run the workflow.
 
-A final reporting job marks success only after npm, Homebrew, channel advancement,
-and website installation checks pass. Failed or cancelled attempts link to their
-Actions logs; successful entries link to the versioned release. Documentation-only
+A final reporting job marks production and beta successful after npm, Homebrew,
+channel advancement, and website installation checks pass. Dev requires verified
+npm publication. Failed or cancelled attempts link to Actions logs. Successful
+production and beta entries link to their release repository; dev entries link
+to the exact npm version. Documentation-only
 skips and invalid release selections do not create deployment entries. Reporting
 starts with runs using this workflow; earlier releases are not backfilled.

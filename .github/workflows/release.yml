@@ -1,6 +1,6 @@
 name: Release
 
-# Stable tags and beta candidates qualify here; dev follows successful main CI.
+# Production publishes here, beta publishes in e-beta, and dev publishes only to npm.
 on:
   push:
     tags: ["v*"]
@@ -38,6 +38,7 @@ jobs:
       # GitHub requires push access to inspect unpublished draft releases.
       contents: write
     outputs:
+      repository: ${{ steps.release.outputs.repository }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       title: ${{ steps.release.outputs.title }}
@@ -49,9 +50,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Check beta publishing access
+        if: inputs.action == 'beta' || contains(inputs.tag, '-beta.')
+        env:
+          BETA_TOKEN: ${{ secrets.BETA_RELEASE_TOKEN }}
+        run: test -n "$BETA_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN with Contents read/write on intuitums/e-beta.'; exit 1; }
       - id: release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ contains(inputs.tag, '-beta.') && secrets.BETA_RELEASE_TOKEN || github.token }}
         run: python3 scripts/release/resolve.py
   qualify:
     needs: resolve
@@ -87,25 +93,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Draft
+        if: needs.resolve.outputs.channel != 'dev'
         env:
           TITLE: ${{ needs.resolve.outputs.title }}
           CHANNEL: ${{ needs.resolve.outputs.channel }}
           SHA: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           if [ "$CHANNEL" = stable ]; then
             ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           else
-            printf 'Preview build %s from %s. See CHANGELOG.md at this commit for changes.\n' "$TAG" "$SHA" > notes.md
+            test -n "$GH_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN for intuitums/e-beta.'; exit 1; }
+            printf 'Source: https://github.com/intuitums/e/commit/%s\n\nBeta build %s.\n' "$SHA" "$TAG" > notes.md
           fi
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
           else
-            gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
+            if [ "$CHANNEL" = stable ]; then
+              gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
+            else
+              gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md
+            fi
           fi
 
   build:
@@ -136,14 +149,17 @@ jobs:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
           E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
           E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           for target in ${{ matrix.targets }}; do
             rustup target add "$target"
             cargo build --release --locked --target "$target"
             tar czf "e-$target.tar.gz" -C "target/$target/release" e
-            gh release upload "$TAG" "e-$target.tar.gz" --clobber
+            if [ "$E_BUILD_CHANNEL" != dev ]; then
+              gh release upload "$TAG" "e-$target.tar.gz" --clobber
+            fi
           done
 
           host=$(rustc -vV | sed -n 's/^host: //p')
@@ -157,6 +173,14 @@ jobs:
               "$install_dir/${{ needs.resolve.outputs.command }}" --version | grep -Fx "e ${TAG#v}"
               ;;
           esac
+
+      - name: Retain build archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binaries-${{ matrix.runner }}
+          path: e-*.tar.gz
+          retention-days: 14
+          overwrite: true
 
   publish:
     name: Checksums and publish
@@ -174,13 +198,24 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
 
+      - name: Download build archives
+        if: needs.resolve.outputs.mode == 'build'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-assets
+
       - name: Download and checksum every artifact
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           mkdir -p "$RUNNER_TEMP/release-assets"
-          gh release download "$TAG" --pattern "e-*.tar.gz" --dir "$RUNNER_TEMP/release-assets"
+          if [ '${{ needs.resolve.outputs.mode }}' = recover ]; then
+            gh release download "$TAG" --pattern "e-*.tar.gz" --dir "$RUNNER_TEMP/release-assets"
+          fi
           cd "$RUNNER_TEMP/release-assets"
           test "$(find . -name 'e-*.tar.gz' | wc -l)" -eq 4
           sha256sum e-*.tar.gz > checksums.txt
@@ -198,10 +233,12 @@ jobs:
           subject-path: ${{ runner.temp }}/release-assets/*
 
       - name: Upload metadata and publish
+        if: needs.resolve.outputs.channel != 'dev'
         env:
           CHANNEL: ${{ needs.resolve.outputs.channel }}
           SHA: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
@@ -211,8 +248,18 @@ jobs:
             gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
             gh release edit "$TAG" --draft=false --latest
           else
-            gh release edit "$TAG" --draft=false --prerelease --latest=false
+            printf '%s\n' "$TAG" > "$RUNNER_TEMP/release-assets/version.txt"
+            gh release upload "$TAG" "$RUNNER_TEMP/release-assets/version.txt" --clobber
+            gh release edit "$TAG" --draft=false --latest=false
           fi
+
+      - name: Retain verified assets for package publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-assets
+          path: ${{ runner.temp }}/release-assets/*
+          retention-days: 14
+          overwrite: true
 
   npm:
     name: npm and bun
@@ -226,19 +273,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           registry-url: https://registry.npmjs.org
+      - name: Download verified assets
+        if: needs.resolve.outputs.mode != 'retry'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: verified-assets
+          path: ${{ runner.temp }}/npm-assets
       - name: Prepare verified packages
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
-          gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
-          python3 scripts/packaging/prepare.py "$TAG" assets dist
+          if [ '${{ needs.resolve.outputs.mode }}' = retry ]; then
+            test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
+            gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir "$RUNNER_TEMP/npm-assets"
+          fi
+          python3 scripts/packaging/prepare.py "$TAG" "$RUNNER_TEMP/npm-assets" dist
       - name: Publish and verify npm packages
         env:
           # Remove this secret after all five packages trust this workflow.
@@ -259,26 +315,35 @@ jobs:
             fi
           done
 
+      - name: Verify registry installation
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          COMMAND: ${{ needs.resolve.outputs.command }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/npm-smoke" "@intuitums/e@$VERSION"
+          "$RUNNER_TEMP/npm-smoke/node_modules/.bin/$COMMAND" --version | grep -Fx "e $VERSION"
+
   homebrew:
     name: Homebrew tap
     permissions:
       contents: read
     needs: [resolve, publish]
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+    if: ${{ !cancelled() && needs.resolve.outputs.channel != 'dev' && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.sha }}
       - name: Prepare verified formula
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
-          gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir assets
-          python3 scripts/packaging/prepare.py "$TAG" assets dist
+          gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir "$RUNNER_TEMP/brew-assets"
+          python3 scripts/packaging/prepare.py "$TAG" "$RUNNER_TEMP/brew-assets" dist
       - name: Check publishing access
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -305,10 +370,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.sha }}
       - name: Advance channel
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: python3 scripts/release/channel.py "$TAG"
       - name: Install through website

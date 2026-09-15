@@ -12,8 +12,8 @@ class DeploymentTests(unittest.TestCase):
                 with self.subTest(channel=channel, outcome=outcome):
                     needs = {
                         'resolve': {'result': 'success', 'outputs': {
-                            'channel': channel, 'sha': 'a' * 40, 'tag': 'v1.2.3', 'version': '1.2.3'}},
-                        'npm': {'result': outcome}, 'homebrew': {'result': 'success'},
+                            'channel': channel, 'repository': 'intuitums/e-beta' if channel == 'beta' else 'intuitums/e', 'sha': 'a' * 40, 'tag': 'v1.2.3', 'version': '1.2.3'}},
+                        'npm': {'result': outcome}, 'homebrew': {'result': 'skipped' if channel == 'dev' else 'success'},
                         'channel': {'result': 'success' if outcome == 'success' else 'skipped'},
                     }
                     with patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
@@ -26,4 +26,4 @@ class DeploymentTests(unittest.TestCase):
                     self.assertEqual(status['state'], 'error' if outcome == 'cancelled' else outcome)
                     self.assertEqual(status['log_url'], 'https://github.com/intuitums/e/actions/runs/123')
                     self.assertEqual(status['environment_url'],
-                                     'https://github.com/intuitums/e/releases/tag/v1.2.3' if outcome == 'success' else status['log_url'])
+                                     (('https://www.npmjs.com/package/@intuitums/e/v/1.2.3' if channel == 'dev' else f'https://github.com/intuitums/{"e-beta" if channel == "beta" else "e"}/releases/tag/v1.2.3') if outcome == 'success' else status['log_url']))

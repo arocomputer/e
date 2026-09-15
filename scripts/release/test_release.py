@@ -7,6 +7,9 @@ from notes import parse
 class ReleaseContracts(unittest.TestCase):
     def test_channel_versions_and_numeric_order(self):
         self.assertEqual(identity('v1.2.3')['npm_tag'], 'latest')
+        self.assertEqual(identity('v1.2.3')['repository'], 'intuitums/e')
+        self.assertEqual(identity('v1.2.3-beta.12.gabcdef012345')['repository'], 'intuitums/e-beta')
+        self.assertEqual(identity('v1.2.3-dev.12.gabcdef012345')['repository'], '')
         self.assertEqual(identity('v1.2.3-beta.12.gabcdef012345')['command'], 'e-beta')
         self.assertGreater(version_key('1.2.3-dev.12.gabcdef012345'), version_key('1.2.3-dev.9.gabcdef012345'))
         for invalid in ['1.2.3-rc.1', '1.2.3-dev', '1.2.3-dev.1.g../file', '01.2.3']:
@@ -32,7 +35,38 @@ class ReleaseContracts(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse('### A title\n- Ungrouped change')
 
+class BetaPromotion(unittest.TestCase):
+    def test_only_beta_latest_advances_and_older_retries_do_not(self):
+        import json
+        from unittest.mock import patch
+        from channel import advance
+        for tag, newer, promotes in [
+            ('v1.2.3', False, False),
+            ('v1.2.3-dev.12.gabcdef012345', False, False),
+            ('v1.2.3-beta.12.gabcdef012345', False, True),
+            ('v1.2.3-beta.12.gabcdef012345', True, False),
+        ]:
+            pages = [[{'tag_name': 'v1.2.3-beta.13.gabcdef012345', 'draft': False, 'prerelease': False}]] if newer else [[]]
+            with patch('channel.subprocess.check_output', return_value=json.dumps(pages)), \
+                    patch('channel.subprocess.run') as run:
+                advance(tag)
+            if promotes:
+                run.assert_called_once_with(['gh', 'release', 'edit', tag, '--repo', 'intuitums/e-beta', '--latest'], check=True)
+            else:
+                run.assert_not_called()
+
+
 class ShellInstaller(unittest.TestCase):
+    def test_public_dev_install_redirects_to_npm_without_downloading(self):
+        import os
+        from pathlib import Path
+        import subprocess
+        root = Path(__file__).resolve().parents[2]
+        env = {key: value for key, value in os.environ.items() if key != 'E_RELEASE_BASE'}
+        result = subprocess.run(['sh', str(root / 'install.sh'), '--channel', 'dev'], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('npm install -g @intuitums/e@dev', result.stderr)
+
     def test_pinned_beta_keeps_stable_and_rejects_a_mismatched_channel(self):
         import hashlib
         import io
