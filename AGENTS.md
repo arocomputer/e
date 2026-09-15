@@ -148,8 +148,12 @@ surface? Route it through `panel.rs` so it can't diverge.
   beside the code. When guidance becomes wrong, rewrite it rather than appending
   another account. Use Git history for past decisions.
 
-## Pull requests
+## Branches and pull requests
 
+- Before the first push, name the branch `<type>/<slug>`. Use the PR title's
+  conventional type or scope plus two or three lowercase words, for example
+  `bench/real-launches` or `fix/tool-tree-compaction`. Never push `main`, a bare
+  SHA, or a vague generated name.
 - Never open a PR unless the developer explicitly asks you to.
 - Conventional commit titles, plain language: `fix(tui): tool trees stay
   connected after compaction`. The type is `fix`, `feat`, `perf`, `refactor`,
