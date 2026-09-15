@@ -57,7 +57,7 @@ thread; each thread owns one process and session against the checkout in
 `E_CWD`. Tool
 progress is posted as it happens, the reply when the turn ends, and
 extension questions become a message with buttons. See its README for the
-three Slack credentials and how to run it.
+app manifest and the three Slack credentials, and how to run it.
 
 ## GitHub
 
