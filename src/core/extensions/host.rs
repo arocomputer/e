@@ -1701,7 +1701,7 @@ pub fn shortcut_allowed(chord: &str) -> bool {
 /// own overrides so `Ctrl+Shift+G` and `shift+ctrl+g` are one key. A
 /// modifier with no key is nothing to bind.
 pub fn normalize_chord(chord: &str) -> String {
-    let normalized = crate::core::config::keybindings::normalize_chord(chord);
+    let normalized = crate::core::config::chord::normalize_chord(chord);
     let key = normalized.rsplit('+').next().unwrap_or("");
     if key.is_empty() && !normalized.ends_with("++") {
         return String::new();

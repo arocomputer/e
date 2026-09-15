@@ -102,6 +102,14 @@ for pattern in $(awk '!/^#/ && NF { print $1 }' .github/CODEOWNERS); do
   fi
 done
 
+# 8. The core stays terminal-free. tui depends on core, never the reverse:
+#    src/core names no frontend module and no terminal crate, so the harness
+#    the SDK embeds carries no terminal with it.
+if out=$(grep -rnE '(crate|super|e)::tui\b|\bcrossterm\b' src/core --include='*.rs'); then
+  bad "src/core reaches into the frontend (tui or crossterm):"
+  say "$out"
+fi
+
 if [ "$fail" -eq 0 ]; then
   say "guard: all checks passed"
 else

@@ -70,8 +70,8 @@ pub fn body(topic: &str) -> Option<&'static str> {
         "keybindings" => include_str!("../../../docs/keybindings.md"),
         "layout" => include_str!("../../../docs/layout.md"),
         "sandboxing" => include_str!("../../../docs/sandboxing.md"),
-        "theme-dark" => crate::tui::theme::DARK_JSON,
-        "theme-light" => crate::tui::theme::LIGHT_JSON,
+        "theme-dark" => include_str!("../../../assets/themes/dark.json"),
+        "theme-light" => include_str!("../../../assets/themes/light.json"),
         _ => return None,
     })
 }

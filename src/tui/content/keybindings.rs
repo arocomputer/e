@@ -1,7 +1,7 @@
 //! The composer's line-editing keymap: which key chord performs which
-//! `Key` action (`tui/content/composer.rs`). File-backed like themes and
-//! skills — `~/.e/keybindings.json` overrides individual chords, everything
-//! left unset keeps e's built-in emacs-ish bindings.
+//! `Key` action (`composer.rs`). File-backed like themes and skills —
+//! `~/.e/keybindings.json` overrides individual chords, everything left
+//! unset keeps e's built-in emacs-ish bindings.
 //!
 //! This covers editing only, not e's application-level shortcuts (ctrl+c,
 //! ctrl+p, ctrl+v for clipboard images, tab, menu arrows, …): those are
@@ -9,25 +9,19 @@
 //! spoken for there never reaches this keymap regardless of what a user binds
 //! it to here.
 //!
-//! Format: a flat JSON object, chord string to action name.
+//! Format: a flat JSON object, chord string to action name. The chord
+//! grammar is `core/config/chord.rs`; `"none"` unbinds a default chord (the
+//! event is swallowed, not passed through as a literal character).
 //!
 //! ```json
 //! { "ctrl+j": "none", "alt+d": "kill_word" }
 //! ```
-//!
-//! A chord is `[ctrl+][alt+][shift+]<key>`, modifiers in any order,
-//! case-insensitive; `<key>` is `enter`, `backspace`, `delete`, `left`,
-//! `right`, `up`, `down`, `home`, `end`, or a single character — including
-//! `+` and `-` themselves (`ctrl+-`), since modifiers are read off the front
-//! and whatever remains is the key. A capital letter is spelled with its
-//! modifier (`shift+a`), which is how the terminal reports it. `"none"`
-//! unbinds a default chord (the event is swallowed, not passed through as a
-//! literal character).
 
 use std::collections::HashMap;
 
 use crossterm::event::KeyCode;
 
+use crate::core::config::chord::normalize_chord;
 use crate::tui::content::composer::Key;
 
 /// A loaded set of chord overrides. Not present in the map at all means
@@ -95,49 +89,6 @@ pub fn base_name(code: KeyCode) -> Option<String> {
     )
 }
 
-/// Build a canonical chord string from modifiers and a base name — the same
-/// function both a live `KeyEvent` and a parsed JSON key are run through, so
-/// the two always compare equal for the same physical chord. The base is
-/// lowercased here, on both sides: a typed capital arrives as `Char('A')`
-/// plus SHIFT, and must meet the file's `shift+a`.
-pub fn chord_string(ctrl: bool, alt: bool, shift: bool, base: &str) -> String {
-    let mut s = String::new();
-    if ctrl {
-        s.push_str("ctrl+");
-    }
-    if alt {
-        s.push_str("alt+");
-    }
-    if shift {
-        s.push_str("shift+");
-    }
-    s.push_str(&base.to_ascii_lowercase());
-    s
-}
-
-/// Parse a user-written chord string ("shift+ctrl+A", "Alt+J", "ctrl-w")
-/// into the same canonical form `chord_string` produces, so modifier order
-/// and case in the file never matter. Modifiers are peeled off the front one
-/// `name+` (or `name-`) at a time and the remainder is the key verbatim,
-/// which is what lets `ctrl+-` and `ctrl++` name the `-` and `+` keys.
-pub fn normalize_chord(raw: &str) -> String {
-    let mut ctrl = false;
-    let mut alt = false;
-    let mut shift = false;
-    let lower = raw.trim().to_ascii_lowercase();
-    let mut rest = lower.as_str();
-    while let Some((head, tail)) = rest.split_once(['+', '-']) {
-        match head.trim() {
-            "ctrl" | "control" => ctrl = true,
-            "alt" | "option" | "meta" => alt = true,
-            "shift" => shift = true,
-            _ => break,
-        }
-        rest = tail.trim_start();
-    }
-    chord_string(ctrl, alt, shift, rest)
-}
-
 /// The named actions a chord can be bound to — every `Key` variant except
 /// `Char`, which is the fallback for "insert this literal character", not a
 /// bindable action.
@@ -164,38 +115,4 @@ fn action_of(name: &str) -> Option<Key> {
 
 // Filesystem-touching coverage (`load()` against a real keybindings.json)
 // lives in `tests/keybindings.rs`, like the rest of the suite's file-backed
-// config — this module keeps only pure, filesystem-free unit tests.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chord_string_and_normalize_chord_agree_regardless_of_order_or_case() {
-        assert_eq!(
-            chord_string(true, false, false, "a"),
-            normalize_chord("Ctrl+A")
-        );
-        assert_eq!(
-            chord_string(true, true, false, "left"),
-            normalize_chord("alt+ctrl+left")
-        );
-        assert_eq!(
-            chord_string(false, true, true, "enter"),
-            normalize_chord("SHIFT+ALT+ENTER")
-        );
-    }
-
-    /// The live side sees a capital as `Char('A')` + SHIFT and must meet the
-    /// file's `shift+a`; and `-`/`+` are keys, not just separators.
-    #[test]
-    fn shifted_letters_and_separator_keys_match_the_live_chord() {
-        assert_eq!(
-            chord_string(false, false, true, "A"),
-            normalize_chord("shift+a")
-        );
-        assert_eq!(chord_string(true, false, false, "-"), "ctrl+-");
-        assert_eq!(normalize_chord("ctrl+-"), "ctrl+-");
-        assert_eq!(normalize_chord("ctrl++"), "ctrl++");
-        assert_eq!(normalize_chord("ctrl-w"), "ctrl+w");
-    }
-}
+// config.

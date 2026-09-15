@@ -164,7 +164,7 @@ pub fn parse(json: &str) -> Option<Layout> {
         layout.split_min = usize::try_from(min).unwrap_or(usize::MAX).max(60);
     }
     if let Some(focus) = raw.focus {
-        let chord = crate::core::config::keybindings::normalize_chord(&focus);
+        let chord = crate::core::config::chord::normalize_chord(&focus);
         if !chord.is_empty() {
             layout.focus = chord;
         }

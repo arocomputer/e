@@ -102,7 +102,8 @@ impl UiPrompt {
 /// keys the composer never binds (`escape`, `tab`, `space`, paging) so an
 /// interactive panel can see them. None for keys without a name.
 pub(crate) fn chord_of(event: &KeyEvent) -> Option<String> {
-    use crate::core::config::keybindings::{base_name, chord_string};
+    use crate::core::config::chord::chord_string;
+    use crate::tui::keybindings::base_name;
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let mut shift = event.modifiers.contains(KeyModifiers::SHIFT);
