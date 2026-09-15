@@ -33,11 +33,10 @@ RUN set -eux; \
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-fund --no-audit
-COPY bin ./bin
 COPY src ./src
 COPY .env.example manifest.json README.md ./
 
 # The repository the bot works in. Mount one here.
 WORKDIR /work
 ENV E_CWD=/work
-ENTRYPOINT ["node", "/app/bin/e-slack.js"]
+ENTRYPOINT ["node", "--experimental-strip-types", "/app/src/index.ts"]
