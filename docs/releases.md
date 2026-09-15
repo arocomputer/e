@@ -191,3 +191,16 @@ The website installer at `https://e.intuitum.sh/install.sh` serves the maintaine
 script from main with a five-minute cache. Merge the channel-aware installer
 before attempting the first channel release. No separate deployment is required
 for each binary release. The stable homepage installation stays unchanged.
+
+## Deployment history
+
+GitHub's Deployments panel tracks `production`, `beta`, and `dev`. Production
+maps to the stable installer channel; package tags and update commands keep their
+existing names. The release workflow records its selected source commit, not the
+branch used to run the workflow.
+
+A final reporting job marks success only after npm, Homebrew, channel advancement,
+and website installation checks pass. Failed or cancelled attempts link to their
+Actions logs; successful entries link to the versioned release. Documentation-only
+skips and invalid release selections do not create deployment entries. Reporting
+starts with runs using this workflow; earlier releases are not backfilled.
