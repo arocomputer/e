@@ -64,10 +64,11 @@ The channel publishes with e's releases as `@intuitums/e-slack`, so
 repository. Its version matches the release it came from.
 
 On a server, `channels/slack/Dockerfile` builds an image carrying e from the
-release and the bot from the repository. Mount the checkout at `/work` and e's
-home on a volume, and record the trust decision once (`e trust`): a channel has
-no terminal, so nothing else can answer the panel that gates the repository's
-own instructions.
+release and the bot from the repository; each release publishes it as
+`ghcr.io/intuitums/e-slack`, so the usual case needs neither Node nor a
+checkout. Mount the checkout at `/work` and e's home on a volume, and record the
+trust decision once (`e trust`): a channel has no terminal, so nothing else can
+answer the panel that gates the repository's own instructions.
 
 ## GitHub
 

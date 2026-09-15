@@ -380,6 +380,42 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/npm-smoke" "@intuitums/e@$VERSION"
           "$RUNNER_TEMP/npm-smoke/node_modules/.bin/$COMMAND" --version | grep -Fx "e $VERSION"
 
+  container:
+    name: Container image
+    # The image installs the release it belongs to, so it waits for one. Dev
+    # builds are npm-only and the installer has no dev channel.
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel != 'dev' }}
+    # A registry hiccup must not fail the release, the way the channel package's
+    # publishing step does not. The deployment report still records the outcome.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: channels/slack
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            E_CHANNEL=${{ needs.resolve.outputs.channel }}
+            E_VERSION=${{ needs.resolve.outputs.version }}
+          tags: |
+            ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.channel == 'stable' && 'latest' || needs.resolve.outputs.channel }}
+            ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
+
   homebrew:
     name: Homebrew tap
     permissions:
@@ -448,7 +484,7 @@ jobs:
 
   deployment:
     name: Report release deployment
-    needs: [resolve, qualify, create, build, publish, npm, homebrew, channel, comment-building, comment-publishing]
+    needs: [resolve, qualify, create, build, publish, npm, homebrew, container, channel, comment-building, comment-publishing]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
