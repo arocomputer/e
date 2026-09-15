@@ -242,6 +242,20 @@ jobs:
           # Remove this secret after all five packages trust this workflow.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist
+      - name: Keep preview packages off latest
+        if: needs.resolve.outputs.channel != 'stable'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          # npm may assign latest on a package's first publication despite --tag.
+          for package in dist/*/package.json; do
+            name=$(node -p 'require("./" + process.argv[1]).name' "$package")
+            latest=$(npm dist-tag ls "$name" --json | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).latest || ""')
+            if [ "$latest" = "$VERSION" ]; then
+              npm dist-tag rm "$name" latest
+            fi
+          done
 
   homebrew:
     name: Homebrew tap
