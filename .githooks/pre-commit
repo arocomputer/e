@@ -1,0 +1,8 @@
+#!/bin/sh
+# Preserve the contributor's existing identity checks, then inspect staged content.
+set -eu
+previous=$(git config --get e.previousPreCommit || true)
+if [ -n "$previous" ] && [ -x "$previous" ]; then
+  "$previous" "$@"
+fi
+exec python3 scripts/hooks/check.py

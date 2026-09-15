@@ -5,6 +5,7 @@ Instructions for an agent editing this repo.
 ## Build and check
 
 ```sh
+./x hooks            # required once per contributing worktree
 cargo build          # fast dev build
 ./x test             # the whole behavioral contract
 ./x check            # format, lint, tests, and security-surface guard

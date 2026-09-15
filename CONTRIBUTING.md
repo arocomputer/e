@@ -12,6 +12,7 @@ new protocol message to land, say why in the PR; if it doesn't, don't add one.
 ```sh
 git clone https://github.com/intuitums/e
 cd e
+./x hooks
 cargo build
 ./x test
 ```
@@ -19,6 +20,23 @@ cargo build
 The Rust toolchain is pinned in `rust-toolchain.toml`; rustup installs the
 right version on its own. A full build plus test run is the fastest way to
 find out whether your machine is set up correctly.
+
+### Commit checks
+
+Run `./x hooks` in each contributing checkout or worktree. This is part of the
+required setup. It enables the repository pre-commit hook for that worktree and
+preserves an existing executable pre-commit hook. Setup refuses to replace other
+active hooks; integrate those explicitly before enabling it.
+
+Before each commit, the hook checks staged changes for whitespace errors and
+conflict markers, then checks formatting for changed Rust files using their
+staged content. It never rewrites files or stages changes. Full tests and builds
+remain separate so commits stay fast. Python 3 and the pinned Rust toolchain are
+required.
+
+Git allows local hooks to be bypassed. The required CI Guard check runs the same
+content checks on every PR, including docs-only changes, so bypassing a hook does
+not bypass merge checks.
 
 ## Reporting issues
 
