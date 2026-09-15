@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ export async function publishPackages(
         npm = runNpm,
         lookup = lookupRegistry,
         sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        availabilityAttempts = 80, // Twenty minutes per package at fifteen-second intervals.
     } = {},
 ) {
     const folders = readdirSync(root, { withFileTypes: true })
@@ -56,40 +57,33 @@ export async function publishPackages(
         const integrity =
             "sha512-" +
             createHash("sha512").update(readFileSync(tarball)).digest("base64");
-        for (let attempt = 0; ; attempt++) {
+        let existing = await lookup(manifest.name, manifest.version);
+        if (!existing) {
+            console.log(`Publishing ${manifest.name}@${manifest.version}`);
+            const channel = manifest.publishConfig?.tag ?? "latest";
+            const latest = await lookup(manifest.name, channel);
+            const tag = latest && newer(latest.version, manifest.version)
+                ? `v${manifest.version}` : channel;
             try {
-                let existing = await lookup(manifest.name, manifest.version);
-                if (!existing) {
-                    console.log(
-                        `Publishing ${manifest.name}@${manifest.version}`,
-                    );
-                    const channel = manifest.publishConfig?.tag ?? "latest";
-                    const latest = await lookup(manifest.name, channel);
-                    const tag =
-                        latest && newer(latest.version, manifest.version)
-                            ? `v${manifest.version}`
-                            : channel;
-                    npm(
-                        "publish",
-                        tarball,
-                        "--access",
-                        "public",
-                        "--tag",
-                        tag,
-                        "--ignore-scripts",
-                    );
-                    existing = await lookup(manifest.name, manifest.version);
-                }
-                if (existing?.dist?.integrity !== integrity)
-                    throw new Error(
-                        `Published content does not match ${manifest.name}@${manifest.version}`,
-                    );
-                break;
+                npm("publish", tarball, "--access", "public", "--tag", tag, "--ignore-scripts");
             } catch (error) {
-                if (attempt === 2) throw error;
-                await sleep(5000 * (attempt + 1));
+                // A previous attempt may have uploaded this immutable version already.
+                if (!String(error.stderr ?? error.message).includes("previously staged version"))
+                    throw error;
+                console.log(`Already staged ${manifest.name}@${manifest.version}; waiting for npm`);
             }
+            const deadline = Date.now() + 20 * 60 * 1000;
+            for (let attempt = 0; attempt < availabilityAttempts && Date.now() < deadline; attempt++) {
+                existing = await lookup(manifest.name, manifest.version);
+                if (existing) break;
+                console.log(`Waiting for npm processing: ${manifest.name}@${manifest.version}`);
+                await sleep(15000);
+            }
+            if (!existing)
+                throw new Error(`npm processing timed out for ${manifest.name}@${manifest.version}. Check npm package status, then rerun failed jobs to resume verification.`);
         }
+        if (existing.dist?.integrity !== integrity)
+            throw new Error(`Published content does not match ${manifest.name}@${manifest.version}`);
         console.log(`Verified ${manifest.name}@${manifest.version}`);
     }
 }
@@ -98,5 +92,15 @@ if (
     process.argv[1] &&
     resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-    await publishPackages(resolve(process.argv[2]));
+    try {
+        await publishPackages(resolve(process.argv[2]));
+    } catch (error) {
+        const message = String(error.stderr ?? error.message);
+        const reason = message.includes("npm processing timed out") ? "processing"
+            : message.includes("Published content does not match") ? "integrity"
+            : /E401|E403|ENEEDAUTH|EOTP/.test(message) ? "authorization" : "publication";
+        if (process.env.GITHUB_OUTPUT)
+            appendFileSync(process.env.GITHUB_OUTPUT, `failure=${reason}\n`);
+        throw error;
+    }
 }

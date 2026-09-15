@@ -94,3 +94,42 @@ test("a different tarball under the same version fails without overwriting it", 
     assert.equal(command[command.indexOf("--tag") + 1], `v${version}`);
     assert.ok(!lookups.includes("latest"));
 });
+
+for (const staged of [false, true]) {
+    test(`waits for registry visibility without republishing (staged=${staged})`, async (t) => {
+        const f = fixture(t);
+        let reads = 0;
+        await publishPackages(f.root, {
+            npm: (...args) => {
+                const result = f.npm(...args);
+                if (staged && args[0] === "publish")
+                    throw new Error('Cannot publish over previously staged version');
+                return result;
+            },
+            lookup: async (_, version) => version === 'latest' || ++reads < 4
+                ? null : {dist: {integrity: f.integrity}},
+            sleep: async () => {},
+        });
+        assert.equal(f.calls.filter(args => args[0] === 'publish').length, 1);
+    });
+}
+
+test('pending publication times out with resume instructions', async (t) => {
+    const f = fixture(t);
+    await assert.rejects(publishPackages(f.root, {
+        npm: f.npm, lookup: async () => null, sleep: async () => {}, availabilityAttempts: 2,
+    }), /npm processing timed out.*rerun failed jobs/);
+    assert.equal(f.calls.filter(args => args[0] === 'publish').length, 1);
+});
+
+test('authentication failure stops without waiting or republishing', async (t) => {
+    const f = fixture(t);
+    await assert.rejects(publishPackages(f.root, {
+        npm: (...args) => {
+            if (args[0] === 'publish') throw new Error('E403 forbidden');
+            return f.npm(...args);
+        },
+        lookup: async () => null,
+        sleep: async () => assert.fail('must not wait for a rejected upload'),
+    }), /E403/);
+});
