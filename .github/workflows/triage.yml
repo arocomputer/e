@@ -11,11 +11,11 @@ permissions:
 
 jobs:
   paths:
-    name: Label changed areas
+    name: Triage / Labels
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Apply maintained path labels
+      - name: Label
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -32,19 +32,24 @@ jobs:
           # `|| true` on every probe: a non-matching grep must read as
           # "no label", not fail the run — the final statement's status is
           # the script's exit code under `set -eu`.
-          echo "$files" | grep -q '^src/core/' && \
+          echo "$files" | grep -Eq '^src/core/|^src/(main|lib)\.rs$' && \
             add_label area:core 1d76db 'Agent, providers, tools, storage, and extensions' || true
           echo "$files" | grep -q '^src/tui/' && \
             add_label area:tui 5319e7 'Terminal interface and rendering' || true
           echo "$files" | grep -Eq '^(sdk/|docs/sdk\.md)' && \
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
-          echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md)' && \
+          echo "$files" | grep -Eq '^(docs/|README$|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
             add_label documentation 0075ca 'Documentation changes' || true
           echo "$files" | grep -q '^benchmarks/' && \
             add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true
-          echo "$files" | grep -Eq '^(\.github/|scripts/|x$|rust-toolchain.toml)' && \
+          # area:infra covers the tooling paths: automation, fuzz targets,
+          # the dev shim, and test-only changes.
+          echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|bin/|tests/|x$|rust-toolchain.toml)' && \
             add_label area:infra 6f42c1 'Build, CI, release, or repository automation' || true
           echo "$files" | grep -Eq '^(Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
+          # `breaking` is never path-derived — no grep can know a wire or
+          # persisted contract changed. The author declares it; see
+          # docs/compatibility.md.
           echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages.rs|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true
