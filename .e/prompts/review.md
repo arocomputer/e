@@ -86,8 +86,8 @@ the change; ordinary changes do not need to discuss every section.
   explicitly instead of partially interpreting it.
 - Update the format/protocol version only for incompatible changes; additive
   fields remain tolerant.
-- Require migration behavior, compatibility documentation, a changelog entry,
-  and an architecture decision for difficult-to-reverse changes.
+- Require migration behavior, compatibility documentation, and a changelog entry
+  for difficult-to-reverse changes.
 
 ### Security surface
 
