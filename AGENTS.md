@@ -34,7 +34,9 @@ src/core/    the harness, terminal-free
   auth/           credentials (mod.rs) · login.rs (OAuth, device-code, API keys)
   config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·
-                  keybindings.rs (composer chord overrides)
+                  chord.rs (the chord grammar keybindings, layout focus,
+                  and extension shortcuts share). Terminal-free: nothing
+                  under core/ names tui/ or crossterm — guard.sh pins it
   resources/      skills.rs · prompts.rs (/name templates) · packages.rs
                   (`e install`: git clones under ~/.e/packages that every
                   loader reads after ~/.e's own dirs) · docs.rs (the
@@ -55,7 +57,8 @@ src/core/    the harness, terminal-free
                   (the /usage fold) · export.rs (a branch as one HTML page)
 src/tui/     the frontend (short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
-  content/        markdown · transcript · composer · statusline · history
+  content/        markdown · transcript · composer · keybindings (the
+                  ~/.e/keybindings.json keymap) · statusline · history
                   (prompts across sessions, ~/.e/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state, keys, the frame loop) · events.rs
