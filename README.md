@@ -22,14 +22,19 @@
 ```sh
 # macOS and Linux
 curl -fsSL https://e.intuitum.sh/install.sh | sh
-
-# npm / Bun (beta)
-npm install -g @intuitums/e@beta
-bun add -g @intuitums/e@beta
 ```
 
-See [installation](docs/guides/start/install.md) for updates, preview channels,
-and platform requirements.
+Or download a binary from the [latest release](https://github.com/intuitums/e/releases/latest):
+
+| Platform | Download |
+| --- | --- |
+| macOS · Apple Silicon | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-apple-darwin.tar.gz) |
+| macOS · Intel | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-apple-darwin.tar.gz) |
+| Linux · ARM64 | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-unknown-linux-gnu.tar.gz) |
+| Linux · x86-64 | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-unknown-linux-gnu.tar.gz) |
+
+[Checksums](https://github.com/intuitums/e/releases/latest/download/checksums.txt) ·
+[Installation guide](docs/guides/start/install.md)
 
 ### Usage
 
@@ -39,7 +44,6 @@ e
 ```
 
 Run `/login` to connect a provider, then `/models` to choose a model.
-For a beta install, use `e-beta` instead of `e`.
 
 ### Documentation
 
@@ -51,4 +55,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ---
 
-[Intuitum](https://intuitum.sh) · [MIT](LICENSE)
+<p align="center">
+  <a href="https://intuitum.sh">INTUITUM</a> · <a href="LICENSE">MIT</a>
+</p>
