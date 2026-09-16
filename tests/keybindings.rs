@@ -2,22 +2,17 @@
 //! rather than breaking the composer, and a missing/malformed file behaves
 //! exactly like an empty one.
 
-use std::sync::Mutex;
+mod common;
+use common::{env_lock, Home};
 
 use e::tui::content::composer::Key;
 use e::tui::keybindings::{self, Keymap};
 
-// E_HOME is process-global; serialize the tests that set it.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+/// Run each keymap case with an isolated configuration home.
 fn with_home<F: FnOnce()>(name: &str, f: F) {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("e-keybindings-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _guard = env_lock();
+    let _home = Home::new(name);
     f();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
