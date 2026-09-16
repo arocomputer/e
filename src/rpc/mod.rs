@@ -34,6 +34,7 @@ use crate::core::providers::catalog::{self as catalog, Model, Pricing};
 use crate::core::providers::{ChatMessage, ImageInput};
 use crate::core::session::{self as log, SessionLog};
 
+mod params;
 pub mod result;
 pub use result::TurnAccumulator;
 
@@ -288,6 +289,14 @@ impl Server {
             }
         };
         let id = value.get("id").cloned().unwrap_or(Value::Null);
+        if value
+            .get("method")
+            .is_some_and(|method| !method.is_string())
+        {
+            self.respond(&id, Err("method must be a string".into()))
+                .await;
+            return Flow::Continue;
+        }
         let Some(method) = value.get("method").and_then(Value::as_str) else {
             let outcome = self.one_shot(id.clone(), value);
             if let Err(error) = outcome {
@@ -298,6 +307,11 @@ impl Server {
         };
         let method = method.to_string();
         let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
+        if !params.is_object() {
+            self.respond(&id, Err("params must be an object".into()))
+                .await;
+            return Flow::Continue;
+        }
         if method == "shutdown" {
             self.respond(&id, Ok(json!({}))).await;
             return Flow::Shutdown;
@@ -327,8 +341,9 @@ impl Server {
     fn dispatch(&mut self, method: &str, params: &Value) -> Result<Value, String> {
         match method {
             "hello" => {
+                let params: params::Hello = params::decode(params)?;
                 self.greeted = true;
-                self.ask = params.get("ask").and_then(Value::as_bool).unwrap_or(false);
+                self.ask = params.ask.unwrap_or(false);
                 Ok(json!({
                     "protocol": PROTOCOL,
                     "version": crate::VERSION,
@@ -342,11 +357,12 @@ impl Server {
             }
             "models.list" => Ok(models_list()),
             "session.create" => self.create(params),
-            "session.list" => Ok(sessions_list(params)),
+            "session.list" => Ok(sessions_list(params::decode(params)?)),
             "session.info" => Ok(self.slot(params)?.info()),
             "session.steer" => {
                 let slot = self.slot(params)?;
-                let text = text_param(params, "text")?;
+                let args: params::Steer = params::decode(params)?;
+                let text = args.text;
                 let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
                 if agent.steer(text) {
                     Ok(json!({"held": true}))
@@ -505,8 +521,9 @@ impl Server {
     }
 
     fn create(&mut self, params: &Value) -> Result<Value, String> {
+        let params: params::Create = params::decode(params)?;
         let process_cwd = std::env::current_dir().unwrap_or_default();
-        let cwd = match params.get("cwd").and_then(Value::as_str) {
+        let cwd = match params.cwd.as_deref() {
             Some(path) => {
                 let path = PathBuf::from(path);
                 if path.is_absolute() {
@@ -524,29 +541,20 @@ impl Server {
             return Err(refusal);
         }
         let mut options = self.defaults.clone();
-        if let Some(model) = params.get("model").and_then(Value::as_str) {
+        if let Some(model) = params.model.as_deref() {
             options.model = Some(model.to_string());
         }
-        if let Some(effort) = params.get("effort").and_then(Value::as_str) {
+        if let Some(effort) = params.effort.as_deref() {
             options.effort = Some(effort.to_string());
         }
-        let tools: Option<Vec<String>> = match params.get("tools") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(
-                serde_json::from_value(value.clone())
-                    .map_err(|_| "tools must be a list of built-in tool names".to_string())?,
-            ),
-        };
+        let tools = params.tools;
         check_allowlist(tools.as_ref())?;
-        let requested = parse_tool_mode(params.get("tool_mode").and_then(Value::as_str))?;
+        let requested = parse_tool_mode(params.tool_mode.as_deref())?;
         options.tool_mode = self.defaults.tool_mode.restrict(requested);
-        let save = params.get("save").and_then(Value::as_bool).unwrap_or(false);
+        let save = params.save.unwrap_or(false);
         options.no_save = self.defaults.no_save || !save;
         let model = cli::resolve_model(&options)?;
-        let resume = params
-            .get("resume")
-            .and_then(Value::as_str)
-            .map(PathBuf::from);
+        let resume = params.resume.map(PathBuf::from);
         let resumed = match &resume {
             Some(path) => {
                 // Only a writer takes ownership and repairs the log. A
@@ -571,7 +579,7 @@ impl Server {
             agent.set_session(session);
             agent.adopt_session_name(name);
         }
-        if let Some(name) = params.get("name").and_then(Value::as_str) {
+        if let Some(name) = params.name.as_deref() {
             agent.set_session_name(name.to_string());
         }
         Ok(json!({
@@ -587,15 +595,12 @@ impl Server {
     /// an error here means nothing started.
     fn prompt(&mut self, id: Value, params: &Value) -> Result<(), String> {
         let slot = self.slot(params)?;
-        let text = text_param(params, "prompt")?;
+        let args: params::Prompt = params::decode(params)?;
+        let text = args.prompt;
         if text.trim().is_empty() {
             return Err("prompt is empty".into());
         }
-        let paths: Vec<String> = match params.get("images") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(value) => serde_json::from_value(value.clone())
-                .map_err(|_| "images must be a list of file paths".to_string())?,
-        };
+        let paths = args.images.unwrap_or_default();
         let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
         if !paths.is_empty() && !agent.model.image_input {
             return Err(format!(
@@ -626,10 +631,8 @@ impl Server {
     /// the running turn and reports through its result.
     fn compact(&mut self, id: Value, params: &Value) -> Result<(), String> {
         let slot = self.slot(params)?;
-        let focus = params
-            .get("focus")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        let args: params::Compact = params::decode(params)?;
+        let focus = args.focus;
         let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
         let mut turn = slot.turn.lock().unwrap_or_else(|e| e.into_inner());
         if agent.is_streaming() || turn.is_some() {
@@ -656,25 +659,29 @@ impl Server {
         if agent.is_streaming() {
             return Err("a turn is running; change models between turns".into());
         }
-        if let Some(query) = params.get("model").and_then(Value::as_str) {
-            let model = catalog::resolve(query).ok_or_else(|| {
+        let args: params::Set = params::decode(params)?;
+        let model = match args.model.as_deref() {
+            Some(query) => catalog::resolve(query).ok_or_else(|| {
                 format!("model `{query}` is unavailable; sign in to its provider or pick one from models.list")
-            })?;
-            agent.model = model;
-        }
-        if let Some(effort) = params.get("effort").and_then(Value::as_str) {
-            if !agent.set_run_effort(effort) {
-                let supported = agent.effort_levels();
+            })?,
+            None => agent.model.clone(),
+        };
+        if let Some(effort) = args.effort.as_deref() {
+            if !model.effort.iter().any(|level| level == effort) {
                 return Err(format!(
                     "model `{}` does not support effort `{effort}` (supported: {})",
-                    agent.model_slug(),
-                    if supported.is_empty() {
+                    catalog::slug(&model),
+                    if model.effort.is_empty() {
                         "none".to_string()
                     } else {
-                        supported.join(", ")
+                        model.effort.join(", ")
                     }
                 ));
             }
+        }
+        agent.model = model;
+        if let Some(effort) = args.effort.as_deref() {
+            agent.set_run_effort(effort);
         }
         Ok(json!({"model": agent.model_slug(), "effort": agent.effort()}))
     }
@@ -732,7 +739,8 @@ impl Server {
                     .map(|m| m.content.lines().next().unwrap_or_default().to_string())
             })
             .unwrap_or_else(|| "e session".to_string());
-        let target = match params.get("path").and_then(Value::as_str) {
+        let args: params::Export = params::decode(params)?;
+        let target = match args.path.as_deref() {
             Some(path) => {
                 let path = PathBuf::from(path);
                 if path.is_absolute() {
@@ -847,14 +855,13 @@ fn models_list() -> Value {
 
 /// Saved sessions on disk, newest first — this workspace's, another
 /// directory's, or every workspace's with `all`.
-fn sessions_list(params: &Value) -> Value {
-    let all = params.get("all").and_then(Value::as_bool).unwrap_or(false);
+fn sessions_list(params: params::List) -> Value {
+    let all = params.all.unwrap_or(false);
     let sessions = if all {
         log::list_all()
     } else {
         let cwd = params
-            .get("cwd")
-            .and_then(Value::as_str)
+            .cwd
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         log::list(&cwd)

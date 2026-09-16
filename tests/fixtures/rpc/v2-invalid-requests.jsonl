@@ -1,0 +1,8 @@
+{"method":"session.create","params":{"tool_mode":false}}
+{"method":"session.create","params":{"save":"yes"}}
+{"method":"session.create","params":{"cwd":false}}
+{"method":"session.create","params":{"resume":23}}
+{"method":"hello","params":{"ask":"true"}}
+{"method":"session.list","params":{"all":"true"}}
+{"method":"session.list","params":{"cwd":[]}}
+{"method":"models.list","params":[]}
