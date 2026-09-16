@@ -13,116 +13,48 @@
   <a href="https://github.com/intuitums/e/actions/workflows/checks.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/intuitums/e/checks.yml?style=flat-square&branch=main&label=CI" /></a>
 </p>
 
-<br>
+[![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://e.intuitum.sh)
 
-**e** is one Rust binary that reads, edits, runs, and explains code with any
-model you sign in to. It starts as a terminal app. The same binary is a
-headless session server for Slack bots and CI, a Rust library for your own
-product, and a host for extensions your team writes in any language.
+---
 
-- **Small and fast.** A single binary, no runtime, byte-pinned rendering.
-- **Any model.** Anthropic, OpenAI, Google, and every OpenAI-compatible
-  gateway, with your own `models.json` for the rest.
-- **Yours to extend.** Executable JSONL extensions add tools, commands,
-  hooks, and side panes. Packages share extensions, skills, prompts, and
-  themes with `e install`.
-- **Goes where your team works.** `e rpc` speaks sessions over stdin and
-  stdout; reference Slack and GitHub channels show the shape. `e-sdk`
-  embeds the agent in Rust.
-
-## Install
+### Installation
 
 ```sh
+# macOS and Linux
 curl -fsSL https://e.intuitum.sh/install.sh | sh
 ```
 
-Or with a package manager (available after the first package-enabled
-release):
+Or download a binary from the [latest release](https://github.com/intuitums/e/releases/latest):
+
+| Platform | Download |
+| --- | --- |
+| macOS · Apple Silicon | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-apple-darwin.tar.gz) |
+| macOS · Intel | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-apple-darwin.tar.gz) |
+| Linux · ARM64 | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-unknown-linux-gnu.tar.gz) |
+| Linux · x86-64 | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-unknown-linux-gnu.tar.gz) |
+
+[Checksums](https://github.com/intuitums/e/releases/latest/download/checksums.txt) ·
+[Installation guide](docs/guides/start/install.md)
+
+### Usage
 
 ```sh
-brew install intuitums/tap/e
-npm install -g @intuitums/e
-bun add -g @intuitums/e
+cd your-project
+e
 ```
 
-Update with the method you installed with: `e update` for curl or a release
-archive, `npm install -g @intuitums/e@latest`, `bun add -g @intuitums/e@latest`,
-or `brew upgrade intuitums/tap/e`. `e --version` confirms the build.
-[Install](docs/guides/start/install.md) covers the preview channels and the Linux
-requirements.
+Run `/login` to connect a provider, then `/models` to choose a model.
 
-The Linux binaries link against glibc 2.31 or newer — Debian 11+, Ubuntu 22.04+,
-RHEL 9+. They are built on the oldest glibc we support, and the release refuses
-to publish one that needs anything newer. A system below it needs a build from
-source, or the published image, which carries its own runtime:
+### Documentation
 
-```sh
-docker run --rm --entrypoint e ghcr.io/intuitums/e-slack:latest --version
-```
+Read the [docs](https://e.intuitum.sh/docs), or run `e docs` in your terminal.
 
-## Start
+### Contributing
 
-```sh
-e                                          # open a session in this directory
-e "why is this function 400 lines long"    # start with a prompt
-e -p "summarize the last commit"           # one headless turn, reply on stdout
-e help
-```
-
-Sign in from inside e with `/login <provider>`, or set the provider's usual
-environment variable (`ANTHROPIC_API_KEY` and friends) for scripts and CI.
-
-## Put it anywhere
-
-| Surface | What it is | Guide |
-|---|---|---|
-| Terminal | The interactive app: transcript, composer, side panes, `/` commands | `e help` |
-| `e -p` | One headless turn; `--json` streams every event | [Automation](docs/guides/usage/automation.md) |
-| `e rpc` | A JSONL session server: concurrent sessions, streaming events, extension questions relayed to your client | [Automation](docs/guides/usage/automation.md) |
-| Channels | Reference Slack bot and GitHub Actions workflow built on `e rpc` | [Channels](docs/guides/usage/channels.md) · [`channels/`](channels/) |
-| e-sdk | The agent as a Rust library: sessions, turns, one event stream (`cargo add intuitums-e-sdk`) | [SDK](docs/guides/extend/sdk.md) |
-| Extensions | Tools, commands, hooks, and UI from a subprocess in any language | [Extensions](docs/guides/extend/extensions.md) |
-| Packages | Share extensions, skills, prompts, and themes from git or npm | [Packages](docs/guides/extend/packages.md) |
-
-## Safety
-
-- Model-directed tools run as your user without a permission prompt by
-  default.
-- Directory trust controls context loading; it does not sandbox execution.
-- Use a container, VM, or OS sandbox when work needs containment. See
-  [sandboxing](docs/guides/usage/sandboxing.md) and [SECURITY.md](SECURITY.md).
-
-## Documentation
-
-Every guide is in [`docs/`](docs/) and built into the binary: `e docs` lists
-the topics and `e docs <topic>` prints one.
-
-[Install](docs/guides/start/install.md) · [Extensions](docs/guides/extend/extensions.md) · [Automation](docs/guides/usage/automation.md) ·
-[Channels](docs/guides/usage/channels.md) · [SDK](docs/guides/extend/sdk.md) · [Packages](docs/guides/extend/packages.md) ·
-[Skills](docs/guides/customize/skills.md) · [Instructions](docs/guides/customize/instructions.md) ·
-[Prompt templates](docs/guides/customize/prompt-templates.md) · [Models](docs/guides/customize/models.md) ·
-[Settings](docs/guides/customize/settings.md) · [Themes](docs/guides/customize/themes.md) · [Layout](docs/guides/customize/layout.md) ·
-[Keybindings](docs/guides/customize/keybindings.md) · [Command line](docs/guides/usage/commands.md) ·
-[Sandboxing](docs/guides/usage/sandboxing.md) ·
-[Architecture](contributing/architecture.md) · [Compatibility](docs/guides/extend/compatibility.md)
-
-## Development and preview builds
-
-Run `./x dev /path/to/project` from a checkout, or install a published preview
-with `npm install -g @intuitums/e@dev` and run `e-dev`. Beta uses `@beta` and
-`e-beta`. Curl and brew support separate beta installations; dev uses npm or
-bun. Preview channels have separate state and stay on their channel when
-updating. See [releases and testing](contributing/releases.md) for all installers and
-PR builds.
-
-## Contributing
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md), the
-guide an agent editing this repository follows. `./x check` is the whole
-bar: format, lint, tests, and the security-surface guard.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ---
 
 <p align="center">
-  <sub>Made by <a href="https://intuitum.sh">Intuitum</a> · <a href="mailto:support@intuitum.sh">support@intuitum.sh</a> · MIT</sub>
+  <a href="https://intuitum.sh">INTUITUM</a> · <a href="LICENSE">MIT</a>
 </p>
