@@ -69,7 +69,18 @@ brew install intuitums/tap/e-beta
 
 For dev, use `npm install -g @intuitums/e@dev` or
 `bun add -g @intuitums/e@dev`, then run `e-dev`. Dev is not published to curl
-or Homebrew. Stable remains the default:
+or Homebrew. To install the verified binary before npm is ready, use an
+authenticated GitHub CLI and select a Release run:
+
+```sh
+./x install-dev RUN_ID
+```
+
+This installs `e-dev` through the checksum-verifying installer after the run's
+Checksums and publish job succeeds, even if npm is still running or fails.
+The artifacts expire after 14 days. Repeat with a newer run to update; the
+installed build does not self-update. Older runs without `build.json` cannot
+use this command. Stable remains the default:
 no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
 Curl and brew support side-by-side production and beta installations. npm and bun replace the
 installed version of `@intuitums/e` when switching its tag. Package installs
@@ -149,7 +160,8 @@ Release builds use the committed lockfile. Each build has four archives,
 `checksums.txt`, a CycloneDX SBOM, and GitHub build-provenance attestations.
 The workflow smoke-tests native binaries and the shell installer before
 publication. Production and beta test pinned and channel installs through the
-public website. Dev verifies an exact-version npm install. Actions retains build
+public website. Dev verifies an exact-version npm install and retains `build.json` with the
+source commit and version for direct artifact installations. Actions retains build
 archives and metadata for 14 days; npm retains the published dev packages.
 
 The Linux legs build in `rust:1.98-bullseye` (Debian 11, glibc 2.31) and the
