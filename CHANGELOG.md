@@ -77,6 +77,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 ### Fixes
 
 - RPC rejects malformed optional parameters and applies model/effort changes atomically.
+- The Slack channel preserves damaged state files, saves thread paths atomically, and terminates unresponsive RPC children during shutdown.
 
 - Publish the independently versioned Slack package with stable releases only, avoiding conflicting tarballs across channels. Its updated README gets a new package version.
 
