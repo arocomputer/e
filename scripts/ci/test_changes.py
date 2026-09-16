@@ -47,7 +47,7 @@ class ChangesTests(unittest.TestCase):
     def test_failed_file_listing_runs_every_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / 'output'
-            with patch.dict(os.environ, GITHUB_OUTPUT=str(output)), \
+            with patch.dict(os.environ, GITHUB_OUTPUT=str(output), GITHUB_EVENT_NAME='push'), \
                     patch('changes.changed_paths', side_effect=subprocess.CalledProcessError(1, 'gh')):
                 main()
             self.assertEqual(dict(line.split('=') for line in output.read_text().splitlines()),

@@ -82,8 +82,8 @@ and macOS, `e2e`, `packages`, `channels`, `docs`, `glibc`, and `bench` jobs:
 
 The full suite includes the docs contract. Prose-only changes run that contract
 and the site build without the full suite. Performance-related PRs run benchmarks;
-main code changes and the weekly schedule run them too. Rust jobs cache dependencies and build outputs by
-platform, job, toolchain, and dependency set.
+main code changes and the weekly schedule run them too. Rust jobs cache
+dependencies and build outputs by platform, job, toolchain, and dependency set.
 
 `./x` is the single definition of green; CI runs the same commands, so
 nothing merges on a private definition of passing. `scripts/guard.sh` enforces
