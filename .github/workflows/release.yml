@@ -243,8 +243,14 @@ jobs:
         run: |
           cargo install cargo-cyclonedx --version 0.5.9 --locked
           cargo cyclonedx --format json --spec-version 1.5
-          # cargo-cyclonedx names the BOM after the crate (e.cdx.json), not bom.json.
-          mv e.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
+          # cargo-cyclonedx names each BOM after its crate, so the file is
+          # neither `bom.json` nor a name this step can hardcode: renaming the
+          # package (`e` is taken on crates.io) failed the whole release at its
+          # last step. Ask for however many it wrote, and ship the one.
+          test "$(ls ./*.cdx.json | wc -l)" = 1
+          mv ./*.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
+          # Every workspace member gets one; the release ships the application's.
+          find . -name '*.cdx.json' -delete
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
