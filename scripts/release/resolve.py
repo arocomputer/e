@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 import tomllib
 from identity import identity
+from promotion import verify
 
 
 def git(*args):
@@ -51,6 +52,7 @@ def resolve():
     version = base if channel == 'stable' else f'{base}-{channel}.{os.environ["GITHUB_RUN_NUMBER"]}.g{sha[:12]}'
     if channel == 'stable':
         assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'stable tag must match manifest'
+        verify(f'v{version}', sha)
     mode = 'build'
     if kind == 'workflow_run':
         paths = git('diff-tree', '--no-commit-id', '--name-only', '-r', sha).splitlines()

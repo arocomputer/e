@@ -37,6 +37,8 @@ jobs:
     permissions:
       # GitHub requires push access to inspect unpublished draft releases.
       contents: write
+      # Stable promotion reads the selected beta's verified deployment.
+      deployments: read
     outputs:
       repository: ${{ steps.release.outputs.repository }}
       tag: ${{ steps.release.outputs.tag }}
