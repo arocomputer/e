@@ -37,7 +37,7 @@
 //!
 //! Requests from an extension carry the extension's own `id` (any JSON
 //! value) and are answered with the same id. Their methods are the `ui.*`
-//! and `session.*` families documented in docs/customize/extensions.md. The two id
+//! and `session.*` families documented in docs/extend/extensions.md. The two id
 //! spaces never meet: direction tells them apart.
 //!
 //! `initialize` params carry the extension's own config from
@@ -57,7 +57,7 @@ use serde_json::Value;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this e can do beyond version 1, listed in `initialize` params. Each
-/// name is a family in docs/customize/extensions.md; an extension that ignores them
+/// name is a family in docs/extend/extensions.md; an extension that ignores them
 /// all is a valid version-1 extension.
 pub const CAPABILITIES: &[&str] = &[
     "tool.update",

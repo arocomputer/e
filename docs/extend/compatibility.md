@@ -1,7 +1,7 @@
 ---
 title: Compatibility
 description: versioned contracts: sessions, configuration, protocols
-order: 2
+order: 4
 ---
 
 # Compatibility
@@ -32,7 +32,7 @@ against so changes to them are deliberate rather than accidental.
   lists (`extensions`, `skills`, `prompts`, `themes`); npm packages live
   under `~/.e/packages/npm/node_modules/<name>`, git packages under
   `~/.e/packages/<host>/<path>`. All are documented in
-  [packages.md](../customize/packages.md) and pinned by
+  [packages.md](../extend/packages.md) and pinned by
   `tests/fixtures/config/settings-v1-packages.json`; a reader that meets an
   entry it cannot parse reports it and loads the rest.
 - **`e rpc`:** the headless session protocol reports `protocol: 2` in
@@ -45,7 +45,7 @@ against so changes to them are deliberate rather than accidental.
 - **Extensions:** the JSONL protocol is versioned independently. e sends its
   protocol number during `initialize`; additive fields do not change the
   number, while incompatible wire changes require a new protocol version.
-  Version 1 is documented in [extensions.md](../customize/extensions.md). The families
+  Version 1 is documented in [extensions.md](../extend/extensions.md). The families
   beyond it (`events`, `hooks`, `display`, `ui`, `session`, `shortcuts`)
   are additive: each is advertised in `capabilities`, declared in the
   manifest, or initiated by the extension, so a version-1 extension is never

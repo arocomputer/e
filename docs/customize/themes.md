@@ -1,13 +1,13 @@
 ---
 title: Themes
 description: theme JSON format; file wins over a built-in name
-order: 5
+order: 6
 ---
 
 # Themes
 
 A theme is a JSON file: `~/.e/themes/<name>.json`, or `themes/<name>.json`
-in an installed [package](packages.md). Every name in `/settings` → Theme
+in an installed [package](../extend/packages.md). Every name in `/settings` → Theme
 comes from these directories plus the two built-ins (`dark`, `light`) — a
 file named like a built-in replaces it, the home's file first.
 

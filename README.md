@@ -48,6 +48,8 @@ bun add -g @intuitums/e
 Update with the method you installed with: `e update` for curl or a release
 archive, `npm install -g @intuitums/e@latest`, `bun add -g @intuitums/e@latest`,
 or `brew upgrade intuitums/tap/e`. `e --version` confirms the build.
+[Install](docs/start/install.md) covers the preview channels and the Linux
+requirements.
 
 The Linux binaries link against glibc 2.31 or newer — Debian 11+, Ubuntu 22.04+,
 RHEL 9+. They are built on the oldest glibc we support, and the release refuses
@@ -79,8 +81,8 @@ environment variable (`ANTHROPIC_API_KEY` and friends) for scripts and CI.
 | `e rpc` | A JSONL session server: concurrent sessions, streaming events, extension questions relayed to your client | [Automation](docs/usage/automation.md) |
 | Channels | Reference Slack bot and GitHub Actions workflow built on `e rpc` | [Channels](docs/usage/channels.md) · [`channels/`](channels/) |
 | e-sdk | The agent as a Rust library: sessions, turns, one event stream (`cargo add intuitums-e-sdk`) | [SDK](docs/extend/sdk.md) |
-| Extensions | Tools, commands, hooks, and UI from a subprocess in any language | [Extensions](docs/customize/extensions.md) |
-| Packages | Share extensions, skills, prompts, and themes from git or npm | [Packages](docs/customize/packages.md) |
+| Extensions | Tools, commands, hooks, and UI from a subprocess in any language | [Extensions](docs/extend/extensions.md) |
+| Packages | Share extensions, skills, prompts, and themes from git or npm | [Packages](docs/extend/packages.md) |
 
 ## Safety
 
@@ -95,12 +97,13 @@ environment variable (`ANTHROPIC_API_KEY` and friends) for scripts and CI.
 Every guide is in [`docs/`](docs/) and built into the binary: `e docs` lists
 the topics and `e docs <topic>` prints one.
 
-[Extensions](docs/customize/extensions.md) · [Automation](docs/usage/automation.md) ·
-[Channels](docs/usage/channels.md) · [SDK](docs/extend/sdk.md) · [Packages](docs/customize/packages.md) ·
+[Install](docs/start/install.md) · [Extensions](docs/extend/extensions.md) · [Automation](docs/usage/automation.md) ·
+[Channels](docs/usage/channels.md) · [SDK](docs/extend/sdk.md) · [Packages](docs/extend/packages.md) ·
 [Skills](docs/customize/skills.md) · [Instructions](docs/customize/instructions.md) ·
-[Prompt templates](docs/customize/prompt-templates.md) · [Models](docs/start/models.md) ·
-[Themes](docs/customize/themes.md) · [Layout](docs/customize/layout.md) ·
-[Keybindings](docs/customize/keybindings.md) · [Sandboxing](docs/usage/sandboxing.md) ·
+[Prompt templates](docs/customize/prompt-templates.md) · [Models](docs/customize/models.md) ·
+[Settings](docs/customize/settings.md) · [Themes](docs/customize/themes.md) · [Layout](docs/customize/layout.md) ·
+[Keybindings](docs/customize/keybindings.md) · [Command line](docs/usage/commands.md) ·
+[Sandboxing](docs/usage/sandboxing.md) ·
 [Architecture](contributing/architecture.md) · [Compatibility](docs/extend/compatibility.md)
 
 ## Development and preview builds

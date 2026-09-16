@@ -28,7 +28,7 @@ example and its protocol helper:
 
 ```sh
 mkdir -p ~/.e/extensions/hello
-cp docs/customize/examples/hello.mjs docs/customize/examples/scaffold.mjs ~/.e/extensions/hello/
+cp docs/extend/examples/hello.mjs docs/extend/examples/scaffold.mjs ~/.e/extensions/hello/
 chmod +x ~/.e/extensions/hello/hello.mjs
 ```
 
@@ -37,5 +37,5 @@ request routing, and replies, so your extension can define handlers. The MCP and
 subagent examples implement the protocol directly and do not need that helper.
 Read each example's configuration before enabling it.
 
-For the protocol and supported interactions, see the [extension guide](../extensions.md).
-For sharing an extension with its prompts, skills, or themes, see [packages](../packages.md).
+For the protocol and supported interactions, see the [extension guide](../../extend/extensions.md).
+For sharing an extension with its prompts, skills, or themes, see [packages](../../extend/packages.md).

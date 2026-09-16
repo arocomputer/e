@@ -44,9 +44,9 @@ Use the bug or feature issue form. Bug reports need a reproducible case and
 the version (`e --version`, or the commit if you built from source). Feature
 requests should explain the need before the design; an implementation sketch
 is welcome but optional. A feature that could be an extension is usually
-better as one — the extension API in [docs/customize/extensions.md](docs/customize/extensions.md)
+better as one — the extension API in [docs/extend/extensions.md](docs/extend/extensions.md)
 exists precisely so most additions never have to touch the binary, and
-[docs/customize/packages.md](docs/customize/packages.md) is how an extension, skill, prompt, or
+[docs/extend/packages.md](docs/extend/packages.md) is how an extension, skill, prompt, or
 theme reaches other users without a release of e.
 
 ## Finding your way around
