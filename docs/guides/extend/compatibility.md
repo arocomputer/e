@@ -73,7 +73,7 @@ npm packages live under `~/.e/packages/npm/node_modules/<name>`. Git
 packages live under `~/.e/packages/<host>/<path>`.
 
 All of this is documented in [Packages](packages.md) and pinned by
-`tests/fixtures/config/settings-v1-packages.json`. A reader that meets an
+`crates/cli/tests/fixtures/config/settings-v1-packages.json`. A reader that meets an
 entry it cannot parse reports it and loads the rest.
 
 ### `e rpc`
@@ -86,10 +86,10 @@ Methods, parameters, result fields, and the `session` and `request` tags on
 event lines become a supported contract once documented in
 [Automation](../usage/automation.md). New methods and fields are additive
 and do not change the protocol number. A change to an existing shape does.
-`tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
+`crates/cli/tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
 
 Optional parameters reject wrong JSON types instead of falling back to their
-defaults, and `tests/fixtures/rpc/v2-invalid-requests.jsonl` pins those
+defaults, and `crates/cli/tests/fixtures/rpc/v2-invalid-requests.jsonl` pins those
 refusals. Valid requests still speak protocol 2.
 
 ### Extensions
@@ -109,7 +109,7 @@ supported contract once documented.
 
 ## Compatibility fixtures
 
-Compatibility fixtures under `tests/fixtures/` are release artifacts in
+Compatibility fixtures under `crates/cli/tests/fixtures/` are release artifacts in
 source form. Once committed for a release, they are not rewritten. Newer
 readers must keep loading them or intentionally document the migration.
 
@@ -207,11 +207,11 @@ Files and saved sessions need no migration.
 
 ## Not a supported contract
 
-The Cargo library target lets the binary, the integration tests, and the
-`sdk/` package share code. Its public Rust items are not a stable
-third-party API in themselves.
+The workspace crates under `crates/` share code between the binary, the
+integration tests, and the SDK. Their public Rust items, in `intuitums-e-core`
+and the frontend crates, are not a stable third-party API in themselves.
 
-The supported Rust SDK is the separate `intuitums-e-sdk` crate in `sdk/`.
+The supported Rust SDK is the separate `intuitums-e-sdk` crate in `crates/sdk/`.
 See [SDK](sdk.md). The API it consumes is its documented contract. It
 follows semantic versioning from its first published release. Before 1.0, a
 breaking change moves the minor version and is named in the changelog.

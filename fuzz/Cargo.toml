@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 # The application package renamed for crates.io; the library is still `e`.
-e = { package = "intuitums-e", path = ".." }
+e = { package = "intuitums-e", path = "../crates/cli" }
 
 [[bin]]
 name = "sse"

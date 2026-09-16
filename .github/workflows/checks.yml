@@ -74,19 +74,19 @@ jobs:
           while IFS= read -r file; do
             # The reference channels have their own checks.
             case "$file" in
-              channels/* | tests/fixtures/channels/* | .github/workflows/checks.yml) channels=true ;;
+              channels/* | crates/cli/tests/fixtures/channels/* | .github/workflows/checks.yml) channels=true ;;
             esac
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
-              scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
-              src/core/update.rs | tests/update.rs | scripts/release-check.sh | \
+              scripts/packaging/* | scripts/release/* | crates/core/build.rs | install.sh | LICENSE | \
+              crates/core/src/update.rs | crates/cli/tests/update.rs | scripts/release-check.sh | \
               .github/workflows/checks.yml | .github/workflows/release.yml | .github/workflows/preview.yml)
                 packages=true ;;
             esac
             # A dependency can raise the glibc floor without touching release
             # plumbing, so the one container build also answers to the lockfile.
             case "$file" in
-              Cargo.toml | Cargo.lock) lock=true ;;
+              Cargo.toml | crates/*/Cargo.toml | Cargo.lock) lock=true ;;
             esac
             # The guides are published to the website and embedded in the
             # binary, so a docs-only change still runs their contract.

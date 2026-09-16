@@ -125,7 +125,7 @@ work to get right, as the next section explains. The mechanism exists today.
 
 If you build one, preserve the built-in bash schema's full contract:
 `command`, `timeout`, `background`, `handle`, and `signal`. See
-`src/core/tools/bash.rs`. Explicitly reject what you don't support rather than
+`crates/core/src/tools/bash.rs`. Explicitly reject what you don't support rather than
 silently dropping it. A tool that claims to support `background: true` and
 then hangs or errors opaquely is worse than one that says plainly "not
 supported here."

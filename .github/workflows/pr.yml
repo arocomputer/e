@@ -35,26 +35,26 @@ jobs:
           # `|| true` on every probe: a non-matching grep must read as
           # "no label", not fail the run — the final statement's status is
           # the script's exit code under `set -eu`.
-          echo "$files" | grep -Eq '^src/core/|^src/(main|lib)\.rs$' && \
+          echo "$files" | grep -Eq '^crates/(core|cli|rpc)/' && \
             add_label area:core 1d76db 'Agent, providers, tools, storage, and extensions' || true
-          echo "$files" | grep -q '^src/tui/' && \
+          echo "$files" | grep -q '^crates/tui/' && \
             add_label area:tui 5319e7 'Terminal interface and rendering' || true
-          echo "$files" | grep -Eq '^(sdk/|docs/guides/extend/sdk\.md)' && \
+          echo "$files" | grep -Eq '^(crates/sdk/|docs/guides/extend/sdk\.md)' && \
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
           echo "$files" | grep -Eq '^(docs/|README\.md|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
             add_label documentation 0075ca 'Documentation changes' || true
           echo "$files" | grep -q '^benchmarks/' && \
             add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true
           # area:infra covers the tooling paths: automation, fuzz targets,
-          # the dev shim, and test-only changes.
-          echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|bin/|tests/|x$|rust-toolchain.toml)' && \
+          # the development entry point, and test-only changes.
+          echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|crates/[^/]+/tests/|x$|rust-toolchain.toml)' && \
             add_label area:infra 6f42c1 'Build, CI, release, or repository automation' || true
-          echo "$files" | grep -Eq '^(Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
+          echo "$files" | grep -Eq '^(Cargo.toml|crates/[^/]+/Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
           # `breaking` is never path-derived — no grep can know a wire or
           # persisted contract changed. The author declares it; see
           # docs/guides/extend/compatibility.md.
-          echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages[/.]|install.sh|SECURITY.md)' && \
+          echo "$files" | grep -Eq '^(crates/core/src/(api|auth|config|providers|tools|update)/|crates/core/src/session.rs|crates/core/src/resources/packages[/.]|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true
           # The guides are published to the website and embedded in the binary,
           # and every path in CODEOWNERS resolves to the maintainer, so an
