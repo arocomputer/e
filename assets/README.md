@@ -30,14 +30,27 @@ The terminal text is unchanged. [readme-window.html](readme-window.html)
 adds a compact title bar, window controls, and a border. There is no outer
 backdrop or shadow.
 
+The canvas exports the image with an alpha channel, so the rounded corners
+stay transparent on both light and dark pages. Browser screenshots flatten
+those corners onto the browser's default background; use the PNG export.
+
 To regenerate it from the repository root, with ffmpeg and agent-browser:
 
 ```sh
 curl -fsSL https://e.intuitum.sh/e/demo.mp4 -o /tmp/e-demo.mp4
 mkdir -p target
 ffmpeg -y -ss 26 -i /tmp/e-demo.mp4 -frames:v 1 target/readme-frame.png
-agent-browser --session readme open "file://$PWD/assets/readme-window.html"
-agent-browser --session readme set viewport 1100 900
-agent-browser --session readme screenshot .window "$PWD/assets/readme.png"
+python3 -m http.server 8769 --bind 127.0.0.1
+```
+
+In another terminal, open the frame and export its canvas once it has loaded:
+
+```sh
+agent-browser --session readme open http://127.0.0.1:8769/assets/readme-window.html
+agent-browser --session readme wait 'canvas[data-ready="true"]'
+agent-browser --session readme eval 'document.querySelector("canvas").toDataURL("image/png")' --json > /tmp/e-readme-png.json
+python3 -c 'import base64,json,pathlib; data=json.load(open("/tmp/e-readme-png.json"))["data"]["result"]; pathlib.Path("assets/readme.png").write_bytes(base64.b64decode(data.split(",",1)[1]))'
 agent-browser --session readme close
 ```
+
+Stop the local HTTP server when finished.
