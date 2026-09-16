@@ -57,6 +57,13 @@ class CommentTests(unittest.TestCase):
         self.assertIn('npm processing timed out', body)
         self.assertIn('rerun failed jobs to resume verification', body)
 
+    def test_linux_failure_is_reported_before_skipped_publication(self):
+        needs = jobs('skipped')
+        needs['build-linux'] = {'result': 'failure'}
+        body = render(needs, 'finished', 'url')
+        self.assertIn('Linux build failure', body)
+        self.assertNotIn('Incomplete', body)
+
     def test_direct_push_has_no_pr_comment(self):
         with patch('pr_comment.api', return_value=[]) as api:
             report(jobs(), 'finished', 'intuitums/e', 'https://github.com', '100', '1')

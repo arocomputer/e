@@ -1,4 +1,4 @@
-name: pr
+name: triage
 
 on:
   pull_request_target:

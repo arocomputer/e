@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|fmt|lint|test|crates|docs|site|guard|packages|channels|container|ui|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|fmt|lint|test|crates|docs|site|guard|packages|channels|container|ui|bench|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -39,16 +39,13 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     exec python3 scripts/hooks/install.py
     ;;
-  # Each step below is a guarantee, and CI runs them as separate jobs so a
-  # failure names itself instead of hiding behind "check". `./x check` is the
-  # same steps in the same order, for a contributor's one command.
+  # CI groups these commands into jobs; local checks use the same commands.
   check)
     [ "$#" -eq 0 ] || usage
     ./x fmt --check
     ./x lint
     ./x test
     ./x crates
-    ./x docs
     ./x guard
     ;;
   test)
@@ -102,6 +99,7 @@ case "$command" in
     ./scripts/guard.sh
     python3 -m unittest discover -s scripts/release -p 'test_*.py'
     python3 -m unittest discover -s scripts/hooks -p 'test_*.py'
+    python3 -m unittest discover -s scripts/ci -p 'test_*.py'
     ;;
   ui)
     cargo build --locked
@@ -131,6 +129,11 @@ case "$command" in
   bench)
     [ "$#" -eq 0 ] || usage
     python3 benchmarks/run.py --build --check
+    ;;
+  sbom)
+    [ "$#" -eq 1 ] || usage
+    cargo install cargo-cyclonedx --version 0.5.9 --locked
+    python3 scripts/release/sbom.py "$1"
     ;;
   release-check)
     ./scripts/release-check.sh "$@"
