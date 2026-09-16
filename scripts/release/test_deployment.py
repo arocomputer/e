@@ -1,5 +1,6 @@
 """Deployment history must reflect verified installers and the actual release source."""
 import json
+import os
 import unittest
 from unittest.mock import patch
 from deployment import report
@@ -16,7 +17,8 @@ class DeploymentTests(unittest.TestCase):
                         'npm': {'result': outcome}, 'homebrew': {'result': 'skipped' if channel == 'dev' else 'success'},
                         'channel': {'result': 'success' if outcome == 'success' else 'skipped'},
                     }
-                    with patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
+                    with patch.dict(os.environ, GITHUB_STEP_SUMMARY=''), \
+                            patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
                         report(needs, 'intuitums/e', 'https://github.com', '123')
                     created, status = [json.loads(c.kwargs['input']) for c in call.call_args_list]
                     self.assertEqual(created['environment'], environment)
@@ -27,3 +29,20 @@ class DeploymentTests(unittest.TestCase):
                     self.assertEqual(status['log_url'], 'https://github.com/intuitums/e/actions/runs/123')
                     self.assertEqual(status['environment_url'],
                                      (('https://www.npmjs.com/package/@intuitums/e/v/1.2.3' if channel == 'dev' else f'https://github.com/intuitums/{"e-beta" if channel == "beta" else "e"}/releases/tag/v1.2.3') if outcome == 'success' else status['log_url']))
+
+    def test_failed_npm_does_not_hide_verified_direct_downloads(self):
+        from pathlib import Path
+        import tempfile
+        needs = {'resolve': {'result': 'success', 'outputs': {'channel': 'beta', 'sha': 'a' * 40,
+                 'repository': 'intuitums/e-beta', 'tag': 'v1.2.3-beta.1.gaaaaaaaaaaaa',
+                 'version': '1.2.3-beta.1.gaaaaaaaaaaaa'}},
+                 'publish': {'result': 'success'}, 'channel': {'result': 'success'},
+                 'npm': {'result': 'failure'}, 'homebrew': {'result': 'success'}}
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict(os.environ, GITHUB_STEP_SUMMARY=str(Path(tmp, 'summary'))), \
+                patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
+            report(needs, 'intuitums/e', 'https://github.com', '123')
+            summary = Path(tmp, 'summary').read_text()
+        self.assertIn('| Website installer | success |', summary)
+        self.assertIn('| npm and bun | failure |', summary)
+        self.assertEqual(json.loads(call.call_args.kwargs['input'])['state'], 'failure')

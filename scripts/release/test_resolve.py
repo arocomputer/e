@@ -23,6 +23,17 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result['mode'], 'recover')
         self.assertEqual(result['sha'], sha)
 
+    def test_stable_selection_requires_beta_verification(self):
+        with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_EVENT_PATH='/event',
+                        GITHUB_REF_NAME='v1.2.3'), \
+                patch('resolve.Path.read_text', return_value='{}'), \
+                patch('resolve.git', side_effect=['a' * 40, '[package]\nversion = "1.2.3"']), \
+                patch('resolve.subprocess.run'), \
+                patch('resolve.verify', side_effect=ValueError('beta required')) as verify:
+            with self.assertRaisesRegex(ValueError, 'beta required'):
+                resolve()
+        verify.assert_called_once_with('v1.2.3', 'a' * 40)
+
     def test_dev_retry_requires_the_original_run(self):
         event = {'inputs': {'action': 'retry', 'tag': 'v1.2.3-dev.12.gabcdef012345'}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \

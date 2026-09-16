@@ -10,6 +10,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### New features
 
+- Install a pinned dev binary with `./x install-dev RUN_ID` as soon as its verified artifacts are ready, without waiting for npm.
 - Test current work with dev npm/bun packages, beta installers, or a pinned PR build. Preview channels have separate state.
 - Run a checkout with `./x dev` and inspect repeatable terminal scenarios with `./x scenario`. Build diagnostics include the channel and source commit.
 
