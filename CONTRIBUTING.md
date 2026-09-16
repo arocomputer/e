@@ -1,6 +1,6 @@
 # Contributing
 
-e is a small, fast coding agent for the terminal: one Rust binary, no daemon,
+e is the coding agent you can put anywhere: one Rust binary, no daemon,
 no plugin runtime beyond executable JSONL extensions. That smallness is the
 point, and it shapes what a good contribution looks like. The best ones solve
 one clear problem, add the least code that solves it, and leave the repository

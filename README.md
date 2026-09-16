@@ -7,7 +7,7 @@
     </picture>
   </a>
 </p>
-<p align="center">The small, fast coding agent you can put anywhere.</p>
+<p align="center">The coding agent you can put anywhere.</p>
 <p align="center">
   <a href="https://github.com/intuitums/e/releases"><img alt="Release" src="https://img.shields.io/github/v/release/intuitums/e?style=flat-square&label=release&labelColor=grey&color=blue" /></a>
   <a href="https://github.com/intuitums/e/actions/workflows/checks.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/intuitums/e/checks.yml?style=flat-square&branch=main&label=CI" /></a>

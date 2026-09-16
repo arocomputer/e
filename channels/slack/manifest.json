@@ -4,7 +4,7 @@
   },
   "display_information": {
     "name": "e",
-    "description": "The small, fast coding agent, answering in a thread against the checkout it runs in.",
+    "description": "The coding agent you can put anywhere. Answers in a thread against the checkout it runs in.",
     "background_color": "#100F0C"
   },
   "features": {
