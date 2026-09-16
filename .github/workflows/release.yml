@@ -416,6 +416,59 @@ jobs:
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.channel == 'stable' && 'latest' || needs.resolve.outputs.channel }}
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
+  crates:
+    name: crates.io
+    # Crate versions come from the release version, so previews stay on npm. The
+    # application publishes first: the SDK's manifest depends on it by version.
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
+    # Like the npm and image publications, a registry hiccup must not fail the
+    # release; the deployment report still records the outcome.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Publish the crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          test -n "$CARGO_REGISTRY_TOKEN" || { echo 'Configure CARGO_REGISTRY_TOKEN to publish the crates.'; exit 1; }
+
+          published() {
+            curl -fsS -o /dev/null "https://crates.io/api/v1/crates/$1/$VERSION"
+          }
+          # crates.io serves a new version to the index asynchronously, and the
+          # SDK cannot resolve its dependency until the application is visible.
+          await_index() {
+            for _ in $(seq 1 60); do
+              published "$1" && return 0
+              sleep 10
+            done
+            return 1
+          }
+
+          # A retry after a partial publish finds the version already there.
+          if published intuitum-e; then
+            echo "intuitum-e $VERSION is already published"
+          else
+            cargo publish --locked -p intuitum-e
+            await_index intuitum-e || { echo 'intuitum-e never reached the index'; exit 1; }
+          fi
+
+          if published e-sdk; then
+            echo "e-sdk $VERSION is already published"
+          else
+            # Not --locked: packaging the SDK resolves its dependency from the
+            # registry rather than from this workspace.
+            cargo publish -p e-sdk
+          fi
+
   homebrew:
     name: Homebrew tap
     permissions:
@@ -484,7 +537,7 @@ jobs:
 
   deployment:
     name: Report release deployment
-    needs: [resolve, qualify, create, build, publish, npm, homebrew, container, channel, comment-building, comment-publishing]
+    needs: [resolve, qualify, create, build, publish, npm, homebrew, container, crates, channel, comment-building, comment-publishing]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -1,16 +1,24 @@
 [package]
 name = "e-sdk"
-# The SDK's own version, independent of the application version. It stays
-# 0.0.0 until the first release declares the semantic-versioning policy.
-version = "0.0.0"
+# One version for the application and the SDK: they are published together from
+# one tag, so a version identifies a matching pair.
+version.workspace = true
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
 description = "e's coding agent as a library: sessions, turns, one event stream"
-publish = false
+documentation = "https://docs.rs/e-sdk"
+homepage = "https://e.intuitum.sh"
+repository = "https://github.com/intuitums/e"
+readme = "README.md"
+keywords = ["agent", "coding-agent", "llm", "ai"]
+categories = ["development-tools", "api-bindings"]
 
 [dependencies]
-e = { path = ".." }
+# `intuitum-e` is the application package (`e` is taken on crates.io); its
+# library target is still `e`. Any 0.x is accepted because both crates publish
+# from the same commit, so the matching app is always the one beside it.
+e = { package = "intuitum-e", path = "..", version = "0" }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 futures = "0.3"
 thiserror = "2"

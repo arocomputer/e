@@ -6,8 +6,16 @@ event stream (extension notices fill its gaps), get a reply. It links the same c
 the built-in tools, skills and AGENTS.md context, automatic compaction,
 on-disk session logs, extensions — without a terminal.
 
-Until the first release declares its semantic-versioning policy, the
-surface is unstable (see [compatibility.md](compatibility.md)).
+```sh
+cargo add e-sdk
+```
+
+The SDK follows semantic versioning from its first published release: before
+1.0, a release that changes the documented API without a compatible path moves
+the minor version and names the change in the changelog. The application crate
+is `intuitum-e` (`e` is taken on crates.io) and publishes from the same tag, so
+one version identifies a matching pair; its library target is not itself a
+stable API ([compatibility.md](compatibility.md)).
 
 ## Why a separate package
 

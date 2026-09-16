@@ -26,6 +26,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
 - Embed e with the `e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
+- Install the SDK from crates.io with `cargo add e-sdk`. It follows semantic versioning from its first release, and both it and the application crate (`intuitum-e`, since `e` is taken) publish together from each stable release.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
 - Recall prompts from previous sessions with Up on an empty composer. Ctrl+G opens the current draft in an external editor.
@@ -39,6 +40,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 ### Improvements
 
 - **Upgrade:** e refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `e trust [dir]` for a session with no terminal.
+- The installer refuses a host below the Linux binaries' glibc floor (2.39) with a message naming the requirement, instead of failing after the download with a linker error.
 
 - **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 

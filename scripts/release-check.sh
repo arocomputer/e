@@ -6,11 +6,11 @@ tag=${1:-}
 channel=${E_BUILD_CHANNEL:-stable}
 if [ -n "$tag" ]; then
   python3 - "$tag" "$channel" <<'PY'
-import sys,tomllib
+import sys
 sys.path.insert(0,'scripts/release')
-from identity import identity
+from identity import identity, workspace_version
 release=identity(sys.argv[1])
-base=tomllib.load(open('Cargo.toml','rb'))['package']['version']
+base=workspace_version(open('Cargo.toml').read())
 assert release['channel']==sys.argv[2], 'channel mismatch'
 assert release['version'].split('-')[0]==base, 'manifest mismatch'
 PY

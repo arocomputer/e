@@ -152,6 +152,13 @@ publication. Production and beta test pinned and channel installs through the
 public website. Dev verifies an exact-version npm install. Actions retains build
 archives and metadata for 14 days; npm retains the published dev packages.
 
+The Linux legs build on `ubuntu-latest` (24.04), whose glibc is 2.39, so that is
+the floor every released Linux binary inherits — Ubuntu 24.04+, Debian 13+,
+Fedora 40+, RHEL 10+, and no older LTS. Lowering it means building those legs in
+a container with the older glibc (`jobs.<id>.container`), which needs the build
+job split from the macOS legs, and a check that asserts the highest `GLIBC_`
+symbol the binary requires.
+
 ```sh
 sha256sum -c checksums.txt --ignore-missing
 gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo intuitums/e
@@ -218,6 +225,15 @@ Complete npm's browser authentication when prompted. An API token that bypasses
 list @intuitums/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
 Subsequent releases need no npm token. The token in 1Password can remain available
 for separately authorized manual publishing.
+
+crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish the two crates
+and no others: `intuitum-e` (the application — `e` is taken on crates.io) and
+`e-sdk`. The `crates` job publishes the application first and waits for it to
+appear on the index, because the SDK's manifest depends on it by version, and
+skips a version that is already published so a retry is safe. Stable releases
+only: crate versions come from the release version, and previews stay on npm.
+Create the token at https://crates.io/settings/tokens and set the first
+publication up interactively with `cargo login` if the token is ever rotated.
 
 
 The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
