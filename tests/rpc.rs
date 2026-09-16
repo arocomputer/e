@@ -585,3 +585,49 @@ fn the_fixture_requests_are_all_understood() {
     assert!(rpc.child.wait().unwrap().success());
     server.join().unwrap();
 }
+
+/// Bad optional types must not silently enable defaults such as all tools.
+#[test]
+fn malformed_optional_parameters_are_rejected() {
+    let _guard = env_lock();
+    let home = mock_home("rpc-invalid-params", 1);
+    let mut rpc = Rpc::spawn(&home, &[]);
+    for line in include_str!("fixtures/rpc/v2-invalid-requests.jsonl").lines() {
+        let request: Value = serde_json::from_str(line).unwrap();
+        let response = rpc.call(
+            "bad",
+            request["method"].as_str().unwrap(),
+            request["params"].clone(),
+        );
+        assert!(
+            response["error"].as_str().is_some(),
+            "{request}: {response}"
+        );
+    }
+    assert!(rpc.finish().success());
+}
+
+/// Model and effort form one update: a rejected effort changes neither.
+#[test]
+fn rejected_effort_leaves_the_model_unchanged() {
+    let _guard = env_lock();
+    let home = mock_home("rpc-atomic-set", 1);
+    home.write("models.json", r#"{"providers":{"mock":{"base_url":"http://127.0.0.1:1","api":"completions","models":[{"id":"test","effort":["low","high"]},{"id":"other","effort":["low"]}]}}}"#);
+    let ws = workspace("atomic-set");
+    let mut rpc = Rpc::spawn(&home, &[]);
+    let session = rpc.create(&ws, json!({"effort":"high"}));
+    let response = rpc.call(
+        "bad",
+        "session.set",
+        json!({"session":session,"model":"mock/other","effort":"high"}),
+    );
+    assert!(response["error"]
+        .as_str()
+        .unwrap()
+        .contains("does not support"));
+    let info = rpc.call("info", "session.info", json!({"session":session}));
+    assert_eq!(info["result"]["model"], "mock/test");
+    assert_eq!(info["result"]["effort"], "high");
+    assert!(rpc.finish().success());
+    let _ = std::fs::remove_dir_all(ws);
+}

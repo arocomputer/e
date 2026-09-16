@@ -42,6 +42,8 @@ against so changes to them are deliberate rather than accidental.
   documented in [automation.md](../usage/automation.md); new methods and fields are
   additive and do not change the number, a change to an existing shape
   does. `tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
+  Optional parameters reject wrong JSON types instead of falling back to defaults;
+  `v2-invalid-requests.jsonl` pins those refusals. Valid requests retain protocol 2.
 - **Extensions:** the JSONL protocol is versioned independently. e sends its
   protocol number during `initialize`; additive fields do not change the
   number, while incompatible wire changes require a new protocol version.
