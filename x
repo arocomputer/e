@@ -51,16 +51,14 @@ case "$command" in
   test)
     # Every failing suite in one run: without this, the first of 46 test
     # binaries stops the rest and a red pull request reports one problem.
-    cargo test --locked --no-fail-fast "$@"
+    cargo test --workspace --locked --no-fail-fast "$@"
     ;;
   crates)
     [ "$#" -eq 0 ] || usage
     # The published crates: the application is packaged and built end to end,
-    # and the SDK's file list is checked (it cannot resolve its own dependency
-    # until the application is on the registry, which the release publishes
-    # first).
+    # and the SDK is compiled by an external consumer from its packaged files.
     cargo publish --dry-run --locked --allow-dirty -p intuitums-e
-    cargo package --list --allow-dirty -p intuitums-e-sdk
+    python3 scripts/check-sdk.py
     ;;
   docs)
     [ "$#" -eq 0 ] || usage
@@ -117,7 +115,7 @@ case "$command" in
     cargo fmt --manifest-path fuzz/Cargo.toml "$@"
     ;;
   lint)
-    cargo clippy --all-targets "$@" -- -D warnings
+    cargo clippy --workspace --all-targets "$@" -- -D warnings
     ;;
   bench)
     [ "$#" -eq 0 ] || usage
