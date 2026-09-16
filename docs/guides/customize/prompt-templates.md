@@ -1,12 +1,13 @@
 ---
 title: Prompt templates
-description: /name templates with bash-style arguments
+description: Turn a markdown file into a /name command with arguments.
 order: 4
 ---
 
 # Prompt templates
 
-A markdown file at `~/.e/prompts/<name>.md` becomes the `/name` command.
+A prompt template is a reusable prompt you run as a slash command. The
+markdown file `~/.e/prompts/<name>.md` becomes the `/name` command.
 
 ```markdown
 ---
@@ -16,21 +17,36 @@ argument-hint: [path]
 Review ${1:-everything} carefully. Focus on $2.
 ```
 
-- `description` shows in the `/` picker; `argument-hint` after it.
-- The body is submitted as the prompt after bash-style substitution:
-  `$1`..`$9` positional, `$@` / `$ARGUMENTS` all args, `${N:-default}`,
-  `${@:-default}`, `${@:2}` (args from the 2nd on). Quoted arguments group
-  as one word.
-- New files are picked up immediately — templates are read per use.
+e reads templates on each use, so it picks up new files immediately.
+
+## Front matter
+
+- `description` shows in the `/` picker.
+- `argument-hint` shows after the description.
+
+## Arguments
+
+e submits the body as the prompt after bash-style substitution. Quoted
+arguments group as one word.
+
+| Syntax | Expands to |
+| --- | --- |
+| `$1`..`$9` | The positional argument. |
+| `$@` or `$ARGUMENTS` | All arguments. |
+| `${N:-default}` | Argument N, or `default` when it is missing or empty. |
+| `${@:-default}` | All arguments, or `default` when there are none. |
+| `${@:2}` | The arguments from the 2nd on. |
 
 ## Package templates
 
-An installed [package](../extend/packages.md) contributes its `prompts/` directory the
-same way; a global template of the same name shadows a package's.
+An installed [package](../extend/packages.md) contributes its `prompts/`
+directory the same way. A global template shadows a package's template of the
+same name.
 
 ## Repo-local templates
 
-A trusted repository can carry its own commands in `.e/prompts/`:
-`<repo>/.e/prompts/<name>.md` becomes `/name`, same format as above. They load
-only after `/trust`, like the repo's AGENTS.md, and shadow a global template
-of the same name — the closer context wins.
+A trusted repository can carry its own commands in `.e/prompts/`.
+`<repo>/.e/prompts/<name>.md` becomes `/name`, in the same format as above.
+
+These templates load only after `/trust`, like the repo's AGENTS.md. They
+shadow a global template of the same name, because the closer context wins.

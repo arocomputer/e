@@ -49,6 +49,11 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
   commands are in `commands`, and the `~/.e` home is in `settings`. Models and
   providers moved to `customize/` beside the rest of the `~/.e` surface, and
   extensions, packages, and their examples moved to `extend/`.
+- **Docs:** every guide is rewritten for reading: a one-sentence description,
+  short sections that lead with what a thing is for, and tables for keys,
+  flags, and methods. `e docs` lists each topic with that description. The
+  keybindings guide now unbinds an extension's chord with `"none"`, the value
+  the loader accepts; `null` made it ignore the whole file.
 
 - **Upgrade:** e refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `e trust [dir]` for a session with no terminal.
 - Linux binaries are built against glibc 2.31 instead of the build runner's 2.39, so they run on Debian 11+, Ubuntu 22.04+, and RHEL 9+ too, and the release refuses to publish one that needs anything newer. The installer refuses a host below the floor with a message naming the requirement instead of failing after the download with a linker error.
