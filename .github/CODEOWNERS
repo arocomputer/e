@@ -8,6 +8,7 @@
 
 /src/core/extensions/        @fschrhunt
 /src/core/resources/packages.rs @fschrhunt
+/src/core/resources/packages/ @fschrhunt
 /src/core/auth/       @fschrhunt
 /src/core/config/     @fschrhunt
 /src/core/providers/  @fschrhunt
