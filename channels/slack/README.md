@@ -32,7 +32,10 @@ once. Nothing here is compiled into e.
 ## Run it
 
 `@intuitums/e-slack` ships with e's releases and versions itself; the release
-supplies the npm tag (`latest`, `beta`, or `dev`). It only needs a checkout to work in (`E_CWD`):
+supplies the npm tag (`latest`, `beta`, or `dev`). **Bump `version` in
+`package.json` in the same pull request that changes the bot**: npm refuses to
+republish a version, so an unraised version means the change ships in the
+repository and nowhere else. It only needs a checkout to work in (`E_CWD`):
 
 ```sh
 npm install -g @intuitums/e-slack
