@@ -375,33 +375,58 @@ fn wait_for_code(
     }
 }
 
-/// The one e surface a browser renders: the wordmark, a title, a dim line —
-/// e's look in page form. UTF-8 is declared in the header AND a meta tag
-/// (the em-dash mojibake taught us not to let browsers guess).
+/// The one e surface a browser renders: the three-bar mark, a title, a dim
+/// line — e.intuitum.sh in page form. The palette (warm paper and ink, the
+/// green and red status inks), the mono type, and the heading's weight and
+/// tracking are the website's values; keep them aligned with its `site.css`
+/// and `logo.tsx`. The page is self-contained — no font or asset is fetched,
+/// so it renders offline and JetBrains Mono applies only where installed.
+/// A successful sign-in asks the tab to close itself; browsers grant that
+/// only to tabs a script opened, so the detail line still says what to do.
+/// UTF-8 is declared in the header AND a meta tag (the em-dash mojibake
+/// taught us not to let browsers guess).
 fn respond(stream: &mut std::net::TcpStream, status: u16, title: &str, detail: &str) {
     let reason = if status == 200 { "OK" } else { "Error" };
+    let (tone, script) = match status {
+        200 => (
+            "var(--success)",
+            "<script>setTimeout(function(){try{window.close()}catch(e){}},2000)</script>",
+        ),
+        404 => ("var(--ink)", ""),
+        _ => ("var(--error)", ""),
+    };
     let body = format!(
         concat!(
-            "<!doctype html><html><head><meta charset=\"utf-8\">",
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+            "<meta name=\"robots\" content=\"noindex\">",
             "<title>e · {title}</title><style>",
-            ":root{{--bg:#ffffff;--ink:#262626;--dim:#767676}}",
-            "@media(prefers-color-scheme:dark){{:root{{--bg:#0c0c0c;--ink:#e8e8e8;--dim:#8a8a8a}}}}",
+            ":root{{color-scheme:light dark;--paper:rgb(247 247 244);--ink:rgb(38 37 30);",
+            "--muted:rgb(38 37 30 / 60%);--success:rgb(34 128 68);--error:rgb(154 52 40)}}",
+            "@media(prefers-color-scheme:dark){{:root{{--paper:rgb(16 15 12);--ink:rgb(237 236 236);",
+            "--muted:rgb(237 236 236 / 60%);--success:rgb(138 203 156);--error:rgb(255 170 160)}}}}",
             "html,body{{height:100%;margin:0}}",
             "body{{display:flex;align-items:center;justify-content:center;",
-            "background:var(--bg);color:var(--ink);",
-            "font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}",
-            "main{{text-align:center}}",
-            ".mark{{font-size:64px;line-height:1}}",
-            ".title{{margin-top:24px;font-size:16px}}",
-            ".detail{{margin-top:8px;font-size:13px;color:var(--dim)}}",
+            "background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;",
+            "font:16px/2 \"JetBrains Mono\",ui-monospace,SFMono-Regular,Menlo,monospace}}",
+            "main{{text-align:center;padding:24px}}",
+            ".mark{{width:32px;height:40px;fill:currentColor}}",
+            ".title{{margin:24px 0 0;font-size:24px;font-weight:500;line-height:1.5;",
+            "letter-spacing:-0.055em;color:{tone}}}",
+            ".detail{{margin:8px 0 0;color:var(--muted)}}",
             "</style></head><body><main>",
-            "<div class=\"mark\">𝑒</div>",
-            "<div class=\"title\">{title}</div>",
-            "<div class=\"detail\">{detail}</div>",
-            "</main></body></html>"
+            "<svg class=\"mark\" viewBox=\"0 0 400 500\" aria-hidden=\"true\">",
+            "<rect x=\"100\" width=\"300\" height=\"100\"/>",
+            "<rect y=\"200\" width=\"300\" height=\"100\"/>",
+            "<rect x=\"100\" y=\"400\" width=\"300\" height=\"100\"/></svg>",
+            "<h1 class=\"title\">{title}</h1>",
+            "<p class=\"detail\">{detail}</p>",
+            "{script}</main></body></html>"
         ),
         title = title,
         detail = detail,
+        tone = tone,
+        script = script,
     );
     let _ = write!(
         stream,
@@ -894,27 +919,36 @@ mod tests {
         server.join().unwrap();
     }
 
-    /// The callback page must declare UTF-8 — the em-dash mojibake bug — and
-    /// carry e's wordmark.
-    #[test]
-    fn callback_page_is_utf8_and_branded() {
-        use std::io::Read;
+    /// Serve one callback page over a loopback socket and return the raw
+    /// response text.
+    fn callback_page(status: u16, title: &str, detail: &str) -> String {
+        use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
+        let (title, detail) = (title.to_string(), detail.to_string());
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            super::respond(&mut stream, 200, "Signed in", "You can close this tab.");
+            super::respond(&mut stream, status, &title, &detail);
         });
         let mut client = std::net::TcpStream::connect(addr).unwrap();
-        use std::io::Write;
         client.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
         let mut response = Vec::new();
         let _ = client.read_to_end(&mut response);
         server.join().unwrap();
-        let text = String::from_utf8(response).expect("response is valid UTF-8");
+        String::from_utf8(response).expect("response is valid UTF-8")
+    }
+
+    /// The callback page must declare UTF-8 — the em-dash mojibake bug — and
+    /// carry the three-bar mark in the website's palette.
+    #[test]
+    fn callback_page_is_utf8_and_branded() {
+        let text = callback_page(200, "Signed in", "You can close this tab.");
         assert!(text.contains("content-type: text/html; charset=utf-8"));
         assert!(text.contains("<meta charset=\"utf-8\">"));
-        assert!(text.contains("𝑒"));
+        assert!(text.contains("<svg class=\"mark\" viewBox=\"0 0 400 500\""));
+        assert!(text.contains("--paper:rgb(247 247 244)"));
+        assert!(text.contains("--paper:rgb(16 15 12)"));
+        assert!(text.contains("\"JetBrains Mono\""));
         assert!(text.contains("Signed in"));
         assert!(text.contains("You can close this tab."));
         // The body length header counts bytes, not chars.
@@ -925,6 +959,21 @@ mod tests {
             .and_then(|l| l.split(':').nth(1)?.trim().parse().ok())
             .unwrap();
         assert_eq!(declared, body.len());
+    }
+
+    /// Only a completed sign-in asks the tab to close itself: a failure page
+    /// has to stay readable, and a stray request gets the plain ink title.
+    #[test]
+    fn only_the_signed_in_page_closes_itself() {
+        let signed_in = callback_page(200, "Signed in", "You can close this tab.");
+        assert!(signed_in.contains("window.close()"));
+        assert!(signed_in.contains("color:var(--success)"));
+        let failed = callback_page(400, "Sign-in failed", "Return to the terminal.");
+        assert!(!failed.contains("window.close()"));
+        assert!(failed.contains("color:var(--error)"));
+        let stray = callback_page(404, "Not found", "");
+        assert!(!stray.contains("window.close()"));
+        assert!(stray.contains("color:var(--ink)}"));
     }
 
     #[test]

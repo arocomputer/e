@@ -167,7 +167,7 @@ jobs:
     needs: changes
     # Release plumbing: the image, the script, and the ceiling only move together.
     if: needs.changes.outputs.packages == 'true'
-    name: glibc floor
+    name: Glibc
     runs-on: ubuntu-latest
     # The image the release builds Linux in. Building here proves the floor on
     # the pull request, instead of a user on an older distribution finding it.
