@@ -2,23 +2,14 @@
 //! that answers the line protocol. Pins discovery, the initialize handshake,
 //! tool routing, command dispatch, and the tool_call hook (block + fail-open).
 
-use std::sync::Mutex;
+use common::{env_lock, Home};
 
 use e::core::extensions::{ExtensionHost, StartupAction};
 
 mod common;
 
-// E_HOME is process-global; serialize the tests that set it.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
 async fn start_host(notices: tokio::sync::mpsc::Sender<String>) -> std::sync::Arc<ExtensionHost> {
     ExtensionHost::start(notices, None).await
-}
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    // A prior panic while holding the lock must not cascade into every
-    // later E_HOME test as PoisonError — clear and continue.
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 // hook.tool_call contains "tool_call", so the hook case must match first.
@@ -64,42 +55,8 @@ while IFS= read -r line; do
 done
 "#;
 
-fn fake_home() -> tempdir::TempHome {
-    tempdir::TempHome::with_extension("fake.sh", FAKE)
-}
-
-/// Minimal temp E_HOME helper; restores nothing (each test sets its own).
-mod tempdir {
-    pub struct TempHome {
-        pub dir: std::path::PathBuf,
-    }
-    impl TempHome {
-        pub fn with_extension(name: &str, body: &str) -> TempHome {
-            Self::with_extensions(&[(name, body)])
-        }
-        pub fn with_extensions(names_bodies: &[(&str, &str)]) -> TempHome {
-            let dir = std::env::temp_dir().join(format!("e-api-test-{}", std::process::id()));
-            let ext = dir.join("extensions");
-            std::fs::create_dir_all(&ext).unwrap();
-            for (name, body) in names_bodies {
-                let path = ext.join(name);
-                std::fs::write(&path, body).unwrap();
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                        .unwrap();
-                }
-            }
-            std::env::set_var("E_HOME", &dir);
-            TempHome { dir }
-        }
-    }
-    impl Drop for TempHome {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
+fn fake_home() -> Home {
+    Home::with_extension("fake.sh", FAKE)
 }
 
 // The env lock is deliberately held across the awaits: E_HOME must stay ours
@@ -237,7 +194,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("streaming.sh", STREAMING);
+    let _home = Home::with_extension("streaming.sh", STREAMING);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
     let (progress, mut updates) = tokio::sync::mpsc::channel(4);
@@ -288,7 +245,7 @@ done
     );
 
     let _lock = env_lock();
-    let home = tempdir::TempHome::with_extension("streaming-agent.sh", STREAMING);
+    let home = Home::with_extension("streaming-agent.sh", STREAMING);
     std::fs::write(home.dir.join("auth.json"), r#"{"mock":{"key":"test"}}"#).unwrap();
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
@@ -351,7 +308,7 @@ done
         "data: [DONE]\n\n",
     );
     let _lock = env_lock();
-    let home = tempdir::TempHome::with_extension("showy.sh", SHOWY);
+    let home = Home::with_extension("showy.sh", SHOWY);
     std::fs::write(home.dir.join("auth.json"), r#"{"mock":{"key":"test"}}"#).unwrap();
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
@@ -418,7 +375,7 @@ done
     let second = "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n";
 
     let _lock = env_lock();
-    let home = tempdir::TempHome::with_extension("read-owner.sh", READ_EXTENSION);
+    let home = Home::with_extension("read-owner.sh", READ_EXTENSION);
     std::fs::write(home.dir.join("auth.json"), r#"{"mock":{"key":"test"}}"#).unwrap();
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
@@ -484,7 +441,7 @@ done
     let second = "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n";
 
     let _lock = env_lock();
-    let home = tempdir::TempHome::with_extension("write-owner.sh", WRITE_EXTENSION);
+    let home = Home::with_extension("write-owner.sh", WRITE_EXTENSION);
     std::fs::write(home.dir.join("auth.json"), r#"{"mock":{"key":"test"}}"#).unwrap();
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
@@ -537,7 +494,7 @@ printf '{"id":%s,"result":{"name":"exiting","tools":[{"name":"boom","parameters"
 exit 0
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("exiting.sh", EXITING);
+    let _home = Home::with_extension("exiting.sh", EXITING);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
     assert!(host.owns_tool("boom"));
@@ -574,7 +531,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("noisy.sh", NOISY);
+    let _home = Home::with_extension("noisy.sh", NOISY);
     // Leave the single slot undrained. Only the first notification fits.
     let (notices, _rx) = tokio::sync::mpsc::channel(1);
     let host = start_host(notices).await;
@@ -607,7 +564,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("oversized.sh", OVERSIZED);
+    let _home = Home::with_extension("oversized.sh", OVERSIZED);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
 
@@ -644,7 +601,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let home = tempdir::TempHome::with_extension("cfg.sh", CONFIG_FAKE);
+    let home = Home::with_extension("cfg.sh", CONFIG_FAKE);
     std::fs::write(
         home.dir.join("settings.json"),
         r#"{"extensions":{"cfg":{"mode":"x"}},"top_level":"untouched"}"#,
@@ -691,7 +648,7 @@ rl.on("line", (line) => {
 });
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("flagsprobe.sh", FLAGS_FAKE);
+    let _home = Home::with_extension("flagsprobe.sh", FLAGS_FAKE);
     let (notices, mut rx) = tokio::sync::mpsc::channel(16);
     let host = start_host(notices).await;
     assert!(!host.is_empty());
@@ -793,7 +750,7 @@ rl.on("line", (line) => {
 });
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extensions(&[("a.sh", BOTH_FAKE), ("b.sh", BOTH_FAKE)]);
+    let _home = Home::with_extensions(&[("a.sh", BOTH_FAKE), ("b.sh", BOTH_FAKE)]);
     let (notices, mut rx) = tokio::sync::mpsc::channel(16);
     let host = start_host(notices).await;
     assert!(!host.is_empty());
@@ -861,7 +818,7 @@ rl.on("line", (line) => {
 });
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("toolonly.sh", TOOLONLY_FAKE);
+    let _home = Home::with_extension("toolonly.sh", TOOLONLY_FAKE);
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
     // No startup hook — the flags notification must arrive on its own.
     let host = start_host(notices).await;
@@ -906,7 +863,7 @@ async fn dead_extension_fails_fast_instead_of_stalling() {
     // runner can consume most of the timeout this test is trying to measure.
     const DIES_INSTANTLY: &str = "#!/bin/sh\nexit 0\n";
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("dies.sh", DIES_INSTANTLY);
+    let _home = Home::with_extension("dies.sh", DIES_INSTANTLY);
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
 
     let t0 = std::time::Instant::now();
@@ -961,7 +918,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extensions(&[("a.sh", NOTICER), ("b.sh", EATER)]);
+    let _home = Home::with_extensions(&[("a.sh", NOTICER), ("b.sh", EATER)]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
 
@@ -998,7 +955,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("chatty.sh", CHATTY);
+    let _home = Home::with_extension("chatty.sh", CHATTY);
     let (notices, mut rx) = tokio::sync::mpsc::channel(8);
     let host = start_host(notices).await;
 
@@ -1051,7 +1008,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("noisy.sh", NOISY);
+    let _home = Home::with_extension("noisy.sh", NOISY);
     let (notices, mut rx) = tokio::sync::mpsc::channel(8);
     let host = start_host(notices).await;
 
@@ -1094,7 +1051,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("gate.sh", GATE);
+    let _home = Home::with_extension("gate.sh", GATE);
     let (notices, mut rx) = tokio::sync::mpsc::channel(8);
     let host = start_host(notices).await;
 
@@ -1134,7 +1091,7 @@ while IFS= read -r line; do
 done
 "#;
     let _lock = env_lock();
-    let _home = tempdir::TempHome::with_extension("pidder.sh", PIDDER);
+    let _home = Home::with_extension("pidder.sh", PIDDER);
     let (notices, mut rx) = tokio::sync::mpsc::channel(8);
     let host = start_host(notices).await;
     let pid = rx

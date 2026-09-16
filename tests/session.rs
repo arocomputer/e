@@ -1,14 +1,12 @@
 //! Sessions persist and resume: write a conversation, list it, load it back.
 
-use std::sync::Mutex;
+mod common;
+use common::{env_lock, Home};
 
 use e::core::agent::Agent;
 use e::core::providers::catalog::{Api, Model};
 use e::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
 use e::core::session::{self, SessionLog};
-
-// E_HOME is process-global, so tests that replace it must not overlap.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn released_session_fixtures_remain_readable() {
@@ -49,11 +47,8 @@ fn future_session_format_fails_with_an_actionable_error() {
 
 #[test]
 fn session_round_trips_and_lists() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-session-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let _home = Home::new("session");
 
     let cwd = std::env::temp_dir().join("e-proj");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -94,10 +89,9 @@ fn session_round_trips_and_lists() {
 // UUID carried in the filename, unchanged when the log is reopened for resume.
 #[test]
 fn response_provenance_is_outside_model_history_and_survives_copying() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-response-{}", uuid::Uuid::now_v7()));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -143,11 +137,8 @@ fn response_provenance_is_outside_model_history_and_survives_copying() {
 
 #[test]
 fn session_id_is_stable_across_reopen() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-session-id-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let _home = Home::new("session");
     let cwd = std::env::temp_dir().join("e-id-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -176,7 +167,8 @@ fn session_id_is_stable_across_reopen() {
 
 #[test]
 fn session_name_sets_reads_and_clears() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = env_lock();
+    let _home = Home::new("session-name");
     let model = Model {
         provider: "test".into(),
         id: "model".into(),
@@ -205,14 +197,9 @@ fn session_name_sets_reads_and_clears() {
 
 #[test]
 fn opening_e_does_not_count_as_a_session() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-empty-session-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let model = Model {
         provider: "test".into(),
@@ -276,14 +263,9 @@ fn old_tool_messages_without_metadata_still_load() {
 
 #[test]
 fn path_separator_and_hyphen_do_not_collide() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-collision-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let root = home.join("workspaces");
     let first = root.join("alpha").join("beta-gamma");
@@ -304,14 +286,9 @@ fn path_separator_and_hyphen_do_not_collide() {
 
 #[test]
 fn legacy_session_directories_are_filtered_by_header_cwd() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-legacy-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let root = home.join("workspaces");
     let first = root.join("alpha").join("beta-gamma");
@@ -361,14 +338,9 @@ fn legacy_session_directories_are_filtered_by_header_cwd() {
 fn session_keys_preserve_non_utf8_path_bytes() {
     use std::os::unix::ffi::OsStringExt;
 
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-non-utf8-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let cwd = home
         .join("workspaces")
@@ -386,14 +358,9 @@ fn session_keys_preserve_non_utf8_path_bytes() {
 
 #[test]
 fn a_session_open_in_one_place_cannot_be_appended_to_from_another() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-lock-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -421,14 +388,9 @@ fn a_session_open_in_one_place_cannot_be_appended_to_from_another() {
 
 #[test]
 fn lock_contents_cannot_override_a_live_owner() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-stale-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -454,7 +416,7 @@ fn lock_contents_cannot_override_a_live_owner() {
 
 #[test]
 fn simultaneous_resumes_have_exactly_one_owner() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = env_lock();
     let home = std::env::temp_dir().join(format!("e-lock-race-{}", uuid::Uuid::new_v4()));
     let saved =
         e::core::config::home::with_home(home.clone(), || SessionLog::create(&home, "mock/test"))
@@ -484,14 +446,9 @@ fn simultaneous_resumes_have_exactly_one_owner() {
 
 #[test]
 fn a_corrupted_record_is_surfaced_not_silently_dropped() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-corrupt-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
 
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -530,14 +487,9 @@ fn a_corrupted_record_is_surfaced_not_silently_dropped() {
 /// interior corruption (the test above) stays fatal.
 #[test]
 fn a_torn_final_line_costs_the_record_not_the_session() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-torn-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -567,14 +519,9 @@ fn a_torn_final_line_costs_the_record_not_the_session() {
 /// intact one.
 #[test]
 fn reopen_truncates_a_torn_tail_before_appending() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-torn-reopen-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -612,14 +559,9 @@ fn reopen_truncates_a_torn_tail_before_appending() {
 /// synthetic result instead of handing the agent an unreplayable history.
 #[test]
 fn a_dangling_tool_call_is_repaired_on_load() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-dangling-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -653,14 +595,9 @@ fn a_dangling_tool_call_is_repaired_on_load() {
 /// request of that session is rejected.
 #[test]
 fn a_dangling_tool_call_is_still_answered_on_the_second_resume() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-dangling-twice-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -706,14 +643,9 @@ fn a_dangling_tool_call_is_still_answered_on_the_second_resume() {
 /// followed by the user's next prompt, and must still be dropped.
 #[test]
 fn an_orphaned_reasoning_block_is_dropped_wherever_it_sits() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-orphan-reasoning-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -741,7 +673,8 @@ fn an_orphaned_reasoning_block_is_dropped_wherever_it_sits() {
 /// not per message, and not never.
 #[tokio::test(flavor = "multi_thread")]
 async fn persistence_failure_warns_once_not_silently() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = env_lock();
+    let _home = Home::new("session-blocked");
     // E_HOME pointing at a regular file makes every session create fail.
     let blocked = std::env::temp_dir().join(format!("e-blocked-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&blocked);
@@ -787,11 +720,9 @@ async fn persistence_failure_warns_once_not_silently() {
 /// line, exactly what `load` still sees.
 #[test]
 fn nodes_chain_linearly_when_nothing_rewound() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-tree-linear-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = std::env::temp_dir().join("e-tree-linear-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -819,11 +750,9 @@ fn nodes_chain_linearly_when_nothing_rewound() {
 /// `nodes`.
 #[test]
 fn set_head_grows_a_branch_without_touching_the_old_tail() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-tree-branch-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = std::env::temp_dir().join("e-tree-branch-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -869,11 +798,9 @@ fn set_head_grows_a_branch_without_touching_the_old_tail() {
 /// beside it.
 #[test]
 fn reopen_continues_the_branch_that_was_active() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-tree-reopen-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = std::env::temp_dir().join("e-tree-reopen-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -912,11 +839,9 @@ fn reopen_continues_the_branch_that_was_active() {
 /// second root.
 #[test]
 fn legacy_records_synthesize_a_linear_chain() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-tree-legacy-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = std::env::temp_dir().join("e-tree-legacy-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -954,11 +879,9 @@ fn legacy_records_synthesize_a_linear_chain() {
 /// for resume, and the latest entry wins.
 #[test]
 fn the_latest_persisted_name_is_readable_for_resume() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-name-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = std::env::temp_dir().join("e-name-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -975,11 +898,9 @@ fn the_latest_persisted_name_is_readable_for_resume() {
 
 #[test]
 fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!("e-session-fork-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("ws");
     std::fs::create_dir_all(&cwd).unwrap();
     let mut original = SessionLog::create(&cwd, "test/model").unwrap();
@@ -1024,14 +945,9 @@ fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
 /// one torn record: the session loads, and it stays listed for /resume.
 #[test]
 fn a_tail_torn_inside_a_character_costs_the_record_not_the_session() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-torn-utf8-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
@@ -1063,14 +979,9 @@ fn a_tail_torn_inside_a_character_costs_the_record_not_the_session() {
 /// two into one unreadable record.
 #[test]
 fn reopen_restores_the_newline_a_whole_last_record_lost() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "e-session-no-newline-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    let _lock = env_lock();
+    let fixture = Home::new("session");
+    let home = fixture.dir.clone();
     let cwd = home.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
 
