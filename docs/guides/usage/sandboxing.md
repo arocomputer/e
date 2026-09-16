@@ -25,7 +25,7 @@ for how older session files are handled.
 lives, SHA-pinned CI actions), not the permissions of a running session. A
 clean `guard.sh` says nothing about what a live `e` process can reach.
 
-The rest of the extension surface (`docs/extend/extensions.md`: events, the
+The rest of the extension surface (`docs/guides/extend/extensions.md`: events, the
 `before_turn` and `tool_result` hooks, `ui.*` and `session.*` requests) is
 the same posture. An extension can narrow the toolset (`session.tools`),
 append to the system prompt, redact tool output, and ask the user things —
@@ -43,7 +43,7 @@ it and pin the ref you read (`@v1`).
 ## What e gives you: the `tool_call` hook
 
 Extensions can gate individual tool calls — see
-[`docs/extend/extensions.md`](../extend/extensions.md#results-by-method) and the
+[`docs/guides/extend/extensions.md`](../extend/extensions.md#results-by-method) and the
 [`gate.mjs`](../extend/examples/gate.mjs) / [`protected.mjs`](../extend/examples/protected.mjs)
 examples, which deny destructive bash patterns and credential-shaped paths
 respectively. This is a real, useful speed bump, but it is fail-open by
@@ -65,11 +65,11 @@ For an actual boundary, isolate the process:
   VM, when a container's shared kernel isn't isolation enough for your
   threat model.
 - **OS-level sandboxing of just `bash`.** e's extension protocol lets a
-  tool declaration override a built-in by name (`docs/extend/extensions.md`:
+  tool declaration override a built-in by name (`docs/guides/extend/extensions.md`:
   "add tools — and override a built-in by using its name"), so an
   extension can replace `bash` with a version that wraps the command in
   `bwrap` (Linux), `firejail`, or `sandbox-exec` (macOS) before running it.
-  There is no example of this in `docs/extend/examples/` yet — it's real work
+  There is no example of this in `docs/guides/extend/examples/` yet — it's real work
   to get right (see the next section) — but the mechanism exists today. If
   you build one: preserve the built-in bash schema's full contract
   (`command`, `timeout`, `background`, `handle`, `signal` — see
@@ -86,7 +86,7 @@ isolated but isn't — a missing `--unshare-net`, a bind mount that's
 writable when it should be read-only. Getting that right for real is its
 own project: `thule` is the planned first-party answer, built to give e a
 real execution boundary directly instead of leaving every user to wrap
-`bash` themselves. Until it lands, a future `docs/extend/examples/sandbox.mjs`
+`bash` themselves. Until it lands, a future `docs/guides/extend/examples/sandbox.mjs`
 built on the `tool_call`-override mechanism above should wrap a maintained
 sandboxing tool and fail loudly (refuse the call) when that tool isn't
 installed, never fall back to running the command unsandboxed.

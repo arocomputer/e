@@ -3,7 +3,7 @@
 //! so the binary itself is the docs carrier. The system prompt tells the
 //! agent to run it when asked about e's own surfaces.
 //!
-//! The topics are not listed here: `build.rs` generates them from `docs/`,
+//! The topics are not listed here: `build.rs` generates them from `docs/guides/`,
 //! where the folder is the nav group, the file stem is the topic, and front
 //! matter carries the blurb. The website renders the same files, so a guide is
 //! written once and read by the terminal, GitHub, and the site.

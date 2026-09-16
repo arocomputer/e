@@ -1,12 +1,12 @@
 # Writing e's documentation
 
-These folders are the only copy of e's guides. Three readers render them:
+`docs/guides/` is the only copy of e's guides. Three readers render them:
 
 - **GitHub** — the files themselves, as you see them here.
 - **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **e.intuitum.sh/docs** — the website fetches this folder from `main` at build
-  time and renders each file as a page. A push to `main` that touches this folder
+- **e.intuitum.sh/docs** — the website fetches `docs/guides/` from `main` at
+  build time and renders each file as a page. A push to `main` that touches this folder
   pings the site's deploy hook, so a guide goes live without a change over there.
 
 Write once, and all three follow. Never paste a guide's text into the website,
@@ -16,32 +16,33 @@ the README, or an issue: link to it.
 
 ```
 docs/
-  README.md            this file — GitHub only, never a topic and never a page
-  start/               one folder per nav group
-    README.md          the group's label and order, and nothing else
-    getting-started.md the website's landing page
-  usage/
-    README.md
-    sessions.md
-  customize/
-    README.md
-    settings.md
-  extend/
-    README.md
-    examples/          assets a guide links to (code, images); not topics
+  README.md              this file — GitHub only, never a topic and never a page
+  guides/
+    start/               one folder per nav group
+      README.md          the group's label and order, and nothing else
+      getting-started.md the website's landing page
+    usage/
+      README.md
+      sessions.md
+    customize/
+      README.md
+      settings.md
+    extend/
+      README.md
+      examples/          assets a guide links to (code, images); not topics
 contributing/          the repository's own documentation: architecture,
                        rendering, releases. Never on the website, never in
                        `e docs`.
 ```
 
 - **The folder is the nav group**, and its README.md's front matter names it
-  and orders it: `docs/usage/` is “Usage”, second in the sidebar. Nothing is
+  and orders it: `docs/guides/usage/` is “Usage”, second in the sidebar. Nothing is
   numbered, so renaming a group is renaming a folder.
 - **A group has a subject.** `start/` is the first run, `usage/` is day-to-day
   operation, `customize/` is the `~/.e` surface, and `extend/` is building
   against e. Put a guide where a reader would look for it, and move it when
   that changes.
-- **The file stem is the `e docs` topic.** `docs/customize/themes.md` is
+- **The file stem is the `e docs` topic.** `docs/guides/customize/themes.md` is
   `e docs themes`. Stems are unique across the whole folder tree.
 - **The guide named `getting-started` is the website's landing page.**
   `e.intuitum.sh/docs` renders that file, so its first commands are the ones a
@@ -102,11 +103,11 @@ YAML dependency.
 
 ## Links
 
-- **Another guide:** link it relatively — `[themes](customize/themes.md)` from
+- **Another guide:** link it relatively — `[themes](guides/customize/themes.md)` from
   this folder, or `themes.md` from beside it. GitHub resolves either, and the
   website rewrites it to the page's route. Do not write repository-absolute
-  paths like `/docs/customize/themes.md`: they break on GitHub.
-- **Anything outside `docs/`** — `contributing/`, `src/`, an example file —
+  paths like `/docs/guides/customize/themes.md`: they break on GitHub.
+- **Anything outside `docs/guides/`** — `contributing/`, `src/`, an example file —
   link it relatively too. The website points those at GitHub, since they are
   not pages.
 - **Fragments work** (`extensions.md#results-by-method`) and the website keeps
@@ -114,7 +115,7 @@ YAML dependency.
 
 ## Checking your work
 
-`./x docs` covers this folder: every guide has complete front matter, the
+`./x docs` covers `docs/guides/`: every guide has complete front matter, the
 topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 

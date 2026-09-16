@@ -16,7 +16,7 @@ and bot frameworks, and lets a company write its channel in whatever
 language its glue code already uses.
 
 The protocol is [automation.md](automation.md). Reference channels live
-under [`channels/`](../../channels/) in the repository:
+under [`channels/`](../../../channels/) in the repository:
 
 ```
 channels/slack/     a Slack bot: one thread, one session (TypeScript)

@@ -39,7 +39,7 @@ jobs:
             add_label area:core 1d76db 'Agent, providers, tools, storage, and extensions' || true
           echo "$files" | grep -q '^src/tui/' && \
             add_label area:tui 5319e7 'Terminal interface and rendering' || true
-          echo "$files" | grep -Eq '^(sdk/|docs/sdk\.md)' && \
+          echo "$files" | grep -Eq '^(sdk/|docs/guides/extend/sdk\.md)' && \
             add_label area:sdk 0e8a16 'The e-sdk package and its docs' || true
           echo "$files" | grep -Eq '^(docs/|README\.md|SECURITY.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|LICENSE)' && \
             add_label documentation 0075ca 'Documentation changes' || true
@@ -53,7 +53,7 @@ jobs:
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
           # `breaking` is never path-derived — no grep can know a wire or
           # persisted contract changed. The author declares it; see
-          # docs/extend/compatibility.md.
+          # docs/guides/extend/compatibility.md.
           echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages[/.]|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true
           # The guides are published to the website and embedded in the binary,

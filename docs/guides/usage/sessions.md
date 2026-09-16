@@ -9,7 +9,7 @@ order: 1
 A session is one conversation with its history: messages, tool calls, their
 output, and the usage they recorded. Sessions are the unit that `e rpc` opens
 ([automation](automation.md)), the unit `/resume` lists, and the unit a
-[channel](../usage/channels.md) maps to a thread.
+[channel](channels.md) maps to a thread.
 
 ## Where they live
 
