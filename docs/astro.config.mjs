@@ -37,7 +37,36 @@ export default defineConfig({
         ),
       })),
       customCss: ["@fontsource-variable/jetbrains-mono", "./src/styles/e.css"],
-      components: { SocialIcons: "./src/components/SocialIcons.astro" },
+      components: {
+        PageTitle: "./src/components/PageTitle.astro",
+        SocialIcons: "./src/components/SocialIcons.astro",
+      },
+      // Code blocks are flat frames on the page surface, and long lines wrap
+      // inside the column rather than scrolling out of it.
+      expressiveCode: {
+        defaultProps: { wrap: true, frame: "code" },
+        styleOverrides: {
+          borderRadius: "0",
+          borderColor: "var(--sl-color-hairline-light)",
+          codeBackground: "var(--sl-color-gray-6)",
+          codeFontFamily: "var(--__sl-font-mono)",
+          codeFontSize: "0.8125rem",
+          codeLineHeight: "1.65",
+          uiFontFamily: "var(--__sl-font)",
+          frames: {
+            shadowColor: "transparent",
+            frameBoxShadowCssValue: "none",
+            editorTabBarBackground: "var(--sl-color-gray-6)",
+            editorActiveTabBackground: "var(--sl-color-gray-6)",
+            editorActiveTabIndicatorTopColor: "transparent",
+            editorTabBarBorderBottomColor: "var(--sl-color-hairline-light)",
+            terminalBackground: "var(--sl-color-gray-6)",
+            terminalTitlebarBackground: "var(--sl-color-gray-6)",
+            terminalTitlebarDotsOpacity: "0",
+            terminalTitlebarBorderBottomColor: "var(--sl-color-hairline-light)",
+          },
+        },
+      },
     }),
   ],
 });
