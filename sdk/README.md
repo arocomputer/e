@@ -43,8 +43,13 @@ cargo add intuitums-e-sdk
 - **Its own version, not the application's.** The SDK changes for its own
   reasons, so its version tracks only those. It depends on the application crate
   — `intuitums-e`, the npm naming (`@intuitums/e`) since bare `e` is taken on
-  crates.io — and accepts any 0.x of it, so an SDK release never waits for a
-  binary release.
+  crates.io. It pins the exact application version it was tested against; publish
+  that application version before publishing the SDK.
 - **The application's library target is not a promise.** What the SDK is built
   on is internal; the contract is what this package documents
   ([compatibility.md](../docs/extend/compatibility.md)).
+
+The SDK pins the application crate version it was tested against. Run `./x check`
+from the repository root to check all workspace members and compile the packaged
+SDK example as an external consumer. See the [SDK guide](../docs/extend/sdk.md)
+for the API and release contract.
