@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|fmt|lint|test|crates|docs|site|guard|packages|channels|container|ui|bench|release-check] [args...]" >&2
   exit 2
 }
 
@@ -68,6 +68,12 @@ case "$command" in
     # The guides are a published contract: front matter, one group README per
     # folder, unique topics, and every relative link resolving.
     cargo test --locked --test docs
+    ;;
+  site)
+    [ "$#" -eq 0 ] || usage
+    # The docs site: every guide rendered as a page, which fails on anything
+    # the site cannot render. Needs Node, like the channels.
+    (cd docs && npm ci --no-fund --no-audit && npm run build)
     ;;
   packages)
     [ "$#" -eq 0 ] || usage
