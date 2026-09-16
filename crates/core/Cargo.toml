@@ -1,0 +1,36 @@
+[package]
+# The harness without a terminal: the agent turn loop, provider dialects,
+# tools, sessions, configuration, extensions, and the embedded guides. Nothing
+# here depends on a frontend crate or a terminal library.
+name = "intuitums-e-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "The terminal-free core of e, the coding agent you can put anywhere"
+documentation = "https://e.intuitum.sh/docs"
+readme = "../../README.md"
+keywords = ["agent", "coding-agent", "llm"]
+categories = ["development-tools"]
+# The build embeds the guides and the themes; `guides` is a link to
+# docs/guides, which Cargo packages as ordinary files.
+include = ["/src", "/build.rs", "/guides", "/themes"]
+
+[lib]
+name = "e_core"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+pulldown-cmark.workspace = true
+reqwest.workspace = true
+uuid.workspace = true
+base64.workspace = true
+sha2.workspace = true
+rand.workspace = true
+regex.workspace = true
+libc.workspace = true

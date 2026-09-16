@@ -18,7 +18,7 @@ def main():
     parser.add_argument('scenario', choices=['streaming', 'long-output', 'tools', 'cancellation', 'resume'])
     args = parser.parse_args()
     # Reuse the UI provider without loading the optional frame-checking dependencies.
-    spec = importlib.util.spec_from_file_location('scenario_provider', ROOT / 'tests/ui/provider.py')
+    spec = importlib.util.spec_from_file_location('scenario_provider', ROOT / 'crates/cli/tests/ui/provider.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), module.Provider)

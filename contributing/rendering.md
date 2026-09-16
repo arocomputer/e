@@ -144,7 +144,7 @@ and reports the failure rather than blindly replaying the request. Sleep-attribu
 bounded continuation policy. A display-off event alone does not activate it.
 
 `./x ui` checks completed terminal frames for composer anchoring, shell styling,
-short errors, and colored diff counts. See [tests/ui/README.md](../tests/ui/README.md)
+short errors, and colored diff counts. See [crates/cli/tests/ui/README.md](../crates/cli/tests/ui/README.md)
 for checked scenarios and capture-only repros of paste safety and trust panels:
 
 ```sh

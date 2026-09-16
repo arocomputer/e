@@ -1,0 +1,41 @@
+[package]
+# The crates.io package name: `e` is taken there, so the application carries the
+# org prefix the npm packages already use (`@intuitums/e` → `intuitums-e`).
+# The binary and its library are still `e`, so `e --version` and `use e::…`
+# are unchanged.
+name = "intuitums-e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "The coding agent you can put anywhere"
+documentation = "https://e.intuitum.sh/docs"
+readme = "../../README.md"
+keywords = ["agent", "coding-agent", "cli", "llm", "tui"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "e"
+
+[[bin]]
+name = "e"
+path = "src/main.rs"
+
+[dependencies]
+e-core.workspace = true
+e-tui.workspace = true
+e-rpc.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+libc.workspace = true
+proptest.workspace = true
