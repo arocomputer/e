@@ -150,39 +150,56 @@ fn topics_are_unique_and_served_without_front_matter() {
 
 #[test]
 fn every_relative_link_resolves() {
-    let roots = [
-        docs(),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("contributing"),
-    ];
-    for root in roots {
-        for path in walk(&root) {
-            let text = std::fs::read_to_string(&path).unwrap();
-            for target in targets(&text) {
-                if target.starts_with("http://")
-                    || target.starts_with("https://")
-                    || target.starts_with("mailto:")
-                    || target.starts_with('#')
-                {
-                    continue;
-                }
-                let file = target.split('#').next().unwrap();
-                if file.is_empty() {
-                    continue;
-                }
-                let resolved = path.parent().unwrap().join(file);
-                assert!(
-                    resolved.exists(),
-                    "{} links to `{target}`, which does not resolve",
-                    path.display()
-                );
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = walk(&docs());
+    files.extend(walk(&manifest.join("contributing")));
+    // A reader starts at the repository root, so its guides are checked too.
+    for name in [
+        "README.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+    ] {
+        let path = manifest.join(name);
+        if path.is_file() {
+            files.push(path);
+        }
+    }
+
+    let mut checked = 0;
+    for path in &files {
+        let text = std::fs::read_to_string(path).unwrap();
+        for target in targets(&text) {
+            if target.starts_with("http://")
+                || target.starts_with("https://")
+                || target.starts_with("mailto:")
+                || target.starts_with('#')
+            {
+                continue;
             }
+            let file = target.split('#').next().unwrap();
+            if file.is_empty() {
+                continue;
+            }
+            let resolved = path.parent().unwrap().join(file);
+            assert!(
+                resolved.exists(),
+                "{} links to `{target}`, which does not resolve",
+                path.display()
+            );
+            checked += 1;
         }
     }
     // The walk must see the guides and the folder READMEs, or a broken link in
     // one of them would pass unnoticed.
     assert!(
-        walk(&docs()).len() >= guides().len() + 2,
+        files.len() >= guides().len() + 2,
         "the walk missed files under docs/"
+    );
+    assert!(
+        checked > 20,
+        "only {checked} links checked; did the walk run?"
     );
 }
 
