@@ -2,6 +2,7 @@
 """Record the release outcome against its source commit in GitHub deployments."""
 import json
 import os
+from pathlib import Path
 import subprocess
 
 
@@ -23,6 +24,14 @@ def report(needs, repository, server, run_id):
         return json.loads(subprocess.check_output(
             ['gh', 'api', '--method', 'POST', f'repos/{repository}/{path}', '--input', '-'],
             input=json.dumps(data), text=True))
+
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+            summary.write('Release distribution results\n\n| Distribution | Result |\n| --- | --- |\n')
+            for job, label in [('publish', 'Verified binaries'), ('channel', 'Website installer'),
+                               ('npm', 'npm and bun'), ('homebrew', 'Homebrew'),
+                               ('container', 'Container'), ('crates', 'crates.io')]:
+                summary.write(f'| {label} | {needs.get(job, {}).get("result", "skipped")} |\n')
 
     deployment = post('deployments', {
         'ref': release['sha'], 'environment': environment,

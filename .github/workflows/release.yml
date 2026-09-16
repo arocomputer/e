@@ -37,6 +37,8 @@ jobs:
     permissions:
       # GitHub requires push access to inspect unpublished draft releases.
       contents: write
+      # Stable promotion reads the selected beta's verified deployment.
+      deployments: read
     outputs:
       repository: ${{ steps.release.outputs.repository }}
       tag: ${{ steps.release.outputs.tag }}
@@ -283,6 +285,13 @@ jobs:
           mv ./*.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
           # Every workspace member gets one; the release ships the application's.
           find . -name '*.cdx.json' -delete
+
+      - name: Record build identity
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.resolve.outputs.sha }}
+        run: |
+          python3 -c 'import json, os; from pathlib import Path; Path(os.environ["RUNNER_TEMP"], "release-assets", "build.json").write_text(json.dumps({"version": os.environ["VERSION"], "commit": os.environ["SOURCE_COMMIT"]}) + "\n")'
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -547,8 +556,8 @@ jobs:
 
   channel:
     name: Advance channel and verify website installer
-    needs: [resolve, publish, npm, homebrew]
-    if: ${{ !cancelled() && needs.npm.result == 'success' && needs.homebrew.result == 'success' }}
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.resolve.outputs.channel != 'dev' && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -557,13 +566,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Advance channel
-        env:
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
-          GH_REPO: ${{ needs.resolve.outputs.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        run: python3 scripts/release/channel.py "$TAG"
-      - name: Install through website
+      - name: Verify pinned website installer
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
           CHANNEL: ${{ needs.resolve.outputs.channel }}
@@ -572,6 +575,17 @@ jobs:
           curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
           E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL" --version "${TAG#v}"
           "$RUNNER_TEMP/e-pinned/$COMMAND" --version | grep -Fx "e ${TAG#v}"
+      - name: Advance channel
+        env:
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: python3 scripts/release/channel.py "$TAG"
+      - name: Verify current website installer
+        env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          COMMAND: ${{ needs.resolve.outputs.command }}
+        run: |
           E_INSTALL_DIR="$RUNNER_TEMP/e-current" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL"
           "$RUNNER_TEMP/e-current/$COMMAND" --version
 
