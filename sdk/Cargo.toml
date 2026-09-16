@@ -11,7 +11,7 @@ edition = "2021"
 rust-version = "1.98"
 license = "MIT"
 description = "e's coding agent as a library: sessions, turns, one event stream"
-documentation = "https://docs.rs/e-sdk"
+documentation = "https://docs.rs/intuitums-e-sdk"
 homepage = "https://e.intuitum.sh"
 repository = "https://github.com/intuitums/e"
 readme = "README.md"
@@ -26,9 +26,9 @@ path = "src/lib.rs"
 
 [dependencies]
 # `intuitums-e` is the application package (`e` is taken on crates.io); its
-# library target is still `e`. Any 0.x is accepted because the two are released
-# from one repository, so a given SDK never needs a specific patch of it.
-e = { package = "intuitums-e", path = "..", version = "0" }
+# library target is still `e`. Its Rust API is internal, so each SDK release
+# pins the application version it was built and tested against.
+e = { package = "intuitums-e", path = "..", version = "=0.0.1" }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 futures = "0.3"
 thiserror = "2"
