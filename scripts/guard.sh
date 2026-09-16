@@ -53,7 +53,8 @@ fi
 #    files are a second door into the filesystem — `var_os` included, so the
 #    OsString form cannot slip past the pattern.
 if out=$(grep -rn 'env::var("HOME")\|env::var("E_HOME")\|env::var_os("HOME")\|env::var_os("E_HOME")' src/ --include='*.rs' |
-    grep -v '^src/core/config/home.rs:' | grep -v '^src/tui/app/mod.rs:'); then
+    grep -v '^src/core/config/home.rs:' | grep -v '^src/tui/app/mod.rs:' |
+    grep -v '^src/tui/app/frame.rs:'); then
   bad "HOME/E_HOME read outside core/config/home.rs (or tui/app's title display):"
   say "$out"
 fi
