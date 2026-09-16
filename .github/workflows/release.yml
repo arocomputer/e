@@ -141,12 +141,18 @@ jobs:
           fi
 
   build:
-    name: Build (macos)
+    name: Build (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: macos
+            targets: "aarch64-apple-darwin x86_64-apple-darwin"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,20 +169,20 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           # A macOS runner's libc is not a Linux floor; scripts/release/build.sh
           # checks the glibc ceiling on the Linux legs instead.
-          TARGETS: aarch64-apple-darwin x86_64-apple-darwin
+          TARGETS: ${{ matrix.targets }}
           COMMAND: ${{ needs.resolve.outputs.command }}
         run: scripts/release/build.sh
 
       - name: Retain build archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binaries-macos
+          name: binaries-${{ matrix.leg }}
           path: e-*.tar.gz
           retention-days: 14
           overwrite: true
 
   build-linux:
-    name: Build (linux ${{ matrix.arch }})
+    name: Build (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
     # A Linux binary links against the glibc of the image that built it, so it
@@ -193,11 +199,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
-            arch: x86_64
+          - leg: linux-x86_64
+            runner: ubuntu-latest
             targets: "x86_64-unknown-linux-gnu"
-          - runner: ubuntu-24.04-arm
-            arch: arm64
+          - leg: linux-arm64
+            runner: ubuntu-24.04-arm
             targets: "aarch64-unknown-linux-gnu"
     steps:
       - name: Checkout
@@ -222,7 +228,7 @@ jobs:
       - name: Retain build archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binaries-linux-${{ matrix.arch }}
+          name: binaries-${{ matrix.leg }}
           path: e-*.tar.gz
           retention-days: 14
           overwrite: true
