@@ -131,6 +131,13 @@ shutdown           {}                            → {}               then the p
 `session.prompt` takes `images`, a list of PNG, JPEG, GIF, or WebP paths
 (ten files, 20 MiB each, 40 MiB total); the model must declare image input.
 
+Optional parameters are type-checked before defaults apply. For example,
+`tool_mode: false` and `save: "yes"` return errors. Omit an optional parameter
+or send `null` to use its default. Unknown fields remain accepted.
+
+`session.set` validates the proposed model and effort together. A rejected update
+changes neither value.
+
 `session.set` changes the model or effort for the following turns without
 touching the user's saved settings. `session.fork` copies the branch into
 a session of its own — a file of its own when the original persists — so
