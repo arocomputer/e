@@ -1,15 +1,18 @@
 ---
 title: Themes
-description: theme JSON format; file wins over a built-in name
+description: Recolor e with a theme JSON file.
 order: 6
 ---
 
 # Themes
 
-A theme is a JSON file: `~/.e/themes/<name>.json`, or `themes/<name>.json`
-in an installed [package](../extend/packages.md). Every name in `/settings` → Theme
-comes from these directories plus the two built-ins (`dark`, `light`) — a
-file named like a built-in replaces it, the home's file first.
+A theme is a JSON file that sets e's colors. Put it at
+`~/.e/themes/<name>.json`, or at `themes/<name>.json` in an installed
+[package](../extend/packages.md).
+
+The names in `/settings` → Theme come from these directories plus the two
+built-ins, `dark` and `light`. A file named like a built-in replaces it. When
+both the home and a package have one, the home's file comes first.
 
 ## Format
 
@@ -21,25 +24,45 @@ file named like a built-in replaces it, the home's file first.
 }
 ```
 
-- `vars` maps a palette name to a 256-color index or `"#RRGGBB"` color.
-- `colors` maps a UI token to a var name, index, or hex color; `""` means the terminal default.
-- Start by copying a built-in: `e docs theme-dark` prints the dark theme's
-  JSON verbatim; save it under a new name and edit.
+- `vars` maps a palette name to a 256-color index or a `"#RRGGBB"` color.
+- `colors` maps a UI token to a var name, an index, or a hex color. `""` means
+  the terminal default.
 
-Tokens you will most likely touch: `userMessageText` (the composer rail and
-user text), `dim`, `border` (dividers), `muted`, `bashMode` (the `!` shell marker),
-`accent`, and the `syntax*` family for code tinting. Unknown tokens are
-ignored; missing tokens fall back to the terminal default — a partial theme
-is valid.
+To start, copy a built-in. `e docs theme-dark` prints the dark theme's JSON
+verbatim. Save it under a new name and edit it.
 
-Apply instantly with `/reload` (or pick it in `/settings`).
+Apply a theme instantly with `/reload`, or pick it in `/settings`.
 
-The full transcript reader rails tool details with a `│` in the theme's
-`muted` tone and dim output text. Its footer uses `userMessageText` for `┃`
-and `muted` for navigation.
+## Tokens
 
-Edit/write summary counts use `toolDiffAddedMarker` and `toolDiffRemovedMarker`
-for truecolor terminals, or `toolDiffAddedMarkerFallback` and
-`toolDiffRemovedMarkerFallback` otherwise. These also color the review's diff
-markers. The defaults are green for additions and red for deletions; labels and
-tree rails remain neutral.
+These are the tokens you will most likely touch:
+
+- `userMessageText`, for the composer rail and user text
+- `dim`
+- `border`, for dividers
+- `muted`
+- `bashMode`, for the `!` shell marker
+- `accent`
+- the `syntax*` family, for code tinting
+
+e ignores unknown tokens. A missing token falls back to the terminal default,
+so a partial theme is valid.
+
+### Full transcript reader
+
+The reader rails tool details with a `│` in the `muted` tone, and shows output
+text dim. Its footer uses `userMessageText` for `┃` and `muted` for
+navigation.
+
+### Diff markers
+
+Edit and write summary counts use these tokens. They also color the review's
+diff markers.
+
+| Terminal | Additions | Deletions |
+| --- | --- | --- |
+| Truecolor | `toolDiffAddedMarker` | `toolDiffRemovedMarker` |
+| Other | `toolDiffAddedMarkerFallback` | `toolDiffRemovedMarkerFallback` |
+
+By default additions are green and deletions are red. Labels and tree rails
+stay neutral.
