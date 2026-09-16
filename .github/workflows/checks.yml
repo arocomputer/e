@@ -78,7 +78,7 @@ jobs:
             esac
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
-              packaging/* | scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
+              scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
               src/core/update.rs | tests/update.rs | scripts/release-check.sh | \
               .github/workflows/checks.yml | .github/workflows/release.yml | .github/workflows/preview.yml)
                 packages=true ;;
