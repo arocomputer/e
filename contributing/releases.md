@@ -132,13 +132,24 @@ permissions, no publishing credentials, and no persisted checkout token.
 3. Test that beta. Fixes produce another beta from a newer main commit.
 4. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
    title, introduction, and fixed groups. Create a fresh Unreleased section.
-5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`, then
-   tag it `vX.Y.Z` and push the tag.
+5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`.
+   Create an annotated stable tag that names the beta you tested:
 
-Stable recompiles with the stable identity. It is not a byte-for-byte rename of
-the beta binary. Keep functional changes out of the final promotion commit;
-if code changes, test another beta. The stable workflow checks the final commit
-again. No permanent beta or production branch is required.
+   ```sh
+   git tag -a vX.Y.Z -m "Release X.Y.Z" -m "Beta: vX.Y.Z-beta.NUMBER.gCOMMIT"
+   git push origin vX.Y.Z
+   ```
+
+The stable workflow requires the named beta to be published, to have a successful
+verified beta deployment, and to share the stable base version. Its source must
+be an ancestor of the stable commit. Only `CHANGELOG.md` may differ; any code,
+dependency, build, or other file change requires another beta. This check runs
+before stable builds or publication. Retrying an already published stable release
+reuses its existing artifacts and does not retroactively require a beta marker.
+
+Stable recompiles with the stable identity, so it is not a byte-for-byte rename
+of the beta binary. The workflow checks the final commit again. No permanent
+beta or production branch is required.
 
 ## Release notes and the website
 
