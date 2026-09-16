@@ -76,6 +76,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Fixes
 
+- RPC rejects malformed optional parameters and applies model/effort changes atomically.
+
 - Publish the independently versioned Slack package with stable releases only, avoiding conflicting tarballs across channels. Its updated README gets a new package version.
 
 - Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
