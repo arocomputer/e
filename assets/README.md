@@ -16,7 +16,5 @@ changing the artwork.
 
 ## Themes
 
-`themes/dark.json` and `themes/light.json` are the two bundled palettes,
-compiled into the binary by `src/tui/paint/theme.rs` and served verbatim by
-`e docs theme-dark` / `theme-light`. They live here, not under `src/tui/`, so
-the terminal-free core can embed them without naming the frontend.
+The two bundled palettes live in `crates/core/themes/`, beside the core that
+embeds them for `e docs theme-dark` and hands them to the terminal frontend.

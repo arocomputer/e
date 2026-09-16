@@ -23,7 +23,7 @@ test("restart resumes the saved path and never reuses a persisted session ID", a
   const dir = mkdtempSync(join(tmpdir(), "e-slack-restart-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "state.json");
-  const saved = JSON.parse(readFileSync(new URL("../../../tests/fixtures/channels/slack-state-v1.json", import.meta.url), "utf8"));
+  const saved = JSON.parse(readFileSync(new URL("../../../crates/cli/tests/fixtures/channels/slack-state-v1.json", import.meta.url), "utf8"));
   writeFileSync(path, JSON.stringify({ ...saved, unsaved: { session: "dead-process-session" } }));
   const rpc = new FakeRpc();
   const threads = new Threads(path, () => rpc, { cwd: "/repo" }, () => {});

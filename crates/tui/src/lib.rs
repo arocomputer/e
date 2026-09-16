@@ -1,0 +1,31 @@
+//! The terminal frontend.
+//!
+//! Grouped so the tree answers "what is this?":
+//! - `paint/` — SGR, screen differ, theme, background, highlight
+//! - `content/` — markdown, transcript, composer, statusline
+//! - `surfaces/` — footer panels (picker, settings, auth, trust)
+//! - `app/` — the interactive frame loop (extracted from the binary)
+//!
+//! Short paths (`tui::theme`, `tui::composer`, …) re-export from the groups
+//! so call sites and tests stay readable.
+
+// Shipped code denies explicit panic sites outside test builds. Every allowed
+// site needs a proof comment explaining why runtime input cannot reach it.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable
+    )
+)]
+
+pub mod app;
+pub mod content;
+pub mod paint;
+pub mod surfaces;
+
+pub use content::{composer, history, keybindings, markdown, statusline, transcript};
+pub use paint::{background, highlight, render, screen, theme};
+pub use surfaces::{authpanel, menu, pane, panel, settingspanel, trustpanel};

@@ -1,24 +1,29 @@
 # Architecture
 
-e is one primary Rust crate with two directional layers:
+e is a Cargo workspace of five crates under `crates/`, in two directional
+layers:
 
 ```text
-CLI / TUI          e rpc (JSONL session server)          Rust SDK
+crates/tui         crates/rpc                      crates/sdk
+CLI / TUI          e rpc (JSONL session server)    Rust SDK
     │ subscribes to one ordered SessionEvent stream
     ▼
-terminal-free core
+crates/core: terminal-free core
     ├── agent turn loop ──► provider wire dialects ──► model APIs
     ├── tools ────────────► the selected working directory
     ├── extension host ───► user-installed child processes over JSONL
     └── stores ───────────► the captured configuration home
 ```
 
-The single-crate shape is intentional. A new crate needs an independent
-consumer, release/API boundary, platform boundary, or measured build-time
-benefit. The `sdk/` package is that case made explicit: an independent
-consumer of the library target with its own release boundary (see
-[sdk.md](../docs/guides/extend/sdk.md)).
-It is a consumer, not a fourth layer. File length alone is a reason to
+`crates/cli` is the `e` binary. It parses the command line and starts the
+terminal frontend or the session server.
+
+Each crate boundary is a dependency rule that Cargo enforces. core depends
+on no frontend and no terminal library, so the SDK embeds the agent without a
+terminal. The frontends depend on core and never on each other.
+`scripts/guard.sh` pins those manifests. A new crate needs one of four
+things: an independent consumer, a release or API boundary, a platform
+boundary, or a measured build-time benefit. File length alone is a reason to
 extract a module, not a crate.
 
 ## Invariants

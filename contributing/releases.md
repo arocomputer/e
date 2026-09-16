@@ -40,8 +40,8 @@ channel, sequence, and commit identifier used by installers.
 | beta | Release workflow, action `beta`, selected main commit | `e-beta` | `~/.e-beta` |
 | PR | Preview workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
 
-`Cargo.toml` owns the base version. `scripts/release/identity.py` derives channel,
-package tag, executable name, and preview version. `build.rs` embeds the workflow's
+The root `Cargo.toml` owns the base version, under `[workspace.package]`. `scripts/release/identity.py` derives channel,
+package tag, executable name, and preview version. `crates/core/build.rs` embeds the workflow's
 version, channel, and full source commit. Preview identities use
 `X.Y.Z-dev.NUMBER.gCOMMIT` or `X.Y.Z-beta.NUMBER.gCOMMIT`; the sequence is the
 Release workflow run number. PR builds use that workflow's run number.
@@ -266,14 +266,16 @@ for the web project — whenever `docs/` or `contributing/` reaches `main`. Set
 the secret once; without it the job fails loudly rather than going stale
 silently.
 
-crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish the two crates
-and no others: `intuitums-e` (the application's npm naming, `@intuitums/e`, since
-bare `e` is taken on crates.io) and `intuitums-e-sdk`. The `crates` job publishes
-the application first and waits for it to appear on the index, because the SDK's
-manifest depends on it by version, and skips a version that is already published
-so a retry is safe. Stable releases only: previews stay on npm. The application's
+crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish these crates
+and no others: `intuitums-e-core`, `intuitums-e-tui`, `intuitums-e-rpc`,
+`intuitums-e` (the binary, named after `@intuitums/e` since bare `e` is taken on
+crates.io), and `intuitums-e-sdk`. The `crates` job publishes the application
+crates in dependency order, core, tui, rpc, then `intuitums-e`, and waits for
+each to reach the index, because the next manifest depends on it by version.
+It skips a version that is already published, so a retry is safe. The SDK
+publishes last. Stable releases only: previews stay on npm. The application's
 version is the release version; the SDK versions itself, so the job reads
-`sdk/Cargo.toml` and publishes only when that version is new. Create the token at
+`crates/sdk/Cargo.toml` and publishes only when that version is new. Create the token at
 https://crates.io/settings/tokens and set the first publication up interactively
 with `cargo login` if the token is ever rotated.
 

@@ -1,61 +1,62 @@
 #!/usr/bin/env python3
-"""Compile an external SDK consumer from Cargo's package file lists before publication.
+"""Compile an external SDK consumer from packed crates before publication.
 
-The application need not exist on crates.io yet. Patch its exact pinned version
-into the consumer from a staged package, never from the working tree.
+The core need not exist on crates.io yet. Patch its exact pinned version into
+the consumer from its packed crate, never from the working tree.
 """
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def stage(package, source, target):
-    """Copy only distributable files and remove local workspace/path resolution."""
-    names = subprocess.check_output(['cargo', 'package', '--list', '--allow-dirty', '-p', package],
-                                    cwd=ROOT, text=True).splitlines()
-    for name in names:
-        path = source / name
-        # Cargo generates these metadata files while packing; they are not source.
-        if name in ('Cargo.toml.orig', '.cargo_vcs_info.json') or not path.is_file():
-            continue
-        dest = target / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, dest)
-    manifest = target / 'Cargo.toml'
-    text = re.sub(r'(?ms)^\[workspace\]\n.*?(?=^\[|\Z)', '', manifest.read_text())
-    if package == 'intuitums-e-sdk':
-        text = text.replace('path = "..", ', '')
-    manifest.write_text(text)
+def stage(packages, target):
+    """Pack the crates as Cargo would publish them and unpack each into `target`.
+
+    A packed crate carries Cargo's normalized manifest: workspace fields are
+    resolved and path dependencies are gone, exactly what crates.io serves.
+    """
+    args = ['cargo', 'package', '--allow-dirty', '--no-verify', '--locked']
+    for package in packages:
+        args += ['-p', package]
+    subprocess.run(args, cwd=ROOT, check=True)
+    metadata = json.loads(subprocess.check_output(
+        ['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=ROOT, text=True))
+    versions = {p['name']: p['version'] for p in metadata['packages']}
+    for package in packages:
+        crate = Path(metadata['target_directory']) / 'package' / f'{package}-{versions[package]}.crate'
+        with tarfile.open(crate) as archive:
+            archive.extractall(target, filter='data')
+        (target / f'{package}-{versions[package]}').rename(target / package)
 
 
 def main():
     """Check the SDK's real example as a downstream binary, with isolated resolution."""
-    app = tomllib.loads((ROOT / 'Cargo.toml').read_text())['package']['version']
-    sdk = tomllib.loads((ROOT / 'sdk/Cargo.toml').read_text())
-    assert sdk['dependencies']['e']['version'] == f'={app}', 'SDK must pin the current application version'
+    manifest = tomllib.loads((ROOT / 'Cargo.toml').read_text())
+    app = manifest['workspace']['package']['version']
+    sdk = tomllib.loads((ROOT / 'crates/sdk/Cargo.toml').read_text())
+    assert sdk['dependencies']['e-core']['version'] == f'={app}', 'SDK must pin the current core version'
     with tempfile.TemporaryDirectory(prefix='e-sdk-consumer-') as tmp:
         root = Path(tmp)
-        stage('intuitums-e', ROOT, root / 'app')
-        stage('intuitums-e-sdk', ROOT / 'sdk', root / 'sdk')
+        stage(['intuitums-e-core', 'intuitums-e-sdk'], root)
         consumer = root / 'consumer'
         (consumer / 'src').mkdir(parents=True)
-        shutil.copyfile(root / 'sdk/examples/ask.rs', consumer / 'src/main.rs')
+        shutil.copyfile(root / 'intuitums-e-sdk/examples/ask.rs', consumer / 'src/main.rs')
         (consumer / 'Cargo.toml').write_text('''[package]
 name = "e-sdk-consumer"
 version = "0.0.0"
 edition = "2021"
 [dependencies]
-e_sdk = { package = "intuitums-e-sdk", path = "../sdk" }
+e_sdk = { package = "intuitums-e-sdk", path = "../intuitums-e-sdk" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [patch.crates-io]
-intuitums-e = { path = "../app" }
+intuitums-e-core = { path = "../intuitums-e-core" }
 ''')
         metadata = json.loads(subprocess.check_output(
             ['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=ROOT, text=True))
