@@ -54,7 +54,7 @@ jobs:
           # `breaking` is never path-derived — no grep can know a wire or
           # persisted contract changed. The author declares it; see
           # docs/extend/compatibility.md.
-          echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages.rs|install.sh|SECURITY.md)' && \
+          echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages[/.]|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true
           # The guides are published to the website and embedded in the binary,
           # and every path in CODEOWNERS resolves to the maintainer, so an
