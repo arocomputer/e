@@ -99,8 +99,10 @@ def prepare(tag, assets, output):
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
-    # The Slack channel ships with the release under e's version, so an operator
-    # gets the bot that matches the binary it drives.
+    # The Slack channel keeps its own version — it changes for its own reasons,
+    # not with every binary release — so only the npm tag follows the release
+    # channel. A release republishes an unchanged version as a no-op, and the
+    # publish step verifies the tarball's integrity when the version exists.
     source = ROOT / "channels/slack"
     folder = output / "slack"
     folder.mkdir()
@@ -113,7 +115,6 @@ def prepare(tag, assets, output):
         shutil.copy2(source / name, folder / name)
     shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
     manifest = json.loads((source / "package.json").read_text())
-    manifest["version"] = version
     manifest["publishConfig"] = {"access": "public", "tag": release["npm_tag"]}
     # Only the bot and its metadata are published: no lifecycle scripts and no
     # development dependencies, nothing the consumer did not ask for.

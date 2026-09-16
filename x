@@ -46,8 +46,8 @@ case "$command" in
     # and the SDK's file list is checked (it cannot resolve its own dependency
     # until the application is on the registry, which the release publishes
     # first).
-    cargo publish --dry-run --locked --allow-dirty -p intuitum-e
-    cargo package --list --allow-dirty -p e-sdk
+    cargo publish --dry-run --locked --allow-dirty -p intuitums-e
+    cargo package --list --allow-dirty -p intuitums-e-sdk
     ./scripts/guard.sh
     python3 -m unittest discover -s scripts/release -p 'test_*.py'
     python3 -m unittest discover -s scripts/hooks -p 'test_*.py'

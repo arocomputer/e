@@ -1,8 +1,12 @@
 [package]
-name = "e-sdk"
-# One version for the application and the SDK: they are published together from
-# one tag, so a version identifies a matching pair.
-version.workspace = true
+# Named after the npm packages (`@intuitums/e` → `intuitums-e`, and the SDK
+# mirrors it as `intuitums-e-sdk`); the library is still `e_sdk`.
+name = "intuitums-e-sdk"
+# The SDK's own version, not the application's: different crates in this
+# repository change for different reasons, so an SDK release that breaks its API
+# moves this and says so in the changelog, while the application's version
+# tracks the release.
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
@@ -14,11 +18,17 @@ readme = "README.md"
 keywords = ["agent", "coding-agent", "llm", "ai"]
 categories = ["development-tools", "api-bindings"]
 
+[lib]
+# The library keeps its own name: the docs, examples, and tests are written
+# against `use e_sdk::…`, independent of the registry package name.
+name = "e_sdk"
+path = "src/lib.rs"
+
 [dependencies]
-# `intuitum-e` is the application package (`e` is taken on crates.io); its
-# library target is still `e`. Any 0.x is accepted because both crates publish
-# from the same commit, so the matching app is always the one beside it.
-e = { package = "intuitum-e", path = "..", version = "0" }
+# `intuitums-e` is the application package (`e` is taken on crates.io); its
+# library target is still `e`. Any 0.x is accepted because the two are released
+# from one repository, so a given SDK never needs a specific patch of it.
+e = { package = "intuitums-e", path = "..", version = "0" }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 futures = "0.3"
 thiserror = "2"

@@ -231,18 +231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "e-sdk"
-version = "0.0.1"
-dependencies = [
- "futures",
- "intuitum-e",
- "serde_json",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -618,7 +606,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "intuitum-e"
+name = "intuitums-e"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -637,6 +625,18 @@ dependencies = [
  "thiserror",
  "tokio",
  "unicode-width",
+ "uuid",
+]
+
+[[package]]
+name = "intuitums-e-sdk"
+version = "0.0.1"
+dependencies = [
+ "futures",
+ "intuitums-e",
+ "serde_json",
+ "thiserror",
+ "tokio",
  "uuid",
 ]
 

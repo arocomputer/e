@@ -67,12 +67,13 @@ class Packages(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Expected"):
             prepare("v1.2.3-rc.1", self.assets, self.root / "dist")
 
-    def test_slack_channel_ships_with_the_release_version(self):
+    def test_slack_channel_keeps_its_own_version_and_takes_the_release_tag(self):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
         package = json.loads((output / "slack/package.json").read_text())
         self.assertEqual(package["name"], "@intuitums/e-slack")
-        self.assertEqual(package["version"], "1.2.3")
+        # The channel versions itself; the release supplies only the npm tag.
+        self.assertEqual(package["version"], "0.0.1")
         self.assertEqual(package["publishConfig"], {"access": "public", "tag": "latest"})
         self.assertEqual(package["bin"], {"e-slack": "bin/e-slack.js"})
         self.assertNotIn("scripts", package)
@@ -97,7 +98,8 @@ class Packages(unittest.TestCase):
         wrapper = json.loads((output / "e/package.json").read_text())
         channel = json.loads((output / "slack/package.json").read_text())
         self.assertEqual(channel["publishConfig"]["tag"], "beta")
-        self.assertEqual(channel["version"], wrapper["version"])
+        self.assertEqual(channel["version"], "0.0.1")
+        self.assertEqual(wrapper["version"], "1.2.3-beta.12.gabcdef012345")
 
     def test_dev_publishes_npm_without_a_formula(self):
         output = self.root / "dist"

@@ -5,7 +5,8 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from identity import identity, workspace_version
+import tomllib
+from identity import identity
 
 
 def git(*args):
@@ -46,7 +47,7 @@ def resolve():
         sha, channel = git('rev-parse', '--verify', f'{ref}^{{commit}}'), 'beta'
     # Only reviewed commits from main may receive publishing credentials.
     subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
-    base = workspace_version(git('show', f'{sha}:Cargo.toml'))
+    base = tomllib.loads(git('show', f'{sha}:Cargo.toml'))['package']['version']
     version = base if channel == 'stable' else f'{base}-{channel}.{os.environ["GITHUB_RUN_NUMBER"]}.g{sha[:12]}'
     if channel == 'stable':
         assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'stable tag must match manifest'

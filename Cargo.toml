@@ -1,14 +1,17 @@
 [package]
-# The crates.io package name: `e` is taken there. The library and the binary are
-# still `e` (see [lib] below), so `use e::…` and `e --version` are unchanged.
-name = "intuitum-e"
-# One version for the application and the SDK that ships with it: the release
-# tag, `e --version`, and both crates on crates.io come from here.
-version.workspace = true
+# The crates.io package name: `e` is taken there, so the application carries the
+# org prefix the npm packages already use (`@intuitums/e` → `intuitums-e`).
+# The library and the binary are still `e` (see [lib] below), so `use e::…` and
+# `e --version` are unchanged.
+name = "intuitums-e"
+# The application's version is the release version: the tag, `e --version`, the
+# npm packages, the Homebrew formula, and the install channel all come from it.
+# The SDK and the Slack channel version themselves independently.
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
-description = "A small, fast coding agent: terminal app, headless session server, and the library behind e-sdk"
+description = "A small, fast coding agent: terminal app, headless session server, and the library behind the SDK"
 documentation = "https://e.intuitum.sh/docs"
 homepage = "https://e.intuitum.sh"
 repository = "https://github.com/intuitums/e"
@@ -62,6 +65,3 @@ strip = "symbols"
 members = ["sdk"]
 default-members = ["."]
 resolver = "2"
-
-[workspace.package]
-version = "0.0.1"

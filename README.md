@@ -77,7 +77,7 @@ environment variable (`ANTHROPIC_API_KEY` and friends) for scripts and CI.
 | `e -p` | One headless turn; `--json` streams every event | [Automation](docs/automation.md) |
 | `e rpc` | A JSONL session server: concurrent sessions, streaming events, extension questions relayed to your client | [Automation](docs/automation.md) |
 | Channels | Reference Slack bot and GitHub Actions workflow built on `e rpc` | [Channels](docs/channels.md) · [`channels/`](channels/) |
-| `e-sdk` | The agent as a Rust library: sessions, turns, one event stream (`cargo add e-sdk`) | [SDK](docs/sdk.md) |
+| e-sdk | The agent as a Rust library: sessions, turns, one event stream (`cargo add intuitums-e-sdk`) | [SDK](docs/sdk.md) |
 | Extensions | Tools, commands, hooks, and UI from a subprocess in any language | [Extensions](docs/extensions.md) |
 | Packages | Share extensions, skills, prompts, and themes from git or npm | [Packages](docs/packages.md) |
 

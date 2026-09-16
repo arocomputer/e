@@ -20,7 +20,7 @@ session.close().await;
 ```
 
 ```sh
-cargo run -p e-sdk --example ask -- "what does this repository do"
+cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
 ```
 
 See [docs/sdk.md](../docs/sdk.md) for the API, package boundary, and usage rules.
@@ -28,11 +28,11 @@ The API is unstable until its first release declares a versioning policy.
 
 ## Versioning
 
-`e-sdk` is published on crates.io and its versions mean something from the
-first release:
+`intuitums-e-sdk` is published on crates.io and its versions mean something from
+the first release:
 
 ```sh
-cargo add e-sdk
+cargo add intuitums-e-sdk
 ```
 
 - **The SDK's API is the contract**: the types and methods
@@ -40,8 +40,11 @@ cargo add e-sdk
 - **Semantic versioning.** Before 1.0, a release that changes that API without
   a compatible path moves the minor version and says so in the changelog;
   additive and internal changes move the patch. From 1.0 the usual rules apply.
-- **One version, two crates.** The application publishes as `intuitum-e`
-  (`e` is taken on crates.io) and the SDK as `e-sdk`, from the same tag, so a
-  version identifies a matching pair. The application's library target is what
-  the SDK is built on; it is not a stable API in itself
+- **Its own version, not the application's.** The SDK changes for its own
+  reasons, so its version tracks only those. It depends on the application crate
+  — `intuitums-e`, the npm naming (`@intuitums/e`) since bare `e` is taken on
+  crates.io — and accepts any 0.x of it, so an SDK release never waits for a
+  binary release.
+- **The application's library target is not a promise.** What the SDK is built
+  on is internal; the contract is what this package documents
   ([compatibility.md](../docs/compatibility.md)).

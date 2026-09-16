@@ -227,13 +227,15 @@ Subsequent releases need no npm token. The token in 1Password can remain availab
 for separately authorized manual publishing.
 
 crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish the two crates
-and no others: `intuitum-e` (the application — `e` is taken on crates.io) and
-`e-sdk`. The `crates` job publishes the application first and waits for it to
-appear on the index, because the SDK's manifest depends on it by version, and
-skips a version that is already published so a retry is safe. Stable releases
-only: crate versions come from the release version, and previews stay on npm.
-Create the token at https://crates.io/settings/tokens and set the first
-publication up interactively with `cargo login` if the token is ever rotated.
+and no others: `intuitums-e` (the application's npm naming, `@intuitums/e`, since
+bare `e` is taken on crates.io) and `intuitums-e-sdk`. The `crates` job publishes
+the application first and waits for it to appear on the index, because the SDK's
+manifest depends on it by version, and skips a version that is already published
+so a retry is safe. Stable releases only: previews stay on npm. The application's
+version is the release version; the SDK versions itself, so the job reads
+`sdk/Cargo.toml` and publishes only when that version is new. Create the token at
+https://crates.io/settings/tokens and set the first publication up interactively
+with `cargo login` if the token is ever rotated.
 
 
 The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
