@@ -11,7 +11,6 @@ cargo build          # fast dev build
 ./x check            # format, lint, tests, and security-surface guard
 ./x bench            # release-mode performance budgets
 ./x ui               # PTY frame/color checks; makes its own Python env on first run
-./x site             # build the docs site in docs/; needs Node
 ```
 
 `./x test` is not optional. The visual design is pinned byte-for-byte in
@@ -89,8 +88,8 @@ crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server ov
              `-p --json` and rpc both report)
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
-             `e docs` embeds them, and the Starlight site beside them
-             (astro.config.mjs, src/) renders them at e.intuitum.sh/docs. contributing/ is the
+             `e docs` embeds them, and the website (intuitums/web) renders
+             them at e.intuitum.sh/docs. contributing/ is the
              repository's own documentation, never published.
 crates/cli/  the `e` binary, published as intuitums-e: src/main.rs (flags,
              rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `e`

@@ -5,9 +5,9 @@
 - **GitHub** — the files themselves, as you see them here.
 - **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **e.intuitum.sh/docs** — the Starlight site in this folder renders each guide
-  as a page. `src/guides.mjs` is the one place that adapts the guides to it: the
-  sidebar, link routes, and alerts.
+- **e.intuitum.sh/docs** — the website, in intuitums/web, renders each guide as
+  a page. Its `scripts/e/docs/docs.mjs` is the one place that adapts the guides
+  to it: the sidebar, link routes, and alerts.
 
 Write once, and all three follow. Never paste a guide's text into another
 page, the README, or an issue: link to it.
@@ -17,7 +17,6 @@ page, the README, or an issue: link to it.
 ```
 docs/
   README.md              this file — GitHub only, never a topic and never a page
-  astro.config.mjs       the site: Starlight, served under /docs
   src/                   the guides adapter, the palette, and site-only pages
   guides/
     start/               one folder per nav group
@@ -119,9 +118,10 @@ YAML dependency.
 topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 
-`./x site` builds the site, which fails on a guide it cannot render. To read
-the pages as you write, run `npm ci` and then `npm run dev` in this folder; the
-server reloads when a guide changes.
+To read the pages as they will appear, build the website against this
+checkout: in intuitums/web, run `E_DOCS_PATH=<path to this checkout> npm run
+preview`. Merging a guide to `main` redeploys the website
+(`.github/workflows/docs.yml`).
 
 ## Adding a guide
 
@@ -129,7 +129,7 @@ server reloads when a guide changes.
 2. Add front matter with `title`, `description`, and `order`.
 3. Link it from a nearby guide — the navigation follows the folders, so a new
    page appears without another list to edit.
-4. Run `./x docs` and `./x site`.
+4. Run `./x docs`.
 
 A new group is a new folder with a `README.md` whose front matter gives its
 `title` and `order`; the sidebar and the topics list pick it up from there.

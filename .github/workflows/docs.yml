@@ -1,12 +1,12 @@
 name: deploy
 
-# The guides live in this repository and are rendered by the website, which
-# builds from its own commits: without this, a docs change would wait for the
-# next change over there to appear. Ping the site's deploy hook instead.
+# The guides live in this repository and the website (intuitums/web) renders
+# them at build time. Without this, a merged guide would wait for the next
+# website change to appear, so start the website's deploy instead.
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "contributing/**"]
+    paths: ["docs/guides/**"]
   workflow_dispatch:
 
 permissions:
@@ -18,11 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Ping the website's deploy hook
+      - name: Start the website's deploy
         env:
-          HOOK: ${{ secrets.DOCS_DEPLOY_HOOK }}
-          REF: ${{ github.sha }}
+          # A fine-grained token limited to intuitums/web with Actions: write.
+          GH_TOKEN: ${{ secrets.WEB_DEPLOY_TOKEN }}
         run: |
-          test -n "$HOOK" || { echo 'Configure DOCS_DEPLOY_HOOK with the website deploy hook URL.'; exit 1; }
-          curl -fsS -X POST "$HOOK" -o /dev/null
-          echo "requested a rebuild for $REF"
+          test -n "$GH_TOKEN" || { echo 'Configure WEB_DEPLOY_TOKEN to redeploy intuitums/web.'; exit 1; }
+          gh workflow run deploy.yml --repo intuitums/web --ref main
