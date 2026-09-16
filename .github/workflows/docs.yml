@@ -1,4 +1,4 @@
-name: Docs
+name: docs
 
 # The guides live in this repository and are rendered by the website, which
 # builds from its own commits: without this, a docs change would wait for the
@@ -14,7 +14,6 @@ permissions:
 
 jobs:
   rebuild:
-    name: Rebuild the docs site
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

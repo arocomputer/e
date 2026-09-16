@@ -1,11 +1,11 @@
-name: Release
+name: release
 
 # Production publishes here, beta publishes in e-beta, and dev publishes only to npm.
 on:
   push:
     tags: ["v*"]
   workflow_run:
-    workflows: [CI]
+    workflows: [checks]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   resolve:
-    name: Select release
+    name: select release
     if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     permissions:
@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ contains(inputs.tag, '-beta.') && secrets.BETA_RELEASE_TOKEN || github.token }}
         run: python3 scripts/release/resolve.py
   comment-building:
-    name: Report dev build start
+    name: report dev build start
     needs: resolve
     if: needs.resolve.outputs.channel == 'dev' && needs.resolve.outputs.mode == 'build'
     runs-on: ubuntu-latest
@@ -81,7 +81,7 @@ jobs:
   qualify:
     needs: resolve
     if: needs.resolve.outputs.mode == 'build'
-    name: Qualify tag
+    name: qualify tag
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -102,7 +102,7 @@ jobs:
           E_BUILD_CHANNEL="$CHANNEL" ./x release-check "$TAG"
 
   create:
-    name: Draft release
+    name: draft release
     needs: [resolve, qualify]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -141,7 +141,7 @@ jobs:
           fi
 
   build:
-    name: Build (${{ matrix.leg }})
+    name: build (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: macos-latest
     timeout-minutes: 30
@@ -182,7 +182,7 @@ jobs:
           overwrite: true
 
   build-linux:
-    name: Build (${{ matrix.leg }})
+    name: build (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
     # A Linux binary links against the glibc of the image that built it, so it
@@ -234,7 +234,7 @@ jobs:
           overwrite: true
 
   publish:
-    name: Checksums and publish
+    name: publish
     needs: [resolve, build, build-linux]
     if: ${{ !cancelled() && ((needs.build.result == 'success' && needs.build-linux.result == 'success') || needs.resolve.outputs.mode == 'recover') }}
     runs-on: ubuntu-latest
@@ -319,7 +319,7 @@ jobs:
           overwrite: true
 
   comment-publishing:
-    name: Report dev publication start
+    name: report dev publication start
     needs: [resolve, publish, comment-building]
     if: ${{ !cancelled() && needs.resolve.outputs.channel == 'dev' && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
@@ -338,7 +338,7 @@ jobs:
         run: python3 scripts/release/pr_comment.py
 
   npm:
-    name: npm and bun
+    name: npm
     needs: [resolve, publish]
     if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
@@ -418,7 +418,7 @@ jobs:
         run: sh scripts/packaging/verify-npm.sh
 
   container:
-    name: Container image
+    name: container image
     # The image installs the release it belongs to, so it waits for one. Dev
     # builds are npm-only and the installer has no dev channel.
     needs: [resolve, publish]
@@ -454,7 +454,7 @@ jobs:
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
   crates:
-    name: crates.io
+    name: crates
     # The application's version is the release version, so previews stay on npm.
     # It publishes first: the SDK's manifest depends on it by version.
     needs: [resolve, publish]
@@ -510,7 +510,7 @@ jobs:
           fi
 
   homebrew:
-    name: Homebrew tap
+    name: homebrew
     permissions:
       contents: read
     needs: [resolve, publish]
@@ -546,7 +546,7 @@ jobs:
         run: scripts/packaging/publish-brew.sh "dist/${{ needs.resolve.outputs.command }}.rb" tap
 
   channel:
-    name: Advance channel and verify website installer
+    name: advance channel
     needs: [resolve, publish, npm, homebrew]
     if: ${{ !cancelled() && needs.npm.result == 'success' && needs.homebrew.result == 'success' }}
     runs-on: ubuntu-latest
@@ -576,7 +576,7 @@ jobs:
           "$RUNNER_TEMP/e-current/$COMMAND" --version
 
   deployment:
-    name: Report release deployment
+    name: report deployment
     needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, crates, channel, comment-building, comment-publishing]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest

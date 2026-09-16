@@ -1,17 +1,39 @@
-name: Fuzz
+name: security
 
+# Dependency advisories (RustSec) and the three fuzz targets. The audit runs
+# when the dependency set changes and weekly, so a CVE in an existing pin still
+# surfaces without a pull request; the fuzzers run on their own weekly schedule
+# and never on a pull request.
 on:
   schedule:
+    - cron: "17 6 * * 1"
     - cron: "41 5 * * 3"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit
+        run: cargo audit
+
   fuzz:
     # Exercise each parser independently on a fresh GitHub-hosted VM.
-    name: ${{ matrix.target }}
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

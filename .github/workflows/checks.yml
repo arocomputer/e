@@ -1,4 +1,4 @@
-name: CI
+name: checks
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
     # skip the heavy jobs — but the required checks must still report green,
     # so Build & Test and Performance stay running and short-circuit their
     # steps instead of skipping themselves.
-    name: Decide
+    name: decide
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -68,13 +68,13 @@ jobs:
           while IFS= read -r file; do
             # The reference channels have their own checks.
             case "$file" in
-              channels/* | tests/fixtures/channels/* | .github/workflows/ci.yml) channels=true ;;
+              channels/* | tests/fixtures/channels/* | .github/workflows/checks.yml) channels=true ;;
             esac
             # Installer jobs cover package generation, launchers, and ownership.
             case "$file" in
               packaging/* | scripts/packaging/* | scripts/release/* | build.rs | install.sh | LICENSE | \
               src/core/update.rs | tests/update.rs | scripts/release-check.sh | \
-              .github/workflows/ci.yml | .github/workflows/release.yml | .github/workflows/preview.yml)
+              .github/workflows/checks.yml | .github/workflows/release.yml | .github/workflows/preview.yml)
                 packages=true ;;
             esac
             # The guides are published to the website and embedded in the
@@ -101,7 +101,7 @@ jobs:
 
   guard:
     # Enforce fast contributor checks on every PR, including docs-only changes.
-    name: Guard
+    name: guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -121,7 +121,7 @@ jobs:
 
   test:
     # Run the repository contract on fresh GitHub-hosted Linux and macOS VMs.
-    name: Build (${{ matrix.os }})
+    name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     needs: changes
@@ -167,7 +167,7 @@ jobs:
     needs: changes
     # Release plumbing: the image, the script, and the ceiling only move together.
     if: needs.changes.outputs.packages == 'true'
-    name: Glibc
+    name: glibc
     runs-on: ubuntu-latest
     # The image the release builds Linux in. Building here proves the floor on
     # the pull request, instead of a user on an older distribution finding it.
@@ -184,7 +184,7 @@ jobs:
         run: scripts/release/build.sh
 
   performance:
-    name: Budgets
+    name: budgets
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
@@ -216,7 +216,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.packages == 'true'
     # A skipped matrix is not expanded, so keep the check name static.
-    name: Installers
+    name: installers
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -239,7 +239,7 @@ jobs:
   channels:
     needs: changes
     if: needs.changes.outputs.channels == 'true'
-    name: Channels
+    name: channels
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -259,7 +259,7 @@ jobs:
   container:
     needs: changes
     if: needs.changes.outputs.channels == 'true'
-    name: Container
+    name: container
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
