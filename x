@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|release-check] [args...]" >&2
   exit 2
 }
 
@@ -36,24 +36,63 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     exec python3 scripts/hooks/install.py
     ;;
+  # Each step below is a guarantee, and CI runs them as separate jobs so a
+  # failure names itself instead of hiding behind "check". `./x check` is the
+  # same steps in the same order, for a contributor's one command.
   check)
     [ "$#" -eq 0 ] || usage
-    cargo fmt --check
-    cargo fmt --manifest-path fuzz/Cargo.toml --check
-    cargo clippy --all-targets -- -D warnings
-    cargo test --locked
+    ./x fmt --check
+    ./x lint
+    ./x test
+    ./x crates
+    ./x docs
+    ./x guard
+    ;;
+  test)
+    # Every failing suite in one run: without this, the first of 46 test
+    # binaries stops the rest and a red pull request reports one problem.
+    cargo test --locked --no-fail-fast "$@"
+    ;;
+  crates)
+    [ "$#" -eq 0 ] || usage
     # The published crates: the application is packaged and built end to end,
     # and the SDK's file list is checked (it cannot resolve its own dependency
     # until the application is on the registry, which the release publishes
     # first).
     cargo publish --dry-run --locked --allow-dirty -p intuitums-e
     cargo package --list --allow-dirty -p intuitums-e-sdk
+    ;;
+  docs)
+    [ "$#" -eq 0 ] || usage
+    # The guides are a published contract: front matter, one group README per
+    # folder, unique topics, and every relative link resolving.
+    cargo test --locked --test docs
+    ;;
+  packages)
+    [ "$#" -eq 0 ] || usage
+    # Installer and package contents: npm and Homebrew packaging, the platform
+    # launchers, and an install through each.
+    python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
+    node --test scripts/packaging/publish-npm.test.mjs
+    scripts/packaging/smoke.sh
+    ;;
+  channels)
+    [ "$#" -eq 0 ] || usage
+    # The reference channels, which are consumers of `e rpc` rather than part
+    # of the binary.
+    (cd channels/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
+    python3 -m unittest discover -s channels/github -p 'test_*.py'
+    ;;
+  container)
+    [ "$#" -eq 0 ] || usage
+    docker build --tag e-slack channels/slack
+    ;;
+  guard)
+    [ "$#" -eq 0 ] || usage
+    # The trust boundary, plus the repository's own tooling tests.
     ./scripts/guard.sh
     python3 -m unittest discover -s scripts/release -p 'test_*.py'
     python3 -m unittest discover -s scripts/hooks -p 'test_*.py'
-    ;;
-  test)
-    cargo test --locked "$@"
     ;;
   ui)
     cargo build --locked
@@ -79,10 +118,6 @@ case "$command" in
     ;;
   lint)
     cargo clippy --all-targets "$@" -- -D warnings
-    ;;
-  guard)
-    [ "$#" -eq 0 ] || usage
-    ./scripts/guard.sh
     ;;
   bench)
     [ "$#" -eq 0 ] || usage
