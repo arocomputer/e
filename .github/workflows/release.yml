@@ -93,6 +93,7 @@ jobs:
             ~/.cargo/git
             target/debug
             target/release
+            target/*/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
@@ -170,6 +171,7 @@ jobs:
             ~/.cargo/git
             target/debug
             target/release
+            target/*/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
@@ -233,6 +235,7 @@ jobs:
             ~/.cargo/git
             target/debug
             target/release
+            target/*/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
@@ -308,6 +311,7 @@ jobs:
             ~/.cargo/git
             target/debug
             target/release
+            target/*/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Generate CycloneDX SBOM
