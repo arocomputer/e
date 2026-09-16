@@ -67,14 +67,14 @@ class Packages(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Expected"):
             prepare("v1.2.3-rc.1", self.assets, self.root / "dist")
 
-    def test_slack_channel_keeps_its_own_version_and_takes_the_release_tag(self):
+    def test_slack_channel_keeps_its_own_version_and_immutable_manifest(self):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
         package = json.loads((output / "slack/package.json").read_text())
         self.assertEqual(package["name"], "@intuitums/e-slack")
-        # The channel versions itself; the release supplies only the npm tag.
-        self.assertEqual(package["version"], "0.0.1")
-        self.assertEqual(package["publishConfig"], {"access": "public", "tag": "latest"})
+        # The channel versions itself; mutable tags stay outside its tarball.
+        self.assertEqual(package["version"], "0.0.2")
+        self.assertEqual(package["publishConfig"], {"access": "public"})
         self.assertEqual(package["bin"], {"e-slack": "bin/e-slack.js"})
         self.assertNotIn("scripts", package)
         self.assertNotIn("devDependencies", package)
@@ -97,8 +97,8 @@ class Packages(unittest.TestCase):
         self.assertIn('=> "e-beta"', formula)
         wrapper = json.loads((output / "e/package.json").read_text())
         channel = json.loads((output / "slack/package.json").read_text())
-        self.assertEqual(channel["publishConfig"]["tag"], "beta")
-        self.assertEqual(channel["version"], "0.0.1")
+        self.assertNotIn("tag", channel["publishConfig"])
+        self.assertEqual(channel["version"], "0.0.2")
         self.assertEqual(wrapper["version"], "1.2.3-beta.12.gabcdef012345")
 
     def test_dev_publishes_npm_without_a_formula(self):
@@ -108,6 +108,16 @@ class Packages(unittest.TestCase):
         self.assertEqual(package["publishConfig"]["tag"], "dev")
         self.assertEqual(package["bin"], {"e-dev": "bin/e"})
         self.assertEqual(list(output.glob("*.rb")), [])
+
+    def test_slack_payload_is_identical_across_release_channels(self):
+        payloads = []
+        for version in ['1.2.3', '1.2.3-dev.1.gabcdef012345', '1.2.3-beta.2.gabcdef012345']:
+            output = self.root / version
+            prepare(version, self.assets, output)
+            payloads.append({str(path.relative_to(output / 'slack')): path.read_bytes()
+                             for path in (output / 'slack').rglob('*') if path.is_file()})
+        self.assertEqual(payloads[0], payloads[1])
+        self.assertEqual(payloads[1], payloads[2])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "name": "@intuitums/e-slack",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A Slack bot that runs e: one thread, one session, over `e rpc`",
   "type": "module",
   "license": "MIT",
