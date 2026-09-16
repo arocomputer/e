@@ -6,8 +6,8 @@ order: 1
 
 # Getting started
 
-e is a coding agent for the terminal. It runs on macOS and glibc Linux, on
-ARM64 and x86-64, and works in any directory you trust.
+e is the coding agent you can put anywhere. It runs on macOS and glibc Linux,
+on ARM64 and x86-64, and works in any directory you trust.
 
 ## Install
 

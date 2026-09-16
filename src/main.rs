@@ -24,7 +24,7 @@ use e::tui::app;
 /// flags and commands that extensions contribute.
 fn print_help(host: &e::core::extensions::ExtensionHost) {
     println!(
-        "e — a coding agent for your terminal\n\n\
+        "e — the coding agent you can put anywhere\n\n\
 usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use -p or `e rpc` headless)\n  \
 e -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
 e -c, --continue      continue this directory's most recent session\n  \

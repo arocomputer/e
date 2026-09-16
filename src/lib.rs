@@ -1,4 +1,4 @@
-//! e — a coding agent for your terminal.
+//! e — the coding agent you can put anywhere.
 //!
 //! `core/` is the small, terminal-free harness. `tui/` is the terminal
 //! frontend, grouped as paint / content / surfaces / app. `rpc/` is the
