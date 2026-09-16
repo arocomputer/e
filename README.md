@@ -13,7 +13,7 @@
   <a href="https://github.com/intuitums/e/actions/workflows/checks.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/intuitums/e/checks.yml?style=flat-square&branch=main&label=CI" /></a>
 </p>
 
-[![e reading a file, making an edit, and running tests in the terminal](assets/readme.png)](https://e.intuitum.sh)
+[![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://e.intuitum.sh)
 
 ---
 
