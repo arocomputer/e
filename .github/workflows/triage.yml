@@ -50,6 +50,6 @@ jobs:
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
           # `breaking` is never path-derived — no grep can know a wire or
           # persisted contract changed. The author declares it; see
-          # docs/compatibility.md.
+          # docs/extend/compatibility.md.
           echo "$files" | grep -Eq '^(src/core/(api|auth|config|providers|tools|update)/|src/core/session.rs|src/core/resources/packages.rs|install.sh|SECURITY.md)' && \
             add_label security-surface b60205 'Touches a reviewed trust boundary' || true

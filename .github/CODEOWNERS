@@ -13,8 +13,8 @@
 /src/core/session.rs  @fschrhunt
 /src/core/tools/      @fschrhunt
 /src/core/update.rs   @fschrhunt
-/docs/extensions.md   @fschrhunt
-/docs/compatibility.md @fschrhunt
+/docs/customize/extensions.md   @fschrhunt
+/docs/extend/compatibility.md @fschrhunt
 /.github/             @fschrhunt
 /scripts/guard.sh     @fschrhunt
 /install.sh           @fschrhunt
