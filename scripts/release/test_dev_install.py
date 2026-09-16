@@ -7,7 +7,7 @@ from dev_install import install
 
 
 class DevInstallTests(unittest.TestCase):
-    def fixture(self, *, verified=True, event='workflow_run', channel='dev'):
+    def fixture(self, *, verified=True, event='workflow_run', channel='dev', job='release'):
         """Supply downloaded metadata without contacting GitHub or changing an installation."""
         def gh(*args):
             if args[0] == 'run':
@@ -15,7 +15,7 @@ class DevInstallTests(unittest.TestCase):
                     'version': f'1.2.3-{channel}.12.gabcdef012345', 'commit': 'abcdef012345' + 'a' * 28}))
                 return ''
             if 'jobs?' in args[-1]:
-                return json.dumps([{'jobs': [{'name': 'Checksums and publish',
+                return json.dumps([{'jobs': [{'name': job,
                                              'conclusion': 'success' if verified else 'failure'}]}])
             return json.dumps({'path': '.github/workflows/release.yml', 'event': event,
                                'head_branch': 'main', 'conclusion': 'failure'})
@@ -26,6 +26,12 @@ class DevInstallTests(unittest.TestCase):
             install('123')
         self.assertEqual(run.call_args.args[0][-4:], ['--channel', 'dev', '--version', '1.2.3-dev.12.gabcdef012345'])
         self.assertTrue(run.call_args.kwargs['env']['E_RELEASE_BASE'].startswith('file://'))
+
+    def test_previous_workflow_job_name_remains_installable(self):
+        with patch('dev_install.gh', side_effect=self.fixture(job='Checksums and publish')), \
+                patch('dev_install.subprocess.run') as run:
+            install('123')
+        run.assert_called_once()
 
     def test_unverified_or_non_dev_runs_never_install(self):
         for options in [{'verified': False}, {'event': 'pull_request'}, {'channel': 'beta'}]:

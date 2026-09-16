@@ -124,17 +124,17 @@ if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'i
   say "$out"
 fi
 
-if [ "$fail" -eq 0 ]; then
-  say "guard: all checks passed"
-else
-  exit 1
-fi
-
-# 9. The check workflow names guarantees, and every one of them is a step in
-#    `./x`. A raw `cargo` or `npm` there is a second definition of green, one
+# 9. The test workflow uses the local check commands. Raw `cargo` or `npm`
+#    calls would create a second definition of passing, one
 #    the local check does not have; the specialized workflows (release,
 #    security, docs) are their own thing and are not fenced.
 if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/checks.yml 2>/dev/null); then
   bad "a check calls a tool directly; call ./x <step> instead
 $out"
+fi
+
+if [ "$fail" -eq 0 ]; then
+  say "guard: all checks passed"
+else
+  exit 1
 fi

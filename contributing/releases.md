@@ -37,14 +37,14 @@ channel, sequence, and commit identifier used by installers.
 | --- | --- | --- | --- |
 | stable | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |
 | dev | Successful CI for code changes on main | `e-dev` | `~/.e-dev` |
-| beta | Release workflow, action `beta`, selected main commit | `e-beta` | `~/.e-beta` |
-| PR | Preview workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
+| beta | `publish` workflow, action `beta`, selected main commit | `e-beta` | `~/.e-beta` |
+| PR | `preview` workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
 
 The root `Cargo.toml` owns the base version, under `[workspace.package]`. `scripts/release/identity.py` derives channel,
 package tag, executable name, and preview version. `crates/core/build.rs` embeds the workflow's
 version, channel, and full source commit. Preview identities use
 `X.Y.Z-dev.NUMBER.gCOMMIT` or `X.Y.Z-beta.NUMBER.gCOMMIT`; the sequence is the
-Release workflow run number. PR builds use that workflow's run number.
+`publish` workflow run number. PR builds use that workflow's run number.
 `e --version --json` and `e doctor` report the build identity.
 
 The beta repository's latest release advances after its pinned website install
@@ -78,7 +78,7 @@ authenticated GitHub CLI and select a Release run:
 ```
 
 This installs `e-dev` through the checksum-verifying installer after the run's
-Checksums and publish job succeeds, even if npm is still running or fails.
+`release` job succeeds, even if npm is still running or fails.
 The artifacts expire after 14 days. Repeat with a newer run to update; the
 installed build does not self-update. Older runs without `build.json` cannot
 use this command. Stable remains the default:
@@ -217,7 +217,10 @@ scripts/packaging/smoke.sh
 ```
 
 PR CI runs installer checks only when packaging, installer, identity, updater,
-or workflow sources change. Docs-only main changes do not publish dev builds.
+or workflow sources change. Documentation and README artwork changes do not publish dev builds.
+The test workflow and dev release selector share `scripts/ci/changes.py`.
+Dev reuses the successful test run for its exact commit and checks release identity
+again. Beta and stable candidates run the full checks before building.
 Release installation checks always run. The npm smoke check retries both installation
 and the executable version check six times, twenty seconds apart, with a fresh
 prefix and cache each time. This covers delayed wrapper metadata and missing
@@ -298,7 +301,7 @@ npm publication. Failed or cancelled attempts link to Actions logs. The run summ
 distribution result separately, so an incomplete package publication does not
 hide a working direct download. Successful
 production and beta entries link to their release repository; dev entries link
-to the exact npm version. Documentation-only
+to the exact npm version. Documentation and artwork-only
 skips and invalid release selections do not create deployment entries. Reporting
 starts with runs using this workflow; earlier releases are not backfilled.
 
