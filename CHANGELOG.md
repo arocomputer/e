@@ -39,6 +39,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Improvements
 
+- The page the browser shows after `/login` wears e.intuitum.sh's look: the three-bar mark, the warm paper and ink palette in light and dark, JetBrains Mono where it is installed, and a green or red title for the outcome. A finished sign-in closes its tab where the browser allows it.
 - **Docs:** the user guides under `docs/` are grouped by folder — `start/`, `usage/`, `customize/`, `extend/` — and front matter is their only metadata. `e docs` builds its topic list by reading those files, so the guides no longer have a second list to drift from, and `docs/README.md` explains the layout to whoever edits them. The repository's own documentation (architecture, rendering, releases) moved to `contributing/`, and a new `sessions` guide covers resuming, branching, compaction, and export (`e docs sessions`).
 
 - **Docs:** `docs/start/getting-started.md` is a first run rather than a
