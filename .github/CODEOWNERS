@@ -1,7 +1,8 @@
-# Every change needs the maintainer's eyes; these paths are called out because
-# they are the trust boundary — credentials, the extension host, the network
-# surface, and CI itself. Branch protection requires code-owner review, so a
-# PR touching them cannot merge on green checks alone.
+# The paths that matter most: the trust boundary (credentials, the extension
+# host, the network surface) and CI itself. Every path resolves to the same
+# owner through the wildcard below. This is a map for reviewers, not a gate:
+# branch protection requires the check names and no review, and
+# `scripts/guard.sh` fails when a path listed here stops existing.
 
 *                     @fschrhunt
 

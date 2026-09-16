@@ -5,7 +5,7 @@ on:
   push:
     tags: ["v*"]
   workflow_run:
-    workflows: [CI]
+    workflows: [checks]
     types: [completed]
     branches: [main]
   workflow_dispatch:

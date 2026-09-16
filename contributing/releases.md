@@ -157,7 +157,7 @@ macOS legs on `macos-latest`; `scripts/release/build.sh` does both. A Linux
 binary links against the glibc of the image that built it, so that image is the
 floor every release inherits — Debian 11+, Ubuntu 22.04+, RHEL 9+ — and the
 script refuses to publish a binary that requires anything newer, which the
-`glibc floor` CI job proves on the pull request. Change the image and the
+`glibc` job proves on the pull request. Change the image and the
 ceiling (`E_GLIBC_CEILING`, and the refusal in `install.sh`) move together.
 
 ```sh
