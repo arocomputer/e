@@ -415,19 +415,7 @@ jobs:
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           COMMAND: ${{ needs.resolve.outputs.command }}
-        run: |
-          # The registry's abbreviated metadata — the document `npm install`
-          # reads — can lag the full one the publisher verified, so a version
-          # published seconds ago is briefly unresolvable. Retry before calling
-          # that a failure; the last attempt's output is the error if it is one.
-          for attempt in 1 2 3 4 5 6; do
-            if npm install --prefix "$RUNNER_TEMP/npm-smoke" "@intuitums/e@$VERSION"; then
-              break
-            fi
-            test "$attempt" -lt 6 || exit 1
-            sleep 20
-          done
-          "$RUNNER_TEMP/npm-smoke/node_modules/.bin/$COMMAND" --version | grep -Fx "e $VERSION"
+        run: sh scripts/packaging/verify-npm.sh
 
   container:
     name: Container image
