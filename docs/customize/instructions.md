@@ -1,7 +1,7 @@
 ---
 title: Instructions
 description: AGENTS.md: global, project, and nested per directory
-order: 1
+order: 3
 ---
 
 # Instructions

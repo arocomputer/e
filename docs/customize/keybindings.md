@@ -1,7 +1,7 @@
 ---
 title: Keybindings
 description: keybindings.json: override the composer's editing keys
-order: 6
+order: 7
 ---
 
 # Keybindings
@@ -38,7 +38,7 @@ falls back to e's built-in bindings untouched.
   (ctrl+c, ctrl+o, ctrl+p, tab, shift+tab, menu navigation) reach this
   keymap — binding one of those here has no effect, since the app-level
   handler runs first.
-- An extension's declared shortcut (`docs/customize/extensions.md`, Shortcuts) runs
+- An extension's declared shortcut (`docs/extend/extensions.md`, Shortcuts) runs
   after this keymap: a chord bound here, or by the composer's built-in
   bindings, never reaches the extension. Unbind it here (`null`) to hand it
   over. Extensions may only declare ctrl or alt chords.

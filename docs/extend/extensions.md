@@ -1,7 +1,7 @@
 ---
 title: Extensions
 description: the extension protocol, with a worked shell example
-order: 8
+order: 1
 ---
 
 # Extensions
@@ -425,7 +425,7 @@ extensions, with a notice.
 ## Examples
 
 ```
-docs/customize/examples/
+docs/extend/examples/
   subagent.mjs   bounded delegated e turns as a tool, over e rpc (self-contained)
   hello.mjs      every surface at once, on the optional scaffold helper
   gate.mjs       the tool_call hook as a fail-open guard

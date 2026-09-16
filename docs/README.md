@@ -19,15 +19,16 @@ docs/
   README.md            this file — GitHub only, never a topic and never a page
   start/               one folder per nav group
     README.md          the group's label and order, and nothing else
-    models.md
+    getting-started.md the website's landing page
   usage/
     README.md
     sessions.md
   customize/
     README.md
-    examples/          assets a guide links to (code, images); not topics
+    settings.md
   extend/
     README.md
+    examples/          assets a guide links to (code, images); not topics
 contributing/          the repository's own documentation: architecture,
                        rendering, releases. Never on the website, never in
                        `e docs`.
@@ -36,8 +37,16 @@ contributing/          the repository's own documentation: architecture,
 - **The folder is the nav group**, and its README.md's front matter names it
   and orders it: `docs/usage/` is “Usage”, second in the sidebar. Nothing is
   numbered, so renaming a group is renaming a folder.
+- **A group has a subject.** `start/` is the first run, `usage/` is day-to-day
+  operation, `customize/` is the `~/.e` surface, and `extend/` is building
+  against e. Put a guide where a reader would look for it, and move it when
+  that changes.
 - **The file stem is the `e docs` topic.** `docs/customize/themes.md` is
   `e docs themes`. Stems are unique across the whole folder tree.
+- **The guide named `getting-started` is the website's landing page.**
+  `e.intuitum.sh/docs` renders that file, so its first commands are the ones a
+  new reader copies, and a change there needs the same care as a change to the
+  install script.
 - **A folder may hold assets** beside its guides — an example, an image. They
   are copied with the group so links keep working; only `.md`/`.mdx` become
   pages.

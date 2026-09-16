@@ -1,7 +1,7 @@
 ---
 title: Prompt templates
 description: /name templates with bash-style arguments
-order: 2
+order: 4
 ---
 
 # Prompt templates
@@ -25,7 +25,7 @@ Review ${1:-everything} carefully. Focus on $2.
 
 ## Package templates
 
-An installed [package](packages.md) contributes its `prompts/` directory the
+An installed [package](../extend/packages.md) contributes its `prompts/` directory the
 same way; a global template of the same name shadows a package's.
 
 ## Repo-local templates

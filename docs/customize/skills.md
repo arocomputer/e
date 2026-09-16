@@ -1,7 +1,7 @@
 ---
 title: Skills
 description: SKILL.md directories and how the model pages them in
-order: 3
+order: 5
 ---
 
 # Skills
@@ -29,7 +29,7 @@ Step one …
 
 ## Package skills
 
-An installed [package](packages.md) contributes its `skills/` directory the
+An installed [package](../extend/packages.md) contributes its `skills/` directory the
 same way. A global skill of the same name shadows a package's; the `$` picker
 labels package skills `Package`.
 
