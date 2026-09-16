@@ -383,10 +383,11 @@ jobs:
         continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
+          # No version to check here: the channel keeps its own, so the
+          # release's is not its. The script verifies what it published against
+          # the registry, integrity included.
           node scripts/packaging/publish-npm.mjs dist --only=slack
-          npm view "@intuitums/e-slack@$VERSION" version | grep -Fx "$VERSION"
       - name: Keep preview packages off latest
         id: cleanup
         if: needs.resolve.outputs.channel != 'stable'
