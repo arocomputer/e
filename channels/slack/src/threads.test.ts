@@ -23,9 +23,11 @@ test("restart resumes the saved path and never reuses a persisted session ID", a
   const dir = mkdtempSync(join(tmpdir(), "e-slack-restart-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "state.json");
-  writeFileSync(path, readFileSync(new URL("../../../tests/fixtures/channels/slack-state-v1.json", import.meta.url)));
+  const saved = JSON.parse(readFileSync(new URL("../../../tests/fixtures/channels/slack-state-v1.json", import.meta.url), "utf8"));
+  writeFileSync(path, JSON.stringify({ ...saved, unsaved: { session: "dead-process-session" } }));
   const rpc = new FakeRpc();
   const threads = new Threads(path, () => rpc, { cwd: "/repo" }, () => {});
+  assert.equal(threads.has("unsaved"), false);
   const thread = await threads.get("C123:123.456", "thread");
   assert.equal(thread.session, "new-process-session");
   assert.equal(rpc.calls.find((c) => c.method === "session.create")?.params.resume, "/saved/conversation.jsonl");
@@ -50,4 +52,38 @@ test("concurrent threads route colliding ask IDs to their own connection", async
   for (const q of received) await q.rpc.call("ask.reply", { ask: q.ask.ask, result: { text: q.key } });
   assert.deepEqual((a.rpc as FakeRpc).calls.at(-1)?.params, { ask: 1, result: { text: "A" } });
   assert.deepEqual((b.rpc as FakeRpc).calls.at(-1)?.params, { ask: 1, result: { text: "B" } });
+});
+
+test("damaged saved state is reported and preserved", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "e-slack-corrupt-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "state.json");
+  for (const contents of ["{broken", "null", '{"thread":{"path":false}}']) {
+    writeFileSync(path, contents);
+    assert.throws(() => new Threads(path, () => new FakeRpc(), {}, () => {}));
+    assert.equal(readFileSync(path, "utf8"), contents);
+  }
+});
+
+test("a failed save does not update the in-memory thread map", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "e-slack-write-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const threads = new Threads(join(dir, "missing", "state.json"), () => new FakeRpc(), {}, () => {});
+  assert.throws(() => threads.save("new", "/saved/new.jsonl"));
+  assert.equal(threads.has("new"), false);
+});
+
+
+test("shutdown closes connections still waiting for their first response", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "e-slack-opening-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  let reject: (error: Error) => void = () => {};
+  const waiting = new Promise<Json>((_, fail) => { reject = fail; });
+  const rpc = new FakeRpc();
+  rpc.call = () => waiting;
+  rpc.close = async () => { reject(new Error("closed")); };
+  const threads = new Threads(join(dir, "state.json"), () => rpc, {}, () => {});
+  const opening = assert.rejects(threads.get("thread", "name"), /closed/);
+  await threads.close();
+  await opening;
 });
