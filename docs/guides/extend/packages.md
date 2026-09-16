@@ -20,8 +20,8 @@ themes/       <name>.json palettes
 
 There is no manifest of e's own. A `package.json` is npm's business: e
 reads the directories, and takes only the dependency list from the
-manifest. Find packages in the catalog (`site/packages/`, every npm package
-carrying the `e-package` keyword) or on npmjs.com.
+manifest. Find packages in the [catalog](https://e.intuitum.sh/docs/catalog/),
+which lists every npm package carrying the `e-package` keyword, or on npmjs.com.
 
 > [!WARNING]
 > A package runs with your full permissions. Its extensions are executables e
