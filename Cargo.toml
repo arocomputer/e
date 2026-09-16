@@ -1,37 +1,35 @@
-[package]
-# The crates.io package name: `e` is taken there, so the application carries the
-# org prefix the npm packages already use (`@intuitums/e` → `intuitums-e`).
-# The library and the binary are still `e` (see [lib] below), so `use e::…` and
-# `e --version` are unchanged.
-name = "intuitums-e"
+# The workspace: every crate lives under crates/, one folder per crate.
+#
+#   core  the terminal-free harness: agent, providers, tools, sessions
+#   tui   the terminal frontend
+#   rpc   the `e rpc` frontend, a JSONL session server
+#   cli   the `e` binary: arguments, subcommands, and which frontend runs
+#   sdk   the Rust library frontend, with its own version
+#
+# tui, rpc, and sdk depend on core and never on each other. fuzz/ stays its
+# own workspace because cargo-fuzz requires it.
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
 # The application's version is the release version: the tag, `e --version`, the
 # npm packages, the Homebrew formula, and the install channel all come from it.
-# The SDK and the Slack channel version themselves independently.
+# core, tui, rpc, and cli share it. The SDK and the Slack channel version
+# themselves independently.
+[workspace.package]
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
-description = "The coding agent you can put anywhere"
-documentation = "https://e.intuitum.sh/docs"
 homepage = "https://e.intuitum.sh"
 repository = "https://github.com/intuitums/e"
-readme = "README.md"
-keywords = ["agent", "coding-agent", "cli", "llm", "tui"]
-categories = ["command-line-utilities", "development-tools"]
 
-[lib]
-name = "e"
-path = "src/lib.rs"
-
-[[bin]]
-name = "e"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
+e-core = { package = "intuitums-e-core", path = "crates/core", version = "=0.0.1" }
+e-tui = { package = "intuitums-e-tui", path = "crates/tui", version = "=0.0.1" }
+e-rpc = { package = "intuitums-e-rpc", path = "crates/rpc", version = "=0.0.1" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-thiserror = "2"
-anyhow = "1"
 unicode-width = "0.2"
 crossterm = { version = "0.29", features = ["event-stream"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-std", "io-util", "process", "signal"] }
@@ -44,8 +42,6 @@ sha2 = "0.11"
 rand = "0.10"
 regex = "1"
 libc = "0.2"
-
-[dev-dependencies]
 proptest = "1"
 
 # A third off the binary for zero runtime cost (measured: 8.02 -> 5.18 MiB,
@@ -57,11 +53,3 @@ proptest = "1"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-
-# The SDK package is an in-repo consumer of the library target with its own
-# release boundary — see docs/guides/extend/sdk.md. fuzz/ stays
-# its own workspace because cargo-fuzz requires it.
-[workspace]
-members = ["sdk"]
-default-members = ["."]
-resolver = "2"

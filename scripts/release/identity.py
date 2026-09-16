@@ -40,7 +40,8 @@ if __name__ == '__main__':
     parser.add_argument('--sequence', type=int, default=0)
     parser.add_argument('--tag')
     args = parser.parse_args()
-    base = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+    manifest = tomllib.loads(Path('Cargo.toml').read_text())
+    base = (manifest.get('workspace', {}).get('package') or manifest['package'])['version']
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     version = base if args.channel == 'stable' else f'{base}-{args.channel}.{args.sequence}.g{commit[:12]}'
     if args.tag and args.tag != f'v{version}':

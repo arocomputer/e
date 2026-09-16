@@ -6,7 +6,7 @@ its provider files from).
     python3 scripts/generate-catalog.py --write    # apply it
     python3 scripts/generate-catalog.py --check    # exit 1 on drift (CI)
 
-For every provider file in src/core/providers/data/, models found on
+For every provider file in crates/core/src/providers/data/, models found on
 models.dev get their context_window corrected. Models e lists that
 models.dev lacks are left alone; models.dev models e doesn't list are
 reported, never auto-added — the seed list stays curated, the live
@@ -16,7 +16,7 @@ lists) are skipped.
 import json, pathlib, sys, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PROVIDERS = ROOT / "src" / "core" / "providers" / "data"
+PROVIDERS = ROOT / "crates" / "core" / "src" / "providers" / "data"
 # models.dev ids for e's provider names, where they differ.
 # openai-codex is deliberately absent: models.dev's "openai" entry describes
 # the platform API, and the ChatGPT-backend codex deployment serves different

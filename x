@@ -58,9 +58,11 @@ case "$command" in
     ;;
   crates)
     [ "$#" -eq 0 ] || usage
-    # The published crates: the application is packaged and built end to end,
-    # and the SDK is compiled by an external consumer from its packaged files.
-    cargo publish --dry-run --locked --allow-dirty -p intuitums-e
+    # The published crates: the application crates are packaged and built end
+    # to end in dependency order, and the SDK is compiled by an external
+    # consumer from its packed crate.
+    cargo publish --dry-run --locked --allow-dirty \
+      -p intuitums-e-core -p intuitums-e-tui -p intuitums-e-rpc -p intuitums-e
     python3 scripts/check-sdk.py
     ;;
   docs)
@@ -113,11 +115,11 @@ case "$command" in
       # repair instead of installing again.
       if [ ! -x "$PYTHON" ] || [ ! -f target/ui-env/.requirements-installed ]; then
         python3 -m venv target/ui-env
-        target/ui-env/bin/pip install --quiet -r tests/ui/requirements.txt
+        target/ui-env/bin/pip install --quiet -r crates/cli/tests/ui/requirements.txt
         : > target/ui-env/.requirements-installed
       fi
     fi
-    "$PYTHON" tests/ui/run.py "$@"
+    "$PYTHON" crates/cli/tests/ui/run.py "$@"
     ;;
   fmt)
     cargo fmt "$@"

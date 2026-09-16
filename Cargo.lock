@@ -12,12 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -609,12 +603,26 @@ dependencies = [
 name = "intuitums-e"
 version = "0.0.1"
 dependencies = [
- "anyhow",
- "base64 0.23.1",
- "crossterm",
  "futures",
+ "intuitums-e-core",
+ "intuitums-e-rpc",
+ "intuitums-e-tui",
  "libc",
  "proptest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "intuitums-e-core"
+version = "0.0.1"
+dependencies = [
+ "base64 0.23.1",
+ "futures",
+ "libc",
  "pulldown-cmark",
  "rand 0.10.2",
  "regex",
@@ -622,9 +630,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror",
  "tokio",
- "unicode-width",
+ "uuid",
+]
+
+[[package]]
+name = "intuitums-e-rpc"
+version = "0.0.1"
+dependencies = [
+ "intuitums-e-core",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -634,9 +651,26 @@ version = "0.0.1"
 dependencies = [
  "futures",
  "intuitums-e",
+ "intuitums-e-core",
  "serde_json",
  "thiserror",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "intuitums-e-tui"
+version = "0.0.1"
+dependencies = [
+ "base64 0.23.1",
+ "crossterm",
+ "intuitums-e-core",
+ "libc",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unicode-width",
  "uuid",
 ]
 

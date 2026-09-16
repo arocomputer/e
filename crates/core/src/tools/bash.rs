@@ -1,0 +1,972 @@
+//! The bash tool: spawn a shell command and stream its captured pipes.
+//!
+//! This remains spawn-and-capture, not a terminal daemon. A wall-clock timeout
+//! or turn cancellation kills the command's process group. Pipe readers feed
+//! one tagged queue so display and retained output keep observed ordering.
+//!
+//! A background process outlives its starting call and belongs to the agent's
+//! registry. The model can check or kill its handle in later turns. Dropping
+//! that agent stops its background processes. Everything else
+//! about it — the process group, the 32KB retained tail, ANSI/carriage-return
+//! cleanup — matches the foreground path; only the waiting is removed.
+
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use super::{schema_object, OutputStream, ToolOutcome, ToolOutput};
+
+pub fn schema() -> Value {
+    schema_object(
+        "bash",
+        "Run a shell command in the workspace root and return its combined output. Each call is a fresh shell: cd, environment variables, and (unless started with `background: true`) background processes do not persist between calls. Output keeps the most recent 32KB when longer.\n\nFor something long-lived (a dev server, a watcher) that would otherwise block the turn: pass `background: true` to start it detached and get a `handle` back immediately, instead of waiting for it to exit. Check on it, or read more of its output, with a later call passing `handle` and no `command`; add `signal: \"kill\"` to stop it. A background process outlives the turn that started it but not its owning agent — nothing persists across a restart.",
+        json!({
+            "command": {"type": "string", "description": "The command to run. Omit when checking or killing a background process by `handle`."},
+            "timeout": {"type": "integer", "description": "Seconds before the command is killed (default 120). Ignored when starting a background process — it runs until it exits or is killed."},
+            "background": {"type": "boolean", "description": "Start `command` detached and return immediately with a `handle`, instead of waiting for it to finish."},
+            "handle": {"type": "string", "description": "A background process's handle, from a prior background start. Returns its status and output so far; combine with `signal: \"kill\"` to stop it."},
+            "signal": {"type": "string", "enum": ["kill"], "description": "Send with `handle` to kill that background process."}
+        }),
+        &[],
+    )
+}
+
+/// Bytes kept per background process, tail-retained like the foreground
+/// path's own cap — a runaway server logging forever must not grow forever.
+const BACKGROUND_RETAIN_LIMIT: usize = 32 * 1024;
+/// Finished jobs remain queryable briefly, but an autonomous session must not
+/// retain every completed process forever.
+const BACKGROUND_FINISHED_RETAIN: usize = 64;
+const BACKGROUND_PROCESS_LIMIT: usize = 128;
+static BACKGROUND_FINISHED_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy)]
+enum ExitOutcome {
+    Exited(i32),
+    Killed,
+}
+
+struct BackgroundProcess {
+    pid: u32,
+    command: String,
+    output: Mutex<Vec<u8>>,
+    total_bytes: Mutex<usize>,
+    exit: Mutex<Option<ExitOutcome>>,
+    finished_sequence: AtomicU64,
+}
+
+/// Background handles belong to one agent and are killed when it is dropped.
+#[derive(Default)]
+pub(super) struct BackgroundRegistry {
+    jobs: Mutex<HashMap<String, Arc<BackgroundProcess>>>,
+}
+
+impl Drop for BackgroundRegistry {
+    fn drop(&mut self) {
+        for process in self
+            .jobs
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+        {
+            let exit = process
+                .exit
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if exit.is_none() {
+                kill_group(process.pid);
+            }
+        }
+    }
+}
+
+/// Shells run in their own process groups. Track each live leader so process
+/// shutdown can kill the groups before the runtime exits.
+static PROCESS_GROUPS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+fn track_group(pid: u32) {
+    PROCESS_GROUPS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashSet::new)
+        .insert(pid);
+}
+
+fn untrack_group(pid: u32) {
+    if let Some(groups) = PROCESS_GROUPS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        groups.remove(&pid);
+    }
+}
+
+/// Kill every live shell process group before the owning e process exits.
+pub fn kill_tracked_processes() {
+    let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+    for pid in groups.take().unwrap_or_default() {
+        kill_group(pid);
+    }
+}
+
+struct TrackedGroup(u32);
+
+impl TrackedGroup {
+    fn new(pid: u32) -> Self {
+        track_group(pid);
+        Self(pid)
+    }
+}
+
+impl Drop for TrackedGroup {
+    fn drop(&mut self) {
+        untrack_group(self.0);
+    }
+}
+
+fn prune_background(map: &mut HashMap<String, Arc<BackgroundProcess>>) {
+    let mut finished: Vec<(String, u64)> = map
+        .iter()
+        .filter_map(|(id, process)| {
+            let sequence = process.finished_sequence.load(Ordering::Relaxed);
+            (sequence > 0).then(|| (id.clone(), sequence))
+        })
+        .collect();
+    finished.sort_by_key(|(_, sequence)| *sequence);
+    let excess = finished.len().saturating_sub(BACKGROUND_FINISHED_RETAIN);
+    for (id, _) in finished.into_iter().take(excess) {
+        map.remove(&id);
+    }
+}
+
+fn register_background(
+    registry: &BackgroundRegistry,
+    id: String,
+    process: Arc<BackgroundProcess>,
+) -> bool {
+    let mut guard = registry.jobs.lock().unwrap_or_else(|e| e.into_inner());
+    let map = &mut *guard;
+    prune_background(map);
+    if map.len() >= BACKGROUND_PROCESS_LIMIT {
+        return false;
+    }
+    map.insert(id, process);
+    true
+}
+
+fn find_background(registry: &BackgroundRegistry, id: &str) -> Option<Arc<BackgroundProcess>> {
+    registry
+        .jobs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .cloned()
+}
+
+/// Start `command` detached and return immediately with a handle. Output
+/// keeps accumulating (capped) in the background; nothing here blocks the
+/// calling turn.
+fn start_background(command: &str, cwd: &Path, registry: &Arc<BackgroundRegistry>) -> ToolOutput {
+    let mut cmd = Command::new("bash");
+    cmd.arg("-lc")
+        .arg(command)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => return failure(&format!("bash: {error}")),
+    };
+    let pid = child.id();
+    track_group(pid);
+    let id = uuid::Uuid::new_v4().to_string();
+    let process = Arc::new(BackgroundProcess {
+        pid,
+        command: command.to_string(),
+        output: Mutex::new(Vec::new()),
+        total_bytes: Mutex::new(0),
+        exit: Mutex::new(None),
+        finished_sequence: AtomicU64::new(0),
+    });
+    if !register_background(registry, id.clone(), process.clone()) {
+        kill_group(pid);
+        untrack_group(pid);
+        let _ = child.wait();
+        return failure("bash: background process limit reached; check or stop existing handles");
+    }
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_thread = stdout.map(|pipe| {
+        let process = process.clone();
+        std::thread::spawn(move || drain_into_background(pipe, process))
+    });
+    let stderr_thread = stderr.map(|pipe| {
+        let process = process.clone();
+        std::thread::spawn(move || drain_into_background(pipe, process))
+    });
+    let registry = Arc::downgrade(registry);
+    std::thread::spawn(move || {
+        reap_background(child, process, stdout_thread, stderr_thread, registry)
+    });
+
+    ToolOutput {
+        content: format!("started background process {id} (pid {pid}): {command}"),
+        outcome: ToolOutcome::Completed,
+        summary: format!("background {id}"),
+        display: None,
+    }
+}
+
+/// Drain one pipe into the process's capped, tail-retained buffer. No live
+/// callback here — background output is read on demand, not streamed.
+fn drain_into_background<R: std::io::Read>(mut pipe: R, process: Arc<BackgroundProcess>) {
+    let mut buf = [0u8; 4096];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) => break,
+            Ok(count) => {
+                let mut output = process.output.lock().unwrap_or_else(|e| e.into_inner());
+                output.extend_from_slice(&buf[..count]);
+                if output.len() > BACKGROUND_RETAIN_LIMIT {
+                    let excess = output.len() - BACKGROUND_RETAIN_LIMIT;
+                    output.drain(..excess);
+                    let orphaned = output
+                        .iter()
+                        .take_while(|byte| (**byte & 0b1100_0000) == 0b1000_0000)
+                        .count();
+                    output.drain(..orphaned);
+                }
+                drop(output);
+                *process
+                    .total_bytes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) += count;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+/// Keep the leader unreaped while descendants hold pipes, reserving its PID.
+/// Reaping and retiring the kill handle share locks with both shutdown paths.
+fn reap_background(
+    mut child: Child,
+    process: Arc<BackgroundProcess>,
+    stdout_thread: Option<std::thread::JoinHandle<()>>,
+    stderr_thread: Option<std::thread::JoinHandle<()>>,
+    registry: std::sync::Weak<BackgroundRegistry>,
+) {
+    if let Some(t) = stdout_thread {
+        let _ = t.join();
+    }
+    if let Some(t) = stderr_thread {
+        let _ = t.join();
+    }
+    let (status, mut exit) = loop {
+        let exit = process.exit.lock().unwrap_or_else(|e| e.into_inner());
+        let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+        let status = match child.try_wait() {
+            Ok(None) => {
+                drop(groups);
+                drop(exit);
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Ok(Some(status)) => Ok(status),
+            Err(error) => Err(error),
+        };
+        if let Some(groups) = groups.as_mut() {
+            groups.remove(&process.pid);
+        }
+        break (status, exit);
+    };
+    let outcome = match status {
+        Ok(status) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                match status.signal() {
+                    Some(_) => ExitOutcome::Killed,
+                    None => ExitOutcome::Exited(status.code().unwrap_or(-1)),
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                ExitOutcome::Exited(status.code().unwrap_or(-1))
+            }
+        }
+        Err(_) => ExitOutcome::Exited(-1),
+    };
+    *exit = Some(outcome);
+    drop(exit);
+    process.finished_sequence.store(
+        BACKGROUND_FINISHED_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    if let Some(registry) = registry.upgrade() {
+        prune_background(&mut registry.jobs.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+}
+
+/// Check on, read more from, or kill a background process by handle.
+fn query_background(registry: &BackgroundRegistry, id: &str, kill: bool) -> ToolOutput {
+    let Some(process) = find_background(registry, id) else {
+        return failure(&format!("bash: no background process with handle {id}"));
+    };
+    // Hold the exit lock through signaling so the reaper cannot release and
+    // reuse the PID between the liveness check and kill.
+    let signalled = {
+        let exit = process.exit.lock().unwrap_or_else(|e| e.into_inner());
+        if kill && exit.is_none() {
+            kill_group(process.pid);
+            true
+        } else {
+            false
+        }
+    };
+    if signalled {
+        // Give the reaper a brief window to observe the exit and record it.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while process
+            .exit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let retained = process
+        .output
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let total_bytes = *process
+        .total_bytes
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let exit = *process.exit.lock().unwrap_or_else(|e| e.into_inner());
+    let mut combined =
+        super::resolve_carriage_returns(&super::strip_ansi(&String::from_utf8_lossy(&retained)))
+            .trim_end()
+            .to_string();
+    if total_bytes > retained.len() {
+        combined = format!(
+            "… [truncated: {total_bytes} bytes total, showing the last {} — earlier output dropped]\n{combined}",
+            retained.len()
+        );
+    }
+    let (outcome, summary, status_line) = match exit {
+        None => (
+            ToolOutcome::Completed,
+            format!("running (pid {})", process.pid),
+            format!(
+                "[still running — pid {}, command: {}]",
+                process.pid, process.command
+            ),
+        ),
+        Some(ExitOutcome::Exited(0)) => (
+            ToolOutcome::Completed,
+            "exited 0".to_string(),
+            "[exited 0]".to_string(),
+        ),
+        Some(ExitOutcome::Exited(code)) => (
+            ToolOutcome::Failed,
+            format!("exited {code}"),
+            format!("[exited {code}]"),
+        ),
+        Some(ExitOutcome::Killed) => (
+            ToolOutcome::Cancelled,
+            "killed".to_string(),
+            "[killed]".to_string(),
+        ),
+    };
+    if !combined.is_empty() {
+        combined.push('\n');
+    }
+    combined.push_str(&status_line);
+    ToolOutput {
+        content: combined,
+        outcome,
+        summary,
+        display: None,
+    }
+}
+
+/// Kill a process group whose child is its group leader. The clipboard
+/// reader uses it too, for the same reason: descendants holding a pipe.
+pub fn kill_group(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        // The child creates this process group in `pre_exec`. ESRCH simply
+        // means every member has already exited; falling back to the positive
+        // pid after wait risks signaling a newly reused pid.
+        let _ = libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    if let Ok(mut child) = Command::new("kill").arg("-9").arg(pid.to_string()).spawn() {
+        let _ = child.wait();
+    }
+}
+
+/// Compatibility entry point for non-streaming callers.
+pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
+    run_streaming(args, cwd, state, &AtomicBool::new(false), |_, _| {})
+}
+
+/// Run bash and publish decoded stdout/stderr chunks while the process lives.
+pub fn run_streaming<F>(
+    args: &Value,
+    cwd: &Path,
+    state: &super::ToolRuntime,
+    cancel: &AtomicBool,
+    mut on_output: F,
+) -> ToolOutput
+where
+    F: FnMut(OutputStream, &str),
+{
+    if let Some(handle) = args["handle"].as_str() {
+        return query_background(
+            &state.background,
+            handle,
+            args["signal"].as_str() == Some("kill"),
+        );
+    }
+    let Some(command) = args["command"].as_str() else {
+        return failure("bash: missing command (or a background `handle` to check)");
+    };
+    // Lenient models send `"true"` for a boolean; a dev server run in the
+    // foreground blocks for the whole timeout, so the string counts too.
+    let background = match &args["background"] {
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::String(text) => text.trim().eq_ignore_ascii_case("true"),
+        _ => false,
+    };
+    if background {
+        return start_background(command, cwd, &state.background);
+    }
+    let timeout = match super::integer_arg(args, "timeout") {
+        Ok(timeout) => timeout.unwrap_or(120).clamp(1, 600),
+        Err(message) => return failure(&format!("bash: {message}")),
+    };
+
+    let mut cmd = Command::new("bash");
+    cmd.arg("-lc")
+        .arg(command)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => return failure(&format!("bash: {error}")),
+    };
+    let _tracked_group = TrackedGroup::new(child.id());
+
+    let (tx, rx) = mpsc::sync_channel::<(OutputStream, Vec<u8>)>(64);
+    let reader_stop = Arc::new(AtomicBool::new(false));
+    let mut readers = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        readers.push(spawn_reader(
+            stdout,
+            OutputStream::Stdout,
+            tx.clone(),
+            reader_stop.clone(),
+        ));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        readers.push(spawn_reader(
+            stderr,
+            OutputStream::Stderr,
+            tx.clone(),
+            reader_stop.clone(),
+        ));
+    }
+    drop(tx);
+
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+    let mut timed_out = false;
+    let mut cancelled = false;
+    let mut status = None;
+    let mut retained = Vec::<u8>::new();
+    let mut total_bytes = 0usize;
+    // Per-stream carry for a UTF-8 code point split across pipe reads —
+    // decoding each chunk alone turned split points into U+FFFD live.
+    let mut carries = [Vec::<u8>::new(), Vec::<u8>::new()];
+
+    while status.is_none() {
+        // Bound each drain so continuous output cannot starve cancellation.
+        for (stream, bytes) in rx.try_iter().take(64) {
+            retain_and_publish(
+                &mut retained,
+                &mut total_bytes,
+                &mut carries[carry_index(stream)],
+                stream,
+                &bytes,
+                &mut on_output,
+            );
+        }
+        if cancel.load(Ordering::SeqCst) {
+            cancelled = true;
+            kill_group(child.id());
+        } else if Instant::now() >= deadline {
+            timed_out = true;
+            kill_group(child.id());
+        }
+        match child.try_wait() {
+            Ok(found) => status = found,
+            Err(error) => return failure(&format!("bash: {error}")),
+        }
+        if status.is_none() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    // A shell can exit while a background descendant still owns its pipe.
+    // Background processes are outside this tool's contract, so close the
+    // group on natural exit too. Give readers a brief chance to observe EOF,
+    // then ask nonblocking readers to stop; never join a thread that is still
+    // stuck behind a setsid'd descendant which escaped the group.
+    kill_group(child.id());
+    let drain_deadline = Instant::now() + Duration::from_millis(100);
+    while readers.iter().any(|reader| !reader.is_finished()) && Instant::now() < drain_deadline {
+        for (stream, bytes) in rx.try_iter().take(64) {
+            retain_and_publish(
+                &mut retained,
+                &mut total_bytes,
+                &mut carries[carry_index(stream)],
+                stream,
+                &bytes,
+                &mut on_output,
+            );
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    reader_stop.store(true, Ordering::SeqCst);
+    let stop_deadline = Instant::now() + Duration::from_millis(100);
+    while readers.iter().any(|reader| !reader.is_finished()) && Instant::now() < stop_deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for reader in readers {
+        if reader.is_finished() {
+            let _ = reader.join();
+        }
+    }
+    while let Ok((stream, bytes)) = rx.try_recv() {
+        retain_and_publish(
+            &mut retained,
+            &mut total_bytes,
+            &mut carries[carry_index(stream)],
+            stream,
+            &bytes,
+            &mut on_output,
+        );
+    }
+    // The pipes are closed: whatever the carries still hold is genuinely
+    // incomplete output, published lossily rather than dropped.
+    for (index, stream) in [OutputStream::Stdout, OutputStream::Stderr]
+        .into_iter()
+        .enumerate()
+    {
+        if !carries[index].is_empty() {
+            let rest = String::from_utf8_lossy(&carries[index]);
+            retained.extend_from_slice(rest.as_bytes());
+            on_output(stream, &rest);
+        }
+    }
+
+    // The loop only exits once try_wait() reported an exit; if that
+    // invariant somehow broke, an unknown failure is the honest reading —
+    // never a panic.
+    let exit_code = status.as_ref().and_then(|s| s.code());
+    // The model's copy: decoded, stripped of colour codes and progress-bar
+    // rewrites — token noise it should never pay for.
+    let full =
+        super::resolve_carriage_returns(&super::strip_ansi(&String::from_utf8_lossy(&retained)))
+            .trim_end()
+            .to_string();
+    // The model's copy is the tail: test runners put the verdict at the
+    // end of a long log. The marker leads, so a reader knows it is
+    // mid-stream before line one, and names the kept result to page into.
+    let mut combined = if full.len() > super::MAX_BYTES {
+        let mut start = full.len() - super::MAX_BYTES;
+        while !full.is_char_boundary(start) {
+            start += 1;
+        }
+        let tail = full[start..].to_string();
+        // Bytes dropped by retention are raw bytes against raw bytes: the
+        // decoded copy is shorter by every colour code it shed, and those
+        // were kept.
+        let dropped = if total_bytes > retained.len() {
+            format!(
+                "; the first {} bytes were not kept",
+                total_bytes - retained.len()
+            )
+        } else {
+            String::new()
+        };
+        let id = state.retain_result(full);
+        format!(
+            "… [truncated: {total_bytes} bytes total, showing the last {}; earlier output: read_result {{\"id\": {id}}}{dropped}]\n{tail}",
+            tail.len()
+        )
+    } else if total_bytes > retained.len() {
+        format!(
+            "… [truncated: {total_bytes} bytes total, showing the last {} — earlier output dropped]\n{full}",
+            retained.len()
+        )
+    } else {
+        full
+    };
+    let (outcome, summary) = if cancelled {
+        (ToolOutcome::Cancelled, "cancelled".to_string())
+    } else if timed_out {
+        (ToolOutcome::TimedOut, format!("timeout {timeout}s"))
+    } else if exit_code == Some(0) {
+        (ToolOutcome::Completed, "done".to_string())
+    } else {
+        (
+            ToolOutcome::Failed,
+            format!("exit {}", exit_code.unwrap_or(-1)),
+        )
+    };
+    if outcome == ToolOutcome::TimedOut {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&format!("… [killed: exceeded the {timeout}s timeout]"));
+    } else if outcome == ToolOutcome::Cancelled {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str("… [cancelled]");
+    }
+
+    ToolOutput {
+        content: combined,
+        outcome,
+        summary,
+        display: None,
+    }
+}
+
+/// Drain one process pipe and tag every chunk before joining the shared queue.
+#[cfg(unix)]
+fn spawn_reader<R>(
+    pipe: R,
+    stream: OutputStream,
+    tx: mpsc::SyncSender<(OutputStream, Vec<u8>)>,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()>
+where
+    R: std::io::Read + AsRawFd + Send + 'static,
+{
+    unsafe {
+        let fd = pipe.as_raw_fd();
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags >= 0 {
+            let _ = libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+    spawn_reader_loop(pipe, stream, tx, stop)
+}
+
+#[cfg(not(unix))]
+fn spawn_reader<R>(
+    pipe: R,
+    stream: OutputStream,
+    tx: mpsc::SyncSender<(OutputStream, Vec<u8>)>,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()>
+where
+    R: std::io::Read + Send + 'static,
+{
+    spawn_reader_loop(pipe, stream, tx, stop)
+}
+
+fn spawn_reader_loop<R>(
+    mut pipe: R,
+    stream: OutputStream,
+    tx: mpsc::SyncSender<(OutputStream, Vec<u8>)>,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()>
+where
+    R: std::io::Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        loop {
+            match pipe.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    let mut chunk = (stream, buffer[..count].to_vec());
+                    loop {
+                        match tx.try_send(chunk) {
+                            Ok(()) => break,
+                            Err(mpsc::TrySendError::Disconnected(_)) => return,
+                            Err(mpsc::TrySendError::Full(pending)) => {
+                                if stop.load(Ordering::SeqCst) {
+                                    return;
+                                }
+                                chunk = pending;
+                                std::thread::sleep(Duration::from_millis(5));
+                            }
+                        }
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(_) => break,
+            }
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+    })
+}
+
+fn carry_index(stream: OutputStream) -> usize {
+    match stream {
+        OutputStream::Stdout => 0,
+        OutputStream::Stderr => 1,
+    }
+}
+
+/// Retain a bounded suffix and publish every chunk so pipe draining never
+/// depends on the model-output cap. The tail is what is kept: compilers and
+/// test runners put the verdict at the end of a long log, so retaining the
+/// head handed the model 32KB of passing output and dropped the failure.
+/// Publishing goes through the stream's carry so only complete UTF-8 leaves;
+/// a split code point waits for its remaining bytes instead of becoming a
+/// replacement character.
+fn retain_and_publish<F>(
+    retained: &mut Vec<u8>,
+    total_bytes: &mut usize,
+    carry: &mut Vec<u8>,
+    stream: OutputStream,
+    bytes: &[u8],
+    on_output: &mut F,
+) where
+    F: FnMut(OutputStream, &str),
+{
+    // Far more than the model's copy (the last 32 KiB): the rest is kept
+    // for `read_result`, so a long log's beginning is deferred, not lost.
+    const RETAIN_LIMIT: usize = 4 * 1024 * 1024;
+    // Trim in slabs: draining a few bytes off the front of a 4 MiB buffer
+    // on every chunk would make a long stream quadratic.
+    const RETAIN_SLACK: usize = 512 * 1024;
+    *total_bytes = total_bytes.saturating_add(bytes.len());
+    carry.extend_from_slice(bytes);
+    let text = drain_complete_utf8(carry);
+    // The kept copy is the decoded text, per stream: raw stdout and stderr
+    // bytes interleaved could split one code point around the other
+    // stream's chunk, and a lossy decode of that later reads as garbage.
+    retained.extend_from_slice(text.as_bytes());
+    if retained.len() > RETAIN_LIMIT + RETAIN_SLACK {
+        let excess = retained.len() - RETAIN_LIMIT;
+        retained.drain(..excess);
+        // The raw byte cut may land inside a UTF-8 code point. Discard only
+        // the orphaned continuation prefix so the retained tail starts at a
+        // real boundary and lossy decoding doesn't invent a leading U+FFFD.
+        let orphaned = retained
+            .iter()
+            .take_while(|byte| (**byte & 0b1100_0000) == 0b1000_0000)
+            .count();
+        retained.drain(..orphaned);
+    }
+    if !text.is_empty() {
+        on_output(stream, &text);
+    }
+}
+
+/// Decode everything decodable, leaving at most an incomplete trailing
+/// sequence in the buffer. Interior invalid bytes become U+FFFD — they are
+/// genuinely bad, not split.
+fn drain_complete_utf8(carry: &mut Vec<u8>) -> String {
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(carry) {
+            Ok(text) => {
+                out.push_str(text);
+                carry.clear();
+                return out;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // valid_up_to() proves the prefix decodes; lossy is byte-
+                // identical there and degrades instead of panicking if a
+                // future refactor breaks that proof.
+                out.push_str(&String::from_utf8_lossy(&carry[..valid]));
+                match e.error_len() {
+                    Some(bad) => {
+                        out.push('\u{FFFD}');
+                        carry.drain(..valid + bad);
+                    }
+                    None => {
+                        // An incomplete sequence at the tail: keep it for
+                        // the next chunk.
+                        carry.drain(..valid);
+                        return out;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn failure(message: &str) -> ToolOutput {
+    ToolOutput {
+        content: message.into(),
+        outcome: ToolOutcome::Failed,
+        summary: "error".into(),
+        display: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    /// A leader's zombie reserves its PID until inherited pipes have drained.
+    #[cfg(unix)]
+    #[test]
+    fn background_reaper_reserves_pid_while_pipes_are_open() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let process = std::sync::Arc::new(super::BackgroundProcess {
+            pid,
+            command: String::new(),
+            output: std::sync::Mutex::new(Vec::new()),
+            total_bytes: std::sync::Mutex::new(0),
+            exit: std::sync::Mutex::new(None),
+            finished_sequence: std::sync::atomic::AtomicU64::new(0),
+        });
+        let (release, wait) = std::sync::mpsc::channel();
+        let pipe = std::thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        let reaper = std::thread::spawn(move || {
+            super::reap_background(child, process, Some(pipe), None, std::sync::Weak::new())
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let reserved = loop {
+            let state = std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .output()
+                .unwrap();
+            if String::from_utf8_lossy(&state.stdout).contains('Z') {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        release.send(()).unwrap();
+        reaper.join().unwrap();
+        assert!(reserved, "leader was reaped before inherited pipes closed");
+    }
+
+    use super::*;
+
+    fn finished(sequence: u64) -> Arc<BackgroundProcess> {
+        Arc::new(BackgroundProcess {
+            pid: 0,
+            command: String::new(),
+            output: Mutex::new(Vec::new()),
+            total_bytes: Mutex::new(0),
+            exit: Mutex::new(Some(ExitOutcome::Exited(0))),
+            finished_sequence: AtomicU64::new(sequence),
+        })
+    }
+
+    /// A finished handle's pid may already belong to someone else. Here an
+    /// unrelated group leader wears that pid; killing the handle must leave
+    /// it alone.
+    #[cfg(unix)]
+    #[test]
+    fn killing_a_finished_handle_does_not_signal_its_reused_pid() {
+        let mut bystander = Command::new("sleep");
+        bystander.arg("30").stdin(Stdio::null());
+        unsafe {
+            bystander.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut bystander = bystander.spawn().unwrap();
+        let registry = BackgroundRegistry::default();
+        let process = Arc::new(BackgroundProcess {
+            pid: bystander.id(),
+            command: String::new(),
+            output: Mutex::new(Vec::new()),
+            total_bytes: Mutex::new(0),
+            exit: Mutex::new(Some(ExitOutcome::Exited(0))),
+            finished_sequence: AtomicU64::new(1),
+        });
+        assert!(register_background(&registry, "done".into(), process));
+
+        let out = query_background(&registry, "done", true);
+        assert_eq!(out.summary, "exited 0");
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            bystander.try_wait().unwrap().is_none(),
+            "an unrelated process group was killed through a stale handle"
+        );
+        kill_group(bystander.id());
+        let _ = bystander.wait();
+    }
+
+    #[test]
+    fn finished_background_records_are_bounded() {
+        let mut processes = HashMap::new();
+        for sequence in 1..=(BACKGROUND_FINISHED_RETAIN as u64 + 2) {
+            processes.insert(sequence.to_string(), finished(sequence));
+        }
+        prune_background(&mut processes);
+        assert_eq!(processes.len(), BACKGROUND_FINISHED_RETAIN);
+        assert!(!processes.contains_key("1"));
+        assert!(processes.contains_key(&(BACKGROUND_FINISHED_RETAIN as u64 + 2).to_string()));
+    }
+}

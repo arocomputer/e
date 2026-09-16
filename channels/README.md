@@ -2,7 +2,7 @@
 
 Reference programs that put e in a team's tools by spawning `e rpc` and
 speaking its JSONL protocol (`docs/guides/usage/automation.md`). Each is a consumer of
-the binary, like `sdk/` is a consumer of the library: nothing here is
+the binary, like `crates/sdk/` is a consumer of the core: nothing here is
 compiled into e, and nothing here is required to run it. The pattern they
 share is described in `docs/guides/usage/channels.md`.
 

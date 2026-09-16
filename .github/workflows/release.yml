@@ -461,7 +461,7 @@ jobs:
   crates:
     name: crates.io
     # The application's version is the release version, so previews stay on npm.
-    # It publishes first: the SDK's manifest depends on it by version.
+    # Core publishes first: the frontends and SDK pin its version.
     needs: [resolve, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
     # Like the npm and image publications, a registry hiccup must not fail the
@@ -483,13 +483,13 @@ jobs:
           test -n "$CARGO_REGISTRY_TOKEN" || { echo 'Configure CARGO_REGISTRY_TOKEN to publish the crates.'; exit 1; }
 
           # The SDK versions itself; only the application follows the release.
-          SDK_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('sdk/Cargo.toml','rb'))['package']['version'])")
+          SDK_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('crates/sdk/Cargo.toml','rb'))['package']['version'])")
 
           published() {
             curl -fsS -o /dev/null "https://crates.io/api/v1/crates/$1/$2"
           }
-          # crates.io serves a new version to the index asynchronously, and the
-          # SDK cannot resolve its dependency until the application is visible.
+          # crates.io serves a new version to the index asynchronously, and a
+          # crate cannot resolve a dependency until that version is visible.
           await_index() {
             for _ in $(seq 1 60); do
               published "$1" "$2" && return 0
@@ -498,13 +498,17 @@ jobs:
             return 1
           }
 
-          # A retry after a partial publish finds the version already there.
-          if published intuitums-e "$VERSION"; then
-            echo "intuitums-e $VERSION is already published"
-          else
-            cargo publish --locked -p intuitums-e
-            await_index intuitums-e "$VERSION" || { echo 'intuitums-e never reached the index'; exit 1; }
-          fi
+          # The application crates share the release version and publish in
+          # dependency order: core, then its frontends, then the binary. A
+          # retry after a partial publish finds a version already there.
+          for crate in intuitums-e-core intuitums-e-tui intuitums-e-rpc intuitums-e; do
+            if published "$crate" "$VERSION"; then
+              echo "$crate $VERSION is already published"
+            else
+              cargo publish --locked -p "$crate"
+              await_index "$crate" "$VERSION" || { echo "$crate never reached the index"; exit 1; }
+            fi
+          done
 
           if published intuitums-e-sdk "$SDK_VERSION"; then
             echo "intuitums-e-sdk $SDK_VERSION is already published"

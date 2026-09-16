@@ -130,7 +130,7 @@ provider account. See [releases and testing](contributing/releases.md) for beta 
 PR builds, package installation, and release promotion.
 
 Provider regressions can use reviewed response fixtures under
-`tests/fixtures/providers/`. Existing seed fixtures are synthetic; their `origin`
+`crates/cli/tests/fixtures/providers/`. Existing seed fixtures are synthetic; their `origin`
 field says so. `scripts/record-provider.py` records a real SSE response from an
 explicit endpoint and request file. It sends a real request, potentially billable,
 and never runs in CI. Use synthetic prompts, keep credentials in an environment

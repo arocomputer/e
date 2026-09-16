@@ -77,7 +77,7 @@ order: 5
 A group README carries the same three keys and no guide content; the site
 uses it for the sidebar label and position.
 
-Only those three keys, one line each, no nested YAML. `build.rs` and the
+Only those three keys, one line each, no nested YAML. `crates/core/build.rs` and the
 site both parse them with a few lines of string handling, deliberately not a
 YAML dependency.
 
@@ -107,7 +107,7 @@ YAML dependency.
   this folder, or `themes.md` from beside it. GitHub resolves either, and the
   site rewrites it to the page's route. Do not write repository-absolute
   paths like `/docs/guides/customize/themes.md`: they break on GitHub.
-- **Anything outside `docs/guides/`** — `contributing/`, `src/`, an example file —
+- **Anything outside `docs/guides/`** — `contributing/`, `crates/`, an example file —
   link it relatively too. The site points those at GitHub, since they are
   not pages.
 - **Fragments work** (`extensions.md#results-by-method`) and the site keeps

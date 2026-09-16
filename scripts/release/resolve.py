@@ -48,7 +48,10 @@ def resolve():
         sha, channel = git('rev-parse', '--verify', f'{ref}^{{commit}}'), 'beta'
     # Only reviewed commits from main may receive publishing credentials.
     subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
-    base = tomllib.loads(git('show', f'{sha}:Cargo.toml'))['package']['version']
+    # The version moved to [workspace.package] with the crates split; older
+    # commits keep it under [package].
+    manifest = tomllib.loads(git('show', f'{sha}:Cargo.toml'))
+    base = (manifest.get('workspace', {}).get('package') or manifest['package'])['version']
     version = base if channel == 'stable' else f'{base}-{channel}.{os.environ["GITHUB_RUN_NUMBER"]}.g{sha[:12]}'
     if channel == 'stable':
         assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'stable tag must match manifest'

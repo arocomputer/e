@@ -15,14 +15,19 @@ cargo build          # fast dev build
 ```
 
 `./x test` is not optional. The visual design is pinned byte-for-byte in
-`tests/` against the reference design's own literals. If a rendering change
+`crates/cli/tests/` against the reference design's own literals. If a rendering change
 makes the tests fail, you drifted the look — fix the code, don't loosen the
 test.
 
 ## Where things live
 
+Every Rust crate is a folder under `crates/`. tui, rpc, and sdk depend on core
+and never on each other; cli puts the frontends behind one binary.
+
 ```
-src/core/    the harness, terminal-free
+crates/core/ the harness, terminal-free (`e_core`)
+  build.rs        stamps release identity and embeds the guides (`guides` is
+                  a link to docs/guides) · themes/ (the built-in palettes)
   agent/          mod.rs owns run lifecycle and session state;
                   event.rs is the frontend contract; persistence.rs commits
                   history and logs and reports write failures;
@@ -40,8 +45,9 @@ src/core/    the harness, terminal-free
   config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·
                   chord.rs (the chord grammar keybindings, layout focus,
-                  and extension shortcuts share). Terminal-free: nothing
-                  under core/ names tui/ or crossterm — guard.sh pins it
+                  and extension shortcuts share). Terminal-free: core
+                  depends on no frontend crate and no terminal library —
+                  guard.sh pins the manifests
   resources/      skills.rs · prompts.rs (/name templates) · packages.rs
                   with packages/source.rs (source parsing); `e install` manages
                   npm, git, local, and release bundles that every
@@ -64,7 +70,7 @@ src/core/    the harness, terminal-free
                   line: id/parent per message, `/tree` branches in place,
                   `create_with` seeds a `/fork`; `responses_in` feeds usage.rs
                   (the /usage fold) · export.rs (a branch as one HTML page)
-src/tui/     the frontend (short paths re-export from the groups)
+crates/tui/  the terminal frontend (`e_tui`; short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
   content/        markdown · transcript · composer · keybindings (the
                   ~/.e/keybindings.json keymap) · statusline · history
@@ -76,8 +82,8 @@ src/tui/     the frontend (short paths re-export from the groups)
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows) · extui.rs (answering
                   extensions: modals, panels, status slots, session control)
-src/rpc/     the headless frontend: `e rpc`, a JSONL session server over
-             stdin/stdout (docs/guides/usage/automation.md) — mod.rs (sessions, methods,
+crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server over
+             stdin/stdout (docs/guides/usage/automation.md) — lib.rs (sessions, methods,
              the serve loop, extension questions relayed as `ask`) ·
              params.rs (typed method inputs) · result.rs (the turn result
              `-p --json` and rpc both report)
@@ -86,11 +92,14 @@ docs/        guides/: the guides, one folder per nav group, with front matter
              `e docs` embeds them, and the Starlight site beside them
              (astro.config.mjs, src/) renders them at e.intuitum.sh/docs. contributing/ is the
              repository's own documentation, never published.
-src/main.rs  CLI entry — flags, rpc/docs/auth/update, then tui::app::run
-sdk/         e-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
+crates/cli/  the `e` binary, published as intuitums-e: src/main.rs (flags,
+             rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `e`
+             library, re-exporting core, tui, and rpc for the binary, tests,
+             and fuzz targets) · tests/ (the integration suites, fixtures,
+             and the ui/ PTY scenarios)
+crates/sdk/  e-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
-             a consumer of the library target with its own release boundary
-             (docs/guides/extend/sdk.md), never a fourth layer
+             a frontend over core alone, with its own release boundary
 channels/    reference clients of `e rpc` (docs/guides/usage/channels.md): slack/ (a Bolt
              bot, TypeScript) · github/ (an Actions workflow). Not compiled
              into e; a channel is a program that spawns it, never a module
@@ -98,7 +107,7 @@ channels/    reference clients of `e rpc` (docs/guides/usage/channels.md): slack
 
 ## Running one thing, not everything
 
-Each `tests/*.rs` file is its own binary; the fast loops are:
+Each `crates/cli/tests/*.rs` file is its own binary; the fast loops are:
 
 ```sh
 cargo test --test stream            # agent turn loop against a mock provider
@@ -110,7 +119,7 @@ cargo test --test toolloop          # end-to-end tool execution
 cargo test name_of_one_test         # any single test, by name substring
 ```
 
-New integration tests use `tests/common/` (`mod common;`) — `Home` for an
+New integration tests use `crates/cli/tests/common/` (`mod common;`) — `Home` for an
 isolated `E_HOME` that restores the prior value on drop, `env_lock()` around anything env-global, `serve_sse` +
 `test_model` for a mock provider. Don't hand-roll a second mock harness.
 Use explicit `AgentOptions` home/cwd paths for concurrent embedded sessions;
@@ -118,17 +127,17 @@ process environment belongs only in serialized fixtures. Keep specialized
 servers when the test needs transport timing or malformed bytes.
 
 `./x check` covers all workspace members and an external consumer compiled from
-Cargo package file lists. It does not replace `./x packages`, `./x channels`,
+the packed SDK and core crates. It does not replace `./x packages`, `./x channels`,
 or `./x ui`; run the relevant command when changing those paths.
 
 ## How the look stays consistent
 
 Every colour comes from the theme (`theme.fg("token", text)`), never a raw SGR
 literal — the palette is the single source of truth, and it is the reference
-design's, audited value-for-value. Panel dividers (`tui/surfaces/panel.rs`)
+design's, audited value-for-value. Panel dividers (`crates/tui/src/surfaces/panel.rs`)
 use the `border` token (divider_style, 240/250), not `dim` — markdown's own
 thematic-break rule and blockquote rail are a different, dimmer reference
-element and are pinned as `dim` in `tests/parity.rs`; don't conflate the two.
+element and are pinned as `dim` in `crates/cli/tests/parity.rs`; don't conflate the two.
 Selection is brightness alone on every picker — bold bright ink for the
 current row (models, skills, sessions, /tree, and the inline `/`/`@`/`$`
 completion pickers all the same), unselected rows stay `dim`, and no picker
@@ -139,7 +148,7 @@ with the selected row: a built-in shows its functional group (`Account`,
 template reads `Prompt`, an extension command `Extension`.
 
 Every footer surface (the `/@$` pickers, `/settings`) frames through
-`tui/surfaces/panel.rs`: top divider, header, blank, body, bottom divider, with
+`crates/tui/src/surfaces/panel.rs`: top divider, header, blank, body, bottom divider, with
 the hint on the status row — never a second hint inside a panel. Add a new
 surface? Route it through `panel.rs` so it can't diverge.
 
@@ -149,16 +158,16 @@ surface? Route it through `panel.rs` so it can't diverge.
   arrive on it in order (`SessionEvent`). Compaction and continuation belong
   to the core. Frontends never reset running state or resubmit stranded prompts.
 - Hit every consumer. The core has three frontends — the TUI, `e rpc`
-  (`src/rpc/`), and `sdk/` — and four provider dialects. A change to the turn loop, events, or
+  (`crates/rpc/`), and `crates/sdk/` — and four provider dialects. A change to the turn loop, events, or
   tools needs a decision per frontend, and a provider-shaped change a decision
   per dialect, even when the decision is "no change here". Persisted and
   user-facing contracts (CLI, sessions, configuration, the extension protocol)
-  follow `docs/guides/extend/compatibility.md`: fixtures under `tests/fixtures/` are release
+  follow `docs/guides/extend/compatibility.md`: fixtures under `crates/cli/tests/fixtures/` are release
   artifacts, so a contract change adds or updates one in the same PR, and
   labels it `breaking` — the one label no path can apply for you.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
-- Resolve the active home through `core/config/home.rs`: stable uses `~/.e/`,
+- Resolve the active home through `crates/core/src/config/home.rs`: stable uses `~/.e/`,
   previews use their channel home, and `E_HOME` overrides either. Never read
   another tool's directory.
 - A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/
@@ -169,14 +178,14 @@ surface? Route it through `panel.rs` so it can't diverge.
   themes from `~/.e/themes/`, and skills, prompts, instructions, the system
   prompt the same way. When you add something user-facing, make it a file-backed
   override, not a constant. When data isn't enough there is the extension API
-  (`core/extensions/`, docs/guides/extend/extensions.md) — grow its protocol by need, never by
+  (`crates/core/src/extensions/`, docs/guides/extend/extensions.md) — grow its protocol by need, never by
   symmetry, and keep hooks fail-open. What crosses the line is data, never code
   or terminal bytes: an extension describes (`show`, `panel`, a `label`), e
   paints through the theme. A new rendering need is a new `format` or token, not
   a way for extensions to emit escape sequences.
 - Verify UI changes with a real frame, not by reasoning about bytes. `./x ui`
-  runs checked PTY scenarios under `tests/ui/`, sharing the capture/replay
-  helpers in `scripts/`. See `tests/ui/README.md` for setup and retained frames.
+  runs checked PTY scenarios under `crates/cli/tests/ui/`, sharing the capture/replay
+  helpers in `scripts/`. See `crates/cli/tests/ui/README.md` for setup and retained frames.
 - `scripts/guard.sh` pins the trust boundary: allowed network hosts, the
   sovereign home, store-only config writes, where `unsafe` lives, SHA-pinned
   CI actions. If a change legitimately moves a boundary, update the guard in

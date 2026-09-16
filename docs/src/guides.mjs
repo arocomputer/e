@@ -19,7 +19,7 @@ const HOME = "getting-started";
 /**
  * A file's three-key front matter and the body after it. The format is
  * deliberately not YAML (a description may hold a colon), so it is read the
- * way build.rs reads it: one `key: value` per line.
+ * way crates/core/build.rs reads it: one `key: value` per line.
  */
 function parse(path) {
   const [open, ...lines] = readFileSync(path, "utf8").split("\n");

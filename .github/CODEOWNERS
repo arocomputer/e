@@ -6,18 +6,18 @@
 
 *                     @fschrhunt
 
-/src/core/extensions/        @fschrhunt
-/src/core/resources/packages.rs @fschrhunt
-/src/core/resources/packages/ @fschrhunt
-/src/core/auth/       @fschrhunt
-/src/core/config/     @fschrhunt
-/src/core/providers/  @fschrhunt
-/src/core/session.rs  @fschrhunt
-/src/core/tools/      @fschrhunt
-/src/core/update.rs   @fschrhunt
+/crates/core/src/extensions/        @fschrhunt
+/crates/core/src/resources/packages.rs @fschrhunt
+/crates/core/src/resources/packages/ @fschrhunt
+/crates/core/src/auth/       @fschrhunt
+/crates/core/src/config/     @fschrhunt
+/crates/core/src/providers/  @fschrhunt
+/crates/core/src/session.rs  @fschrhunt
+/crates/core/src/tools/      @fschrhunt
+/crates/core/src/update.rs   @fschrhunt
 # The guides are the source for three readers — GitHub, the website, and the
 # binary's `e docs` — so their structure, front matter, and links are reviewed
-# like code. docs/README.md is the contract and tests/docs.rs enforces it; a new
+# like code. docs/README.md is the contract and crates/cli/tests/docs.rs enforces it; a new
 # folder is a navigation change, not an edit.
 /docs/                @fschrhunt
 /contributing/        @fschrhunt

@@ -10,7 +10,8 @@ import sys,tomllib
 sys.path.insert(0,'scripts/release')
 from identity import identity
 release=identity(sys.argv[1])
-base=tomllib.load(open('Cargo.toml','rb'))['package']['version']
+m=tomllib.load(open('Cargo.toml','rb'))
+base=(m.get('workspace',{}).get('package') or m['package'])['version']
 assert release['channel']==sys.argv[2], 'channel mismatch'
 assert release['version'].split('-')[0]==base, 'manifest mismatch'
 PY

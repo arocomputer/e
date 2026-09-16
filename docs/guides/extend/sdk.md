@@ -6,7 +6,7 @@ order: 3
 
 # SDK
 
-The SDK is e's coding agent as a Rust library. It lives in `sdk/` and is
+The SDK is e's coding agent as a Rust library. It lives in `crates/sdk/` and is
 published as `intuitums-e-sdk`.
 
 With the SDK you create a session against a working directory, prompt it,
@@ -177,18 +177,18 @@ The SDK follows semantic versioning from its first published release.
 Before 1.0, a release that changes the documented API without a compatible
 path moves the minor version and names the change in the changelog.
 
-The SDK pins the exact application crate version it was tested against. The
-application's library target is not itself a stable API. See
+The SDK depends on `intuitums-e-core` alone and pins the exact version it was
+tested against. The core's Rust items are not a stable API. See
 [Compatibility](compatibility.md).
 
-When you change the application pin, bump the SDK's patch version too, or its
-minor version if the documented API breaks. Published crate versions are
+When you change the core pin, bump the SDK's patch version too, or its minor
+version if the documented API breaks. Published crate versions are
 immutable.
 
 ## Why a separate package
 
-The SDK is not part of `core/` and not an extension. It is a second in-repo
-consumer of e's library target. It has its own release boundary so that
+The SDK is not part of the core and not an extension. It is a frontend over
+the core, like the terminal and `e rpc`, and it never links either of them. It has its own release boundary so that
 stabilizing an API is a deliberate act, not an accident of visibility.
 
 ## Building
