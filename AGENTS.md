@@ -43,7 +43,7 @@ src/core/    the harness, terminal-free
                   loader reads after ~/.e's own dirs) · docs.rs (the
                   embedded guides behind `e docs`)
   extensions/     the extension host: subprocesses over a JSONL line
-                  protocol (docs/customize/extensions.md) — tools, commands, hooks,
+                  protocol (docs/extend/extensions.md) — tools, commands, hooks,
                   events, and the extensions' own ui.*/session.* requests
                   (HostRequest, answered by the frontend)
   tools/          read · write · edit · grep (optional `glob` filter) · bash
@@ -148,7 +148,7 @@ surface? Route it through `panel.rs` so it can't diverge.
   themes from `~/.e/themes/`, and skills, prompts, instructions, the system
   prompt the same way. When you add something user-facing, make it a file-backed
   override, not a constant. When data isn't enough there is the extension API
-  (`core/extensions/`, docs/customize/extensions.md) — grow its protocol by need, never by
+  (`core/extensions/`, docs/extend/extensions.md) — grow its protocol by need, never by
   symmetry, and keep hooks fail-open. What crosses the line is data, never code
   or terminal bytes: an extension describes (`show`, `panel`, a `label`), e
   paints through the theme. A new rendering need is a new `format` or token, not

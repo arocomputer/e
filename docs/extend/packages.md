@@ -1,7 +1,7 @@
 ---
 title: Packages
 description: install shared extensions, skills, prompts, and themes
-order: 4
+order: 2
 ---
 
 # Packages
