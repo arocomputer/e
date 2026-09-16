@@ -26,10 +26,18 @@ embeds them for `e docs theme-dark` and hands them to the terminal frontend.
 GPT-5.6 Sol with low reasoning effort to fix a JavaScript slug formatter and
 run its tests. The model and effort appear in the terminal's status row.
 
-The frame is extracted directly from the recording, with no added background,
-window controls, or changes to the terminal text:
+The terminal text is unchanged. [readme-window.html](readme-window.html)
+adds a compact title bar, window controls, and a border. There is no outer
+backdrop or shadow.
+
+To regenerate it from the repository root, with ffmpeg and agent-browser:
 
 ```sh
 curl -fsSL https://e.intuitum.sh/e/demo.mp4 -o /tmp/e-demo.mp4
-ffmpeg -y -ss 26 -i /tmp/e-demo.mp4 -frames:v 1 assets/readme.png
+mkdir -p target
+ffmpeg -y -ss 26 -i /tmp/e-demo.mp4 -frames:v 1 target/readme-frame.png
+agent-browser --session readme open "file://$PWD/assets/readme-window.html"
+agent-browser --session readme set viewport 1100 900
+agent-browser --session readme screenshot .window "$PWD/assets/readme.png"
+agent-browser --session readme close
 ```
