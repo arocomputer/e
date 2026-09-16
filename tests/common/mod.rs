@@ -31,9 +31,10 @@ pub fn clear_env_keys() {
     }
 }
 
-/// A unique `E_HOME` that is removed when dropped.
+/// A unique `E_HOME`; dropping it restores the prior value and removes its files.
 pub struct Home {
     pub dir: PathBuf,
+    previous: Option<std::ffi::OsString>,
 }
 
 impl Home {
@@ -45,8 +46,30 @@ impl Home {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var_os("E_HOME");
         std::env::set_var("E_HOME", &dir);
-        Home { dir }
+        Home { dir, previous }
+    }
+
+    /// Create executable extension fixtures in the same isolated home.
+    pub fn with_extension(name: &str, body: &str) -> Self {
+        Self::with_extensions(&[(name, body)])
+    }
+
+    pub fn with_extensions(entries: &[(&str, &str)]) -> Self {
+        let home = Self::new("extensions");
+        let extensions = home.dir.join("extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
+        for (name, body) in entries {
+            let path = extensions.join(name);
+            std::fs::write(&path, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        home
     }
 
     pub fn write(&self, name: &str, contents: impl AsRef<[u8]>) {
@@ -60,6 +83,10 @@ impl Home {
 
 impl Drop for Home {
     fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("E_HOME", value),
+            None => std::env::remove_var("E_HOME"),
+        }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
