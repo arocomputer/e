@@ -8,6 +8,8 @@ export type Json = Record<string, unknown>;
 export class Rpc {
   private child: ChildProcess;
   private next = 1;
+  private stopped = false;
+  private exited: Promise<void>;
   private failure?: Error;
   private pending = new Map<string, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
   /** Event lines by session id; a turn's owner registers here. */
@@ -18,9 +20,15 @@ export class Rpc {
   constructor(bin: string, args: string[], cwd?: string) {
     this.child = spawn(bin, [...args, "rpc"], { cwd, stdio: ["pipe", "pipe", "inherit"] });
     createInterface({ input: this.child.stdout! }).on("line", (line) => this.receive(line));
-    this.child.on("error", (error) => this.fail(error));
+    this.exited = new Promise<void>((resolve) => {
+      this.child.once("error", (error) => { this.stopped = true; this.fail(error); resolve(); });
+      this.child.once("exit", (code) => {
+        this.stopped = true;
+        this.fail(new Error(`e rpc exited (${code})`));
+        resolve();
+      });
+    });
     this.child.stdin!.on("error", (error) => this.fail(error));
-    this.child.on("exit", (code) => this.fail(new Error(`e rpc exited (${code})`)));
   }
 
   /** Retire the connection so shutdown cannot wait on an exited process. */
@@ -59,11 +67,25 @@ export class Rpc {
     });
   }
 
-  async close() {
-    try {
-      await this.call("shutdown");
-    } catch {
-      // Already gone.
+  /** Give shutdown a deadline, then terminate a process that stopped answering. */
+  async close(timeoutMs = 1000) {
+    if (this.stopped) return;
+    const deadline = async (work: Promise<unknown>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([work, new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); })]);
+      } finally { clearTimeout(timer); }
+    };
+    await deadline(this.call("shutdown").catch(() => {}));
+    this.child.stdin?.end();
+    await deadline(this.exited);
+    if (!this.stopped) {
+      this.child.kill("SIGTERM");
+      await deadline(this.exited);
+    }
+    if (!this.stopped) {
+      this.child.kill("SIGKILL");
+      await this.exited;
     }
   }
 }

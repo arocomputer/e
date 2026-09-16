@@ -75,6 +75,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Fixes
 
+- The Slack channel preserves damaged state files, saves thread paths atomically, and terminates unresponsive RPC children during shutdown.
 - RPC rejects malformed optional parameters and applies model/effort changes atomically.
 - Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
 - RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.

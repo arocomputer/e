@@ -98,7 +98,11 @@ in. Instead of signing in, a provider key in the environment works
   `ui.input` and `ui.editor` are answered by the next message in the thread.
 - The thread's log path is saved to `E_SLACK_STATE`. After a restart, its
   next message starts a new process and resumes that path. Old state files
-  still load; their process-local session IDs are discarded.
+  still load; their process-local session IDs are discarded. State updates replace
+  the file atomically. An unreadable or damaged state file stops startup with an
+  error and stays untouched; repair it or move it aside to start fresh.
+- Shutdown gives each RPC process a deadline, then terminates children that stop
+  answering. Pending requests fail when their process exits.
 - Question buttons retain the owning connection, so two processes can use
   the same ask number without sending an answer to the wrong conversation.
 
