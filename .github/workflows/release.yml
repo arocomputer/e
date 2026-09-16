@@ -415,9 +415,7 @@ jobs:
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           COMMAND: ${{ needs.resolve.outputs.command }}
-        run: |
-          npm install --prefix "$RUNNER_TEMP/npm-smoke" "@intuitums/e@$VERSION"
-          "$RUNNER_TEMP/npm-smoke/node_modules/.bin/$COMMAND" --version | grep -Fx "e $VERSION"
+        run: sh scripts/packaging/verify-npm.sh
 
   container:
     name: Container image

@@ -188,7 +188,10 @@ scripts/packaging/smoke.sh
 
 PR CI runs installer checks only when packaging, installer, identity, updater,
 or workflow sources change. Docs-only main changes do not publish dev builds.
-Release installation checks always run. Preview builds require an explicit request.
+Release installation checks always run. The npm smoke check retries both installation
+and the executable version check six times, twenty seconds apart, with a fresh
+prefix and cache each time. This covers delayed wrapper metadata and missing
+optional platform packages. Preview builds require an explicit request.
 
 ## Publishing credentials
 
