@@ -47,7 +47,8 @@ version, channel, and full source commit. Preview identities use
 Release workflow run number. PR builds use that workflow's run number.
 `e --version --json` and `e doctor` report the build identity.
 
-The beta repository's latest release advances after npm and brew publish.
+The beta repository's latest release advances after its pinned website install
+passes, independently of npm and Homebrew publication.
 Its `version.txt` asset supplies curl's current beta version. No new channel-pointer
 releases are created. Older retries cannot move package tags, formulas, or the
 latest beta backward. PR and local builds never self-update. Curl installations
@@ -69,7 +70,18 @@ brew install intuitums/tap/e-beta
 
 For dev, use `npm install -g @intuitums/e@dev` or
 `bun add -g @intuitums/e@dev`, then run `e-dev`. Dev is not published to curl
-or Homebrew. Stable remains the default:
+or Homebrew. To install the verified binary before npm is ready, use an
+authenticated GitHub CLI and select a Release run:
+
+```sh
+./x install-dev RUN_ID
+```
+
+This installs `e-dev` through the checksum-verifying installer after the run's
+Checksums and publish job succeeds, even if npm is still running or fails.
+The artifacts expire after 14 days. Repeat with a newer run to update; the
+installed build does not self-update. Older runs without `build.json` cannot
+use this command. Stable remains the default:
 no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
 Curl and brew support side-by-side production and beta installations. npm and bun replace the
 installed version of `@intuitums/e` when switching its tag. Package installs
@@ -120,13 +132,24 @@ permissions, no publishing credentials, and no persisted checkout token.
 3. Test that beta. Fixes produce another beta from a newer main commit.
 4. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
    title, introduction, and fixed groups. Create a fresh Unreleased section.
-5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`, then
-   tag it `vX.Y.Z` and push the tag.
+5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`.
+   Create an annotated stable tag that names the beta you tested:
 
-Stable recompiles with the stable identity. It is not a byte-for-byte rename of
-the beta binary. Keep functional changes out of the final promotion commit;
-if code changes, test another beta. The stable workflow checks the final commit
-again. No permanent beta or production branch is required.
+   ```sh
+   git tag -a vX.Y.Z -m "Release X.Y.Z" -m "Beta: vX.Y.Z-beta.NUMBER.gCOMMIT"
+   git push origin vX.Y.Z
+   ```
+
+The stable workflow requires the named beta to be published, to have a successful
+verified beta deployment, and to share the stable base version. Its source must
+be an ancestor of the stable commit. Only `CHANGELOG.md` may differ; any code,
+dependency, build, or other file change requires another beta. This check runs
+before stable builds or publication. Retrying an already published stable release
+reuses its existing artifacts and does not retroactively require a beta marker.
+
+Stable recompiles with the stable identity, so it is not a byte-for-byte rename
+of the beta binary. The workflow checks the final commit again. No permanent
+beta or production branch is required.
 
 ## Release notes and the website
 
@@ -149,7 +172,8 @@ Release builds use the committed lockfile. Each build has four archives,
 `checksums.txt`, a CycloneDX SBOM, and GitHub build-provenance attestations.
 The workflow smoke-tests native binaries and the shell installer before
 publication. Production and beta test pinned and channel installs through the
-public website. Dev verifies an exact-version npm install. Actions retains build
+public website. Dev verifies an exact-version npm install and retains `build.json` with the
+source commit and version for direct artifact installations. Actions retains build
 archives and metadata for 14 days; npm retains the published dev packages.
 
 The Linux legs build in `rust:1.98-bullseye` (Debian 11, glibc 2.31) and the
@@ -176,7 +200,8 @@ checksums, the SBOM, and provenance in an isolated temporary directory, then
 publishes the draft before updating packages. Incomplete drafts fail until all
 four archives exist. npm compares the existing package's integrity;
 a different tarball under the same version fails. Each registry can fail
-independently; rerun failed publication after recovery. There is no transaction
+independently; rerun failed publication after recovery. Package-manager failures
+do not block verified direct downloads or beta channel advancement. There is no transaction
 across registries.
 
 ```sh
@@ -262,7 +287,9 @@ branch used to run the workflow.
 
 A final reporting job marks production and beta successful after npm, Homebrew,
 channel advancement, and website installation checks pass. Dev requires verified
-npm publication. Failed or cancelled attempts link to Actions logs. Successful
+npm publication. Failed or cancelled attempts link to Actions logs. The run summary lists each
+distribution result separately, so an incomplete package publication does not
+hide a working direct download. Successful
 production and beta entries link to their release repository; dev entries link
 to the exact npm version. Documentation-only
 skips and invalid release selections do not create deployment entries. Reporting
