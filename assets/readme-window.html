@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>e · slugify</title>
+<style>html, body { margin: 0; background: transparent; } canvas { display: block; }</style>
+<canvas aria-label="e using GPT-5.6 Sol with low reasoning effort"></canvas>
+<script>
+// Frame the recorded terminal and export a PNG with transparent outer corners.
+const frame = new Image();
+frame.src = '../target/readme-frame.png';
+frame.onload = () => {
+  const canvas = document.querySelector('canvas');
+  canvas.width = 1100;
+  canvas.height = Math.ceil(42 + frame.height * 1098 / frame.width);
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(0.5, 0.5, canvas.width - 1, canvas.height - 1, 13);
+  ctx.clip();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#292a30';
+  ctx.fillRect(0, 0, canvas.width, 41);
+  ctx.drawImage(frame, 1, 41, 1098, frame.height * 1098 / frame.width);
+  ['#ff5f57', '#febc2e', '#28c840'].forEach((color, i) => {
+    ctx.beginPath();
+    ctx.arc(21 + i * 20, 21, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+  });
+  ctx.fillStyle = '#bfc0c6';
+  ctx.font = '13px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('e · slugify', canvas.width / 2, 21);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.roundRect(0.5, 0.5, canvas.width - 1, canvas.height - 1, 13);
+  ctx.strokeStyle = '#484a50';
+  ctx.stroke();
+  canvas.dataset.ready = 'true';
+};
+</script>
