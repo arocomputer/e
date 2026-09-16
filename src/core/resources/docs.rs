@@ -19,9 +19,9 @@ pub use generated::TOPICS;
 const THEME_TOPICS: &[(&str, &str)] = &[
     (
         "theme-dark",
-        "the built-in dark theme, verbatim (a starting point)",
+        "The built-in dark theme, a starting point for your own.",
     ),
-    ("theme-light", "the built-in light theme, verbatim"),
+    ("theme-light", "The built-in light theme, as JSON."),
 ];
 
 /// Every topic `e docs` serves, in the order the folders and front matter give.
