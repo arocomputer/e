@@ -1,133 +1,227 @@
 ---
 title: Compatibility
-description: versioned contracts: sessions, configuration, protocols
+description: The contracts e keeps stable across releases.
 order: 4
 ---
 
 # Compatibility
 
-e is still pre-1.0. This page names the surfaces users can persist or build
-against so changes to them are deliberate rather than accidental.
+e is still pre-1.0. This page names the surfaces you can persist or build
+against, so changes to them are deliberate, not accidental.
 
 ## Supported contracts
 
-- **CLI:** documented commands and exit statuses are user-facing. Before 1.0,
-  incompatible changes require a changelog entry and migration guidance.
-- **Sessions:** JSONL headers carry `format_version`. Version 0 (the unmarked
-  pre-release format), version 1, and version 2 are readable. Version 2 keeps
-  response provenance and disjoint usage in an envelope outside replayable
-  message content. Readers reject a newer version with an actionable error
-  instead of guessing.
-- **Configuration:** writes to `settings.json`, `auth.json`, and `trust.json` carry
-  `format_version: 1`. Readers accept unversioned files, preserve unknown
-  keys, and quarantine corrupt input before creating a replacement. An older
-  e will not write over a file carrying a newer or invalid format version.
-- **Layout:** `~/.e/layout.json` (`panes`, `split_min`, `focus`, `banner`,
-  `status.left`, `status.right`) is documented in [layout.md](../customize/layout.md);
-  unknown keys are ignored and a malformed file falls back to the
-  defaults.
-- **Packages:** the `packages` list in `settings.json` holds source strings
-  as typed (`npm:name[@version]`, `git:host/user/repo[@ref]`, a git URL, or
-  a directory path), or objects carrying a `source` plus per-kind filter
-  lists (`extensions`, `skills`, `prompts`, `themes`); npm packages live
-  under `~/.e/packages/npm/node_modules/<name>`, git packages under
-  `~/.e/packages/<host>/<path>`. All are documented in
-  [packages.md](packages.md) and pinned by
-  `tests/fixtures/config/settings-v1-packages.json`; a reader that meets an
-  entry it cannot parse reports it and loads the rest.
-- **`e rpc`:** the headless session protocol reports `protocol: 2` in
-  `hello`. A line without `method` is the version-1 one-shot request and
-  keeps its flat response. Methods, parameters, result fields, and the
-  `session`/`request` tags on event lines are a supported contract once
-  documented in [automation.md](../usage/automation.md); new methods and fields are
-  additive and do not change the number, a change to an existing shape
-  does. `tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
-  Optional parameters reject wrong JSON types instead of falling back to defaults;
-  `v2-invalid-requests.jsonl` pins those refusals. Valid requests retain protocol 2.
-- **Extensions:** the JSONL protocol is versioned independently. e sends its
-  protocol number during `initialize`; additive fields do not change the
-  number, while incompatible wire changes require a new protocol version.
-  Version 1 is documented in [extensions.md](extensions.md). The families
-  beyond it (`events`, `hooks`, `display`, `ui`, `session`, `shortcuts`)
-  are additive: each is advertised in `capabilities`, declared in the
-  manifest, or initiated by the extension, so a version-1 extension is never
-  sent a message it did not ask for. A method name, event name, field, or
-  result shape in those families is a supported contract once documented.
+### CLI
 
-CLI one-shot commands return 0 after completing their requested operation, 1
-for an operational/provider failure, and 2 for invalid arguments or an unknown
-requested resource. `e doctor` is a local-only diagnostic command and returns
-0 after producing its report; it never turns provider reachability into a
-network side effect.
+Documented commands and exit statuses are user-facing. Before 1.0, an
+incompatible change requires a changelog entry and migration guidance.
+
+CLI one-shot commands return these exit statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `0` | The requested operation completed. |
+| `1` | An operational or provider failure. |
+| `2` | Invalid arguments, or an unknown requested resource. |
+
+`e doctor` is a local-only diagnostic command. It returns 0 after producing
+its report. It never turns provider reachability into a network side effect.
+
+### Sessions
+
+Session JSONL headers carry `format_version`. e reads these versions:
+
+- Version 0, the unmarked pre-release format.
+- Version 1.
+- Version 2, which keeps response provenance and disjoint usage in an
+  envelope outside replayable message content.
+
+Readers reject a newer version with an actionable error instead of guessing.
+
+### Configuration
+
+Writes to `settings.json`, `auth.json`, and `trust.json` carry
+`format_version: 1`.
+
+- Readers accept unversioned files.
+- Readers preserve unknown keys.
+- Readers quarantine corrupt input before creating a replacement.
+- An older e will not write over a file that carries a newer or invalid
+  format version.
+
+### Layout
+
+`~/.e/layout.json` is documented in [Layout](../customize/layout.md). Its
+keys are `panes`, `split_min`, `focus`, `banner`, `status.left`, and
+`status.right`. Unknown keys are ignored, and a malformed file falls back to
+the defaults.
+
+### Packages
+
+The `packages` list in `settings.json` holds source strings as typed. A
+source is one of:
+
+- `npm:name[@version]`
+- `git:host/user/repo[@ref]`
+- a git URL
+- a directory path
+
+An entry can also be an object that carries a `source` plus per-kind filter
+lists: `extensions`, `skills`, `prompts`, and `themes`.
+
+npm packages live under `~/.e/packages/npm/node_modules/<name>`. Git
+packages live under `~/.e/packages/<host>/<path>`.
+
+All of this is documented in [Packages](packages.md) and pinned by
+`tests/fixtures/config/settings-v1-packages.json`. A reader that meets an
+entry it cannot parse reports it and loads the rest.
+
+### `e rpc`
+
+The headless session protocol reports `protocol: 2` in `hello`. A line
+without `method` is the version-1 one-shot request and keeps its flat
+response.
+
+Methods, parameters, result fields, and the `session` and `request` tags on
+event lines become a supported contract once documented in
+[Automation](../usage/automation.md). New methods and fields are additive
+and do not change the protocol number. A change to an existing shape does.
+`tests/fixtures/rpc/v2-requests.jsonl` pins the request shapes.
+
+Optional parameters reject wrong JSON types instead of falling back to their
+defaults, and `tests/fixtures/rpc/v2-invalid-requests.jsonl` pins those
+refusals. Valid requests still speak protocol 2.
+
+### Extensions
+
+The extension JSONL protocol is versioned independently. e sends its
+protocol number during `initialize`. Additive fields do not change the
+number. Incompatible wire changes require a new protocol version.
+
+Version 1 is documented in [Extensions](extensions.md). The families beyond
+it are additive: `events`, `hooks`, `display`, `ui`, `session`, and
+`shortcuts`. Each family is advertised in `capabilities`, declared in the
+manifest, or initiated by the extension. A version-1 extension is never sent
+a message it did not ask for.
+
+A method name, event name, field, or result shape in those families is a
+supported contract once documented.
+
+## Compatibility fixtures
 
 Compatibility fixtures under `tests/fixtures/` are release artifacts in
-source form. Once committed for a release, they are not rewritten: newer
-readers must continue to load them or intentionally document the migration.
+source form. Once committed for a release, they are not rewritten. Newer
+readers must keep loading them or intentionally document the migration.
+
 Regenerable caches such as `models-store.json` and `models-dev.json` are
-internal and are not a
-persisted compatibility contract.
+internal. They are not a persisted compatibility contract.
 
-Session sidecars now use OS-held locks. Stop older e processes before
-resuming their sessions with the new writer; mixed PID-lock and OS-lock
-writers must not open the same session concurrently. Existing JSONL needs
-no migration. Empty `.lock` sidecars are expected and should not be deleted.
+## Session locks
 
-Provider failure diagnostics use separate `<session-stem>.errors.jsonl` files,
-leaving message logs readable across their supported versions. These sidecars
-carry their own `format_version: 1` and link records to message IDs. They can be
-removed without changing conversation history. Headless responses add an
-optional `error_details` object while retaining the `error` string.
+Session sidecars now use OS-held locks. Stop older e processes before you
+resume their sessions with the new writer. Writers that use PID locks and
+writers that use OS locks must not open the same session concurrently.
+
+Existing JSONL needs no migration. Empty `.lock` sidecars are expected. Do
+not delete them.
+
+## Error diagnostics
+
+Provider failure diagnostics go to separate `<session-stem>.errors.jsonl`
+files. This keeps message logs readable across their supported versions.
+
+These sidecars carry their own `format_version: 1` and link records to
+message IDs. You can remove them without changing conversation history.
+
+Headless responses add an optional `error_details` object and keep the
+`error` string.
+
+## Home directory and file permissions
+
+Each release channel has its own home directory:
+
+| Channel | Home |
+| --- | --- |
+| Stable | `~/.e` |
+| Dev and local | `~/.e-dev` |
+| Beta | `~/.e-beta` |
+| PR builds | `~/.e-pr/COMMIT` |
+
+`E_HOME` overrides the channel default. Use a dedicated directory for
+`E_HOME`. It is private application state, not a shared workspace. Files
+copied outside that directory are not migrated.
 
 On Unix, e creates its state directories with `0700` and session logs with
-`0600`. Configuration writes and session creation or reopening also tighten
-the e home directory to `0700`, protecting older files underneath it without
-rewriting their contents. Reopening an older session sets its file to `0600`.
-Stricter owner permissions are preserved, including read-only directories.
-Stable uses `~/.e`, dev/local uses `~/.e-dev`, beta uses `~/.e-beta`, and PR
-builds use `~/.e-pr/COMMIT`. `E_HOME` overrides the channel default.
-Use a dedicated directory for `E_HOME`; it is private application state, not a
-shared workspace. Files copied outside that directory are not migrated.
-Credential staging files start at `0600`, before any secret is written.
+`0600`.
 
-Provider and OAuth endpoints must be final URLs: authenticated requests no
+- Configuration writes and session creation or reopening also tighten the e
+  home directory to `0700`. This protects older files underneath it without
+  rewriting their contents.
+- Reopening an older session sets its file to `0600`.
+- Stricter owner permissions are preserved, including read-only directories.
+- Credential staging files start at `0600`, before any secret is written.
+
+## Redirects
+
+Provider and OAuth endpoints must be final URLs. Authenticated requests no
 longer follow HTTP redirects, including same-origin redirects. Update any
-custom gateway URL that relied on one. Release asset downloads still follow
-redirects, without provider credentials, and reject HTTPS-to-HTTP downgrades.
+custom gateway URL that relied on one.
 
-Filesystem `write` and `edit` stage and sync content before committing it.
-Existing files are updated through their original inode, preserving symlink
-targets, hard-link aliases, ACLs, and extended attributes. Staging failures
-leave the original intact; an I/O failure during the in-place copy can leave
-a partial update. New files are published without overwriting a concurrent
-creator. On Unix, the parent directory is synced before success is reported.
-Unix writes also check that the target still names the opened inode before
-and after copying. A detected external replacement fails the write so the
-caller can reread and retry; external writers still need their own coordination.
+Release asset downloads still follow redirects. They do so without provider
+credentials, and they reject HTTPS-to-HTTP downgrades.
 
-Tool integer arguments accept JSON unsigned integers, integral JSON floats below
-2^64, and decimal integer strings within the u64 range. Out-of-range values fail
-validation instead of saturating. A read line larger than the output window is
-reported as an error with an offset to skip it, never as a complete truncated
-line. Files and saved sessions need no migration.
+## File writes
 
-On filesystems without hard links, a failed new-file copy removes its partial
-target when it still identifies the created file. Freshness checks allow a
-confirmed deletion but fail closed on other metadata errors.
+The filesystem `write` and `edit` tools stage and sync content before
+committing it.
+
+- Existing files are updated through their original inode. This preserves
+  symlink targets, hard-link aliases, ACLs, and extended attributes.
+- A staging failure leaves the original intact. An I/O failure during the
+  in-place copy can leave a partial update.
+- New files are published without overwriting a concurrent creator.
+- On Unix, the parent directory is synced before success is reported.
+- Unix writes also check that the target still names the opened inode,
+  before and after copying. A detected external replacement fails the write,
+  so the caller can reread and retry. External writers still need their own
+  coordination.
+
+On filesystems without hard links, a failed new-file copy removes its
+partial target when that target still identifies the created file. Freshness
+checks allow a confirmed deletion but fail closed on other metadata errors.
+
+## Tool arguments
+
+Tool integer arguments accept:
+
+- JSON unsigned integers
+- integral JSON floats below 2^64
+- decimal integer strings within the u64 range
+
+Out-of-range values fail validation instead of saturating.
+
+A read line larger than the output window is reported as an error with an
+offset to skip it. It is never returned as a complete truncated line.
+
+Files and saved sessions need no migration.
 
 ## Not a supported contract
 
 The Cargo library target lets the binary, the integration tests, and the
-`sdk/` package share code. Its public Rust items are not a stable third-party
-API in themselves. The supported Rust SDK is the separate `intuitums-e-sdk` crate in
-`sdk/` (see [sdk.md](sdk.md)): the API it consumes is its documented contract,
-and it follows semantic versioning from its first published release — before
-1.0, a breaking change moves the minor version and is named in the changelog.
+`sdk/` package share code. Its public Rust items are not a stable
+third-party API in themselves.
+
+The supported Rust SDK is the separate `intuitums-e-sdk` crate in `sdk/`.
+See [SDK](sdk.md). The API it consumes is its documented contract. It
+follows semantic versioning from its first published release. Before 1.0, a
+breaking change moves the minor version and is named in the changelog.
 
 ## Change process
 
-Changes to a supported contract need all of the following in one pull request:
+A change to a supported contract needs all of the following in one pull
+request:
 
-1. a compatibility fixture or contract test;
-2. migration behavior for existing user data or extensions;
-3. documentation and a changelog entry;
-4. updated contract documentation in the relevant guide.
+1. A compatibility fixture or contract test.
+2. Migration behavior for existing user data or extensions.
+3. Documentation and a changelog entry.
+4. Updated contract documentation in the relevant guide.
