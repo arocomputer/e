@@ -106,6 +106,7 @@ done
 # 8. The core stays terminal-free. tui depends on core, never the reverse:
 #    src/core names no frontend module and no terminal crate, so the harness
 #    the SDK embeds carries no terminal with it.
+
 if out=$(grep -rnE '(crate|super|e)::tui\b|\bcrossterm\b' src/core --include='*.rs'); then
   bad "src/core reaches into the frontend (tui or crossterm):"
   say "$out"
@@ -115,4 +116,13 @@ if [ "$fail" -eq 0 ]; then
   say "guard: all checks passed"
 else
   exit 1
+fi
+
+# 9. The check workflow names guarantees, and every one of them is a step in
+#    `./x`. A raw `cargo` or `npm` there is a second definition of green, one
+#    the local check does not have; the specialized workflows (release,
+#    security, docs) are their own thing and are not fenced.
+if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/checks.yml 2>/dev/null); then
+  bad "a check calls a tool directly; call ./x <step> instead
+$out"
 fi
