@@ -61,12 +61,12 @@ repeated here.
 ## Before you open a PR
 
 ```sh
-./x check    # every step below, in order
+./x check    # format, lint, full suite, crate packages, and guard
 ./x bench    # release-mode performance budgets
 ```
 
-Each step is a guarantee, and CI runs them as separate jobs so a failure names
-itself instead of hiding behind "the check":
+The `test` workflow groups the same local commands into `lint`, `unit` on Linux
+and macOS, `e2e`, `packages`, `channels`, `docs`, `glibc`, and `bench` jobs:
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
@@ -75,7 +75,15 @@ itself instead of hiding behind "the check":
 ./x crates        # the crates.io packages: packaged, built, and file-listed
 ./x docs          # the guides' contract: front matter, groups, links
 ./x guard         # the trust boundary and the repository's tooling tests
+./x ui            # terminal frames and interaction scenarios
+./x packages      # installers and package launchers
+./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
 ```
+
+The full suite includes the docs contract. Prose-only changes run that contract
+and the site build without the full suite. Performance-related PRs run benchmarks;
+main code changes and the weekly schedule run them too. Rust jobs cache dependencies;
+only main writes caches.
 
 `./x` is the single definition of green; CI runs the same commands, so
 nothing merges on a private definition of passing. `scripts/guard.sh` enforces

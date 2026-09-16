@@ -34,6 +34,21 @@ class RetryTests(unittest.TestCase):
                 resolve()
         verify.assert_called_once_with('v1.2.3', 'a' * 40)
 
+    def test_dev_publication_uses_the_shared_path_filter(self):
+        sha = 'a' * 40
+        event = {'workflow_run': {'conclusion': 'success', 'head_branch': 'main',
+                 'event': 'push', 'head_sha': sha,
+                 'head_repository': {'full_name': 'intuitums/e'}}}
+        for paths, mode in [('README.md\nassets/readme.png', 'skip'),
+                            ('crates/core/themes/dark.json', 'build')]:
+            with self.subTest(paths=paths), patch.dict(os.environ,
+                    GITHUB_EVENT_NAME='workflow_run', GITHUB_EVENT_PATH='/event',
+                    GITHUB_REPOSITORY='intuitums/e', GITHUB_RUN_NUMBER='12'), \
+                    patch('resolve.Path.read_text', return_value=json.dumps(event)), \
+                    patch('resolve.git', side_effect=['[workspace.package]\nversion = "1.2.3"', paths]), \
+                    patch('resolve.subprocess.run'):
+                self.assertEqual(resolve()['mode'], mode)
+
     def test_dev_retry_requires_the_original_run(self):
         event = {'inputs': {'action': 'retry', 'tag': 'v1.2.3-dev.12.gabcdef012345'}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \

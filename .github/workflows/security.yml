@@ -12,6 +12,10 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "crates/**/Cargo.toml"
+      - "fuzz/Cargo.toml"
+      - "fuzz/Cargo.lock"
+      - ".github/workflows/security.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,6 +23,7 @@ permissions:
 
 jobs:
   audit:
+    if: github.event_name != 'schedule' || github.event.schedule == '17 6 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,7 +38,7 @@ jobs:
 
   fuzz:
     # Exercise each parser independently on a fresh GitHub-hosted VM.
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '41 5 * * 3'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

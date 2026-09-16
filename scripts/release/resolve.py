@@ -4,10 +4,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 import tomllib
 from identity import identity
 from promotion import verify
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+from changes import classify
 
 
 def git(*args):
@@ -59,7 +63,7 @@ def resolve():
     mode = 'build'
     if kind == 'workflow_run':
         paths = git('diff-tree', '--no-commit-id', '--name-only', '-r', sha).splitlines()
-        if paths and all(path.endswith('.md') or path.startswith('docs/') for path in paths):
+        if paths and not classify(paths)['publish']:
             mode = 'skip'
     return identity(version) | {'sha': sha, 'tag': f'v{version}', 'mode': mode}
 

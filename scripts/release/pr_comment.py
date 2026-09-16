@@ -28,7 +28,7 @@ def render(needs, stage, run_url):
         detail = 'macOS and Linux packages published; npm installation verified on Linux x64.'
         labels = {
             'qualify': 'Source checks', 'create': 'Release preparation', 'build': 'Native build',
-            'publish': 'Artifact verification', 'npm': 'npm publication',
+            'build-linux': 'Linux build', 'publish': 'Artifact verification', 'npm': 'npm publication',
         }
         for job, label in labels.items():
             result = needs.get(job, {}).get('result')

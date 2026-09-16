@@ -1,11 +1,11 @@
-name: Release
+name: publish
 
 # Production publishes here, beta publishes in e-beta, and dev publishes only to npm.
 on:
   push:
     tags: ["v*"]
   workflow_run:
-    workflows: [checks]
+    workflows: [test]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   resolve:
-    name: Select release
+    name: resolve
     if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     permissions:
@@ -61,50 +61,51 @@ jobs:
         env:
           GH_TOKEN: ${{ contains(inputs.tag, '-beta.') && secrets.BETA_RELEASE_TOKEN || github.token }}
         run: python3 scripts/release/resolve.py
-  comment-building:
-    name: Report dev build start
+  qualify:
     needs: resolve
-    if: needs.resolve.outputs.channel == 'dev' && needs.resolve.outputs.mode == 'build'
+    if: needs.resolve.outputs.mode == 'build'
+    name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
     permissions:
       contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Update PR comment
+      - name: Report dev build
+        if: needs.resolve.outputs.channel == 'dev'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_JOBS: ${{ toJSON(needs) }}
           REPORT_STAGE: building
         run: python3 scripts/release/pr_comment.py
-
-  qualify:
-    needs: resolve
-    if: needs.resolve.outputs.mode == 'build'
-    name: Qualify tag
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: read
-    steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
 
-      - name: Verify
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check selected source
+        # Dev already passed the test workflow at this exact commit.
+        if: github.event_name != 'workflow_run'
+        run: |
+          ./x check
+          ./x ui
+
+      - name: Verify release identity
         env:
           CHANNEL: ${{ needs.resolve.outputs.channel }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          ./x check
-          ./x ui
           E_BUILD_CHANNEL="$CHANNEL" ./x release-check "$TAG"
 
   create:
-    name: Draft release
+    name: draft
     needs: [resolve, qualify]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -143,23 +144,22 @@ jobs:
           fi
 
   build:
-    name: Build (${{ matrix.leg }})
+    name: build (macos)
     needs: [resolve, create]
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - leg: macos
-            targets: "aarch64-apple-darwin x86_64-apple-darwin"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         env:
@@ -171,20 +171,20 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           # A macOS runner's libc is not a Linux floor; scripts/release/build.sh
           # checks the glibc ceiling on the Linux legs instead.
-          TARGETS: ${{ matrix.targets }}
+          TARGETS: aarch64-apple-darwin x86_64-apple-darwin
           COMMAND: ${{ needs.resolve.outputs.command }}
         run: scripts/release/build.sh
 
       - name: Retain build archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binaries-${{ matrix.leg }}
+          name: binaries-macos
           path: e-*.tar.gz
           retention-days: 14
           overwrite: true
 
   build-linux:
-    name: Build (${{ matrix.leg }})
+    name: build (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
     # A Linux binary links against the glibc of the image that built it, so it
@@ -213,6 +213,12 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: bullseye
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Build
         env:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
@@ -236,7 +242,7 @@ jobs:
           overwrite: true
 
   publish:
-    name: Checksums and publish
+    name: release
     needs: [resolve, build, build-linux]
     if: ${{ !cancelled() && ((needs.build.result == 'success' && needs.build-linux.result == 'success') || needs.resolve.outputs.mode == 'recover') }}
     runs-on: ubuntu-latest
@@ -246,6 +252,10 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Keep SBOM tooling for older source commits
+        run: cp scripts/release/sbom.py "$RUNNER_TEMP/release-sbom.py"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -273,18 +283,14 @@ jobs:
           test "$(find . -name 'e-*.tar.gz' | wc -l)" -eq 4
           sha256sum e-*.tar.gz > checksums.txt
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Generate CycloneDX SBOM
         run: |
           cargo install cargo-cyclonedx --version 0.5.9 --locked
-          cargo cyclonedx --format json --spec-version 1.5
-          # cargo-cyclonedx names each BOM after its crate, so the file is
-          # neither `bom.json` nor a name this step can hardcode: renaming the
-          # package (`e` is taken on crates.io) failed the whole release at its
-          # last step. Ask for however many it wrote, and ship the one.
-          test "$(ls ./*.cdx.json | wc -l)" = 1
-          mv ./*.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
-          # Every workspace member gets one; the release ships the application's.
-          find . -name '*.cdx.json' -delete
+          python3 "$RUNNER_TEMP/release-sbom.py" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
 
       - name: Record build identity
         env:
@@ -327,27 +333,8 @@ jobs:
           retention-days: 14
           overwrite: true
 
-  comment-publishing:
-    name: Report dev publication start
-    needs: [resolve, publish, comment-building]
-    if: ${{ !cancelled() && needs.resolve.outputs.channel == 'dev' && needs.publish.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Update PR comment
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_JOBS: ${{ toJSON(needs) }}
-          REPORT_STAGE: publishing
-        run: python3 scripts/release/pr_comment.py
-
   npm:
-    name: npm and bun
+    name: npm
     needs: [resolve, publish]
     if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
@@ -359,11 +346,20 @@ jobs:
       verify: ${{ steps.verify.outcome }}
     permissions:
       contents: read
+      pull-requests: write
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+      - name: Report dev publication
+        if: needs.resolve.outputs.channel == 'dev'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+          REPORT_STAGE: publishing
+        run: python3 scripts/release/pr_comment.py
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -423,7 +419,7 @@ jobs:
         run: sh scripts/packaging/verify-npm.sh
 
   container:
-    name: Container image
+    name: container
     # The image installs the release it belongs to, so it waits for one. Dev
     # builds are npm-only and the installer has no dev channel.
     needs: [resolve, publish]
@@ -519,7 +515,7 @@ jobs:
           fi
 
   homebrew:
-    name: Homebrew tap
+    name: homebrew
     permissions:
       contents: read
     needs: [resolve, publish]
@@ -555,7 +551,7 @@ jobs:
         run: scripts/packaging/publish-brew.sh "dist/${{ needs.resolve.outputs.command }}.rb" tap
 
   channel:
-    name: Advance channel and verify website installer
+    name: channel
     needs: [resolve, publish]
     if: ${{ !cancelled() && needs.resolve.outputs.channel != 'dev' && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
@@ -590,8 +586,8 @@ jobs:
           "$RUNNER_TEMP/e-current/$COMMAND" --version
 
   deployment:
-    name: Report release deployment
-    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, crates, channel, comment-building, comment-publishing]
+    name: report
+    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, crates, channel]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
