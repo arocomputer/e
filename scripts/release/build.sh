@@ -1,0 +1,75 @@
+#!/bin/sh
+# Build one runner's release archives, upload them, and prove the binary runs on
+# the oldest glibc the release promises.
+#
+# The macOS legs and the Linux legs share this script; the Linux legs run it in
+# a container whose glibc *is* the floor, so the floor is a decision instead of
+# whatever the runner image happens to have. Set E_GLIBC_CEILING to that
+# version: the script refuses an image that does not match it, and refuses a
+# binary that needs anything newer than it.
+#
+# Env: TARGETS (required), E_GLIBC_CEILING, and — when cutting a release — TAG,
+# COMMAND, E_BUILD_VERSION, E_BUILD_CHANNEL, GH_TOKEN, GH_REPO. Without TAG it
+# builds and checks only, which is what CI uses.
+set -eu
+
+targets=${TARGETS:?TARGETS is required}
+ceiling=${E_GLIBC_CEILING:-}
+tag=${TAG:-}
+
+if [ -n "$ceiling" ]; then
+  # A mismatch here means somebody changed the build image without revisiting
+  # what the release promises, which no later check would notice.
+  image=$(ldd --version 2>/dev/null | head -1 | sed -n 's/.*[^0-9]\([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
+  if [ "$image" != "$ceiling" ]; then
+    echo "build image has glibc $image, not $ceiling: the release would promise a floor it does not have" >&2
+    exit 1
+  fi
+fi
+
+for target in $targets; do
+  rustup target add "$target"
+  cargo build --release --locked --target "$target"
+  tar czf "e-$target.tar.gz" -C "target/$target/release" e
+  if [ -n "$tag" ] && [ "$E_BUILD_CHANNEL" != dev ]; then
+    gh release upload "$tag" "e-$target.tar.gz" --clobber
+  fi
+
+  if [ -n "$ceiling" ]; then
+    # Every versioned GLIBC_ symbol the dynamic linker must resolve.
+    required=$(
+      objdump -T "target/$target/release/e" |
+        grep -o 'GLIBC_[0-9.]*' |
+        sed 's/GLIBC_//' |
+        sort -Vu |
+        tail -1
+    )
+    if [ -z "$required" ]; then
+      echo "$target has no glibc symbols: is it a dynamic glibc build?" >&2
+      exit 1
+    fi
+    newest=$(printf '%s\n%s\n' "$ceiling" "$required" | sort -V | tail -1)
+    if [ "$newest" != "$ceiling" ]; then
+      echo "$target needs glibc $required, newer than the $ceiling this release promises" >&2
+      exit 1
+    fi
+    echo "$target: needs glibc $required (ceiling $ceiling)"
+  fi
+done
+
+host=$(rustc -vV | sed -n 's/^host: //p')
+case " $targets " in
+  *" $host "*) ;;
+  *) exit 0 ;;
+esac
+[ -n "$tag" ] || exit 0
+
+# The release runs its own archive end to end: the binary reports the tag, the
+# checksum is written, and the installer puts it in place.
+"target/$host/release/e" --version | grep -Fx "e ${tag#v}"
+sha256sum "e-$host.tar.gz" > checksums.txt 2>/dev/null ||
+  shasum -a 256 "e-$host.tar.gz" > checksums.txt
+install_dir=$(mktemp -d)
+E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh \
+  --channel "$E_BUILD_CHANNEL" --version "$E_BUILD_VERSION"
+"$install_dir/$COMMAND" --version | grep -Fx "e ${tag#v}"

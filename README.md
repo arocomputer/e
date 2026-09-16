@@ -49,9 +49,10 @@ Update with the method you installed with: `e update` for curl or a release
 archive, `npm install -g @intuitums/e@latest`, `bun add -g @intuitums/e@latest`,
 or `brew upgrade intuitums/tap/e`. `e --version` confirms the build.
 
-The Linux binaries link against glibc 2.39 or newer — Ubuntu 24.04+, Debian 13+,
-Fedora 40+, RHEL 10+. Older distributions (Ubuntu 22.04, Debian 12, RHEL 9) need
-a build from source, or the published image, which carries its own runtime:
+The Linux binaries link against glibc 2.31 or newer — Debian 11+, Ubuntu 22.04+,
+RHEL 9+. They are built on the oldest glibc we support, and the release refuses
+to publish one that needs anything newer. A system below it needs a build from
+source, or the published image, which carries its own runtime:
 
 ```sh
 docker run --rm --entrypoint e ghcr.io/intuitums/e-slack:latest --version

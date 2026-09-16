@@ -141,9 +141,51 @@ jobs:
           fi
 
   build:
-    name: Build (${{ matrix.runner }})
+    name: Build (macos)
+    needs: [resolve, create]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Build
+        env:
+          E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
+          E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
+          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ needs.resolve.outputs.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          # A macOS runner's libc is not a Linux floor; scripts/release/build.sh
+          # checks the glibc ceiling on the Linux legs instead.
+          TARGETS: aarch64-apple-darwin x86_64-apple-darwin
+          COMMAND: ${{ needs.resolve.outputs.command }}
+        run: scripts/release/build.sh
+
+      - name: Retain build archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binaries-macos
+          path: e-*.tar.gz
+          retention-days: 14
+          overwrite: true
+
+  build-linux:
+    name: Build (linux ${{ matrix.arch }})
     needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
+    # A Linux binary links against the glibc of the image that built it, so it
+    # is built where that glibc is oldest: Debian 11 ships 2.31, which covers
+    # Debian 11 and 12, Ubuntu 22.04 and 24.04, and RHEL 9. Building on
+    # `ubuntu-latest` instead put the floor at that runner's 2.39 and left the
+    # older half of our users with a binary that would not start.
+    container:
+      image: rust:1.98-bullseye
     timeout-minutes: 30
     permissions:
       contents: write
@@ -151,11 +193,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
-            targets: "aarch64-apple-darwin x86_64-apple-darwin"
           - runner: ubuntu-latest
+            arch: x86_64
             targets: "x86_64-unknown-linux-gnu"
           - runner: ubuntu-24.04-arm
+            arch: arm64
             targets: "aarch64-unknown-linux-gnu"
     steps:
       - name: Checkout
@@ -171,40 +213,24 @@ jobs:
           GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
-        run: |
-          for target in ${{ matrix.targets }}; do
-            rustup target add "$target"
-            cargo build --release --locked --target "$target"
-            tar czf "e-$target.tar.gz" -C "target/$target/release" e
-            if [ "$E_BUILD_CHANNEL" != dev ]; then
-              gh release upload "$TAG" "e-$target.tar.gz" --clobber
-            fi
-          done
-
-          host=$(rustc -vV | sed -n 's/^host: //p')
-          case " ${{ matrix.targets }} " in
-            *" $host "*)
-              "target/$host/release/e" --version | grep -Fx "e ${TAG#v}"
-              sha256sum "e-$host.tar.gz" > checksums.txt 2>/dev/null || \
-                shasum -a 256 "e-$host.tar.gz" > checksums.txt
-              install_dir=$(mktemp -d)
-              E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh --channel "$E_BUILD_CHANNEL" --version "$E_BUILD_VERSION"
-              "$install_dir/${{ needs.resolve.outputs.command }}" --version | grep -Fx "e ${TAG#v}"
-              ;;
-          esac
+          TARGETS: ${{ matrix.targets }}
+          COMMAND: ${{ needs.resolve.outputs.command }}
+          # Debian 11's glibc, and the floor `install.sh` refuses below.
+          E_GLIBC_CEILING: "2.31"
+        run: scripts/release/build.sh
 
       - name: Retain build archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binaries-${{ matrix.runner }}
+          name: binaries-linux-${{ matrix.arch }}
           path: e-*.tar.gz
           retention-days: 14
           overwrite: true
 
   publish:
     name: Checksums and publish
-    needs: [resolve, build]
-    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.resolve.outputs.mode == 'recover') }}
+    needs: [resolve, build, build-linux]
+    if: ${{ !cancelled() && ((needs.build.result == 'success' && needs.build-linux.result == 'success') || needs.resolve.outputs.mode == 'recover') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -546,7 +572,7 @@ jobs:
 
   deployment:
     name: Report release deployment
-    needs: [resolve, qualify, create, build, publish, npm, homebrew, container, crates, channel, comment-building, comment-publishing]
+    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, crates, channel, comment-building, comment-publishing]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

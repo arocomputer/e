@@ -163,6 +163,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  glibc:
+    needs: changes
+    # Release plumbing: the image, the script, and the ceiling only move together.
+    if: needs.changes.outputs.packages == 'true'
+    name: glibc floor
+    runs-on: ubuntu-latest
+    # The image the release builds Linux in. Building here proves the floor on
+    # the pull request, instead of a user on an older distribution finding it.
+    container:
+      image: rust:1.98-bullseye
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build for the oldest glibc the release promises
+        env:
+          TARGETS: x86_64-unknown-linux-gnu
+          E_GLIBC_CEILING: "2.31"
+        run: scripts/release/build.sh
+
   performance:
     name: Budgets
     runs-on: ubuntu-latest
