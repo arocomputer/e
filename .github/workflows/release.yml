@@ -461,7 +461,7 @@ jobs:
   crates:
     name: crates.io
     # The application's version is the release version, so previews stay on npm.
-    # It publishes first: the SDK's manifest depends on it by version.
+    # Core publishes first: the frontends and SDK pin its version.
     needs: [resolve, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
     # Like the npm and image publications, a registry hiccup must not fail the

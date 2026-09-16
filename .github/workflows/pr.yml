@@ -46,10 +46,10 @@ jobs:
           echo "$files" | grep -q '^benchmarks/' && \
             add_label area:bench d93f0b 'Performance budgets and the benchmark suite' || true
           # area:infra covers the tooling paths: automation, fuzz targets,
-          # the dev shim, and test-only changes.
-          echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|bin/|tests/|x$|rust-toolchain.toml)' && \
+          # the development entry point, and test-only changes.
+          echo "$files" | grep -Eq '^(\.github/|scripts/|fuzz/|crates/[^/]+/tests/|x$|rust-toolchain.toml)' && \
             add_label area:infra 6f42c1 'Build, CI, release, or repository automation' || true
-          echo "$files" | grep -Eq '^(Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
+          echo "$files" | grep -Eq '^(Cargo.toml|crates/[^/]+/Cargo.toml|Cargo.lock|\.github/dependabot.yml)' && \
             add_label dependencies 0366d6 'Dependency or toolchain changes' || true
           # `breaking` is never path-derived — no grep can know a wire or
           # persisted contract changed. The author declares it; see
