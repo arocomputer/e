@@ -79,7 +79,7 @@ def prepare(tag, assets, output):
         shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
     folder = output / "e"
     (folder / "bin").mkdir(parents=True)
-    shutil.copy2(ROOT / "packaging/npm/e", folder / "bin/e")
+    shutil.copy2(ROOT / "scripts/packaging/npm-launcher", folder / "bin/e")
     manifest = dict(
         common,
         name="@intuitums/e",
