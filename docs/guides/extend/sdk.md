@@ -144,7 +144,7 @@ it. That is the whole checkpoint story: a readable file, not opaque bytes.
 ## What the SDK is not
 
 - **Not an extension.** Extensions are child processes speaking a JSONL
-  protocol to a running e ([extensions.md](../extend/extensions.md)). The SDK links
+  protocol to a running e ([extensions.md](extensions.md)). The SDK links
   the core into your program, and with `extensions(true)` starts the home's
   extensions for their tools and hooks. They run in the session's `cwd` and
   are told so at `initialize`. Startup hooks do not run, and no flags are

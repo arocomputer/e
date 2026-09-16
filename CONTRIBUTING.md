@@ -44,9 +44,9 @@ Use the bug or feature issue form. Bug reports need a reproducible case and
 the version (`e --version`, or the commit if you built from source). Feature
 requests should explain the need before the design; an implementation sketch
 is welcome but optional. A feature that could be an extension is usually
-better as one — the extension API in [docs/extend/extensions.md](docs/extend/extensions.md)
+better as one — the extension API in [docs/guides/extend/extensions.md](docs/guides/extend/extensions.md)
 exists precisely so most additions never have to touch the binary, and
-[docs/extend/packages.md](docs/extend/packages.md) is how an extension, skill, prompt, or
+[docs/guides/extend/packages.md](docs/guides/extend/packages.md) is how an extension, skill, prompt, or
 theme reaches other users without a release of e.
 
 ## Finding your way around
@@ -96,7 +96,7 @@ title becomes the squash commit on `main`. In the body, state the problem in
 a sentence or two, then how you fixed it; the template only carries the
 checklist CI and review expect. One concern per PR — if the description
 says "also", split it. When a change alters a persisted or wire contract
-(`docs/extend/compatibility.md`), add the `breaking` label yourself: the triage
+(`docs/guides/extend/compatibility.md`), add the `breaking` label yourself: the triage
 workflow can label paths, but no path tells it a contract changed.
 
 ## AI/LLM assistance
