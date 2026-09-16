@@ -152,12 +152,13 @@ publication. Production and beta test pinned and channel installs through the
 public website. Dev verifies an exact-version npm install. Actions retains build
 archives and metadata for 14 days; npm retains the published dev packages.
 
-The Linux legs build on `ubuntu-latest` (24.04), whose glibc is 2.39, so that is
-the floor every released Linux binary inherits — Ubuntu 24.04+, Debian 13+,
-Fedora 40+, RHEL 10+, and no older LTS. Lowering it means building those legs in
-a container with the older glibc (`jobs.<id>.container`), which needs the build
-job split from the macOS legs, and a check that asserts the highest `GLIBC_`
-symbol the binary requires.
+The Linux legs build in `rust:1.98-bullseye` (Debian 11, glibc 2.31) and the
+macOS legs on `macos-latest`; `scripts/release/build.sh` does both. A Linux
+binary links against the glibc of the image that built it, so that image is the
+floor every release inherits — Debian 11+, Ubuntu 22.04+, RHEL 9+ — and the
+script refuses to publish a binary that requires anything newer, which the
+`glibc floor` CI job proves on the pull request. Change the image and the
+ceiling (`E_GLIBC_CEILING`, and the refusal in `install.sh`) move together.
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing

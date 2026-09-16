@@ -42,7 +42,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - **Docs:** the user guides under `docs/` are grouped by folder — `start/`, `usage/`, `customize/`, `extend/` — and front matter is their only metadata. `e docs` builds its topic list by reading those files, so the guides no longer have a second list to drift from, and `docs/README.md` explains the layout to whoever edits them. The repository's own documentation (architecture, rendering, releases) moved to `contributing/`, and a new `sessions` guide covers resuming, branching, compaction, and export (`e docs sessions`).
 
 - **Upgrade:** e refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `e trust [dir]` for a session with no terminal.
-- The installer refuses a host below the Linux binaries' glibc floor (2.39) with a message naming the requirement, instead of failing after the download with a linker error.
+- Linux binaries are built against glibc 2.31 instead of the build runner's 2.39, so they run on Debian 11+, Ubuntu 22.04+, and RHEL 9+ too, and the release refuses to publish one that needs anything newer. The installer refuses a host below the floor with a message naming the requirement instead of failing after the download with a linker error.
 
 - **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 
