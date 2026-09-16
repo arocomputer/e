@@ -86,9 +86,15 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Check selected source
         # Dev already passed the test workflow at this exact commit.
@@ -157,9 +163,15 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Build
         env:
@@ -214,10 +226,15 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          key: bullseye
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Build
         env:
@@ -284,9 +301,15 @@ jobs:
           sha256sum e-*.tar.gz > checksums.txt
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Generate CycloneDX SBOM
         run: |
           cargo install cargo-cyclonedx --version 0.5.9 --locked
