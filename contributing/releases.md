@@ -263,11 +263,11 @@ list @intuitums/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
 Subsequent releases need no npm token. The token in 1Password can remain available
 for separately authorized manual publishing.
 
-The website's documentation builds from this repository's `docs/`, so
-`.github/workflows/docs.yml` pings `DOCS_DEPLOY_HOOK` — the Vercel deploy hook
-for the web project — whenever `docs/` or `contributing/` reaches `main`. Set
-the secret once; without it the job fails loudly rather than going stale
-silently.
+The website renders this repository's `docs/guides/`, so
+`.github/workflows/docs.yml` starts intuitums/web's Deploy workflow whenever a
+guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
+to intuitums/web with Actions: write. Set the secret once; without it the job
+fails loudly rather than going stale silently.
 
 crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish these crates
 and no others: `intuitums-e-core`, `intuitums-e-tui`, `intuitums-e-rpc`,

@@ -143,10 +143,9 @@ jobs:
           retention-days: 7
 
   docs:
-    # The guides are published to the docs site and embedded in the binary. A
+    # The guides are published on the website and embedded in the binary. A
     # change to the binary gets the contract from `./x test`; a prose-only
-    # change, which skips that, gets it here, and every docs change builds the
-    # site.
+    # change, which skips that, gets it here.
     name: docs
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -170,16 +169,6 @@ jobs:
       - name: Docs contract
         if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.build != 'true'
         run: ./x docs
-
-      - name: Setup Node.js
-        if: needs.changes.outputs.docs == 'true'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-
-      - name: Docs site
-        if: needs.changes.outputs.docs == 'true'
-        run: ./x site
 
   packages:
     name: packages (${{ matrix.name }})
