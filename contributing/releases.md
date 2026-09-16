@@ -47,7 +47,8 @@ version, channel, and full source commit. Preview identities use
 Release workflow run number. PR builds use that workflow's run number.
 `e --version --json` and `e doctor` report the build identity.
 
-The beta repository's latest release advances after npm and brew publish.
+The beta repository's latest release advances after its pinned website install
+passes, independently of npm and Homebrew publication.
 Its `version.txt` asset supplies curl's current beta version. No new channel-pointer
 releases are created. Older retries cannot move package tags, formulas, or the
 latest beta backward. PR and local builds never self-update. Curl installations
@@ -188,7 +189,8 @@ checksums, the SBOM, and provenance in an isolated temporary directory, then
 publishes the draft before updating packages. Incomplete drafts fail until all
 four archives exist. npm compares the existing package's integrity;
 a different tarball under the same version fails. Each registry can fail
-independently; rerun failed publication after recovery. There is no transaction
+independently; rerun failed publication after recovery. Package-manager failures
+do not block verified direct downloads or beta channel advancement. There is no transaction
 across registries.
 
 ```sh
@@ -274,7 +276,9 @@ branch used to run the workflow.
 
 A final reporting job marks production and beta successful after npm, Homebrew,
 channel advancement, and website installation checks pass. Dev requires verified
-npm publication. Failed or cancelled attempts link to Actions logs. Successful
+npm publication. Failed or cancelled attempts link to Actions logs. The run summary lists each
+distribution result separately, so an incomplete package publication does not
+hide a working direct download. Successful
 production and beta entries link to their release repository; dev entries link
 to the exact npm version. Documentation-only
 skips and invalid release selections do not create deployment entries. Reporting
