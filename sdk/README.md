@@ -23,7 +23,7 @@ session.close().await;
 cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
 ```
 
-See [docs/extend/sdk.md](../docs/extend/sdk.md) for the API, package boundary, and usage rules.
+See [docs/guides/extend/sdk.md](../docs/guides/extend/sdk.md) for the API, package boundary, and usage rules.
 The API is unstable until its first release declares a versioning policy.
 
 ## Versioning
@@ -36,7 +36,7 @@ cargo add intuitums-e-sdk
 ```
 
 - **The SDK's API is the contract**: the types and methods
-  [docs/extend/sdk.md](../docs/extend/sdk.md) documents. Everything else is internal.
+  [docs/guides/extend/sdk.md](../docs/guides/extend/sdk.md) documents. Everything else is internal.
 - **Semantic versioning.** Before 1.0, a release that changes that API without
   a compatible path moves the minor version and says so in the changelog;
   additive and internal changes move the patch. From 1.0 the usual rules apply.
@@ -47,9 +47,9 @@ cargo add intuitums-e-sdk
   that application version before publishing the SDK.
 - **The application's library target is not a promise.** What the SDK is built
   on is internal; the contract is what this package documents
-  ([compatibility.md](../docs/extend/compatibility.md)).
+  ([compatibility.md](../docs/guides/extend/compatibility.md)).
 
 The SDK pins the application crate version it was tested against. Run `./x check`
 from the repository root to check all workspace members and compile the packaged
-SDK example as an external consumer. See the [SDK guide](../docs/extend/sdk.md)
+SDK example as an external consumer. See the [SDK guide](../docs/guides/extend/sdk.md)
 for the API and release contract.

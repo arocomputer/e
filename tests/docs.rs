@@ -1,4 +1,4 @@
-//! `docs/` is the single source for three readers — GitHub, the website, and the
+//! `docs/guides/` is the single source for three readers — GitHub, the website, and the
 //! binary's `e docs` — so its shape is a contract: complete front matter the
 //! website can parse, unique topic names, and relative links that resolve.
 //! `docs/README.md` is the guide for whoever edits this folder.
@@ -7,10 +7,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 fn docs() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("docs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/guides")
 }
 
-/// Every guide: `docs/<group>/*.md`, excluding each folder's README.md.
+/// Every guide: `docs/guides/<group>/*.md`, excluding each folder's README.md.
 fn guides() -> Vec<PathBuf> {
     let mut found = Vec::new();
     for group in std::fs::read_dir(docs()).unwrap() {
@@ -166,6 +166,7 @@ fn every_relative_link_resolves() {
     files.extend(walk(&manifest.join("contributing")));
     // A reader starts at the repository root, so its guides are checked too.
     for name in [
+        "docs/README.md",
         "README.md",
         "AGENTS.md",
         "CLAUDE.md",
@@ -206,7 +207,7 @@ fn every_relative_link_resolves() {
     // one of them would pass unnoticed.
     assert!(
         files.len() >= guides().len() + 2,
-        "the walk missed files under docs/"
+        "the walk missed files under docs/guides/"
     );
     assert!(
         checked > 20,
