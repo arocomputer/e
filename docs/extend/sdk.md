@@ -20,10 +20,11 @@ The SDK versions itself. Its crate is `intuitums-e-sdk`, mirroring the npm
 naming (`@intuitums/e` → `intuitums-e`), since bare `e` is taken on crates.io;
 and it follows semantic versioning from its first published release: before 1.0,
 a release that changes the documented API without a compatible path moves the
-minor version and names the change in the changelog. It accepts any 0.x of the
-application crate it links, so an SDK release never waits for a binary release,
-and the application's library target is not itself a stable API
-([compatibility.md](compatibility.md)).
+minor version and names the change in the changelog. It pins the exact application crate version it was tested against. The
+application's library target is not itself a stable API
+([compatibility.md](compatibility.md)). When changing the application pin, bump
+the SDK patch version too, or its minor version if the documented API breaks.
+Published crate versions are immutable.
 
 ## Why a separate package
 
@@ -41,7 +42,13 @@ cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
 ```
 
 The package is a member of the root workspace, so `./x check` and `./x test`
-cover it like the rest of the repository. It needs a Tokio runtime: the core
+cover every workspace member. `./x check` also stages the files Cargo includes
+in both packages and compiles an external consumer using the SDK example. This
+catches missing packaged files and dependency drift before publication. The check
+patches the staged application crate locally because its version may not yet be
+on crates.io; the release job publishes the application before the SDK.
+
+The SDK needs a Tokio runtime: the core
 spawns its turn worker and runs tool I/O on the blocking pool.
 
 ## Shape
