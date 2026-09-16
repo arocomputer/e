@@ -23,9 +23,10 @@ reads the directories, and takes only the dependency list from the
 manifest. Find packages in the catalog (`site/packages/`, every npm package
 carrying the `e-package` keyword) or on npmjs.com.
 
-> **Security:** a package runs with your full permissions. Its extensions are
-> executables e starts at launch, and its skills and prompts steer the model.
-> Read the source before installing anything, and pin a ref you have read.
+> [!WARNING]
+> A package runs with your full permissions. Its extensions are executables e
+> starts at launch, and its skills and prompts steer the model. Read the source
+> before installing anything, and pin a ref you have read.
 
 ## Install and manage
 

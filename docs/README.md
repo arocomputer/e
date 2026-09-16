@@ -78,6 +78,17 @@ YAML dependency.
   release archive will not carry it.
 - **Keep the `# Title` heading.** GitHub needs it; the website renders the
   front matter's `title` and drops the duplicate heading.
+- **A note that must stand out uses GitHub's alert syntax**, which GitHub
+  renders as an alert and the website renders as a callout — no component, no
+  change to the website, and `e docs` prints the lines as written:
+
+  ```md
+  > [!WARNING]
+  > A package runs with your full permissions.
+  ```
+
+  The labels are `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, and
+  `[!CAUTION]`.
 
 ## Links
 
