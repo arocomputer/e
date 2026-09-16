@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|test|ui|fmt|lint|guard|bench|packages|channels|scripts|release-check] [args...]" >&2
   exit 2
 }
 
@@ -19,7 +19,7 @@ case "$command" in
     unset E_BUILD_VERSION E_BUILD_CHANNEL E_BUILD_COMMIT
     project=${1:-$PWD}
     if [ "$#" -gt 0 ]; then shift; fi
-    project=$(CDPATH= cd "$project" && pwd)
+    project=$(CDPATH='' cd "$project" && pwd)
     cargo build --locked
     binary="$PWD/target/debug/e"
     cd "$project"
@@ -87,6 +87,29 @@ case "$command" in
   bench)
     [ "$#" -eq 0 ] || usage
     python3 benchmarks/run.py --build --check
+    ;;
+  packages)
+    [ "$#" -eq 0 ] || usage
+    python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
+    node --test scripts/packaging/publish-npm.test.mjs
+    scripts/packaging/smoke.sh
+    ;;
+  channels)
+    [ "$#" -eq 0 ] || usage
+    npm --prefix channels/slack ci
+    npm --prefix channels/slack run typecheck
+    npm --prefix channels/slack test
+    python3 -m unittest discover -s channels/github -p 'test_*.py'
+    ;;
+  scripts)
+    [ "$#" -eq 0 ] || usage
+    python3 -m unittest discover -s scripts/release -p 'test_*.py'
+    python3 -m unittest discover -s scripts/hooks -p 'test_*.py'
+    uvx ruff==0.11.13 check --select F,E9 scripts channels/github tests/ui benchmarks
+    # actionlint 1.7.12 predates GitHub's concurrency.queue field. Ignore only
+    # that schema diagnostic until actionlint supports it; lint the whole file.
+    shellcheck --severity=warning x install.sh scripts/*.sh scripts/packaging/*.sh
+    actionlint -ignore 'unexpected key "queue" for "concurrency"'
     ;;
   release-check)
     ./scripts/release-check.sh "$@"

@@ -65,8 +65,25 @@ repeated here.
 ./x bench    # release-mode performance budgets
 ```
 
-`./x` is the single definition of green; CI runs the same commands, so
-nothing merges on a private definition of passing.
+`./x check` includes every workspace member, including the SDK, and builds an
+external consumer from packaged files. Run the checks for the other paths you
+change as well. CI uses these same commands.
+
+| Changed area | Additional check | Prerequisites |
+| --- | --- | --- |
+| Terminal layout, input, or TUI module boundaries | `./x ui` | Python 3 with venv; the command installs pinned UI dependencies |
+| Installers, npm launchers, or release packaging | `./x packages` | Node 24, npm, Bun 1.4.2, Python 3.11+ |
+| Slack or GitHub channel | `./x channels` | Node 24, npm, Python 3.11+ |
+| Scripts or GitHub workflows | `./x scripts` | Python 3.11+, uv, actionlint 1.7.12, ShellCheck |
+
+`./x scripts` pins Ruff through uv. Its actionlint invocation ignores only the
+unsupported `concurrency.queue` key; the rest of the workflow and embedded shell
+still get checked. Remove that exception when the pinned checker supports it.
+
+When moving modules, preserve the public imports and update the code map and
+CODEOWNERS entries in the same change. Keep configuration writes and terminal
+imports within the boundaries enforced by `scripts/guard.sh`. A file split must
+pass the existing behavioral tests without changing expected output.
 
 ## Review
 

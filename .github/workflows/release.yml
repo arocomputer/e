@@ -281,7 +281,8 @@ jobs:
           # neither `bom.json` nor a name this step can hardcode: renaming the
           # package (`e` is taken on crates.io) failed the whole release at its
           # last step. Ask for however many it wrote, and ship the one.
-          test "$(ls ./*.cdx.json | wc -l)" = 1
+          set -- ./*.cdx.json
+          test "$#" -eq 1 && test -f "$1"
           mv ./*.cdx.json "$RUNNER_TEMP/release-assets/e-sbom.cdx.json"
           # Every workspace member gets one; the release ships the application's.
           find . -name '*.cdx.json' -delete

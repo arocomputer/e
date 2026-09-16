@@ -1,7 +1,6 @@
 """Tolerant pyte screen: agents emit private-mode queries pyte does not model."""
 import codecs, json, pathlib, re
 import pyte
-import re
 
 class Screen(pyte.Screen):
     def report_device_status(self, *args, **kwargs):

@@ -18,7 +18,7 @@ def gh(*args):
 
 
 def install(run_id):
-    """Require a main release run and successful artifact verification, then use the installer."""
+    """Require the verified artifact from a main release run, then use the installer."""
     if not re.fullmatch(r'[1-9][0-9]*', run_id):
         raise ValueError('Run ID must be a positive integer')
     run = json.loads(gh('api', f'repos/intuitums/e/actions/runs/{run_id}'))
@@ -26,9 +26,9 @@ def install(run_id):
             run['event'] != 'workflow_run' or run['head_branch'] != 'main'):
         raise ValueError('Choose a dev Release run from main')
     pages = json.loads(gh('api', '--paginate', '--slurp',
-                         f'repos/intuitums/e/actions/runs/{run_id}/jobs?per_page=100'))
-    if not any(job['name'] == 'Checksums and publish' and job['conclusion'] == 'success'
-               for page in pages for job in page['jobs']):
+                         f'repos/intuitums/e/actions/runs/{run_id}/artifacts?per_page=100'))
+    if not any(artifact['name'] == 'verified-assets' and not artifact['expired']
+               for page in pages for artifact in page['artifacts']):
         raise ValueError('Verified artifacts are not ready for this run')
     with tempfile.TemporaryDirectory() as tmp:
         gh('run', 'download', run_id, '--repo', 'intuitums/e', '--name', 'verified-assets', '--dir', tmp)

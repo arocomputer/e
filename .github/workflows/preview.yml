@@ -57,7 +57,8 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           python3 scripts/release/identity.py --channel pr --sequence "$SEQUENCE" > preview.json
-          export E_BUILD_VERSION=$(python3 -c 'import json; print(json.load(open("preview.json"))["version"])')
+          E_BUILD_VERSION=$(python3 -c 'import json; print(json.load(open("preview.json"))["version"])')
+          export E_BUILD_VERSION
           rustup target add "$TARGET"
           cargo build --release --locked --target "$TARGET"
           mkdir preview

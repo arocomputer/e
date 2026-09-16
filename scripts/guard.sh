@@ -17,12 +17,11 @@ bad() { fail=1; say "FAIL: $*"; }
 # host like example.invalid, a scratch File::write into a temp dir) trip
 # boundaries these checks mean for the shipped binary, not its tests.
 prod_rs() {
-  for f in "$@"; do
-    awk -v file="$f" '
-      /^#\[cfg\(test\)\]/ { exit }
-      { print file":"FNR":"$0 }
-    ' "$f"
-  done
+  find "$@" -name '*.rs' -type f -exec awk '
+    FNR == 1 { skip = 0 }
+    /^#\[cfg\(test\)\]/ { skip = 1 }
+    !skip { print FILENAME":"FNR":"$0 }
+  ' {} +
 }
 
 # 1. Network surface. e talks to its sign-in and model providers, and to
@@ -33,7 +32,7 @@ prod_rs() {
 # Numeric loopback is used by tests/ui/run.py's synthetic streaming server.
 allowed_hosts="localhost 127.0.0.1 models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com www.npmjs.com github.com registry.npmjs.org e.intuitum.sh ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
 found_hosts=$(
-  { prod_rs $(find src -name '*.rs' 2>/dev/null); find scripts tests/ui -type f ! -path '*/__pycache__/*' -exec cat -- {} + 2>/dev/null; } |
+  { prod_rs src; find scripts tests/ui -type f ! -path '*/__pycache__/*' -exec cat -- {} + 2>/dev/null; } |
     grep -ohE 'https?://[A-Za-z0-9.-]+' | sed -E 's#https?://##' | sort -u
 )
 for host in $found_hosts; do
@@ -65,7 +64,7 @@ fi
 #    owns ~/.e/packages/ (the npm project file there) and the files
 #    `e packages init` scaffolds into a directory the user names; its
 #    settings entries still go through the store.
-if out=$(prod_rs $(find src/core -name '*.rs' 2>/dev/null) | grep -E 'fs::write|File::create|OpenOptions' |
+if out=$(prod_rs src/core | grep -E 'fs::write|File::create|OpenOptions' |
     grep -v '^src/core/config/store.rs:' | grep -v '^src/core/session.rs:' |
     grep -v '^src/core/config/home.rs:' | grep -v '^src/core/tools/' |
     grep -v '^src/core/update.rs:' | grep -v '^src/core/providers/diagnostics.rs:' |

@@ -7,16 +7,15 @@ from dev_install import install
 
 
 class DevInstallTests(unittest.TestCase):
-    def fixture(self, *, verified=True, event='workflow_run', channel='dev'):
+    def fixture(self, *, verified=True, event='workflow_run', channel='dev', artifact='verified-assets'):
         """Supply downloaded metadata without contacting GitHub or changing an installation."""
         def gh(*args):
             if args[0] == 'run':
                 Path(args[-1], 'build.json').write_text(json.dumps({
                     'version': f'1.2.3-{channel}.12.gabcdef012345', 'commit': 'abcdef012345' + 'a' * 28}))
                 return ''
-            if 'jobs?' in args[-1]:
-                return json.dumps([{'jobs': [{'name': 'Checksums and publish',
-                                             'conclusion': 'success' if verified else 'failure'}]}])
+            if 'artifacts?' in args[-1]:
+                return json.dumps([{'artifacts': [{'name': artifact, 'expired': not verified}]}])
             return json.dumps({'path': '.github/workflows/release.yml', 'event': event,
                                'head_branch': 'main', 'conclusion': 'failure'})
         return gh
@@ -28,7 +27,7 @@ class DevInstallTests(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs['env']['E_RELEASE_BASE'].startswith('file://'))
 
     def test_unverified_or_non_dev_runs_never_install(self):
-        for options in [{'verified': False}, {'event': 'pull_request'}, {'channel': 'beta'}]:
+        for options in [{'verified': False}, {'event': 'pull_request'}, {'channel': 'beta'}, {'artifact': 'raw-assets'}]:
             with self.subTest(options=options), patch('dev_install.gh', side_effect=self.fixture(**options)), \
                     patch('dev_install.subprocess.run') as run:
                 with self.assertRaises(ValueError):

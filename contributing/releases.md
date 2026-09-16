@@ -78,7 +78,7 @@ authenticated GitHub CLI and select a Release run:
 ```
 
 This installs `e-dev` through the checksum-verifying installer after the run's
-Checksums and publish job succeeds, even if npm is still running or fails.
+verified-assets upload completes, even if npm is still running or fails.
 The artifacts expire after 14 days. Repeat with a newer run to update; the
 installed build does not self-update. Older runs without `build.json` cannot
 use this command. Stable remains the default:
@@ -260,7 +260,8 @@ list @intuitums/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
 Subsequent releases need no npm token. The token in 1Password can remain available
 for separately authorized manual publishing.
 
-The website's documentation builds from this repository's `docs/`, so
+The website deploys separately and reads this repository's `docs/`. There is no
+website application under `site/` in this repository.
 `.github/workflows/docs.yml` pings `DOCS_DEPLOY_HOOK` — the Vercel deploy hook
 for the web project — whenever `docs/` or `contributing/` reaches `main`. Set
 the secret once; without it the job fails loudly rather than going stale
@@ -270,7 +271,7 @@ crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish the two crates
 and no others: `intuitums-e` (the application's npm naming, `@intuitums/e`, since
 bare `e` is taken on crates.io) and `intuitums-e-sdk`. The `crates` job publishes
 the application first and waits for it to appear on the index, because the SDK's
-manifest depends on it by version, and skips a version that is already published
+manifest pins its exact version, and skips a version that is already published
 so a retry is safe. Stable releases only: previews stay on npm. The application's
 version is the release version; the SDK versions itself, so the job reads
 `sdk/Cargo.toml` and publishes only when that version is new. Create the token at
@@ -321,3 +322,16 @@ means availability is unconfirmed; check npm package status and rerun failed job
 Authentication errors and checksum mismatches fail immediately. The npm job allows
 110 minutes for the application packages, optional stable bot publication, and
 installation verification.
+
+## Checking release changes locally
+
+Run `./x scripts` for release-selection tests and workflow lint, and `./x packages`
+for generated package contents and npm/Bun launchers. `./x channels` checks the
+independently versioned Slack package and GitHub client. These are the same
+commands CI runs; none publishes a package.
+
+The `verified-assets` artifact is the dev install readiness contract. The release
+workflow uploads it only after checksum generation, provenance, and artifact checks.
+`./x install-dev RUN_ID` requires that unexpired artifact from an official main
+Release run and validates its `build.json` channel and commit identity. Job display
+names and unrelated npm results do not determine direct-install readiness.
