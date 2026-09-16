@@ -1,6 +1,6 @@
 ---
 title: Usage
-description: sessions, automation, channels, and isolation
+description: sessions, the command line, automation, channels, and isolation
 order: 2
 ---
 

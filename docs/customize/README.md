@@ -1,6 +1,6 @@
 ---
 title: Customize
-description: instructions, prompts, skills, packages, themes, keys, layout
+description: models, settings, instructions, prompts, skills, themes, keys, layout
 order: 3
 ---
 

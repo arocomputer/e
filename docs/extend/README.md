@@ -1,6 +1,6 @@
 ---
 title: Extend
-description: embed e, or build against its contracts
+description: extensions, packages, the SDK, and compatibility
 order: 4
 ---
 

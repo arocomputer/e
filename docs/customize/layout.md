@@ -1,7 +1,7 @@
 ---
 title: Layout
 description: layout.json: where panes go, what the status row says
-order: 7
+order: 8
 ---
 
 # Layout
@@ -32,7 +32,7 @@ Every key is optional; what is shown above is the default, except the
 
 ## Panes
 
-An extension opens a side pane with `ui.pane` (`docs/customize/extensions.md`) and
+An extension opens a side pane with `ui.pane` (`docs/extend/extensions.md`) and
 may propose a side. `panes` outranks it: an entry named after the pane's
 id sets its `side` (`left` or `right`) and `width` (its share of the
 terminal, 30–70 percent); `*` is the default for every pane not named.
