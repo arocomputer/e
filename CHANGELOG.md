@@ -23,7 +23,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Run a headless turn with `e -p`; add `--json` for session events. `e rpc` accepts a built-in tool allowlist and returns the saved session path.
 - `e rpc` is a session server: `session.create` opens a conversation against any working directory, `session.prompt` streams its events tagged with the session and request and answers with the turn result, and sessions run side by side. Steer, interrupt, compact, fork, export, resume saved sessions, list models, and change model or effort between turns. Extension questions reach the client as `ask` lines to answer. Version-1 one-shot lines keep working unchanged.
 - Trust a workspace without the terminal with `e trust [dir]`, and reverse it with `e untrust [dir]`. An unattended session — a channel bot, a CI job — cannot answer the trust panel, and until now that left it loading none of the repository's own instructions.
-- Install the Slack channel from npm (`npm install -g @intuitums/e-slack`, or `npx @intuitums/e-slack`). It ships with each release — its own version, the release's npm tag.
+- Install the Slack channel from npm (`npm install -g @intuitums/e-slack`, or `npx @intuitums/e-slack`). It keeps its own version and publishes under `latest` with stable releases.
 - Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
 - Embed e with the `intuitums-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
@@ -75,6 +75,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Startup and long-session rendering have performance budgets. Terminal-frame checks cover tool trees, composer placement, errors, and review colors.
 
 ### Fixes
+
+- Publish the independently versioned Slack package with stable releases only, avoiding conflicting tarballs across channels. Its updated README gets a new package version.
 
 - Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
 - RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.

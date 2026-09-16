@@ -388,21 +388,17 @@ jobs:
       - name: Publish and verify npm packages
         id: packages
         env:
-          # Remove this secret after all five packages trust this workflow.
+          # Remove this secret after all application packages and the Slack bot trust this workflow.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist --exclude=slack
       - name: Publish the Slack channel
-        # `@intuitums/e-slack` ships with the release but is not part of it: it is
-        # the reference bot, so a registry hiccup here must not fail the release,
-        # stop the install channel advancing, or block another package's retry.
+        # The bot versions itself and publishes with stable only. A bot publication
+        # failure does not block the application's installers or their retries.
+        if: needs.resolve.outputs.channel == 'stable'
         continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          # No version to check here: the channel keeps its own, so the
-          # release's is not its. The script verifies what it published against
-          # the registry, integrity included.
-          node scripts/packaging/publish-npm.mjs dist --only=slack
+        run: node scripts/packaging/publish-npm.mjs dist --only=slack
       - name: Keep preview packages off latest
         id: cleanup
         if: needs.resolve.outputs.channel != 'stable'

@@ -199,7 +199,12 @@ archives instead of rebuilding. For a draft whose builds finished, retry regener
 checksums, the SBOM, and provenance in an isolated temporary directory, then
 publishes the draft before updating packages. Incomplete drafts fail until all
 four archives exist. npm compares the existing package's integrity;
-a different tarball under the same version fails. Each registry can fail
+a different tarball under the same version fails. The Slack bot keeps its own
+version, which must change whenever any packaged file changes, including its
+README. New bot versions publish under `latest` with stable application releases;
+dev and beta releases leave it alone. Historical bot dev/beta tags remain
+available. This avoids changing package bytes or requiring separate tag-management
+credentials when the application changes channels. Each registry can fail
 independently; rerun failed publication after recovery. Package-manager failures
 do not block verified direct downloads or beta channel advancement. There is no transaction
 across registries.
@@ -239,10 +244,10 @@ in `intuitums/e`. Unattended publishing requires a token that can bypass 2FA.
 The npm job uses it as a fallback until trusted publishing is configured.
 
 After the first publication, use an interactive npm login with 2FA enabled and
-npm 11.15.0 or newer to configure the five packages:
+npm 11.15.0 or newer to configure the application packages and the Slack bot:
 
 ```sh
-for package in e e-darwin-arm64 e-darwin-x64 e-linux-arm64 e-linux-x64; do
+for package in e e-darwin-arm64 e-darwin-x64 e-linux-arm64 e-linux-x64 e-slack; do
   npm trust github "@intuitums/$package" \
     --repository intuitums/e --file release.yml --allow-publish --yes
   sleep 2
@@ -314,4 +319,5 @@ integrity. It never republishes an accepted upload in the same attempt. A rerun
 recognizes an already staged version and resumes waiting. A processing timeout
 means availability is unconfirmed; check npm package status and rerun failed jobs.
 Authentication errors and checksum mismatches fail immediately. The npm job allows
-110 minutes for all five packages and installation verification.
+110 minutes for the application packages, optional stable bot publication, and
+installation verification.
