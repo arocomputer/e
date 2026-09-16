@@ -65,7 +65,7 @@ settings and sessions stay apart from the stable installation. Curl and brew
 install beta beside production; npm and bun replace the version of the one
 package, and `@latest` returns it to stable. Beta binaries come from a separate
 repository, so an existing beta needs one reinstall to adopt its new update
-source. [Releases and testing](../../contributing/releases.md) covers every
+source. [Releases and testing](../../../contributing/releases.md) covers every
 installer, the local `./x dev` build, and PR builds.
 
 A specific version is `--version X.Y.Z` on the shell installer; a beta version
