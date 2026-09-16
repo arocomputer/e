@@ -80,7 +80,8 @@ YAML dependency.
   front matter's `title` and drops the duplicate heading.
 - **A note that must stand out uses GitHub's alert syntax**, which GitHub
   renders as an alert and the website renders as a callout — no component, no
-  change to the website, and `e docs` prints the lines as written:
+  change to the website. `e docs` prints the label instead of the marker
+  (`> Warning:`), because `[!WARNING]` is not prose to a reader in a shell:
 
   ```md
   > [!WARNING]

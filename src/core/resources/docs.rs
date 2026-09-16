@@ -29,14 +29,37 @@ pub fn topics() -> impl Iterator<Item = (&'static str, &'static str)> {
     TOPICS.iter().copied().chain(THEME_TOPICS.iter().copied())
 }
 
-/// One topic's text, without the front matter that labels it on the website.
-pub fn body(topic: &str) -> Option<&'static str> {
+/// One topic's text, ready for a terminal: the front matter that labels it on
+/// the website is removed, and GitHub's alert markers become the labels they
+/// stand for — `[!WARNING]` is not prose to a reader in a shell.
+pub fn body(topic: &str) -> Option<String> {
     let raw = match topic {
         "theme-dark" => include_str!("../../../assets/themes/dark.json"),
         "theme-light" => include_str!("../../../assets/themes/light.json"),
         _ => generated::body(topic)?,
     };
-    Some(strip_front_matter(raw))
+    Some(labels(strip_front_matter(raw)))
+}
+
+/// `> [!WARNING]` reads as `> Warning:`; every other line is untouched.
+fn labels(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (content, newline) = match line.strip_suffix('\n') {
+            Some(content) => (content, "\n"),
+            None => (line, ""),
+        };
+        match content {
+            "> [!NOTE]" => out.push_str("> Note:"),
+            "> [!TIP]" => out.push_str("> Tip:"),
+            "> [!IMPORTANT]" => out.push_str("> Important:"),
+            "> [!WARNING]" => out.push_str("> Warning:"),
+            "> [!CAUTION]" => out.push_str("> Caution:"),
+            other => out.push_str(other),
+        }
+        out.push_str(newline);
+    }
+    out
 }
 
 /// Front matter is the website's metadata; a terminal prints the prose.

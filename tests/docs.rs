@@ -89,6 +89,17 @@ fn every_guide_has_complete_front_matter() {
     }
 }
 
+/// The three readers see the same guide: GitHub and the site render the alert
+/// syntax, a terminal gets the label written out.
+#[test]
+fn a_terminal_reads_an_alert_as_a_label() {
+    let packages = e::core::resources::docs::body("packages").unwrap();
+    assert!(packages.contains("> Warning:"), "{packages}");
+    assert!(!packages.contains("[!"), "the marker reached the terminal");
+    let models = e::core::resources::docs::body("models").unwrap();
+    assert!(!models.contains("[!"), "a guide without an alert grew one");
+}
+
 #[test]
 fn every_group_declares_its_title_and_order() {
     let mut orders = BTreeSet::new();
