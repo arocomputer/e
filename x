@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|install-dev|hooks|check|test|ui|fmt|lint|guard|bench|release-check] [args...]" >&2
   exit 2
 }
 
@@ -31,6 +31,9 @@ case "$command" in
     ;;
   preview)
     exec python3 scripts/release/preview.py "$@"
+    ;;
+  install-dev)
+    exec python3 scripts/release/dev_install.py "$@"
     ;;
   hooks)
     [ "$#" -eq 0 ] || usage
