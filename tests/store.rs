@@ -2,9 +2,9 @@
 //! corrupt files, and never wipe on a parse error.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 
-static LOCK: Mutex<()> = Mutex::new(());
+mod common;
+use common::{env_lock, Home};
 
 #[test]
 fn unversioned_configuration_fixtures_remain_json_objects() {
@@ -19,20 +19,11 @@ fn unversioned_configuration_fixtures_remain_json_objects() {
     }
 }
 
-fn home(name: &str) -> PathBuf {
-    // Unique per process so concurrent CI users on a shared box can't collide
-    // on a fixed path (a stale other-user dir would make writes EPERM).
-    let h = std::env::temp_dir().join(format!("e-store-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&h);
-    std::fs::create_dir_all(&h).unwrap();
-    std::env::set_var("E_HOME", &h);
-    h
-}
-
 #[test]
 fn settings_write_preserves_unknown_keys() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("settings");
+    let _g = env_lock();
+    let fixture = Home::new("settings");
+    let h = fixture.dir.clone();
     // A user hand-added a key e knows nothing about.
     std::fs::write(
         h.join("settings.json"),
@@ -52,8 +43,9 @@ fn settings_write_preserves_unknown_keys() {
 
 #[test]
 fn auth_write_preserves_an_unparseable_entry() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("auth");
+    let _g = env_lock();
+    let fixture = Home::new("auth");
+    let h = fixture.dir.clone();
     // One good entry, one in a shape e can't interpret.
     std::fs::write(
         h.join("auth.json"),
@@ -78,8 +70,9 @@ fn auth_write_preserves_an_unparseable_entry() {
 
 #[test]
 fn trust_write_versions_the_file_and_preserves_unknown_keys() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("trust-format");
+    let _g = env_lock();
+    let fixture = Home::new("trust-format");
+    let h = fixture.dir.clone();
     std::fs::write(h.join("trust.json"), r#"{"future":{"value":42}}"#).unwrap();
     let workspace = h.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -94,8 +87,9 @@ fn trust_write_versions_the_file_and_preserves_unknown_keys() {
 
 #[test]
 fn future_configuration_formats_are_never_downgraded() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("future-formats");
+    let _g = env_lock();
+    let fixture = Home::new("future-formats");
+    let h = fixture.dir.clone();
     let future = r#"{"format_version":999,"future":{"must":"survive"}}"#;
 
     let settings_path = h.join("settings.json");
@@ -123,9 +117,10 @@ fn future_configuration_formats_are_never_downgraded() {
 
 #[test]
 fn a_corrupt_file_is_quarantined_not_reset() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = env_lock();
     let _ = e::core::config::store::take_warnings();
-    let h = home("corrupt");
+    let fixture = Home::new("corrupt");
+    let h = fixture.dir.clone();
     std::fs::write(h.join("settings.json"), "{ this is not json").unwrap();
 
     e::core::config::settings::set_string("theme", "light").unwrap();
@@ -155,8 +150,9 @@ fn an_unreadable_file_aborts_the_write_instead_of_being_wiped() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let h = home("unreadable");
+        let _g = env_lock();
+        let fixture = Home::new("unreadable");
+        let h = fixture.dir.clone();
         std::fs::write(h.join("auth.json"), r#"{"existing":{"key":"k"}}"#).unwrap();
         std::fs::set_permissions(h.join("auth.json"), std::fs::Permissions::from_mode(0o000))
             .unwrap();
@@ -187,8 +183,9 @@ fn an_unreadable_file_aborts_the_write_instead_of_being_wiped() {
 
 #[test]
 fn quarantine_failure_preserves_the_corrupt_source() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("quarantine-fail");
+    let _g = env_lock();
+    let fixture = Home::new("quarantine-fail");
+    let h = fixture.dir.clone();
 
     // A directory where the file must be: rename() of the corrupt original
     // aside cannot succeed, so the write must abort rather than proceed.
@@ -206,8 +203,9 @@ fn quarantine_failure_preserves_the_corrupt_source() {
 
 #[test]
 fn concurrent_updates_preserve_every_key_and_keep_the_temp_unique() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("concurrent");
+    let _g = env_lock();
+    let fixture = Home::new("concurrent");
+    let h = fixture.dir.clone();
     let path = h.clone();
 
     let handles: Vec<_> = (0..8)
@@ -266,8 +264,9 @@ fn subprocess_store_writer() {
 
 #[test]
 fn concurrent_process_updates_preserve_both_snapshots() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let h = home("concurrent-processes");
+    let _g = env_lock();
+    let fixture = Home::new("concurrent-processes");
+    let h = fixture.dir.clone();
     let path = h.join("settings.json");
     let marker = h.join("first-has-read");
 
@@ -313,7 +312,7 @@ fn concurrent_process_updates_preserve_both_snapshots() {
 /// and sessions must never land in whatever directory e was launched from.
 #[test]
 fn an_empty_e_home_does_not_point_at_the_current_directory() {
-    let _guard = LOCK.lock().unwrap();
+    let _guard = env_lock();
     std::env::set_var("E_HOME", "");
     let home = e::core::config::home::home();
     std::env::remove_var("E_HOME");
