@@ -78,6 +78,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 - RPC rejects malformed optional parameters and applies model/effort changes atomically.
 - The Slack channel preserves damaged state files, saves thread paths atomically, and terminates unresponsive RPC children during shutdown.
+- The Rust SDK pins the application version it was tested against.
 
 - Publish the independently versioned Slack package with stable releases only, avoiding conflicting tarballs across channels. Its updated README gets a new package version.
 

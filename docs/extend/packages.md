@@ -20,8 +20,9 @@ themes/       <name>.json palettes
 
 There is no manifest of e's own. A `package.json` is npm's business: e
 reads the directories, and takes only the dependency list from the
-manifest. Find packages in the catalog (`site/packages/`, every npm package
-carrying the `e-package` keyword) or on npmjs.com.
+manifest. Find published packages through the
+[npm package search](https://www.npmjs.com/search?q=keywords%3Ae-package).
+Package authors add the `e-package` keyword to make their bundles discoverable.
 
 > [!WARNING]
 > A package runs with your full permissions. Its extensions are executables e

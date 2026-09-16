@@ -3,14 +3,14 @@
 e is one primary Rust crate with two directional layers:
 
 ```text
-CLI / TUI          e rpc (JSONL session server)
+CLI / TUI          e rpc (JSONL session server)          Rust SDK
     │ subscribes to one ordered SessionEvent stream
     ▼
 terminal-free core
     ├── agent turn loop ──► provider wire dialects ──► model APIs
     ├── tools ────────────► the selected working directory
     ├── extension host ───► user-installed child processes over JSONL
-    └── stores ───────────► ~/.e only
+    └── stores ───────────► the captured configuration home
 ```
 
 The single-crate shape is intentional. A new crate needs an independent
@@ -27,7 +27,7 @@ extract a module, not a crate.
   ordered event stream. There are no state side channels.
 - The core owns run completion, steering, and compaction. `TurnEnd` means
   the run has stopped; a context checkpoint emits `Compacting` and
-  `Compacted` without ending the run. RPC and the TUI share this lifecycle.
+  `Compacted` without ending the run. RPC, the TUI, and the SDK share this lifecycle.
 - Each agent captures its working directory and configuration home and owns
   file observations and background handles. Explicit `AgentOptions` paths
   allow concurrent callers without changing process environment variables.
@@ -43,11 +43,35 @@ extract a module, not a crate.
   one request and event vocabulary.
 - User-controlled behavior is file-backed or supplied by the extension
   process boundary. e does not embed a scripting runtime or daemon.
-- `~/.e/` is e's only home. Store writes merge unknown keys and replace files
-  atomically.
-- Packages are data: git repositories shaped like `~/.e/`, cloned by the
-  user's own `git` on `e install` and read by the same loaders as the home.
-  Startup reads disk only; nothing a package carries runs at install time.
+- `core/config/home.rs` resolves the active home. Stable uses `~/.e/`, preview
+  channels use separate homes, and `E_HOME` overrides either. Agents capture that
+  path at construction. Store writes merge unknown keys and replace files atomically.
+- Resource packages use the same four resource directories as the home.
+  Sources can be npm, git, local directories, or verified release archives.
+  `packages/source.rs` parses identities; `packages.rs` owns installation and
+  settings. Startup reads disk only; npm lifecycle scripts stay disabled.
 - Trust gates whether e runs in a workspace at all, and with it the
   repository-provided context. It is not an execution sandbox.
   The complete threat model is in [../SECURITY.md](../SECURITY.md).
+
+## Ownership when changing code
+
+The code map in [AGENTS.md](../AGENTS.md) names the files. These boundaries decide
+where new behavior belongs:
+
+- Provider messages persist across releases. Keep their serialization independent
+  of HTTP transport; errors classify retry behavior before the agent sees them.
+- Agent persistence commits history and logs. Session events describe the result
+  to all three frontends; frontends must not repair or restart core turns.
+- RPC decodes optional parameters before applying defaults. Validate a proposed
+  state change completely before committing it, including model and effort together.
+- TUI modules share one `App`. Frames paint state, input submits work, session
+  actions navigate history, and the runtime owns terminal cleanup. Keep asynchronous
+  results tied to their session or draft generation.
+- Channels own subprocesses and their own state files. They must bound shutdown
+  and preserve unreadable state rather than treating it as a fresh installation.
+
+The website consumes `docs/` from this repository and deploys separately. Resource
+package discovery links to npm's `e-package` keyword search; this repository does
+not maintain a second catalog application. Native application distribution lives
+in `packaging/`, which is unrelated to installable resource bundles.

@@ -23,11 +23,14 @@ test.
 ```
 src/core/    the harness, terminal-free
   agent/          mod.rs owns run lifecycle and session state;
+                  event.rs is the frontend contract; persistence.rs commits
+                  history and logs and reports write failures;
                   turn.rs: request → stream → tools → compact when needed → repeat;
                   compact.rs (threshold, protected instructions, summarize)
                   · context.rs (system prompt, AGENTS.md, skills catalog)
-  providers/      the seam (mod.rs) — one Request, one Event stream, the SSE
-                  splitter · api/{completions,responses,anthropic,google}.rs ·
+  providers/      mod.rs (Request and Event), message.rs (persisted messages),
+                  error.rs (failure classification), transport.rs (HTTP deadlines),
+                  sse.rs (bounded framing) · api/{completions,responses,anthropic,google}.rs ·
                   registry.rs + data/*.json (providers are data: gateway,
                   dialect, auth surface, seed models) · catalog/ (assembly,
                   availability, scope; remote.rs = the live /models sync;
@@ -39,10 +42,14 @@ src/core/    the harness, terminal-free
                   and extension shortcuts share). Terminal-free: nothing
                   under core/ names tui/ or crossterm — guard.sh pins it
   resources/      skills.rs · prompts.rs (/name templates) · packages.rs
-                  (`e install`: git clones under ~/.e/packages that every
-                  loader reads after ~/.e's own dirs) · docs.rs (the
+                  with packages/source.rs (source parsing); `e install` manages
+                  npm, git, local, and release bundles that every
+                  loader reads after the active home's own dirs · docs.rs (the
                   embedded guides behind `e docs`)
-  extensions/     the extension host: subprocesses over a JSONL line
+  extensions/     the extension host: host.rs owns process lifecycle and routing;
+                  host/discovery.rs finds entry points, host/hooks.rs handles
+                  hooks and events, host/transport.rs owns bounded JSONL I/O.
+                  Subprocesses use a JSONL line
                   protocol (docs/extend/extensions.md) — tools, commands, hooks,
                   events, and the extensions' own ui.*/session.* requests
                   (HostRequest, answered by the frontend)
@@ -62,14 +69,17 @@ src/tui/     the frontend (short paths re-export from the groups)
                   ~/.e/keybindings.json keymap) · statusline · history
                   (prompts across sessions, ~/.e/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
-  app/            mod.rs (App state, keys, the frame loop) · events.rs
+  app/            mod.rs (App state and shared actions) · runtime.rs (startup
+                  and frame loop) · frame.rs (painting) · input.rs (composer
+                  and attachments) · sessions.rs (navigation) · events.rs
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows) · extui.rs (answering
                   extensions: modals, panels, status slots, session control)
 src/rpc/     the headless frontend: `e rpc`, a JSONL session server over
              stdin/stdout (docs/usage/automation.md) — mod.rs (sessions, methods,
              the serve loop, extension questions relayed as `ask`) ·
-             result.rs (the turn result `-p --json` and rpc both report)
+             params.rs (typed method inputs) · result.rs (the turn result
+             `-p --json` and rpc both report)
 docs/        the guides, one folder per nav group, with front matter as their
              only metadata (docs/README.md is the writing guide); `e docs`
              and the website both read them. contributing/ is the
@@ -92,13 +102,23 @@ Each `tests/*.rs` file is its own binary; the fast loops are:
 cargo test --test stream            # agent turn loop against a mock provider
 cargo test --test providers         # the four wire dialects' request/stream shapes
 cargo test --test parity            # byte-pinned rendering (run after any look change)
+cargo test --test file_tools        # read/write/edit/grep behavior
+cargo test -p intuitums-e-sdk        # embedded SDK consumer
 cargo test --test toolloop          # end-to-end tool execution
 cargo test name_of_one_test         # any single test, by name substring
 ```
 
 New integration tests use `tests/common/` (`mod common;`) — `Home` for an
-isolated `E_HOME`, `env_lock()` around anything env-global, `serve_sse` +
+isolated `E_HOME` that restores the prior value on drop, `env_lock()` around anything env-global, `serve_sse` +
 `test_model` for a mock provider. Don't hand-roll a second mock harness.
+Use explicit `AgentOptions` home/cwd paths for concurrent embedded sessions;
+process environment belongs only in serialized fixtures. Keep specialized
+servers when the test needs transport timing or malformed bytes.
+
+`./x check` covers all workspace members and an external consumer compiled from
+Cargo package file lists. It does not replace `./x packages`, `./x channels`,
+`./x scripts`, or `./x ui`; run the relevant command when changing those paths.
+See CONTRIBUTING.md for prerequisites and the check matrix.
 
 ## How the look stays consistent
 
