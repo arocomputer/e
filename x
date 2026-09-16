@@ -43,20 +43,17 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     cargo fmt --check
     cargo fmt --manifest-path fuzz/Cargo.toml --check
-    cargo clippy --all-targets -- -D warnings
-    cargo test --locked
-    # The published crates: the application is packaged and built end to end,
-    # and the SDK's file list is checked (it cannot resolve its own dependency
-    # until the application is on the registry, which the release publishes
-    # first).
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace --locked
+    # Verify package contents and compile the SDK from an external consumer.
     cargo publish --dry-run --locked --allow-dirty -p intuitums-e
-    cargo package --list --allow-dirty -p intuitums-e-sdk
+    python3 scripts/check-sdk.py
     ./scripts/guard.sh
     python3 -m unittest discover -s scripts/release -p 'test_*.py'
     python3 -m unittest discover -s scripts/hooks -p 'test_*.py'
     ;;
   test)
-    cargo test --locked "$@"
+    cargo test --workspace --locked "$@"
     ;;
   ui)
     cargo build --locked
@@ -81,7 +78,7 @@ case "$command" in
     cargo fmt --manifest-path fuzz/Cargo.toml "$@"
     ;;
   lint)
-    cargo clippy --all-targets "$@" -- -D warnings
+    cargo clippy --workspace --all-targets "$@" -- -D warnings
     ;;
   guard)
     [ "$#" -eq 0 ] || usage
