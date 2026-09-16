@@ -1,67 +1,41 @@
-<!doctype html>
-<!--
-  The e package catalog: one static page, no build, no server. It asks the
-  npm registry's search API for every package carrying the `e-package`
-  keyword and renders the answer. Host it anywhere that serves a file;
-  the registry answers cross-origin requests.
--->
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>e packages</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --fg: #1f1f1f; --bg: #fff; --muted: #6b6b6b; --box: #f4f4f5; --border: #e4e4e7; --accent: #7c3aed;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --fg: #e6e6e6; --bg: #111; --muted: #9a9a9a; --box: #1b1b1f; --border: #2a2a2e; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
-  main { max-width: 900px; margin: 0 auto; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h1 span { color: var(--accent); }
-  .lead { color: var(--muted); margin: 0 0 20px; }
-  .lead code, .card code, .empty code { font-family: ui-monospace, monospace; font-size: 13px; background: var(--box); padding: 1px 5px; border-radius: 4px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-  .controls input, .controls select { font: inherit; color: var(--fg); background: var(--box); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
-  .controls input { flex: 1 1 240px; min-width: 0; }
-  .count { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
-  .card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--box); }
-  .card .head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
-  .card .name { font-weight: 600; font-size: 16px; text-decoration: none; color: var(--fg); }
-  .card .name:hover { color: var(--accent); }
-  .card .version, .card .meta { color: var(--muted); font-size: 13px; }
-  .card .desc { margin: 6px 0 8px; }
-  .card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-  .card .tag { font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
-  .card .install { font-family: ui-monospace, monospace; font-size: 13px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; display: inline-block; user-select: all; }
-  .card .links { float: right; font-size: 13px; }
-  .card .links a { color: var(--muted); margin-left: 10px; }
-  .empty, .error { color: var(--muted); padding: 24px 0; }
-  footer { color: var(--muted); font-size: 13px; margin-top: 32px; }
-  footer a { color: inherit; }
-</style>
-</head>
-<body>
-<main>
-  <h1><span>e</span> packages</h1>
-  <p class="lead">Extensions, skills, prompt templates, and themes for <a href="https://github.com/intuitums/e">e</a>. Every npm package with the <code>e-package</code> keyword, straight from the registry. Install one with <code>e install npm:&lt;name&gt;</code>.</p>
-  <div class="controls">
-    <input id="q" type="search" placeholder="filter by name, description, author, or keyword" autocomplete="off">
-    <select id="sort">
-      <option value="downloads">most downloaded</option>
-      <option value="recent">recently published</option>
-      <option value="name">a–z</option>
-    </select>
+---
+/**
+ * The package catalog: every npm package carrying the `e-package` keyword,
+ * asked of the npm registry's search API in the reader's browser. No build
+ * step and no server; the registry answers cross-origin requests.
+ */
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Package catalog",
+    description: "Extensions, skills, prompt templates, and themes published for e.",
+    tableOfContents: false,
+    editUrl: false,
+  }}
+>
+  <p>
+    Every npm package with the <code>e-package</code> keyword, straight from the
+    registry. Install one with <code>e install npm:&lt;name&gt;</code>. A package
+    runs with your full permissions; read the source before installing. See
+    <a href="/docs/packages/">packages</a> to publish your own.
+  </p>
+  <div class="not-content catalog">
+    <div class="controls">
+      <input id="q" type="search" placeholder="filter by name, description, author, or keyword" autocomplete="off" />
+      <select id="sort">
+        <option value="downloads">most downloaded</option>
+        <option value="recent">recently published</option>
+        <option value="name">a–z</option>
+      </select>
+    </div>
+    <div class="count" id="count">loading…</div>
+    <div id="list"></div>
   </div>
-  <div class="count" id="count">loading…</div>
-  <div id="list"></div>
-  <footer>Publish one: <code>e packages init my-package</code>, then <code>npm publish</code> — see <a href="https://github.com/intuitums/e/blob/main/docs/guides/customize/packages.md">docs/guides/customize/packages.md</a>. A package runs with your full permissions; read the source before installing.</footer>
-</main>
-<script>
+</StarlightPage>
+
+<script is:inline>
 (async () => {
   const REGISTRY = "https://registry.npmjs.org/-/v1/search";
   const KINDS = ["extensions", "skills", "prompts", "themes"];
@@ -168,5 +142,28 @@
   }
 })();
 </script>
-</body>
-</html>
+
+<style is:global>
+  .catalog { margin-top: 1.5rem; }
+  .catalog .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .catalog input, .catalog select {
+    font: inherit; font-size: var(--sl-text-sm); color: var(--sl-color-white);
+    background: var(--sl-color-gray-6); border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 0.25rem; padding: 0.5rem 0.75rem;
+  }
+  .catalog input { flex: 1 1 15rem; min-width: 0; }
+  .catalog .count, .catalog .empty, .catalog .error { color: var(--sl-color-gray-3); font-size: var(--sl-text-sm); }
+  .catalog .count { margin-bottom: 0.75rem; }
+  .catalog .empty, .catalog .error { padding: 1.5rem 0; }
+  .catalog .card { border-top: 1px solid var(--sl-color-hairline); padding: 1rem 0; }
+  .catalog .head { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: baseline; }
+  .catalog .name { font-weight: 600; color: var(--sl-color-white); text-decoration: none; }
+  .catalog .name:hover { text-decoration: underline; }
+  .catalog .version, .catalog .meta, .catalog .links a { color: var(--sl-color-gray-3); font-size: var(--sl-text-xs); }
+  .catalog .links { float: right; }
+  .catalog .links a { margin-left: 0.75rem; }
+  .catalog .desc { margin: 0.375rem 0 0.5rem; color: var(--sl-color-gray-2); }
+  .catalog .tags { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-bottom: 0.5rem; }
+  .catalog .tag { font-size: var(--sl-text-xs); border: 1px solid var(--sl-color-hairline-light); border-radius: 999px; padding: 0 0.5rem; color: var(--sl-color-gray-3); }
+  .catalog .install, .catalog code { font-family: var(--__sl-font-mono); font-size: var(--sl-text-xs); background: var(--sl-color-gray-6); border-radius: 0.25rem; padding: 0.125rem 0.375rem; user-select: all; }
+</style>

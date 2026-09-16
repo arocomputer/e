@@ -1,0 +1,78 @@
+/*
+ * e's palette and type on Starlight. The values are the product site's warm
+ * neutrals (ink on paper, no hue accent) and JetBrains Mono, set through
+ * Starlight's own custom properties so every component follows.
+ */
+:root {
+  --sl-font: "JetBrains Mono Variable", ui-monospace, monospace;
+  --sl-font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --sl-text-body: 0.9375rem;
+  --sl-line-height: 1.8;
+  --sl-content-width: 46rem;
+
+  --sl-color-white: rgb(237 236 236);
+  --sl-color-gray-1: rgb(214 213 210);
+  --sl-color-gray-2: rgb(185 184 179);
+  --sl-color-gray-3: rgb(138 137 131);
+  --sl-color-gray-4: rgb(92 91 85);
+  --sl-color-gray-5: rgb(48 47 42);
+  --sl-color-gray-6: rgb(30 29 24);
+  --sl-color-black: rgb(21 20 16);
+
+  --sl-color-accent-low: rgb(40 39 33);
+  --sl-color-accent: rgb(185 184 179);
+  --sl-color-accent-high: rgb(237 236 236);
+
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-hairline-light: rgb(237 236 236 / 10%);
+  --sl-color-hairline: rgb(237 236 236 / 10%);
+}
+
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-white: rgb(38 37 30);
+  --sl-color-gray-1: rgb(58 57 50);
+  --sl-color-gray-2: rgb(78 77 70);
+  --sl-color-gray-3: rgb(118 117 110);
+  --sl-color-gray-4: rgb(160 159 153);
+  --sl-color-gray-5: rgb(214 213 208);
+  --sl-color-gray-6: rgb(243 243 240);
+  --sl-color-gray-7: rgb(248 248 246);
+  --sl-color-black: rgb(253 253 252);
+
+  --sl-color-accent-low: rgb(236 235 230);
+  --sl-color-accent: rgb(78 77 70);
+  --sl-color-accent-high: rgb(38 37 30);
+
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-hairline-light: rgb(38 37 30 / 10%);
+  --sl-color-hairline: rgb(38 37 30 / 10%);
+}
+
+/* Links read as ink with an underline, as on the product site. */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--sl-color-white);
+  text-underline-offset: 0.2em;
+  text-decoration-color: var(--sl-color-gray-4);
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-color: currentColor;
+}
+
+/* The current page is brightness alone, as in every e picker: no filled row. */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  color: var(--sl-color-white);
+  background-color: transparent;
+}
+
+/* Asides keep their kind in the rail and title, on the page's own surface. */
+.starlight-aside {
+  background-color: var(--sl-color-gray-6);
+}
+.starlight-aside__title {
+  color: var(--sl-color-asides-text-accent);
+}

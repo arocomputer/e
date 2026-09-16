@@ -5,18 +5,20 @@
 - **GitHub** — the files themselves, as you see them here.
 - **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **e.intuitum.sh/docs** — the website fetches `docs/guides/` from `main` at
-  build time and renders each file as a page. A push to `main` that touches this folder
-  pings the site's deploy hook, so a guide goes live without a change over there.
+- **e.intuitum.sh/docs** — the Starlight site in this folder renders each guide
+  as a page. `src/guides.mjs` is the one place that adapts the guides to it: the
+  sidebar, link routes, and alerts.
 
-Write once, and all three follow. Never paste a guide's text into the website,
-the README, or an issue: link to it.
+Write once, and all three follow. Never paste a guide's text into another
+page, the README, or an issue: link to it.
 
 ## Layout
 
 ```
 docs/
   README.md              this file — GitHub only, never a topic and never a page
+  astro.config.mjs       the site: Starlight, served under /docs
+  src/                   the guides adapter, the palette, and site-only pages
   guides/
     start/               one folder per nav group
       README.md          the group's label and order, and nothing else
@@ -49,8 +51,8 @@ contributing/          the repository's own documentation: architecture,
   new reader copies, and a change there needs the same care as a change to the
   install script.
 - **A folder may hold assets** beside its guides — an example, an image. They
-  are copied with the group so links keep working; only `.md`/`.mdx` become
-  pages.
+  stay beside the guide that links them, and the site links them on GitHub;
+  only `.md` files become pages.
 - **`README.md` in any folder is repository-only.** The one at the root is this
   guide; a group's carries that group's front matter.
 
@@ -66,31 +68,29 @@ order: 5
 ---
 ```
 
-- `title` — the label in the website's navigation and the page's heading.
-- `description` — one line, no trailing period needed. It is the website's
+- `title` — the label in the site's navigation and the page's heading.
+- `description` — one line, no trailing period needed. It is the site's
   meta description and the blurb `e docs` prints when listing topics.
 - `order` — position inside the group. Gaps are fine; ties fall back to the
   file name. In a group's README.md the same key orders the *group*.
 
-A group README carries the same three keys and no guide content; the website
+A group README carries the same three keys and no guide content; the site
 uses it for the sidebar label and position.
 
 Only those three keys, one line each, no nested YAML. `build.rs` and the
-website both parse them with a few lines of string handling, deliberately not a
+site both parse them with a few lines of string handling, deliberately not a
 YAML dependency.
 
-## Markdown, MDX, and the heading
+## Markdown and the heading
 
-- **`.md` is the default** and the only thing the binary embeds.
-- **`.mdx` is for a page that needs a website component** — an interactive
-  installer, tabs, a diagram. It is skipped by `e docs` and by the topic list;
-  write one only when the alternative is worse, because the binary and the
-  release archive will not carry it.
-- **Keep the `# Title` heading.** GitHub needs it; the website renders the
+- **A guide is `.md`**, the one format all three readers take. A page that
+  needs components, like the package catalog, is an Astro page under
+  `src/pages/`: part of the site, not a guide, and not in `e docs`.
+- **Keep the `# Title` heading.** GitHub needs it; the site renders the
   front matter's `title` and drops the duplicate heading.
 - **A note that must stand out uses GitHub's alert syntax**, which GitHub
-  renders as an alert and the website renders as a callout — no component, no
-  change to the website. `e docs` prints the label instead of the marker
+  renders as an alert and the site renders as an aside — no component, no
+  change to the site. `e docs` prints the label instead of the marker
   (`> Warning:`), because `[!WARNING]` is not prose to a reader in a shell:
 
   ```md
@@ -105,12 +105,12 @@ YAML dependency.
 
 - **Another guide:** link it relatively — `[themes](guides/customize/themes.md)` from
   this folder, or `themes.md` from beside it. GitHub resolves either, and the
-  website rewrites it to the page's route. Do not write repository-absolute
+  site rewrites it to the page's route. Do not write repository-absolute
   paths like `/docs/guides/customize/themes.md`: they break on GitHub.
 - **Anything outside `docs/guides/`** — `contributing/`, `src/`, an example file —
-  link it relatively too. The website points those at GitHub, since they are
+  link it relatively too. The site points those at GitHub, since they are
   not pages.
-- **Fragments work** (`extensions.md#results-by-method`) and the website keeps
+- **Fragments work** (`extensions.md#results-by-method`) and the site keeps
   them.
 
 ## Checking your work
@@ -119,9 +119,9 @@ YAML dependency.
 topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 
-To see the website's rendering, run the web repository's dev server with
-`E_DOCS_PATH` pointing at this checkout; it reads the files from disk instead of
-fetching `main`.
+`./x site` builds the site, which fails on a guide it cannot render. To read
+the pages as you write, run `npm ci` and then `npm run dev` in this folder; the
+server reloads when a guide changes.
 
 ## Adding a guide
 
@@ -129,7 +129,7 @@ fetching `main`.
 2. Add front matter with `title`, `description`, and `order`.
 3. Link it from a nearby guide — the navigation follows the folders, so a new
    page appears without another list to edit.
-4. Run `./x test docs`, then `./x check`.
+4. Run `./x docs` and `./x site`.
 
 A new group is a new folder with a `README.md` whose front matter gives its
 `title` and `order`; the sidebar and the topics list pick it up from there.
