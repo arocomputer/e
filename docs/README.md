@@ -114,7 +114,7 @@ YAML dependency.
 
 ## Checking your work
 
-`./x test docs` covers this folder: every guide has complete front matter, the
+`./x docs` covers this folder: every guide has complete front matter, the
 topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 

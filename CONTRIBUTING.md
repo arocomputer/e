@@ -61,12 +61,26 @@ repeated here.
 ## Before you open a PR
 
 ```sh
-./x check    # format, clippy, full test suite, security-surface guard
+./x check    # every step below, in order
 ./x bench    # release-mode performance budgets
 ```
 
+Each step is a guarantee, and CI runs them as separate jobs so a failure names
+itself instead of hiding behind "the check":
+
+```sh
+./x fmt --check   # formatting, fuzz targets included
+./x lint          # clippy, warnings denied
+./x test          # the suite; every failing binary reports, not just the first
+./x crates        # the crates.io packages: packaged, built, and file-listed
+./x docs          # the guides' contract: front matter, groups, links
+./x guard         # the trust boundary and the repository's tooling tests
+```
+
 `./x` is the single definition of green; CI runs the same commands, so
-nothing merges on a private definition of passing.
+nothing merges on a private definition of passing. `scripts/guard.sh` enforces
+the last part mechanically: the check workflow may not invoke `cargo` or `npm`
+directly.
 
 ## Review
 
