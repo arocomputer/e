@@ -88,6 +88,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - The Slack channel preserves damaged state files, saves thread paths atomically, and terminates unresponsive RPC children during shutdown.
 - RPC rejects malformed optional parameters and applies model/effort changes atomically.
 - The Rust SDK pins the application version it was tested against.
+- The Rust SDK reports an extension that fails to start before the first turn's output every time, not only when the turn's first event is slow to arrive.
 - Partial declarations of new models retain cached model facts. Explicit provider image-support settings win over feed facts for discovered models.
 - RPC memory-only resume leaves saved logs untouched, and forks preserve the current effort setting.
 - Slack restores conversations from saved paths after restart and keeps extension questions and answers with their owning thread.
