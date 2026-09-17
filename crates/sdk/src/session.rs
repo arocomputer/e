@@ -295,6 +295,13 @@ impl SessionBuilder {
                     Some(notice) = receiver.recv() => startup_notices.push_back(notice),
                 }
             };
+            // The host reports a failed extension in the same poll it
+            // finishes, so its last notices are still queued when the loop
+            // ends. Left there, they would reach the first turn only when no
+            // core event happened to be ready ahead of them.
+            while let Ok(notice) = receiver.try_recv() {
+                startup_notices.push_back(notice);
+            }
             agent.set_host(host.clone());
             (Some(host), Some(receiver), startup_notices)
         } else {
@@ -479,5 +486,55 @@ impl Drop for Session {
                 handle.spawn(async move { host.shutdown().await });
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A home with one keyed mock provider and one extension that exits
+    /// before its handshake. No request is ever sent.
+    fn home_with_broken_extension() -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!(
+            "e-sdk-unit-broken-{}-{}",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(home.join("extensions")).unwrap();
+        std::fs::write(home.join("auth.json"), r#"{"mock":{"key":"k"}}"#).unwrap();
+        std::fs::write(
+            home.join("models.json"),
+            r#"{"providers":{"mock":{"base_url":"http://127.0.0.1:1","api":"completions","models":["test"]}}}"#,
+        )
+        .unwrap();
+        let script = home.join("extensions").join("broken");
+        std::fs::write(&script, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        home
+    }
+
+    // The host reports a failed extension in the same poll it finishes
+    // starting, so a notice read only while the host starts is still queued
+    // when build returns. It must be in the pre-turn queue, not left for the
+    // turn to find between core events.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn build_collects_a_failed_extensions_notice_before_the_first_turn() {
+        let home = home_with_broken_extension();
+        let session = Session::builder()
+            .home(&home)
+            .model("mock/test")
+            .extensions(true)
+            .build()
+            .await
+            .unwrap();
+        let queued: Vec<_> = session.startup_notices.iter().cloned().collect();
+        session.close().await;
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            queued.iter().any(|notice| notice.contains("broken")),
+            "the failed extension's notice must be collected by build, got: {queued:?}"
+        );
     }
 }
