@@ -162,7 +162,7 @@ session format.
 | `SessionBuilder::saved()` | Lists a workspace's logs. |
 | `resume(path)` | Continues a log in place and holds its lock. |
 | `e_sdk::transcript(path)` | Reads a log without taking ownership. |
-| `history(messages)` | Seeds a memory-only session from a transcript. |
+| `history(messages)` | Seeds a session from a transcript. With `persist(true)` the seeds are written to the session file, so a resume replays the whole conversation. |
 
 That is the whole checkpoint story: a readable file, not opaque bytes.
 

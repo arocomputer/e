@@ -977,6 +977,34 @@ async fn responses_error_events_fail_the_stream_with_their_message() {
     assert_eq!(error.cause, FailureCause::RateLimited);
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_refusal_text_is_delivered_with_a_refusal_finish() {
+    let _lock = env_lock();
+    let body = concat!(
+        "data: {\"type\":\"response.refusal.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"I cannot answer\"}\n\n",
+        "data: {\"type\":\"response.refusal.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\" that request.\"}\n\n",
+        "data: {\"type\":\"response.refusal.done\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"refusal\":\"I cannot answer that request.\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n",
+    );
+    let (port, server) = serve_sse(&[body]);
+    let home = Home::new("responses-refusal");
+    home.auth(r#"{"openai":{"key":"k"}}"#);
+    let (text, _, _, _, finish) = collect_stream(Request {
+        model: test_model("openai", port, Api::Responses),
+        system: "sys".into(),
+        messages: vec![ChatMessage::user("hi")],
+        effort: None,
+        session_id: String::new(),
+        tools: Vec::new(),
+    })
+    .await;
+    server.join().unwrap();
+
+    assert_eq!(text, "I cannot answer that request.");
+    assert_eq!(finish, Some(FinishReason::Refusal));
+}
+
 /// A reply that ran out of tokens while reasoning leaves a reasoning item
 /// with no output after it. Replayed on its own the API rejects the whole
 /// request, so the next turn must leave it out.

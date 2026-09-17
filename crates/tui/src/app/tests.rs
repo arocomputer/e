@@ -404,6 +404,20 @@ async fn enter_waits_for_the_clipboard_result_before_submitting() {
     assert_eq!(app.editor.text(), "question answer");
 }
 
+#[test]
+fn deferred_clipboard_submit_expands_long_paste() {
+    let mut app = session_app();
+    app.reloading = true;
+    app.attachments.reading = true;
+    let pasted = "x".repeat(1200);
+
+    app.submit_composer("question ".into());
+    app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text(pasted.clone())), None);
+
+    assert_eq!(app.held_prompts, vec![format!("question {pasted}")]);
+    assert!(app.editor.is_empty());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_clipboard_result_releases_a_newer_pending_submit() {
     let mut app = session_app();
@@ -416,6 +430,62 @@ async fn a_stale_clipboard_result_releases_a_newer_pending_submit() {
     assert_eq!(app.editor.text(), "");
     app.editor.key(Key::Up);
     assert_eq!(app.editor.text(), "new draft");
+}
+
+#[test]
+fn stale_clipboard_deferred_submit_expands_long_paste() {
+    let mut app = session_app();
+    app.reloading = true;
+    app.attachments.reading = true;
+    app.discard_composer_images();
+    app.submit_composer("new draft ".into());
+    let pasted = "x".repeat(1200);
+    app.paste(&pasted);
+
+    app.apply_clipboard_paste(0, Ok(clipboard::Paste::Text("stale".into())), None);
+
+    assert_eq!(app.held_prompts, vec![format!("new draft {pasted}")]);
+    assert!(app.editor.is_empty());
+    assert!(!app.attachments.reading);
+    assert!(!app.attachments.submit_pending);
+}
+
+#[tokio::test]
+async fn fork_during_a_shell_command_preserves_its_session_and_held_prompts() {
+    let home = std::env::temp_dir().join(format!("e-fork-shell-{}", uuid::Uuid::new_v4()));
+    e_core::config::home::with_home(home.clone(), || {
+        let mut app = session_app();
+        let messages = vec![e_core::providers::ChatMessage::user("keep history")];
+        let log = e_core::session::SessionLog::create_with(
+            &app.agent.cwd(),
+            &app.agent.model_slug(),
+            &messages,
+        )
+        .unwrap();
+        app.agent.set_session(Some(log));
+        app.agent.load_history(messages);
+        let path = app.agent.session_path();
+        let epoch = app.session_epoch;
+        app.transcript.push(Block::new(Kind::Shell, "pending"));
+        app.shell_block = Some(0);
+        app.prompt("after the shell".into());
+
+        app.submit_direct("/fork next".into());
+
+        assert_eq!(app.session_epoch, epoch);
+        assert_eq!(app.agent.session_path(), path);
+        assert_eq!(app.shell_block, Some(0));
+        assert_eq!(app.held_prompts, ["after the shell"]);
+        assert!(!app.transcript.blocks[0].done);
+        assert!(app
+            .transcript
+            .blocks
+            .last()
+            .unwrap()
+            .text
+            .contains("shell command is running"));
+    });
+    std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
