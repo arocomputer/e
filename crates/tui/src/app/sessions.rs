@@ -411,6 +411,10 @@ impl App {
     /// current branch. The transcript and history stay as they are; only
     /// where the next messages land changes. The original file is untouched.
     pub(super) fn fork_session(&mut self, name: Option<String>) {
+        if self.shell_block.is_some() {
+            self.notice("a shell command is running — fork after it finishes".into());
+            return;
+        }
         if self.active.is_some() || self.agent.is_streaming() {
             self.notice("a turn is running — press Esc to stop it, then /fork".into());
             return;

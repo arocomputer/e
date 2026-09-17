@@ -447,12 +447,21 @@ impl Stream for Turn<'_> {
                             }
                             Poll::Ready(Some(_)) => continue,
                             Poll::Ready(None) => {
+                                if std::mem::take(&mut self.session.pending_clear) {
+                                    self.session.reset_agent();
+                                }
                                 self.error = Some(CLOSED.into());
                                 self.state = State::Done;
                             }
                             Poll::Pending => return Poll::Pending,
                         }
                         continue;
+                    }
+                    // A clear deferred out of a dropped turn's final commits
+                    // runs once the tail is drained: the prompt and the reset
+                    // share this section, so nothing can commit after it.
+                    if std::mem::take(&mut self.session.pending_clear) {
+                        self.session.reset_agent();
                     }
                     // Extension startup diagnostics predate the turn, so they
                     // come out before it begins.

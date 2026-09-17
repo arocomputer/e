@@ -165,7 +165,7 @@ impl App {
             // been pressed on that draft while this stale read still owned the
             // in-flight flag. Release the requested submission now.
             if submit_after {
-                let text = self.editor.text();
+                let text = self.editor.expanded_text();
                 self.editor.set_text("");
                 self.submit_composer(text);
             }
@@ -199,7 +199,7 @@ impl App {
             }
         }
         if submit_after {
-            let text = self.editor.text();
+            let text = self.editor.expanded_text();
             self.editor.set_text("");
             self.submit_composer(text);
         }

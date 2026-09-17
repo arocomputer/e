@@ -237,6 +237,42 @@ fn a_prompt_streams_tagged_events_then_answers_with_the_result() {
 }
 
 #[test]
+fn cancelled_unstarted_tools_count_as_failures_in_headless_results() {
+    use e::core::agent::{SessionEvent, ToolCallPresentation};
+    use e::core::tools::ToolOutcome;
+    use e::rpc::result::TurnAccumulator;
+
+    let mut result = TurnAccumulator::default();
+    result.observe(&SessionEvent::ToolBatchStart {
+        calls: (1..=2)
+            .map(|id| ToolCallPresentation {
+                id,
+                name: "read".into(),
+                arguments: r#"{"path":"hello.txt"}"#.into(),
+                category: "read".into(),
+                running: "reading".into(),
+                completed: "read".into(),
+                target: "hello.txt".into(),
+            })
+            .collect(),
+    });
+    result.observe(&SessionEvent::ToolStart { id: 1 });
+    result.observe(&SessionEvent::ToolEnd {
+        id: 1,
+        outcome: ToolOutcome::Cancelled,
+        summary: "cancelled".into(),
+        content: String::new(),
+    });
+    result.observe(&SessionEvent::TurnEnd { aborted: true });
+    result.finish();
+
+    assert_eq!(
+        result.json("mock/test", None, None)["tools"],
+        json!({"calls": 2, "failures": 2})
+    );
+}
+
+#[test]
 fn a_session_keeps_its_history_across_prompts() {
     let _lock = env_lock();
     let (port, server) = serve_sse(&[OK, AGAIN]);
