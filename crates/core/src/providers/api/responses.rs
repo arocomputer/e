@@ -163,11 +163,16 @@ pub async fn run(
     // function_call items accumulate argument deltas keyed by item id.
     let mut pending: std::collections::BTreeMap<String, ToolCall> = Default::default();
     let mut streamed_arguments: std::collections::BTreeMap<String, String> = Default::default();
+    let mut refused = false;
     loop {
         let payload = sse.next().await?;
         {
             if payload == "[DONE]" {
-                return Ok(sse.end(FinishReason::Normal));
+                return Ok(sse.end(if refused {
+                    FinishReason::Refusal
+                } else {
+                    FinishReason::Normal
+                }));
             }
             let value: serde_json::Value = match serde_json::from_str(&payload) {
                 Ok(v) => v,
@@ -181,6 +186,15 @@ pub async fn run(
                     if let Some(text) = value["delta"].as_str() {
                         let _ = tx.send(Event::TextDelta(text.into())).await;
                     }
+                }
+                "response.refusal.delta" => {
+                    refused = true;
+                    if let Some(text) = value["delta"].as_str() {
+                        let _ = tx.send(Event::TextDelta(text.into())).await;
+                    }
+                }
+                "response.refusal.done" => {
+                    refused = true;
                 }
                 "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
                     if let Some(text) = value["delta"].as_str() {
@@ -323,6 +337,8 @@ pub async fn run(
                             "content_filter" => FinishReason::ContentFilter,
                             other => FinishReason::Other(format!("incomplete: {other}")),
                         }
+                    } else if refused {
+                        FinishReason::Refusal
                     } else {
                         FinishReason::Normal
                     };

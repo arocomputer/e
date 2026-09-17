@@ -17,6 +17,7 @@ pub struct TurnAccumulator {
     pub usage: providers::Usage,
     pub tool_calls: u64,
     pub tool_failures: u64,
+    unended: std::collections::HashSet<u64>,
 }
 
 impl TurnAccumulator {
@@ -30,9 +31,14 @@ impl TurnAccumulator {
     pub fn observe(&mut self, event: &SessionEvent) {
         match event {
             SessionEvent::TextDelta(delta) => self.output.push_str(delta),
-            SessionEvent::ToolBatchStart { calls } => self.tool_calls += calls.len() as u64,
-            SessionEvent::ToolEnd { outcome, .. } if outcome.is_error() => {
-                self.tool_failures += 1;
+            SessionEvent::ToolBatchStart { calls } => {
+                self.tool_calls += calls.len() as u64;
+                self.unended.extend(calls.iter().map(|call| call.id));
+            }
+            SessionEvent::ToolEnd { id, outcome, .. } => {
+                if self.unended.remove(id) && outcome.is_error() {
+                    self.tool_failures += 1;
+                }
             }
             SessionEvent::Compacted { response, .. } => {
                 if let Some(usage) = response.usage {
@@ -56,6 +62,8 @@ impl TurnAccumulator {
             }
             SessionEvent::Error(message) => self.error = Some(message.clone()),
             SessionEvent::TurnEnd { aborted } => {
+                self.tool_failures += self.unended.len() as u64;
+                self.unended.clear();
                 self.aborted = *aborted;
                 self.terminal = true;
             }

@@ -275,7 +275,26 @@ impl SessionBuilder {
             agent.set_session(Some(session));
             agent.adopt_session_name(name);
         } else if !self.history.is_empty() {
-            agent.load_history(self.history);
+            let messages = self.history;
+            if self.persist {
+                let blocking_home = home.clone();
+                let seed_cwd = cwd.clone();
+                let model = agent.model_slug();
+                let (session, messages) = tokio::task::spawn_blocking(move || {
+                    home::with_home(blocking_home, || {
+                        let session = SessionLog::create_with(&seed_cwd, &model, &messages)?;
+                        Ok::<_, std::io::Error>((session, messages))
+                    })
+                })
+                .await
+                .map_err(|_| {
+                    Error::Session(std::io::Error::other("session seed task panicked"))
+                })??;
+                agent.load_history(messages);
+                agent.set_session(Some(session));
+            } else {
+                agent.load_history(messages);
+            }
         }
 
         let (host, notices, startup_notices) = if self.extensions {
@@ -317,6 +336,7 @@ impl SessionBuilder {
             home,
             instructions: self.instructions,
             stale: false,
+            pending_clear: false,
         })
     }
 }
@@ -366,6 +386,10 @@ pub struct Session {
     /// A turn was dropped mid-run: its interrupted tail is still queued in
     /// `events`, and the next turn drains it to `TurnEnd` before submitting.
     pub(crate) stale: bool,
+    /// A `clear` that arrived while a dropped turn's final commits were
+    /// still running: history and path are hidden from now on, and the
+    /// agent's own reset is deferred to the next prompt.
+    pub(crate) pending_clear: bool,
 }
 
 impl Session {
@@ -414,22 +438,42 @@ impl Session {
         self.agent.effort()
     }
 
-    /// The conversation so far, in e's persisted message shape.
+    /// The conversation so far, in e's persisted message shape. Empty once
+    /// `clear` has been called, even before a dropped turn's commits stop.
     pub fn history(&self) -> Vec<Message> {
+        if self.pending_clear {
+            return Vec::new();
+        }
         self.agent.history_snapshot()
     }
 
-    /// Forget the conversation. A persisted session starts a fresh file on
-    /// the next prompt; the old one stays on disk.
+    /// Forget the conversation. While a dropped turn's final commits may
+    /// still be running, only the reset is deferred: the next prompt
+    /// performs the agent's clear before starting the turn.
     pub fn clear(&mut self) {
+        if self.agent.is_streaming() {
+            self.agent.interrupt();
+            self.stale = true;
+            self.pending_clear = true;
+        } else {
+            self.reset_agent();
+        }
+    }
+
+    /// Empty the agent's history and detach its session log.
+    pub(crate) fn reset_agent(&mut self) {
         self.agent.clear();
         self.agent.set_session(None);
         self.agent.clear_session_name();
     }
 
     /// The session log's path once a persisted conversation has its first
-    /// message; None for memory-only sessions.
+    /// message; None for memory-only sessions, and while a `clear` waits for
+    /// a dropped turn's final commits.
     pub fn path(&self) -> Option<PathBuf> {
+        if self.pending_clear {
+            return None;
+        }
         self.agent.session_path()
     }
 

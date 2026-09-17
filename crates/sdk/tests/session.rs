@@ -222,6 +222,76 @@ async fn dropping_a_running_turn_interrupts_it_and_the_session_recovers() {
     assert_eq!(roles, vec!["user", "user", "assistant"]);
 }
 
+#[test]
+fn clearing_after_a_dropped_turn_waits_for_its_final_commit() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let (port, server) = serve_sse(&[OK, OK]);
+        let home = mock_home("drop-clear", &[("mock", port)]);
+        let ws = TempDir::new("drop-clear-ws");
+        let mut session = Session::builder()
+            .home(&home.0)
+            .cwd(&ws.0)
+            .model("mock/test")
+            .persist(true)
+            .build()
+            .await
+            .unwrap();
+        // A parked blocking-pool thread holds the first turn's reply commit
+        // after the event it produced has already been read: the race
+        // window between drop and the final commit, made wide and
+        // deterministic. The pool keeps a second thread for hyper's DNS
+        // task, which shares it.
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            blocked
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the dropped turn's commit must not wait on the clearer");
+        });
+        ready.await.unwrap();
+
+        let mut turn = session.prompt("old prompt");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(3), turn.next())
+                .await
+                .unwrap(),
+            Some(Event::Text("ok".into()))
+        );
+        drop(turn);
+        let old_path = session.path().unwrap();
+        session.clear();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+
+        let reply = tokio::time::timeout(Duration::from_secs(3), session.prompt("new prompt"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reply.text, "ok");
+        let texts: Vec<_> = session.history().into_iter().map(|m| m.content).collect();
+        assert_eq!(texts, ["new prompt", "ok"]);
+        let new_path = session.path().unwrap();
+        assert_ne!(new_path, old_path);
+        let old: Vec<_> = e_sdk::transcript(old_path)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.content)
+            .collect();
+        assert_eq!(old, ["old prompt", "ok"]);
+        assert_eq!(e_sdk::transcript(new_path).unwrap(), session.history());
+        let requests = server.join().unwrap();
+        assert_eq!(
+            &message_texts(&request_json(&requests[1]))[1..],
+            ["new prompt"]
+        );
+    });
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelling_a_turn_stops_it_and_reports_cancelled() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -485,6 +555,45 @@ async fn a_persisted_session_is_listed_and_resumes_from_its_file() {
     let second = request_json(&server.join().unwrap()[1]);
     let texts = message_texts(&second);
     assert_eq!(&texts[1..], ["first", "ok", "second"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn persisted_seed_history_survives_resume() {
+    let (port, server) = serve_sse(&[OK]);
+    let home = mock_home("persist-seed", &[("mock", port)]);
+    let ws = TempDir::new("persist-seed-ws");
+    let builder = || {
+        Session::builder()
+            .home(&home.0)
+            .cwd(&ws.0)
+            .model("mock/test")
+    };
+    let mut session = builder()
+        .history(vec![
+            Message::user("seed question"),
+            Message::assistant("seed answer", Vec::new()),
+        ])
+        .persist(true)
+        .build()
+        .await
+        .unwrap();
+    session.prompt("continue").await.unwrap();
+    let expected: Vec<String> = session
+        .history()
+        .iter()
+        .map(|m| m.content.clone())
+        .collect();
+    let path = session.path().unwrap();
+    drop(session);
+    server.join().unwrap();
+
+    let resumed = builder().resume(path).build().await.unwrap();
+    let actual: Vec<String> = resumed
+        .history()
+        .iter()
+        .map(|m| m.content.clone())
+        .collect();
+    assert_eq!(actual, expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]
