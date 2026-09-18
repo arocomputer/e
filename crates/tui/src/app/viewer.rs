@@ -273,7 +273,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn full_detail_navigation_matches_fx_and_ellipsizes_in_narrow_frames() {
+    fn full_detail_navigation_ellipsizes_in_narrow_frames() {
         let theme = crate::theme::load_bundled(false).unwrap();
         let hint = "full detail · ctrl+o close · pgup/pgdn scroll · esc close";
         assert_eq!(

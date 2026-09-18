@@ -15,6 +15,53 @@ use crate::providers::{
     ProviderError, Request, SseStream, StreamEnd, ToolCall, Usage,
 };
 
+/// Text identity spans both the output item and its content parts.
+fn text_key(value: &serde_json::Value) -> (u64, u64) {
+    (
+        value["output_index"].as_u64().unwrap_or(0),
+        value["content_index"].as_u64().unwrap_or(0),
+    )
+}
+
+/// Recover a missing text suffix from a completed part without replaying streamed bytes.
+async fn complete_text(
+    parts: &mut std::collections::BTreeMap<(u64, u64), String>,
+    key: (u64, u64),
+    text: &str,
+    tx: &mpsc::Sender<Event>,
+) {
+    let sent = parts.entry(key).or_default();
+    // A conflicting snapshot cannot be appended to an already-visible answer.
+    if let Some(suffix) = text
+        .strip_prefix(sent.as_str())
+        .filter(|suffix| !suffix.is_empty())
+    {
+        let _ = tx.send(Event::TextDelta(suffix.into())).await;
+        *sent = text.into();
+    }
+}
+
+/// Gateways may deliver message text only in completion snapshots.
+async fn complete_message(
+    parts: &mut std::collections::BTreeMap<(u64, u64), String>,
+    index: u64,
+    item: &serde_json::Value,
+    tx: &mpsc::Sender<Event>,
+) {
+    if item["type"].as_str() != Some("message") {
+        return;
+    }
+    if let Some(content) = item["content"].as_array() {
+        for (part, value) in content.iter().enumerate() {
+            if value["type"].as_str() == Some("output_text") {
+                if let Some(text) = value["text"].as_str() {
+                    complete_text(parts, (index, part as u64), text, tx).await;
+                }
+            }
+        }
+    }
+}
+
 pub async fn run(
     request: &Request,
     authorization: &Authorization,
@@ -164,6 +211,7 @@ pub async fn run(
     let mut pending: std::collections::BTreeMap<String, ToolCall> = Default::default();
     let mut streamed_arguments: std::collections::BTreeMap<String, String> = Default::default();
     let mut refused = false;
+    let mut text_parts: std::collections::BTreeMap<(u64, u64), String> = Default::default();
     loop {
         let payload = sse.next().await?;
         {
@@ -184,6 +232,10 @@ pub async fn run(
             match value["type"].as_str().unwrap_or("") {
                 "response.output_text.delta" => {
                     if let Some(text) = value["delta"].as_str() {
+                        text_parts
+                            .entry(text_key(&value))
+                            .or_default()
+                            .push_str(text);
                         let _ = tx.send(Event::TextDelta(text.into())).await;
                     }
                 }
@@ -195,6 +247,18 @@ pub async fn run(
                 }
                 "response.refusal.done" => {
                     refused = true;
+                }
+                "response.output_text.done" => {
+                    if let Some(text) = value["text"].as_str() {
+                        complete_text(&mut text_parts, text_key(&value), text, tx).await;
+                    }
+                }
+                "response.content_part.done" => {
+                    if value["part"]["type"].as_str() == Some("output_text") {
+                        if let Some(text) = value["part"]["text"].as_str() {
+                            complete_text(&mut text_parts, text_key(&value), text, tx).await;
+                        }
+                    }
                 }
                 "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
                     if let Some(text) = value["delta"].as_str() {
@@ -255,6 +319,13 @@ pub async fn run(
                 }
                 "response.output_item.done" => {
                     let item = &value["item"];
+                    complete_message(
+                        &mut text_parts,
+                        value["output_index"].as_u64().unwrap_or(0),
+                        item,
+                        tx,
+                    )
+                    .await;
                     if item["type"].as_str() == Some("reasoning") {
                         // Must be replayed verbatim on the next request, ahead
                         // of the calls it produced — the API 400s otherwise.
@@ -310,6 +381,11 @@ pub async fn run(
                     }
                 }
                 kind @ ("response.completed" | "response.done" | "response.incomplete") => {
+                    if let Some(output) = value["response"]["output"].as_array() {
+                        for (index, item) in output.iter().enumerate() {
+                            complete_message(&mut text_parts, index as u64, item, tx).await;
+                        }
+                    }
                     let usage = &value["response"]["usage"];
                     if usage.is_object() {
                         let cached = usage["input_tokens_details"]["cached_tokens"]

@@ -96,18 +96,16 @@ impl App {
                     }
                 }
             }
-            // Reasoning streams live in thinkingText while the burst runs;
-            // the completed burst stays expanded. Raw provider text is
-            // stripped before it can reach the paint stream, like reply text.
+            // Retain reasoning even when collapsed so review and later expansion
+            // can reveal it. Block ingestion sanitizes provider text.
             SessionEvent::ReasoningDelta(delta) => {
                 if let Some(s) = &mut self.active {
                     s.turn.phase = TurnPhase::Thinking;
-                    if self.show_thinking {
-                        let idx =
-                            open_block(&mut self.transcript, &mut s.thinking_block, Kind::Thinking);
-                        if let Some(block) = self.transcript.blocks.get_mut(idx) {
-                            block.append_streaming(&delta);
-                        }
+                    let idx =
+                        open_block(&mut self.transcript, &mut s.thinking_block, Kind::Thinking);
+                    if let Some(block) = self.transcript.blocks.get_mut(idx) {
+                        block.collapsed = (!self.show_thinking).then(|| self.thinking_hint.clone());
+                        block.append_streaming(&delta);
                     }
                 }
             }
@@ -142,6 +140,8 @@ impl App {
                     let idx = self.transcript.extend_tool_group(children);
                     self.transcript.blocks[idx].live_preview_rows = self.live_preview_rows;
                     self.transcript.blocks[idx].tool_label_rows = self.tool_label_rows;
+                    self.transcript.blocks[idx].tool_history_limit = self.tool_history_limit;
+                    self.transcript.blocks[idx].tool_history_hint = self.tool_history_hint.clone();
                     for call in calls {
                         s.tool_blocks.insert(call.id, idx);
                         s.tool_names.insert(call.id, call.name.clone());
@@ -422,13 +422,8 @@ fn open_block(transcript: &mut Transcript, index: &mut Option<usize>, kind: Kind
     }
 }
 
-/// End the live thinking burst: detach it so the next reasoning opens a
-/// fresh block. The streamed thought stays where it sits, expanded, in
-/// `thinkingText` — there is no collapse to a dim `Thought for Ns` summary.
-/// That collapse shrank the frame mid-turn, and because the paint window
-/// tracks the transcript's tail, a shrink after the burst had scrolled into
-/// scrollback read as the whole screen jumping. A no-op with no burst open —
-/// in particular when `show_thinking` is off, which never opens one.
+/// End a thinking burst without changing its height or discarding its source.
+/// The next burst gets its own block, whether thinking is expanded or collapsed.
 impl App {
     pub(super) fn end_thinking_burst(&mut self) {
         let Some(index) = self

@@ -40,6 +40,7 @@ impl App {
         self.editor.set_text("");
         self.discard_composer_images();
         self.viewer = None;
+        self.conversation_scroll = None;
         self.settings = None;
         self.menu = None;
         self.staged_scope = None;
@@ -207,6 +208,7 @@ impl App {
 
     /// Submit the visible draft with any clipboard images attached to it.
     pub(super) fn submit_composer(&mut self, text: String) {
+        self.conversation_scroll = None;
         if self.attachments.reading {
             self.editor.set_text(&text);
             self.attachments.submit_pending = true;

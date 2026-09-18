@@ -56,6 +56,8 @@ def replay(path, cols, rows, on_frame=None):
         feed(data[offset:end])
         if kind == "resize":
             screen.resize(lines=size["rows"], columns=size["cols"])
+            if screen is not main:
+                main.resize(lines=size["rows"], columns=size["cols"])
         else:
             on_frame(screen)
         offset = end

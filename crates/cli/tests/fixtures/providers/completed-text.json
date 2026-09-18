@@ -1,0 +1,39 @@
+{
+  "origin": "synthetic",
+  "cases": [
+    {
+      "name": "completed item without deltas",
+      "events": [
+        {"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"Recovered answer."}]}},
+        {"type":"response.completed","response":{}}
+      ],
+      "text": "Recovered answer."
+    },
+    {
+      "name": "completed response without item events",
+      "events": [
+        {"type":"response.completed","response":{"output":[{"type":"reasoning","summary":[]},{"type":"message","content":[{"type":"output_text","text":"Final answer."}]}]}}
+      ],
+      "text": "Final answer."
+    },
+    {
+      "name": "partial deltas and repeated snapshots across parts",
+      "events": [
+        {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"caf"},
+        {"type":"response.output_text.done","output_index":1,"content_index":0,"text":"café "},
+        {"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"café "},{"type":"output_text","text":"ready"}]}},
+        {"type":"response.completed","response":{"output":[{"type":"reasoning","summary":[]},{"type":"message","content":[{"type":"output_text","text":"café "},{"type":"output_text","text":"ready"}]}]}}
+      ],
+      "text": "café ready"
+    },
+    {
+      "name": "conflicting completion does not duplicate visible text",
+      "events": [
+        {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Visible answer."},
+        {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"Different answer."},
+        {"type":"response.completed","response":{}}
+      ],
+      "text": "Visible answer."
+    }
+  ]
+}

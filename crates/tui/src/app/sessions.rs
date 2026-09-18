@@ -105,6 +105,7 @@ impl App {
         self.transcript.clear();
         self.outputs.clear();
         self.viewer = None;
+        self.conversation_scroll = None;
         // The projection is keyed by the transcript's shape, which another
         // session can share; the cache must not outlive the transcript.
         self.viewer_cache = None;
@@ -216,6 +217,8 @@ impl App {
         for block in &mut self.transcript.blocks {
             if block.kind == Kind::ToolGroup {
                 block.tool_label_rows = self.tool_label_rows;
+                block.tool_history_limit = self.tool_history_limit;
+                block.tool_history_hint = self.tool_history_hint.clone();
                 block.seal();
             }
         }

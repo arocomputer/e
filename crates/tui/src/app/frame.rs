@@ -11,10 +11,8 @@ impl App {
         crate::transcript::diff_row_style(theme, line)
     }
 
-    /// Ordinary chat joins the transcript and composer into one frame. With
-    /// a pane open the conversation and the pane share the width at a fixed
-    /// height, so pane scrolling never moves the conversation; a terminal
-    /// too narrow to split shows whichever has focus.
+    /// Compose chat and any side pane, each with its own reading position.
+    /// A terminal too narrow to split shows whichever has focus.
     pub(super) fn frame(&mut self, width: usize, height: usize) -> Vec<String> {
         self.pump_ui_queue();
         let Some(pane) = self.pane.as_ref() else {
@@ -70,14 +68,23 @@ impl App {
     /// The transcript and composer as one column.
     pub(super) fn conversation_frame(&mut self, width: usize, height: usize) -> Vec<String> {
         let mut lines = self.transcript_frame(width);
-        let dock_start = lines.len();
-        lines.extend(self.composer_frame(width, height));
-        if self.bottom_pinned && lines.len() < height {
-            lines.splice(
-                dock_start..dock_start,
-                vec![String::new(); height - lines.len()],
-            );
+        let dock = self.composer_frame(width, height);
+        if self.fixed_view() {
+            let window = height.saturating_sub(dock.len());
+            let end = lines.len().saturating_sub(window);
+            let offset = self.conversation_scroll.unwrap_or(end).min(end);
+            if self.conversation_scroll.is_some() {
+                self.conversation_scroll = (offset < end).then_some(offset);
+            }
+            let mut visible: Vec<_> = lines.into_iter().skip(offset).take(window).collect();
+            visible.resize(window, String::new());
+            visible.extend(dock);
+            if visible.len() > height {
+                visible.drain(..visible.len() - height);
+            }
+            return visible;
         }
+        lines.extend(dock);
         lines
     }
 
@@ -297,6 +304,7 @@ impl App {
                 .reading
                 .then(|| "reading clipboard…".to_string()))
             .or(hidden_pane)
+            .or_else(|| self.conversation_scroll.map(|_| self.scroll_hint.clone()))
             .or(right);
         let footer = statusline(
             &self.theme,

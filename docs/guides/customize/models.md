@@ -176,8 +176,7 @@ opens. A model a gateway ships today appears today, with no e release
 involved.
 
 Most of those lists carry nothing but ids. The facts come from
-[models.dev](https://models.dev), the community catalog that opencode and pi
-generate their provider files from. e fetches it in the same refresh, trims
+[models.dev](https://models.dev), a community catalog. e fetches it in the same refresh, trims
 it to e's providers, and caches it in `~/.e/models-dev.json`.
 
 For every model models.dev knows, built-in seed or freshly discovered id, it

@@ -146,7 +146,38 @@ def diff_counts(frames):
     assert final.colors[row][text.index('Edited')] not in ('5faf5f', 'd75f5f'), 'tool label inherited a diff color'
 
 
+def scroll_chat(frames):
+    """Reading pauses while output streams; the draft survives resize and review."""
+    paused = [frame for frame in frames if frame.find('Scrolled · End to follow') is not None]
+    assert len(paused) >= 2, 'ordinary chat did not enter a paused reading view'
+    wide = [frame for frame in paused if len(frame.rows[0]) == 100]
+    assert wide, 'missing paused frame during streaming'
+    for frame in paused:
+        assert frame.find('┃ draft stays') == len(frame.rows) - 3, 'scrolling changed the draft or moved its dock'
+    assert any(len(frame.rows) == 18 for frame in paused), 'paused view did not survive resize'
+    assert frames[-1].find('SCROLL_CHAT_FINISHED') is not None, 'End did not restore the latest output'
+    assert frames[-1].find('┃ draft stays') is not None, 'returning to the tail lost the draft'
+
+
+def visible_work(frames):
+    """Collapsed thinking and successful tools remain available in review."""
+    collapsed = [frame for frame in frames if frame.find('Thinking · ctrl o to view') is not None
+                 and frame.find('VISIBLE_WORK_FINISHED') is not None]
+    assert collapsed, 'completed turn lost its collapsed thinking'
+    assert all(frame.find('RETAINED_THINKING_DETAIL') is None for frame in collapsed), 'collapsed thinking leaked its body'
+    assert any(frame.find('5 earlier successful tools') is not None for frame in frames), 'successful command history was not folded'
+    assert any(frame.find('exit 7') is not None for frame in collapsed), 'folding hid a failed command'
+    review = [frame for frame in frames if frame.find('┃ Review ·') is not None]
+    assert any(frame.find('RETAINED_THINKING_DETAIL') is not None for frame in review), 'review lost hidden thinking'
+    assert any(frame.find('work-00') is not None for frame in review), 'review lost folded successful commands'
+    assert frames[-1].find('RETAINED_THINKING_DETAIL') is not None, 'settings did not reveal earlier thinking'
+    assert frames[-1].find('VISIBLE_WORK_FINISHED') is not None, 'settings lost the reply'
+
+
 CHECKS = {
+    'scroll-chat': scroll_chat,
+    'scroll-fullscreen': scroll_chat,
+    'visible-work': visible_work,
     'heredoc-tool': heredoc_tool,
     'single-tool': single_tool,
     'tui-mode': tui_mode,
@@ -170,3 +201,10 @@ def verify(name, directory):
     replay(paths[-1], 100, 30, on_frame=lambda screen: frames.append(Frame.capture(screen)))
     assert frames, 'no completed synchronized frames'
     CHECKS[name](frames)
+    if name in ('scroll-chat', 'scroll-fullscreen'):
+        # A frozen viewport produces no new paint. Compare settled snapshots
+        # across a timed streaming interval, excluding the wheel gesture itself.
+        before, after = [Frame.capture(replay(directory / f'{index:02d}.raw', 100, 30))
+                         for index in (3, 4)]
+        assert before.find('Scrolled · End to follow') is not None
+        assert before.rows[:-3] == after.rows[:-3], 'new output moved the reading position'

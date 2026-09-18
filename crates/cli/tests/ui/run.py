@@ -43,6 +43,9 @@ from provider import Provider, configure
 # Each step waits, then sends keys or resizes. Frames are taken before the
 # next step, so transient streaming states survive alongside the final view.
 SCENARIOS = {
+    'scroll-chat': [(0.3, 'scroll-chat\r'), (0.3, 'draft stays'), (0.3, '\x1b[<64;3;10M' * 6), (1, ''), (0.3, (72, 18)), (0.3, '\x0f'), (0.3, '\x1b'), (3, '\x1b[F'), (0.5, '')],
+    'scroll-fullscreen': [(0.3, 'scroll-chat\r'), (0.3, 'draft stays'), (0.3, '\x1b[5~'), (1, ''), (0.3, (72, 18)), (0.3, '\x1b[<65;3;10M'), (3, '\x1b[F'), (0.5, '')],
+    'visible-work': [(0.3, 'visible-work\r'), (2, '\x0f'), (0.3, '\x1b[H'), (0.3, '\x1b'), (0.3, '/settings\r'), (0.3, '\x1b[B\x1b[B\x1b[C'), (0.3, '\x1b'), (0.3, '')],
     'single-tool': [(0.8, (44, 30)), (0.3, 'single-tool\r'), (0.5, ''), (2, ''), (0.3, (140, 30)), (0.3, (44, 30)), (0.3, '')],
     'heredoc-tool': [(0.8, 'heredoc-tool\r'), (2, '\x0f'), (0.5, '\x1b[C'), (0.5, '\x1b'), (0.5, '')],
     'tui-mode': [(0.8, '/settings\r'), (0.4, '\x1b[B\x1b[C'), (0.4, '\x1b'), (0.4, '/settings\r'), (0.4, '\x1b[B\x1b[D'), (0.4, '\x1b'), (0.4, '')],
@@ -72,6 +75,9 @@ SCENARIOS = {
 
 # Bounded readiness checks supplement the pacing used to exercise live frames.
 WAIT_FOR = {
+    ('scroll-chat', 8): b'SCROLL_CHAT_FINISHED',
+    ('scroll-fullscreen', 7): b'SCROLL_CHAT_FINISHED',
+    ('visible-work', 1): b'VISIBLE_WORK_FINISHED',
     ('heredoc-tool', 1): b'HEREDOC_FINISHED',
     ('single-tool', 2): b'Running',
     ('single-tool', 3): b'SINGLE_TOOL_FINISHED',
@@ -96,7 +102,7 @@ def capture(name, steps, out, port):
         (workspace / 'sample.txt').write_text('old line\n')
     configure(state, port)
     settings = {'auto_update': 'off'}
-    if name == 'tool-tree':
+    if name in ('tool-tree', 'scroll-fullscreen', 'visible-work'):
         settings['tui_mode'] = 'fullscreen'
     (state / 'settings.json').write_text(json.dumps(settings))
     if name not in ('trust-exit', 'narrow-trust', 'path-control'):
@@ -107,7 +113,7 @@ def capture(name, steps, out, port):
     if pid == 0:
         os.chdir(workspace)
         args = ['e', '--no-save', '--no-extensions', '--model', 'mock/audit']
-        if name not in ('tool-tree', 'single-tool', 'heredoc-tool', 'diff-counts'):
+        if name not in ('tool-tree', 'single-tool', 'heredoc-tool', 'diff-counts', 'visible-work'):
             args.append('--no-tools')
         os.execve(str(ROOT / 'target/debug/e'), args, env)
     raw = bytearray()

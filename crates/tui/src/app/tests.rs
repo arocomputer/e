@@ -23,6 +23,100 @@ fn interrupt_dismisses_trust_and_queue_review_and_drops_held_prompt() {
 
 use super::*;
 
+/// Mouse navigation pauses output following without recalling or editing prompts.
+#[test]
+fn main_wheel_keeps_the_draft_and_reading_position_through_output_and_review() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let mut app = session_app();
+    app.editor.push_history("old prompt".into());
+    app.editor.set_text("unfinished draft");
+    app.transcript.push(Block::new(
+        Kind::Assistant,
+        (0..80)
+            .map(|i| format!("row {i:02}\n\n"))
+            .collect::<String>(),
+    ));
+    app.mouse(
+        MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 1,
+            row: 20,
+            modifiers: KeyModifiers::NONE,
+        },
+        80,
+        24,
+    );
+    let position = app
+        .conversation_scroll
+        .expect("wheel must scroll normal chat");
+    let first = app.frame(80, 24)[0].clone();
+    app.transcript
+        .push(Block::new(Kind::Assistant, "new output"));
+    assert_eq!(app.frame(80, 24)[0], first);
+    assert_eq!(app.editor.text(), "unfinished draft");
+    app.viewer = Some(Viewer::new());
+    app.viewer_frame(80, 24);
+    app.viewer_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 80, 24);
+    assert_eq!(app.conversation_scroll, Some(position));
+    let resized = app.frame(60, 18);
+    assert_eq!(resized.len(), 18);
+    assert!(resized[15].contains("unfinished draft"));
+    assert!(app.conversation_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE), 60, 18));
+    assert!(app.conversation_scroll.is_none());
+    assert!(app
+        .frame(60, 18)
+        .iter()
+        .any(|row| row.contains("new output")));
+}
+
+/// Collapsed thinking stays available to review and to the settings toggle.
+#[test]
+fn thinking_can_be_revealed_after_it_arrived_collapsed() {
+    let home = std::env::temp_dir().join(format!("e-thinking-{}", uuid::Uuid::new_v4()));
+    e_core::config::home::with_home(home.clone(), || {
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("settings.json"),
+            include_str!("../../../cli/tests/fixtures/config/settings-v1-conversation.json"),
+        )
+        .unwrap();
+        let mut app = session_app();
+        app.refresh_status_cache();
+        assert!(app.bottom_pinned);
+        assert_eq!(app.scroll_lines, 5);
+        assert_eq!(app.scroll_hint, "Reading earlier output");
+        assert_eq!(app.tool_history_limit, 4);
+        assert_eq!(app.tool_history_hint, "{count} successful calls in review");
+        app.on_session_event(SessionEvent::TurnStart);
+        app.on_session_event(SessionEvent::ReasoningDelta("retained thought".into()));
+        app.end_thinking_burst();
+        let main = app.transcript_frame(80).join("\n");
+        assert!(main.contains("Reasoning available in review"));
+        assert!(!main.contains("retained thought"));
+        assert!(app
+            .viewer_rows(80, false)
+            .join("\n")
+            .contains("retained thought"));
+        e_core::config::settings::set_string("show_thinking", "on").unwrap();
+        app.refresh_status_cache();
+        assert!(app
+            .transcript_frame(80)
+            .join("\n")
+            .contains("retained thought"));
+        e_core::config::settings::set_string("show_thinking", "off").unwrap();
+        app.refresh_status_cache();
+        assert!(!app
+            .transcript_frame(80)
+            .join("\n")
+            .contains("retained thought"));
+        assert!(app
+            .viewer_rows(80, false)
+            .join("\n")
+            .contains("retained thought"));
+    });
+    std::fs::remove_dir_all(home).unwrap();
+}
+
 #[test]
 fn tab_title_shortens_to_two_components() {
     assert_eq!(
@@ -751,6 +845,7 @@ fn session_app() -> App {
         auth: None,
         settings: None,
         show_thinking: true,
+        thinking_hint: "Thinking · ctrl o to view".into(),
         jobs,
         logins,
         login_task: None,
@@ -769,6 +864,9 @@ fn session_app() -> App {
         outputs: Vec::new(),
         output_seq: 0,
         viewer: None,
+        conversation_scroll: None,
+        scroll_lines: 3,
+        scroll_hint: "Scrolled · End to follow".into(),
         viewer_cache: None,
         queue_review: None,
         session_epoch: 0,
@@ -780,6 +878,8 @@ fn session_app() -> App {
         bottom_pinned: false,
         live_preview_rows: 5,
         tool_label_rows: 2,
+        tool_history_limit: 10,
+        tool_history_hint: "{count} earlier successful tools · ctrl o to view".into(),
         signed_in: false,
         status_effort: None,
         requests: tokio::sync::mpsc::channel(1).0,
