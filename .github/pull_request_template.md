@@ -1,30 +1,32 @@
-<!-- Title: type(scope): what changed, in plain language.
-     e.g. fix(tui): tool trees stay connected after compaction
-     Scopes: core, tui, sdk, bench, infra, docs. The title becomes the squash commit on main. -->
+<!-- Use a conventional title, such as fix(tui): preserve tool tree connections. -->
 
-### Issue for this PR
+### Related issue
 
-Closes #
+<!-- Link an issue when applicable, for example Closes #123. -->
 
 ### Type of change
 
 - [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor / code improvement
+- [ ] Feature
+- [ ] Refactor
 - [ ] Documentation
+- [ ] Repository tooling
 
 ### What does this PR do?
 
-Describe the problem, the change, and why it works. Short and in your own words — a large AI-generated description may be ignored or closed.
+<!-- Explain the problem, what changed, and why it works.
+     Include migration notes for persisted data, CLI, or extension contract changes. -->
 
-### How did you verify your code works?
+### How was it verified?
 
-### Screenshots / recordings
+<!-- List the checks run and their results. -->
 
-_UI change? Include a captured frame (`scripts/ptycap.py`), not a description of bytes._
+### Screenshots or recordings
+
+<!-- Include a captured frame for visual changes; otherwise remove this section. -->
 
 ### Checklist
 
-- [ ] `./x check` passes — the parity suite is the visual spec; if a rendering change fails it, fix the code, don't loosen the test
-- [ ] `CHANGELOG.md` has an entry under `Unreleased` (skip only for pure meta: CI, templates, result files)
-- [ ] I have not included unrelated changes
+- [ ] Relevant checks pass
+- [ ] Affected documentation is updated
+- [ ] The PR contains no unrelated changes
