@@ -133,7 +133,7 @@ jobs:
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          if [ "$CHANNEL" = stable ]; then
+          if [ "$CHANNEL" = production ]; then
             ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           else
             test -n "$GH_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN for intuitums/e-beta.'; exit 1; }
@@ -142,7 +142,7 @@ jobs:
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
           else
-            if [ "$CHANNEL" = stable ]; then
+            if [ "$CHANNEL" = production ]; then
               gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
             else
               gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md
@@ -339,7 +339,7 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
-          if [ "$CHANNEL" = stable ]; then
+          if [ "$CHANNEL" = production ]; then
             ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
             python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
             gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
@@ -413,16 +413,16 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist --exclude=slack
       - name: Publish the Slack channel
-        # The bot versions itself and publishes with stable only. A bot publication
+        # The bot versions itself and publishes with production only. A bot publication
         # failure does not block the application's installers or their retries.
-        if: needs.resolve.outputs.channel == 'stable'
+        if: needs.resolve.outputs.channel == 'production'
         continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist --only=slack
       - name: Keep preview packages off latest
         id: cleanup
-        if: needs.resolve.outputs.channel != 'stable'
+        if: needs.resolve.outputs.channel != 'production'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
           VERSION: ${{ needs.resolve.outputs.version }}
@@ -476,7 +476,7 @@ jobs:
             E_CHANNEL=${{ needs.resolve.outputs.channel }}
             E_VERSION=${{ needs.resolve.outputs.version }}
           tags: |
-            ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.channel == 'stable' && 'latest' || needs.resolve.outputs.channel }}
+            ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.channel == 'production' && 'latest' || needs.resolve.outputs.channel }}
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
   crates:
@@ -484,7 +484,7 @@ jobs:
     # The application's version is the release version, so previews stay on npm.
     # Core publishes first: the frontends and SDK pin its version.
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'production' }}
     # Like the npm and image publications, a registry hiccup must not fail the
     # release; the deployment report still records the outcome.
     continue-on-error: true

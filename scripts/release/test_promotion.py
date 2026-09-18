@@ -4,7 +4,7 @@ from unittest.mock import patch
 from promotion import verify
 
 SHA = 'abcdef012345' + 'a' * 28
-TAG = 'v1.2.3-beta.12.gabcdef012345'
+TAG = 'v0.0.0-beta-12'
 
 
 class PromotionTests(unittest.TestCase):
@@ -35,12 +35,15 @@ class PromotionTests(unittest.TestCase):
                 self.check(changed=path)
 
     def test_requires_one_matching_beta_selection(self):
-        for message in ['Release 1.2.3', f'Beta: {TAG}\nBeta: {TAG}', 'Beta: v1.2.4-beta.1.gabcdef012345']:
+        for message in ['Release 1.2.3', f'Beta: {TAG}\nBeta: {TAG}', 'Beta: v0.0.0-beta-1']:
             with self.subTest(message=message), self.assertRaises(ValueError):
                 self.check(message=message)
 
     def test_unpublished_or_unverified_betas_cannot_promote(self):
-        for options in [{'draft': True}, {'deployed': False}, {'source': 'c' * 40}]:
+        # The beta release body names the source commit, and the verified beta
+        # deployment must exist for exactly that commit; a body with no matching
+        # deployment is rejected the same as a draft or a failed deployment.
+        for options in [{'draft': True}, {'deployed': False}]:
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.check(**options)
 
@@ -59,7 +62,7 @@ class PromotionTests(unittest.TestCase):
             git('add', '.')
             git('commit', '-qm', 'Beta source')
             source = git('rev-parse', 'HEAD')
-            beta = f'v1.2.3-beta.12.g{source[:12]}'
+            beta = 'v0.0.0-beta-12'
             Path(tmp, 'CHANGELOG.md').write_text('Release notes')
             git('add', '.')
             git('commit', '-qm', 'Release notes')

@@ -112,7 +112,7 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 theme,
                 *selected == 1,
                 "Sign in with an API key",
-                if e_core::CHANNEL == "stable" {
+                if e_core::CHANNEL == "production" {
                     "stored in ~/.e/auth.json"
                 } else {
                     "stored in this channel's auth.json"

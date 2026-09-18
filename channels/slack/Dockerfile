@@ -21,10 +21,10 @@ RUN apt-get update \
 ENV E_HOME=/home/e
 RUN mkdir -p /home/e && chmod 0777 /home/e
 
-# The e release the bot drives: `stable` or `beta`, and empty for the latest
+# The e release the bot drives: `production` or `beta`, and empty for the latest
 # of that channel. The channel matters as much as the version — a beta version
 # is only valid against the beta channel.
-ARG E_CHANNEL=stable
+ARG E_CHANNEL=production
 ARG E_VERSION=""
 RUN set -eux; \
     curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \

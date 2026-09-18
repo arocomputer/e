@@ -563,7 +563,7 @@ async fn main() -> std::io::Result<()> {
             host.shutdown().await;
             return Ok(());
         }
-        if !["stable", "dev", "beta"].contains(&e::CHANNEL)
+        if !["production", "dev", "beta"].contains(&e::CHANNEL)
             || !e::core::update::is_release_version(e::VERSION)
         {
             println!(

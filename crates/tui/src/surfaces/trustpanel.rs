@@ -38,7 +38,7 @@ impl TrustStage {
     pub fn choices(&self) -> Vec<(String, String)> {
         let mut rows = vec![(
             "Trust this directory".to_string(),
-            if e_core::CHANNEL == "stable" {
+            if e_core::CHANNEL == "production" {
                 "remembered in ~/.e/trust.json"
             } else {
                 "remembered in this channel's trust.json"

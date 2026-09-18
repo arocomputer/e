@@ -35,9 +35,9 @@ def install(run_id):
         root = Path(tmp)
         info = json.loads((root / 'build.json').read_text())
         release = identity(info['version'])
-        if (release['channel'] != 'dev' or not re.fullmatch(r'[a-f0-9]{40}', info['commit']) or
-                not release['version'].endswith(f'.g{info["commit"][:12]}')):
-            raise ValueError('Artifact identity is not a dev build with a matching source commit')
+        if (release['channel'] != 'dev' or not re.fullmatch(r'[a-f0-9]{40}', info['commit'])
+                or info['commit'] != run['head_sha']):
+            raise ValueError('Artifact identity is not a dev build from this run')
         subprocess.run(['sh', str(ROOT / 'install.sh'), '--channel', 'dev', '--version', release['version']],
                        env=dict(os.environ, E_RELEASE_BASE=root.as_uri()), check=True)
         print(f'Installed source {info["commit"]} from run {run_id}. Repeat with a newer run to update.')

@@ -7,25 +7,28 @@ set -eu
 repo="intuitums/e"
 dir="${E_INSTALL_DIR:-$HOME/.local/bin}"
 
-# Explicit channel/version selection never changes the default stable installation.
-channel=stable
+# Explicit channel/version selection never changes the default production installation.
+channel=production
 version=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel) channel=${2:?channel required}; shift 2 ;;
     --version) version=${2:?version required}; shift 2 ;;
-    *) echo 'usage: install.sh [--channel stable|beta] [--version X.Y.Z]' >&2; exit 2 ;;
+    *) echo 'usage: install.sh [--channel production|beta] [--version X.Y.Z]' >&2; exit 2 ;;
   esac
 done
+# `stable` was the production channel's old name; keep the alias so an existing
+# install command does not start failing.
+[ "$channel" = stable ] && channel=production
 case "$channel" in
-  stable) command=e ;;
+  production) command=e ;;
   beta) command=e-beta; repo=intuitums/e-beta ;;
   dev)
     # Local release qualification still tests the freshly built dev binary.
     if [ -n "${E_RELEASE_BASE:-}" ]; then command=e-dev
     else echo 'Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev' >&2; exit 2; fi ;;
   *) echo 'unknown channel' >&2; exit 2 ;; esac
-if [ -z "$version" ] && [ "$channel" != stable ]; then
+if [ -z "$version" ] && [ "$channel" != production ]; then
   # Keep the previous beta channel usable until its successor is published.
   status=$(curl -sSL -w '\n%{http_code}' "https://github.com/$repo/releases/latest/download/version.txt")
   case "$status" in
@@ -37,8 +40,8 @@ fi
 if [ -n "$version" ]; then
   version=${version#v}
   case "$channel" in
-    stable) pattern='^[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    *) pattern="^[0-9]+\.[0-9]+\.[0-9]+-$channel\.[0-9]+\.g[a-f0-9]{12}$" ;;
+    production) pattern='^[0-9]+\.[0-9]+\.[0-9]+$' ;;
+    *) pattern="^0\.0\.0-$channel-[0-9]+$" ;;
   esac
   printf '%s\n' "$version" | grep -Eq "$pattern" || { echo 'version does not match channel' >&2; exit 2; }
 fi

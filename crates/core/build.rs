@@ -13,17 +13,17 @@ fn main() {
     let version =
         std::env::var("E_BUILD_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
     let channel = std::env::var("E_BUILD_CHANNEL").unwrap_or_else(|_| "local".into());
-    assert!(["local", "stable", "dev", "beta", "pr"].contains(&channel.as_str()));
-    if channel == "stable" {
+    assert!(["local", "production", "dev", "beta", "pr"].contains(&channel.as_str()));
+    if channel == "production" {
         assert_eq!(
             version,
             env!("CARGO_PKG_VERSION"),
-            "stable version must match Cargo.toml"
+            "production version must match Cargo.toml"
         );
     } else if channel != "local" {
         assert!(
-            version.starts_with(&format!("{}-{channel}.", env!("CARGO_PKG_VERSION"))),
-            "preview identity must match manifest and channel"
+            version.starts_with(&format!("0.0.0-{channel}-")),
+            "preview identity must be 0.0.0-<channel>-<build>"
         );
     }
     let commit = std::env::var("E_BUILD_COMMIT").unwrap_or_else(|_| "local".into());

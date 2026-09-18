@@ -29,7 +29,7 @@ def prepare(tag, assets, output):
         raise ValueError("v0.0.1 predates package-manager update protection")
     if channel == "pr":
         raise ValueError("PR builds cannot be published as packages")
-    marker_suffix = "" if channel == "stable" else f"-{channel}"
+    marker_suffix = "" if channel == "production" else f"-{channel}"
     checksums = {}
     for line in (assets / "checksums.txt").read_text().splitlines():
         digest, filename = line.split()
@@ -99,7 +99,7 @@ def prepare(tag, assets, output):
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
-    # Slack versions its own content and publishes only with stable releases.
+    # Slack versions its own content and publishes only with production releases.
     # Preview application channels must not change the bot's immutable package.
     source = ROOT / "channels/slack"
     folder = output / "slack"
@@ -122,7 +122,7 @@ def prepare(tag, assets, output):
     if channel == "dev":
         return
     formula = [
-        f"class {'E' if channel == 'stable' else 'E' + channel.capitalize()} < Formula",
+        f"class {'E' if channel == 'production' else 'E' + channel.capitalize()} < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
         '  homepage "https://e.intuitum.sh"',
         f'  version "{version}"',
