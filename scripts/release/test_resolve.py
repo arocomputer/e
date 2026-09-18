@@ -9,7 +9,7 @@ from resolve import resolve
 
 class RetryTests(unittest.TestCase):
     def test_draft_recovers_without_a_tag(self):
-        tag = 'v0.0.1-beta.9.gd2b45315c43c'
+        tag = 'v0.0.0-beta-9'
         sha = 'd2b45315c43c8f78ea78c7d17043040e2b1dbf7d'
         event = {'inputs': {'action': 'retry', 'tag': tag}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \
@@ -23,7 +23,7 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result['mode'], 'recover')
         self.assertEqual(result['sha'], sha)
 
-    def test_stable_selection_requires_beta_verification(self):
+    def test_production_selection_requires_beta_verification(self):
         with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_EVENT_PATH='/event',
                         GITHUB_REF_NAME='v1.2.3'), \
                 patch('resolve.Path.read_text', return_value='{}'), \
@@ -50,7 +50,7 @@ class RetryTests(unittest.TestCase):
                 self.assertEqual(resolve()['mode'], mode)
 
     def test_dev_retry_requires_the_original_run(self):
-        event = {'inputs': {'action': 'retry', 'tag': 'v1.2.3-dev.12.gabcdef012345'}}
+        event = {'inputs': {'action': 'retry', 'tag': 'v0.0.0-dev-12'}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \
                 patch('resolve.Path.read_text', return_value=json.dumps(event)), \
                 patch('resolve.subprocess.check_output') as gh:

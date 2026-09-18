@@ -29,23 +29,23 @@ when the scenario command finishes.
 ## Release channels
 
 Production releases live in `intuitums/e`. Beta binaries live in
-`intuitums/e-beta`, with titles `X.Y.Z · Beta N`. Dev publishes npm packages
-under `@dev`, with no GitHub Release. Tags and package versions retain the
-channel, sequence, and commit identifier used by installers.
+`intuitums/e-beta`, with titles `0.0.0 · Beta N`. Dev publishes npm packages
+under `@dev`, with no GitHub Release. Preview tags and package versions carry
+the channel and the `publish` workflow run number.
 
 | Channel | Trigger | Executable | Default state |
 | --- | --- | --- | --- |
-| stable | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |
+| production | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |
 | dev | Successful CI for code changes on main | `e-dev` | `~/.e-dev` |
 | beta | `publish` workflow, action `beta`, selected main commit | `e-beta` | `~/.e-beta` |
 | PR | `preview` workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
 
-The root `Cargo.toml` owns the base version, under `[workspace.package]`. `scripts/release/identity.py` derives channel,
+The root `Cargo.toml` owns the production version, under `[workspace.package]`. `scripts/release/identity.py` derives channel,
 package tag, executable name, and preview version. `crates/core/build.rs` embeds the workflow's
-version, channel, and full source commit. Preview identities use
-`X.Y.Z-dev.NUMBER.gCOMMIT` or `X.Y.Z-beta.NUMBER.gCOMMIT`; the sequence is the
-`publish` workflow run number. PR builds use that workflow's run number.
-`e --version --json` and `e doctor` report the build identity.
+version, channel, and full source commit. Production identities use `X.Y.Z`;
+previews use `0.0.0-dev-BUILD`, `0.0.0-beta-BUILD`, or `0.0.0-pr-BUILD`, where
+BUILD is the `publish` workflow run number, so a preview never claims a release
+version it is not. `e --version --json` and `e doctor` report the build identity.
 
 The beta repository's latest release advances after its pinned website install
 passes, independently of npm and Homebrew publication.
@@ -81,7 +81,7 @@ This installs `e-dev` through the checksum-verifying installer after the run's
 `release` job succeeds, even if npm is still running or fails.
 The artifacts expire after 14 days. Repeat with a newer run to update; the
 installed build does not self-update. Older runs without `build.json` cannot
-use this command. Stable remains the default:
+use this command. Production remains the default:
 no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
 Curl and brew support side-by-side production and beta installations. npm and bun replace the
 installed version of `@intuitums/e` when switching its tag. Package installs
@@ -123,7 +123,7 @@ changes later; request a new run to test new commits. PR code is unreviewed and
 can execute arbitrary code when built or run. Its workflow uses read-only
 permissions, no publishing credentials, and no persisted checkout token.
 
-## Select a beta and ship stable
+## Select a beta and ship production
 
 1. Prepare the next base version in `Cargo.toml` and `Cargo.lock` on main.
 2. Run Release with action `beta` and the chosen main commit. An empty commit
@@ -133,23 +133,24 @@ permissions, no publishing credentials, and no persisted checkout token.
 4. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
    title, introduction, and fixed groups. Create a fresh Unreleased section.
 5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`.
-   Create an annotated stable tag that names the beta you tested:
+   Create an annotated production tag that names the beta you tested:
 
    ```sh
-   git tag -a vX.Y.Z -m "Release X.Y.Z" -m "Beta: vX.Y.Z-beta.NUMBER.gCOMMIT"
+   git tag -a vX.Y.Z -m "Release X.Y.Z" -m "Beta: v0.0.0-beta-BUILD"
    git push origin vX.Y.Z
    ```
 
-The stable workflow requires the named beta to be published, to have a successful
-verified beta deployment, and to share the stable base version. Its source must
-be an ancestor of the stable commit. Only `CHANGELOG.md` may differ; any code,
-dependency, build, or other file change requires another beta. This check runs
-before stable builds or publication. Retrying an already published stable release
-reuses its existing artifacts and does not retroactively require a beta marker.
+The production workflow requires the named beta to be published and to have a
+successful verified beta deployment for the source commit named in its body. Its
+source must be an ancestor of the production commit. Only `CHANGELOG.md` may
+differ; any code, dependency, build, or other file change requires another beta.
+This check runs before production builds or publication. Retrying an already
+published production release reuses its existing artifacts and does not
+retroactively require a beta marker.
 
-Stable recompiles with the stable identity, so it is not a byte-for-byte rename
-of the beta binary. The workflow checks the final commit again. No permanent
-beta or production branch is required.
+Production recompiles with the production identity, so it is not a byte-for-byte
+rename of the beta binary. The workflow checks the final commit again. No
+permanent beta or production branch is required.
 
 ## Release notes and the website
 
@@ -201,7 +202,7 @@ publishes the draft before updating packages. Incomplete drafts fail until all
 four archives exist. npm compares the existing package's integrity;
 a different tarball under the same version fails. The Slack bot keeps its own
 version, which must change whenever any packaged file changes, including its
-README. New bot versions publish under `latest` with stable application releases;
+README. New bot versions publish under `latest` with production application releases;
 dev and beta releases leave it alone. Historical bot dev/beta tags remain
 available. This avoids changing package bytes or requiring separate tag-management
 credentials when the application changes channels. Each registry can fail
@@ -220,7 +221,7 @@ PR CI runs installer checks only when packaging, installer, identity, updater,
 or workflow sources change. Documentation and README artwork changes do not publish dev builds.
 The test workflow and dev release selector share `scripts/ci/changes.py`.
 Dev reuses the successful test run for its exact commit and checks release identity
-again. Beta and stable candidates run the full checks before building.
+again. Beta and production candidates run the full checks before building.
 Release installation checks always run. The npm smoke check retries both installation
 and the executable version check six times, twenty seconds apart, with a fresh
 prefix and cache each time. This covers delayed wrapper metadata and missing
@@ -276,7 +277,7 @@ crates.io), and `intuitums-e-sdk`. The `crates` job publishes the application
 crates in dependency order, core, tui, rpc, then `intuitums-e`, and waits for
 each to reach the index, because the next manifest depends on it by version.
 It skips a version that is already published, so a retry is safe. The SDK
-publishes last. Stable releases only: previews stay on npm. The application's
+publishes last. Production releases only: previews stay on npm. The application's
 version is the release version; the SDK versions itself, so the job reads
 `crates/sdk/Cargo.toml` and publishes only when that version is new. Create the token at
 https://crates.io/settings/tokens and set the first publication up interactively
@@ -286,14 +287,14 @@ with `cargo login` if the token is ever rotated.
 The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
 script from main with a five-minute cache. Merge the channel-aware installer
 before attempting the first channel release. No separate deployment is required
-for each binary release. The stable homepage installation stays unchanged.
+for each binary release. The production homepage installation stays unchanged.
 
 ## Deployment history
 
-GitHub's Deployments panel tracks `production`, `beta`, and `dev`. Production
-maps to the stable installer channel; package tags and update commands keep their
-existing names. The release workflow records its selected source commit, not the
-branch used to run the workflow.
+GitHub's Deployments panel tracks `production`, `beta`, and `dev`, matching the
+release channels. Package tags and update commands keep their channel names. The
+release workflow records its selected source commit, not the branch used to run
+the workflow.
 
 A final reporting job marks production and beta successful after npm, Homebrew,
 channel advancement, and website installation checks pass. Dev requires verified
@@ -324,5 +325,5 @@ integrity. It never republishes an accepted upload in the same attempt. A rerun
 recognizes an already staged version and resumes waiting. A processing timeout
 means availability is unconfirmed; check npm package status and rerun failed jobs.
 Authentication errors and checksum mismatches fail immediately. The npm job allows
-110 minutes for the application packages, optional stable bot publication, and
+110 minutes for the application packages, optional production bot publication, and
 installation verification.

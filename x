@@ -85,7 +85,9 @@ case "$command" in
     ;;
   container)
     [ "$#" -eq 0 ] || usage
-    docker build --tag e-slack channels/slack
+    # The check builds without a published release, so it installs a stub `e`.
+    # The release workflow builds the real image with the release it published.
+    docker build --tag e-slack --build-arg E_RELEASE_STUB=1 channels/slack
     ;;
   guard)
     [ "$#" -eq 0 ] || usage

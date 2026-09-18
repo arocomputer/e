@@ -28,11 +28,11 @@ def resolve():
         assert run['head_repository']['full_name'] == os.environ['GITHUB_REPOSITORY']
         sha, channel = run['head_sha'], 'dev'
     elif kind == 'push':
-        sha, channel = git('rev-parse', 'HEAD'), 'stable'
+        sha, channel = git('rev-parse', 'HEAD'), 'production'
     elif mode == 'retry':
         tag = event['inputs']['tag']
         release = identity(tag)
-        assert release['channel'] in ('stable', 'beta'), 'Rerun the original Actions run to retry a dev build'
+        assert release['channel'] in ('production', 'beta'), 'Rerun the original Actions run to retry a dev build'
         metadata = json.loads(subprocess.check_output(
             ['gh', 'release', 'view', tag, '--repo', release['repository'], '--json', 'isDraft,targetCommitish,body'], text=True))
         # Draft releases may not have a tag until they are published.
@@ -44,8 +44,6 @@ def resolve():
             ref = metadata['targetCommitish'] if metadata['isDraft'] else f'refs/tags/{tag}'
         sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
         subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
-        if release['channel'] == 'beta':
-            assert release['version'].endswith(f'.g{sha[:12]}'), 'Beta source does not match its version'
         return release | {'sha': sha, 'tag': tag, 'mode': 'recover' if metadata['isDraft'] else 'retry'}
     else:
         ref = event.get('inputs', {}).get('commit') or 'origin/main'
@@ -56,9 +54,9 @@ def resolve():
     # commits keep it under [package].
     manifest = tomllib.loads(git('show', f'{sha}:Cargo.toml'))
     base = (manifest.get('workspace', {}).get('package') or manifest['package'])['version']
-    version = base if channel == 'stable' else f'{base}-{channel}.{os.environ["GITHUB_RUN_NUMBER"]}.g{sha[:12]}'
-    if channel == 'stable':
-        assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'stable tag must match manifest'
+    version = base if channel == 'production' else f'0.0.0-{channel}-{os.environ["GITHUB_RUN_NUMBER"]}'
+    if channel == 'production':
+        assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'production tag must match manifest'
         verify(f'v{version}', sha)
     mode = 'build'
     if kind == 'workflow_run':

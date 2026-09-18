@@ -10,8 +10,8 @@ def report(needs, repository, server, run_id):
     """Report completed release jobs; never substitute the workflow branch for the source."""
     release = needs['resolve']['outputs']
     channel = release['channel']
-    assert channel in ('stable', 'beta', 'dev')
-    environment = 'production' if channel == 'stable' else channel
+    assert channel in ('production', 'beta', 'dev')
+    environment = channel
     required = ('npm',) if channel == 'dev' else ('npm', 'homebrew', 'channel')
     success = all(needs[job]['result'] == 'success' for job in required)
     state = 'success' if success else 'error' if any(job['result'] == 'cancelled' for job in needs.values()) else 'failure'
@@ -36,7 +36,7 @@ def report(needs, repository, server, run_id):
     deployment = post('deployments', {
         'ref': release['sha'], 'environment': environment,
         'auto_merge': False, 'required_contexts': [],
-        'production_environment': channel == 'stable',
+        'production_environment': channel == 'production',
         'description': release['version'],
         'payload': {'tag': release['tag'], 'run_url': run_url},
     })

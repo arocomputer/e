@@ -8,10 +8,10 @@ class ReleaseContracts(unittest.TestCase):
     def test_channel_versions_and_numeric_order(self):
         self.assertEqual(identity('v1.2.3')['npm_tag'], 'latest')
         self.assertEqual(identity('v1.2.3')['repository'], 'intuitums/e')
-        self.assertEqual(identity('v1.2.3-beta.12.gabcdef012345')['repository'], 'intuitums/e-beta')
-        self.assertEqual(identity('v1.2.3-dev.12.gabcdef012345')['repository'], '')
-        self.assertEqual(identity('v1.2.3-beta.12.gabcdef012345')['command'], 'e-beta')
-        self.assertGreater(version_key('1.2.3-dev.12.gabcdef012345'), version_key('1.2.3-dev.9.gabcdef012345'))
+        self.assertEqual(identity('v0.0.0-beta-12')['repository'], 'intuitums/e-beta')
+        self.assertEqual(identity('v0.0.0-dev-12')['repository'], '')
+        self.assertEqual(identity('v0.0.0-beta-12')['command'], 'e-beta')
+        self.assertGreater(version_key('0.0.0-dev-12'), version_key('0.0.0-dev-9'))
         for invalid in ['1.2.3-rc.1', '1.2.3-dev', '1.2.3-dev.1.g../file', '01.2.3']:
             with self.assertRaises(ValueError):
                 identity(invalid)
@@ -19,9 +19,9 @@ class ReleaseContracts(unittest.TestCase):
     def test_display_titles_keep_versions_separate(self):
         for version, title in [
             ('1.2.3', '1.2.3'),
-            ('1.2.3-beta.12.gabcdef012345', '1.2.3 · Beta 12'),
-            ('1.2.3-dev.9.gabcdef012345', '1.2.3 · Dev 9'),
-            ('1.2.3-pr.42.gabcdef012345', '1.2.3 · PR 42'),
+            ('0.0.0-beta-12', '0.0.0 · Beta 12'),
+            ('0.0.0-dev-9', '0.0.0 · Dev 9'),
+            ('0.0.0-pr-42', '0.0.0 · PR 42'),
         ]:
             with self.subTest(version=version):
                 release = identity(version)
@@ -42,11 +42,11 @@ class BetaPromotion(unittest.TestCase):
         from channel import advance
         for tag, newer, promotes in [
             ('v1.2.3', False, False),
-            ('v1.2.3-dev.12.gabcdef012345', False, False),
-            ('v1.2.3-beta.12.gabcdef012345', False, True),
-            ('v1.2.3-beta.12.gabcdef012345', True, False),
+            ('v0.0.0-dev-12', False, False),
+            ('v0.0.0-beta-12', False, True),
+            ('v0.0.0-beta-12', True, False),
         ]:
-            pages = [[{'tag_name': 'v1.2.3-beta.13.gabcdef012345', 'draft': False, 'prerelease': False}]] if newer else [[]]
+            pages = [[{'tag_name': 'v0.0.0-beta-13', 'draft': False, 'prerelease': False}]] if newer else [[]]
             with patch('channel.subprocess.check_output', return_value=json.dumps(pages)), \
                     patch('channel.subprocess.run') as run:
                 advance(tag)
@@ -67,7 +67,7 @@ class ShellInstaller(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('npm install -g @intuitums/e@dev', result.stderr)
 
-    def test_pinned_beta_keeps_stable_and_rejects_a_mismatched_channel(self):
+    def test_pinned_beta_keeps_production_and_rejects_a_mismatched_channel(self):
         import hashlib
         import io
         import os
@@ -85,7 +85,7 @@ class ShellInstaller(unittest.TestCase):
             arch = 'aarch64' if platform.machine() in ('arm64','aarch64') else 'x86_64'
             target = arch + ('-apple-darwin' if platform.system() == 'Darwin' else '-unknown-linux-gnu')
             archive = work / f'e-{target}.tar.gz'
-            version = '1.2.3-beta.12.gabcdef012345'
+            version = '0.0.0-beta-12'
             binary = f'#!/bin/sh\necho "e {version}"\n'.encode()
             with tarfile.open(archive, 'w:gz') as tar:
                 member = tarfile.TarInfo('e')

@@ -7,23 +7,23 @@ import re
 import subprocess
 import tomllib
 
-VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta|pr)\.(0|[1-9][0-9]*)\.g([a-f0-9]{12}))?')
+VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta|pr)-([1-9][0-9]*))?')
 
 
 def identity(version):
     """Reject unsupported version forms rather than guessing their update channel."""
     match = VERSION.fullmatch(version.removeprefix('v'))
     if not match:
-        raise ValueError('Expected X.Y.Z or X.Y.Z-{dev,beta,pr}.NUMBER.gCOMMIT')
-    channel = match[4] or 'stable'
+        raise ValueError('Expected X.Y.Z or 0.0.0-{dev,beta,pr}-NUMBER')
+    channel = match[4] or 'production'
     title = '.'.join(match.group(1, 2, 3))
-    if channel != 'stable':
+    if channel != 'production':
         label = 'PR' if channel == 'pr' else channel.capitalize()
         title += f' · {label} {match[5]}'
     return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
-            'command': 'e' if channel == 'stable' else f'e-{channel}',
-            'npm_tag': 'latest' if channel == 'stable' else channel,
-            'repository': 'intuitums/e-beta' if channel == 'beta' else 'intuitums/e' if channel == 'stable' else ''}
+            'command': 'e' if channel == 'production' else f'e-{channel}',
+            'npm_tag': 'latest' if channel == 'production' else channel,
+            'repository': 'intuitums/e-beta' if channel == 'beta' else 'intuitums/e' if channel == 'production' else ''}
 
 
 def version_key(version):
@@ -36,15 +36,15 @@ def version_key(version):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--channel', choices=['dev', 'beta', 'pr', 'stable'], required=True)
+    parser.add_argument('--channel', choices=['dev', 'beta', 'pr', 'production'], required=True)
     parser.add_argument('--sequence', type=int, default=0)
     parser.add_argument('--tag')
     args = parser.parse_args()
     manifest = tomllib.loads(Path('Cargo.toml').read_text())
     base = (manifest.get('workspace', {}).get('package') or manifest['package'])['version']
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    version = base if args.channel == 'stable' else f'{base}-{args.channel}.{args.sequence}.g{commit[:12]}'
+    version = base if args.channel == 'production' else f'0.0.0-{args.channel}-{args.sequence}'
     if args.tag and args.tag != f'v{version}':
-        raise SystemExit('Tag does not match Cargo.toml')
+        raise SystemExit('Tag does not match the channel version')
     result = identity(version) | {'commit': commit, 'tag': f'v{version}'}
     print(json.dumps(result))

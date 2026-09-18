@@ -8,7 +8,7 @@ from deployment import report
 
 class DeploymentTests(unittest.TestCase):
     def test_channel_mapping_and_failed_publication(self):
-        for channel, environment in [('stable', 'production'), ('beta', 'beta'), ('dev', 'dev')]:
+        for channel, environment in [('production', 'production'), ('beta', 'beta'), ('dev', 'dev')]:
             for outcome in ['success', 'failure', 'cancelled']:
                 with self.subTest(channel=channel, outcome=outcome):
                     needs = {
@@ -24,7 +24,7 @@ class DeploymentTests(unittest.TestCase):
                     self.assertEqual(created['environment'], environment)
                     self.assertEqual(created['ref'], 'a' * 40)
                     self.assertFalse(created['auto_merge'])
-                    self.assertEqual(created['production_environment'], channel == 'stable')
+                    self.assertEqual(created['production_environment'], channel == 'production')
                     self.assertEqual(status['state'], 'error' if outcome == 'cancelled' else outcome)
                     self.assertEqual(status['log_url'], 'https://github.com/intuitums/e/actions/runs/123')
                     self.assertEqual(status['environment_url'],
@@ -34,8 +34,8 @@ class DeploymentTests(unittest.TestCase):
         from pathlib import Path
         import tempfile
         needs = {'resolve': {'result': 'success', 'outputs': {'channel': 'beta', 'sha': 'a' * 40,
-                 'repository': 'intuitums/e-beta', 'tag': 'v1.2.3-beta.1.gaaaaaaaaaaaa',
-                 'version': '1.2.3-beta.1.gaaaaaaaaaaaa'}},
+                 'repository': 'intuitums/e-beta', 'tag': 'v0.0.0-beta-1',
+                 'version': '0.0.0-beta-1'}},
                  'publish': {'result': 'success'}, 'channel': {'result': 'success'},
                  'npm': {'result': 'failure'}, 'homebrew': {'result': 'success'}}
         with tempfile.TemporaryDirectory() as tmp, \

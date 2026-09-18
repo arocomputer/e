@@ -37,7 +37,7 @@ chmod +x "$prefix/node_modules/.bin/e-dev"
             (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
             (root / 'sleep').chmod(0o755)
             env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', STATE=str(root / 'calls'),
-                       VERSION='1.2.3-dev.1.gabcdef012345', COMMAND='e-dev', FAILURE=failure, READY=str(ready))
+                       VERSION='0.0.0-dev-1', COMMAND='e-dev', FAILURE=failure, READY=str(ready))
             result = subprocess.run(['sh', str(ROOT / 'scripts/packaging/verify-npm.sh')],
                                     env=env, capture_output=True, text=True)
             return result.returncode, int((root / 'calls').read_text())

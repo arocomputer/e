@@ -7,7 +7,7 @@ from pr_comment import MARKER, render, report
 def jobs(result='success'):
     """A selected dev build with its publication outcome."""
     return {
-        'resolve': {'outputs': {'channel': 'dev', 'mode': 'build', 'sha': 'a' * 40, 'version': '1.2.3-dev.1.gaaaaaaaaaaaa'}},
+        'resolve': {'outputs': {'channel': 'dev', 'mode': 'build', 'sha': 'a' * 40, 'version': '0.0.0-dev-1'}},
         'build': {'result': 'success'}, 'npm': {'result': result},
     }
 
@@ -18,7 +18,7 @@ class CommentTests(unittest.TestCase):
             for result in ('success', 'failure', 'cancelled', 'skipped'):
                 body = render(jobs(result), stage, 'https://github.com/intuitums/e/actions/runs/1')
                 self.assertEqual('npm install -g' in body, stage == 'finished' and result == 'success')
-        self.assertIn('@intuitums/e@1.2.3-dev.1.gaaaaaaaaaaaa', render(jobs(), 'finished', 'url'))
+        self.assertIn('@intuitums/e@0.0.0-dev-1', render(jobs(), 'finished', 'url'))
 
     def test_install_failure_is_not_called_a_build_failure(self):
         needs = jobs('failure')

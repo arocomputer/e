@@ -86,7 +86,7 @@ class Packages(unittest.TestCase):
 
     def test_preview_packages_keep_the_channel_and_separate_command(self):
         output = self.root / "dist"
-        prepare("v1.2.3-beta.12.gabcdef012345", self.assets, output)
+        prepare("v0.0.0-beta-12", self.assets, output)
         wrapper = json.loads((output / "e/package.json").read_text())
         self.assertEqual(wrapper["publishConfig"]["tag"], "beta")
         self.assertEqual(wrapper["bin"], {"e-beta": "bin/e"})
@@ -99,11 +99,11 @@ class Packages(unittest.TestCase):
         channel = json.loads((output / "slack/package.json").read_text())
         self.assertNotIn("tag", channel["publishConfig"])
         self.assertEqual(channel["version"], "0.0.2")
-        self.assertEqual(wrapper["version"], "1.2.3-beta.12.gabcdef012345")
+        self.assertEqual(wrapper["version"], "0.0.0-beta-12")
 
     def test_dev_publishes_npm_without_a_formula(self):
         output = self.root / "dist"
-        prepare("v1.2.3-dev.12.gabcdef012345", self.assets, output)
+        prepare("v0.0.0-dev-12", self.assets, output)
         package = json.loads((output / "e/package.json").read_text())
         self.assertEqual(package["publishConfig"]["tag"], "dev")
         self.assertEqual(package["bin"], {"e-dev": "bin/e"})
@@ -111,7 +111,7 @@ class Packages(unittest.TestCase):
 
     def test_slack_payload_is_identical_across_release_channels(self):
         payloads = []
-        for version in ['1.2.3', '1.2.3-dev.1.gabcdef012345', '1.2.3-beta.2.gabcdef012345']:
+        for version in ['1.2.3', '0.0.0-dev-1', '0.0.0-beta-2']:
             output = self.root / version
             prepare(version, self.assets, output)
             payloads.append({str(path.relative_to(output / 'slack')): path.read_bytes()
