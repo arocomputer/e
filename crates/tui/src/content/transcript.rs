@@ -92,7 +92,7 @@ pub enum Kind {
     Banner,
     User,
     Assistant,
-    /// Streamed thinking remains expanded after its burst ends. Legacy
+    /// Streamed thinking retains its source after its burst ends. Legacy
     /// summary blocks are marked done and may be absorbed by a tool tree.
     Thinking,
     Tool,
@@ -138,6 +138,25 @@ fn stream_render_interval(source_bytes: usize) -> std::time::Duration {
     std::time::Duration::from_nanos(nanos as u64)
 }
 
+/// Render retained thinking without reflowing unmatched strong markers as markdown.
+fn thinking_rows(text: &str, theme: &Theme, width: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let styled = reasoning_style(text);
+    wrap_styled(&styled, width.saturating_sub(2).max(8))
+        .into_iter()
+        .map(|line| {
+            if line.is_empty() {
+                line
+            } else {
+                theme.fg("thinkingText", &format!("  {line}"))
+            }
+        })
+        .collect()
+}
+
 pub struct Block {
     pub kind: Kind,
     pub text: String,
@@ -165,6 +184,11 @@ pub struct Block {
     pub live_preview_rows: usize,
     /// Maximum action-label rows in the transcript; review remains unabridged.
     pub tool_label_rows: usize,
+    /// Successful children kept in the main view; the reader retains every child.
+    pub tool_history_limit: usize,
+    pub tool_history_hint: String,
+    /// One-line presentation for retained thinking; review always expands it.
+    pub collapsed: Option<String>,
     /// Number of real image attachments whose generated prefix may be styled.
     image_count: usize,
     cache: Option<RenderCache>,
@@ -198,6 +222,9 @@ impl Block {
             more: 0,
             live_preview_rows: 5,
             tool_label_rows: 2,
+            tool_history_limit: usize::MAX,
+            tool_history_hint: String::new(),
+            collapsed: None,
             image_count: 0,
             cache: None,
             show_format: e_core::extensions::Format::default(),
@@ -441,6 +468,12 @@ impl Block {
         theme: &Theme,
         width: usize,
     ) -> Vec<(String, Option<ToolDetail>)> {
+        if self.kind == Kind::Thinking && self.collapsed.is_some() {
+            return thinking_rows(&self.text, theme, width)
+                .into_iter()
+                .map(|row| (row, None))
+                .collect();
+        }
         if self.kind == Kind::Shell {
             return vec![(
                 theme.fg("dim", &format!("$ {}", self.text)),
@@ -548,27 +581,17 @@ impl Block {
                     .collect()
             }
             Kind::Thinking => {
-                let text = self.text.trim();
-                if text.is_empty() {
-                    return Vec::new();
+                if let Some(hint) = &self.collapsed {
+                    if self.text.trim().is_empty() {
+                        return Vec::new();
+                    }
+                    let hint = e_core::tools::sanitize_display(hint).replace('\n', " ");
+                    return vec![theme.fg(
+                        "thinkingText",
+                        &format!("  {}", clip_plain(&hint, width.saturating_sub(2))),
+                    )];
                 }
-                // Reasoning needs a stable streaming renderer. A general
-                // markdown parser exposes an opening `**` until the closing
-                // marker arrives, then reparses and shifts the live frame.
-                // Treat strong markers as styling even while unmatched, and
-                // leave every other character inert. The whole row remains in
-                // thinkingText, distinct from white assistant TextDelta rows.
-                let styled = reasoning_style(text);
-                wrap_styled(&styled, width.saturating_sub(2).max(8))
-                    .into_iter()
-                    .map(|line| {
-                        if line.is_empty() {
-                            line
-                        } else {
-                            theme.fg("thinkingText", &format!("  {line}"))
-                        }
-                    })
-                    .collect()
+                thinking_rows(&self.text, theme, width)
             }
             Kind::Tool => {
                 // The reference shape: a finished row is just the row — no
@@ -645,10 +668,31 @@ impl Block {
                     }
                     return rows;
                 }
+                let hidden = self
+                    .tool_children
+                    .iter()
+                    .filter(|child| child.state == ToolState::Completed)
+                    .count()
+                    .saturating_sub(self.tool_history_limit);
+                if hidden > 0 {
+                    let hint = e_core::tools::sanitize_display(&self.tool_history_hint)
+                        .replace("{count}", &hidden.to_string())
+                        .replace('\n', " ");
+                    rows.extend(tree_rows(theme, width, "├", &theme.fg("muted", &hint)));
+                }
+                let mut skip = hidden;
                 let visible: Vec<_> = self
                     .tool_children
                     .iter()
                     .filter(|child| child.state != ToolState::Pending || self.done)
+                    .filter(|child| {
+                        if child.state == ToolState::Completed && skip > 0 {
+                            skip -= 1;
+                            false
+                        } else {
+                            true
+                        }
+                    })
                     .collect();
                 for child in &visible {
                     if child.state == ToolState::Pending {
@@ -679,7 +723,7 @@ impl Block {
                         append_tool_preview(&mut rows, child, theme, width, self.live_preview_rows);
                     }
                 }
-                if !visible.is_empty() {
+                if !visible.is_empty() || hidden > 0 {
                     rows.extend(tree_rows(
                         theme,
                         width,
@@ -1355,7 +1399,7 @@ impl Transcript {
         None
     }
 
-    /// Continue the open tree when no reply or expanded thinking separates
+    /// Continue the open tree when no reply or retained thinking separates
     /// batches. Only legacy collapsed summaries may be absorbed; live and
     /// completed reasoning keep their own blocks and start a new tree.
     pub fn extend_tool_group(&mut self, children: Vec<ToolChild>) -> usize {
@@ -1401,6 +1445,55 @@ impl Transcript {
 
 #[cfg(test)]
 mod tests {
+    /// Folding successful history must keep failures, running work, and full review intact.
+    #[test]
+    fn folded_tool_history_preserves_failures_and_review() {
+        let theme = crate::theme::load_bundled(false).unwrap();
+        let children = (0..15)
+            .map(|id| {
+                ToolChild::pending(
+                    id,
+                    "command".into(),
+                    "Running".into(),
+                    "Ran".into(),
+                    format!("command-{id:02}"),
+                )
+            })
+            .collect();
+        let mut block = Block::tool_group(children);
+        block.tool_history_limit = 3;
+        block.tool_history_hint = "{count} earlier successful tools".into();
+        for id in 0..14 {
+            block.start_tool(id);
+            block.finish_tool(
+                id,
+                if id == 1 {
+                    ToolOutcome::Failed
+                } else {
+                    ToolOutcome::Completed
+                },
+                "exit".into(),
+                "",
+            );
+        }
+        block.start_tool(14);
+        let main = block.lines_for_test(&theme, 100).join("\n");
+        assert!(main.contains("10 earlier successful tools"));
+        assert!(!main.contains("command-00"));
+        assert!(main.contains("command-01"));
+        assert!(main.contains("command-11"));
+        assert!(main.contains("command-14"));
+        let review = block
+            .review_lines(&theme, 100)
+            .into_iter()
+            .map(|(row, _)| row)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for id in 0..15 {
+            assert!(review.contains(&format!("command-{id:02}")));
+        }
+    }
+
     /// Notice wrapping preserves the first character, including multibyte text.
     #[test]
     fn notices_keep_the_first_body_character() {

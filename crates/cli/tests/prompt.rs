@@ -33,7 +33,7 @@ fn with_home<F: FnOnce()>(name: &str, f: F) {
 }
 
 #[test]
-fn default_prompt_has_pi_structure() {
+fn default_prompt_has_required_sections() {
     with_home("default", || {
         let prompt = system_prompt(Path::new("/tmp/proj"));
         assert!(prompt.starts_with(

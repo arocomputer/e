@@ -504,6 +504,38 @@ async fn thinking_only_stream_is_not_an_empty_response() {
     );
 }
 
+/// A normal reasoning-only finish needs an explanation even when thinking is hidden.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn reasoning_only_completion_reports_the_missing_answer() {
+    let _lock = env_lock();
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"planning\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (port, server) = serve_sse(&[body]);
+    let home = Home::new("missing-answer");
+    home.auth(r#"{"mock":{"key":"synthetic"}}"#);
+    let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
+    agent.submit("hi".into(), "sys".into());
+    let mut warnings = Vec::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            SessionEvent::Warning(message) => warnings.push(message),
+            SessionEvent::TurnEnd { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(warnings
+        .iter()
+        .any(|message| message.contains("without an answer")));
+    assert_eq!(
+        server.join().unwrap().len(),
+        1,
+        "a reasoning-only finish must not silently re-request"
+    );
+}
+
 /// A 200 stream the provider cut at its output limit must not read as a
 /// finished turn: the finish reason is mapped, and skipped malformed
 /// payloads are counted instead of vanishing.

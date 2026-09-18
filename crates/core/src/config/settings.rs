@@ -195,10 +195,8 @@ pub fn all(effort_levels: Vec<String>) -> Vec<Setting> {
             label: "Show thinking".into(),
             category: "Interface",
             options: vec!["on".into(), "off".into()],
-            // Off by default: e shows only the reply deltas, and the activity
-            // row's blinking dot and elapsed clock already say a silent
-            // reasoning phase is working, not hung. Readers who want the
-            // model's thinking in the transcript turn it `on`.
+            // Off keeps retained reasoning collapsed. Review and the toggle
+            // can reveal earlier thinking without asking the model again.
             default: "off".into(),
         },
         Setting {
@@ -287,7 +285,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thinking_is_hidden_until_explicitly_enabled() {
+    fn thinking_is_collapsed_until_explicitly_expanded() {
         assert!(!show_thinking_value(None));
         assert!(!show_thinking_value(Some("off")));
         assert!(!show_thinking_value(Some("invalid")));

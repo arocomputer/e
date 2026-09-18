@@ -165,6 +165,11 @@ fn capture_session(home: &Home, port: u16, tools: bool, marker: &str, resize: &s
         raw.windows(b"\x1b[?25h".len()).any(|w| w == b"\x1b[?25h"),
         "cursor was not restored on exit"
     );
+    assert!(
+        raw.windows(b"\x1b[?1006l".len())
+            .any(|w| w == b"\x1b[?1006l"),
+        "mouse capture was not disabled on exit"
+    );
     raw
 }
 

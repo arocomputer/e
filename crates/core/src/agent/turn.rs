@@ -733,6 +733,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // Commit the assistant turn with response provenance and any
         // reported usage; compaction carries this metadata forward without
         // putting it back into provider history.
+        let no_answer = text.trim().is_empty();
         let final_message = ChatMessage::assistant(text, calls.clone()).with_response(response);
         log.commit_async(final_message).await;
 
@@ -747,6 +748,13 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 .is_empty()
             {
                 continue 'turn;
+            }
+            if no_answer {
+                let message = crate::config::settings::get_string("no_answer_message")
+                    .unwrap_or_else(|| {
+                        "The model finished without an answer. Retry or ask it to continue.".into()
+                    });
+                let _ = events.send(SessionEvent::Warning(message)).await;
             }
             break 'turn Outcome::Complete;
         }

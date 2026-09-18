@@ -91,6 +91,14 @@ private to your user. A prompt identical to the last one is not repeated.
 
 ## Full transcript
 
+In normal chat, the wheel and PageUp/PageDown scroll the conversation while
+the composer stays editable. Reading above the bottom pauses following new
+output. End returns to the latest output; submitting a prompt resumes following
+too. Up/Down remain composer navigation and prompt history.
+
+Both review depths reveal retained thinking and tool calls folded from normal
+chat. Closing the reader restores the previous chat reading position and draft.
+
 `Ctrl+O` opens the review screen at the latest output. Tool details wrap with
 the reference's `│` rails, and the rail connector renders in the theme's
 `muted` tone. The footer has a navigation row, a blank row, and the usual

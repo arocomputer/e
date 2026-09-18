@@ -19,7 +19,23 @@ class Provider(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Length', '500')
         self.end_headers()
         try:
-            if prompt == 'diff-counts':
+            if prompt == 'scroll-chat':
+                initial = ''.join(f'History row {i:02d}\n\n' for i in range(40))
+                events = [{'choices': [{'delta': {'content': initial}}]}]
+                events += [{'choices': [{'delta': {'content': f'Live row {i:03d}\n\n'}}]} for i in range(120)]
+                events += [{'choices': [{'delta': {'content': 'SCROLL_CHAT_FINISHED'}}]}]
+            elif prompt == 'visible-work':
+                if any(message['role'] == 'tool' for message in request['messages']):
+                    events = [{'choices': [{'delta': {'content': 'VISIBLE_WORK_FINISHED'}}]}]
+                else:
+                    calls = [{'index': i, 'id': f'visible-{i}', 'type': 'function', 'function': {
+                        'name': 'bash', 'arguments': json.dumps({'command': f'printf "work-{i:02d}\\n"' + ('; exit 7' if i == 1 else '')})}}
+                        for i in range(16)]
+                    events = [
+                        {'choices': [{'delta': {'reasoning_content': 'RETAINED_THINKING_DETAIL'}}]},
+                        {'choices': [{'delta': {'tool_calls': calls}, 'finish_reason': 'tool_calls'}]},
+                    ]
+            elif prompt == 'diff-counts':
                 if any(message['role'] == 'tool' for message in request['messages']):
                     events = [{'choices': [{'delta': {'content': 'DIFF_FINISHED'}}]}]
                 else:

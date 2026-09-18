@@ -1,5 +1,4 @@
-//! Model facts from models.dev: the community catalog opencode and pi
-//! generate their provider files from. A provider's own `/models` list is
+//! Model facts from the models.dev community catalog. A provider's `/models` list is
 //! the truth of *which* ids it serves, but most report nothing beyond the
 //! id; models.dev carries the rest — context window, effort levels, image
 //! and tool support, pricing — for every provider e speaks to. Fetched in

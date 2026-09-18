@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "tui_mode": "fullscreen",
+  "show_thinking": "off",
+  "scroll_lines": 5,
+  "scroll_hint": "Reading earlier output",
+  "thinking_hint": "Reasoning available in review",
+  "tool_history_limit": 4,
+  "tool_history_hint": "{count} successful calls in review",
+  "no_answer_message": "No answer was supplied."
+}

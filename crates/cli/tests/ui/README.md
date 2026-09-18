@@ -13,7 +13,7 @@ provider requests remain available after a pass or failure.
 
 `./x ui` builds the current binary, creates a Python environment with the
 packages in `requirements.txt` under `target/ui-env` on first run (set
-`PYTHON` to use another interpreter), and runs the seven checked scenarios.
+`PYTHON` to use another interpreter), and runs the checked scenarios below.
 It prints the temporary artifact directory and exits nonzero if a check fails.
 Both Linux and macOS CI run it after `./x check` and retain artifacts on failure.
 Rust rendering and PTY tests remain part of `./x test` without Python packages.
@@ -26,6 +26,9 @@ Choose one scenario or a fresh output directory:
 
 | Scenario | Contract |
 | --- | --- |
+| `scroll-chat` | Wheel scrolling in inline chat preserves the draft and reading position through new output, resize, and a visit to the detail reader. |
+| `scroll-fullscreen` | Page and wheel navigation scroll fullscreen chat independently of the composer; End resumes following output. |
+| `visible-work` | Collapsed thinking remains available in review and after a settings toggle; folded successful tools remain in review and failures stay visible. |
 | `single-tool` | One command stays within two label rows, retains connected rails, and reveals its full label after widening the terminal. |
 | `heredoc-tool` | The main tree shows only the heredoc invocation; Ctrl+O retains its body and connects the branch through output in both review depths. |
 | `tui-mode` | Startup is inline by default; the settings switch pins and unpins the composer. |
@@ -65,7 +68,8 @@ Each scenario gets fresh `HOME`, `E_HOME`, and workspace directories. Fixtures
 use dummy credentials, disable extensions and auto-update, and send requests only
 to the local mock provider. Only `tool-tree`, `single-tool`, `heredoc-tool`, and `diff-counts` enable tools.
 They run generated `printf`/`sleep`/`cat` commands or edit a generated file. No real
-provider credentials, paid requests, or repository files are used.
+provider credentials, paid requests, or repository files are used. `visible-work`
+also enables tools and runs synthetic commands, including one deliberate failure.
 
 ## Limits
 

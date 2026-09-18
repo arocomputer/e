@@ -19,14 +19,20 @@ of the session document.
   `"tui_mode": "fullscreen"`. Missing or invalid values use `inline`.
   Manual file edits apply with `/reload`. The older
   `"composer_position": "bottom"` preference selects Fullscreen until a TUI mode
-  is saved. Both modes use the normal terminal screen and native scrollback.
+   is saved. Inline mode uses the normal screen at the tail. Fullscreen uses
+   the alternate screen with a fixed-height transcript viewport and composer.
+- Wheel and page navigation retain a reading offset independently of the
+  composer. Inline mode temporarily uses the alternate screen while paused.
+  New output does not move that offset. End or scrolling to the bottom resumes
+  following; submitting a prompt does too. Ctrl+O has its own reading position.
 - Resize redraws only the new visible tail. It does not erase scrollback or
   print the entire transcript again. The terminal controls how existing
   history wraps. The full-detail viewer renders current source at the new
   width when historical presentation is insufficient.
-- Finishing thinking leaves it expanded. A later tool batch cannot absorb
-  that reasoning as a collapsed summary. Only legacy summaries marked done
-  may be absorbed into a continuing tree.
+- Thinking is retained regardless of its display setting. It stays at the
+  chosen height when its burst ends: expanded with `show_thinking: "on"`,
+  otherwise a one-line hint. Review expands the retained source. A later tool
+  batch cannot absorb it. Only legacy summaries marked done may be absorbed.
 - The paint worker receives owned frames through a single pending slot.
   Resize discards a queued frame at the old width; the next frame uses the
   new dimensions. An already executing write can finish before that redraw.
@@ -68,6 +74,10 @@ rows; missing or invalid values use 2. Apply with `/reload`. Existing groups,
 new calls, and restored sessions use the same preference. Review is uncapped.
 Failure status and colored edit counts are not truncated with the arguments.
 Failure reasons have their own bounded continuation using the same row budget.
+
+The main view keeps the latest ten successful calls per group, controlled by
+`tool_history_limit`. A summary replaces older successes. Failed, interrupted,
+and running calls remain visible. Review retains all calls in provider order.
 
 Running commands show a wrapped output tail inside their branch, followed by
 an omission count when needed. There is one review hint per group, always on

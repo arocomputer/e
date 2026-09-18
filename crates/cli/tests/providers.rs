@@ -18,6 +18,37 @@ use e::core::providers::{
 // Shared framing
 // ---------------------------------------------------------------------------
 
+/// Completed text recovers omitted deltas once, keyed by item and content part.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
+async fn responses_recovers_completed_text_without_duplicate_deltas() {
+    let _lock = env_lock();
+    let home = Home::new("completed-text");
+    home.auth(r#"{"openai":{"key":"synthetic"}}"#);
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/providers/completed-text.json")).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        let body = case["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect::<String>();
+        let (port, server) = serve_sse(&[&body]);
+        let (text, _, _, _, _) = collect_stream(Request {
+            model: test_model("openai", port, Api::Responses),
+            system: "sys".into(),
+            messages: vec![ChatMessage::user("hi")],
+            effort: None,
+            session_id: String::new(),
+            tools: Vec::new(),
+        })
+        .await;
+        assert_eq!(text, case["text"].as_str().unwrap(), "{}", case["name"]);
+        server.join().unwrap();
+    }
+}
+
 #[test]
 fn sse_splitter_handles_fragmentation_and_crlf() {
     let mut s = SseSplitter::new();

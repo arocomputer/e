@@ -86,6 +86,7 @@ pub(super) async fn run_scoped(
     execute!(
         std::io::stdout(),
         EnableBracketedPaste,
+        EnableMouseCapture,
         // The kitty keyboard protocol: without it, terminals send plain Enter
         // for shift+enter and multi-line entry is unreachable.
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
@@ -125,6 +126,7 @@ pub(super) async fn run_scoped(
         auth: None,
         settings: None,
         show_thinking: e_core::config::settings::show_thinking(),
+        thinking_hint: String::new(),
         jobs: jobs_tx,
         logins: logins_tx,
         login_task: None,
@@ -143,6 +145,9 @@ pub(super) async fn run_scoped(
         outputs: Vec::new(),
         output_seq: 0,
         viewer: None,
+        conversation_scroll: None,
+        scroll_lines: 3,
+        scroll_hint: String::new(),
         viewer_cache: None,
         queue_review: None,
         session_epoch: 0,
@@ -154,6 +159,8 @@ pub(super) async fn run_scoped(
         bottom_pinned: false,
         live_preview_rows: 5,
         tool_label_rows: 2,
+        tool_history_limit: 10,
+        tool_history_hint: String::new(),
         signed_in: false,
         status_effort: None,
         requests: requests_tx,
@@ -264,7 +271,7 @@ pub(super) async fn run_scoped(
     if let Some(initial) = stage_initial_prompt(initial, hold_initial, &mut app.pending_initial) {
         app.submit_initial(initial);
     }
-    painter.frame_in_view(app.frame(cols as usize, rows as usize), false);
+    painter.frame_in_view(app.frame(cols as usize, rows as usize), app.fixed_view());
 
     // Frame pacing: every select arm may change what's on screen, but frames
     // are built at most once per interval — a token burst becomes one paint,
@@ -273,7 +280,6 @@ pub(super) async fn run_scoped(
     let mut next_paint = tokio::time::Instant::now();
     let mut paint_deferred = false;
     let mut event_buf: Vec<SessionEvent> = Vec::with_capacity(128);
-    let mut mouse_enabled = false;
 
     loop {
         if app.external_edit {
@@ -289,15 +295,7 @@ pub(super) async fn run_scoped(
 
                     }
                     TermEvent::Mouse(event) => {
-                        if app.viewer.is_some() {
-                            match event.kind {
-                                crossterm::event::MouseEventKind::ScrollUp => app.scroll_viewer(false, 3, cols as usize, rows as usize),
-                                crossterm::event::MouseEventKind::ScrollDown => app.scroll_viewer(true, 3, cols as usize, rows as usize),
-                                _ => {}
-                            }
-                        } else {
-                            app.pane_mouse(event, cols as usize);
-                        }
+                        app.mouse(event, cols as usize, rows as usize);
                     },
                     TermEvent::Resize(c, r) => {
                         cols = c;
@@ -445,8 +443,6 @@ pub(super) async fn run_scoped(
                             // lands this frame.
                             app.apply_theme();
                             app.apply_keymap();
-                            app.show_thinking =
-                                e_core::config::settings::show_thinking();
                             app.refresh_status_cache();
                         } else if let Some(stage) = &mut app.auth {
                             match (&mut *stage, k.code) {
@@ -676,6 +672,7 @@ pub(super) async fn run_scoped(
                                 Ok(None) => {}
                                 Err(error) => app.notice(format!("could not save reasoning effort: {error}")),
                             }
+                        } else if app.conversation_key(k, cols as usize, rows as usize) {
                         } else if !ctrl && app.queue_review_key(k.code) {
                             // Consumed by the queued-prompt review.
                         } else if let Some(key) = key_of(&k, &app.keymap) {
@@ -911,15 +908,6 @@ pub(super) async fn run_scoped(
                 }
             }
         }
-        let capture_mouse = app.viewer.is_some() || app.pane.is_some();
-        if capture_mouse != mouse_enabled {
-            if capture_mouse {
-                let _ = execute!(std::io::stdout(), EnableMouseCapture);
-            } else {
-                let _ = execute!(std::io::stdout(), DisableMouseCapture);
-            }
-            mouse_enabled = capture_mouse;
-        }
         let paint_status = painter.status();
         app.rendering_delayed = paint_status.delayed(Duration::from_millis(500));
         match paint_status.failure.as_ref().map(|(_, error)| error) {
@@ -938,10 +926,8 @@ pub(super) async fn run_scoped(
             } else {
                 app.frame(cols as usize, rows as usize)
             };
-            // A split beside a pane is a fixed-height frame: it paints on
-            // the alternate screen, like the viewer, so the transcript and
-            // the terminal's scrollback come back untouched when it closes.
-            painter.frame_in_view(frame, app.viewer.is_some() || app.pane.is_some());
+            // Fixed-height reading preserves the inline screen and its native history.
+            painter.frame_in_view(frame, app.fixed_view());
             next_paint = now + FRAME_INTERVAL;
             paint_deferred = false;
         } else {
@@ -1063,7 +1049,8 @@ pub(super) async fn edit_externally(
     let _ = execute!(
         std::io::stdout(),
         PopKeyboardEnhancementFlags,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        DisableMouseCapture
     );
     let _ = terminal::disable_raw_mode();
     {
@@ -1085,6 +1072,7 @@ pub(super) async fn edit_externally(
     let _ = execute!(
         std::io::stdout(),
         EnableBracketedPaste,
+        EnableMouseCapture,
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
     *painter = Painter::spawn(cols, rows, anchor);
@@ -1103,7 +1091,7 @@ pub(super) async fn edit_externally(
         Err(_) => app.notice("the editor task failed; draft unchanged".into()),
     }
     let _ = std::fs::remove_file(&path);
-    painter.frame(app.frame(cols as usize, rows as usize));
+    painter.frame_in_view(app.frame(cols as usize, rows as usize), app.fixed_view());
 }
 
 /// Restores every terminal mode the TUI enables — keyboard enhancement

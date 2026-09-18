@@ -100,7 +100,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
         "opening and closing must not clear scrollback"
     );
     assert!(
-        raw.contains("\x1b[?1006l"),
-        "mouse capture must end when review closes"
+        raw.contains("\x1b[?1006h") && !restored.contains("\x1b[?1006l"),
+        "mouse capture must remain active for conversation scrolling after review closes"
     );
 }

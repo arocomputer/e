@@ -35,6 +35,7 @@ use e_core::output::{format_duration, format_tokens};
 use e_core::providers::catalog::{self as model, Model};
 
 mod clipboard;
+mod conversation;
 
 mod events;
 mod extui;
@@ -52,8 +53,8 @@ struct ActiveTurn {
     block: Option<usize>,
     /// The live thinking block for the current burst, if reasoning has
     /// streamed. Ending a burst detaches this so the next reasoning opens a
-    /// fresh block; the finished thought stays expanded in place — this index
-    /// is only the open segment.
+    /// fresh block. Finished thoughts retain their source and display mode;
+    /// this index is only the open segment.
     thinking_block: Option<usize>,
     turn: Turn,
     started: Instant,
@@ -252,10 +253,9 @@ struct App {
     auth: Option<AuthStage>,
     /// The settings panel, when /settings is active.
     settings: Option<crate::settingspanel::SettingsPanel>,
-    /// Whether streamed thinking is drawn (the `show_thinking` setting,
-    /// default off). Gating only the drawing — the ↓ token estimate always
-    /// counts reasoning.
+    /// Whether retained thinking is expanded in the main transcript.
     show_thinking: bool,
+    thinking_hint: String,
     /// Background job narration (login flows) into the transcript.
     jobs: tokio::sync::mpsc::Sender<String>,
     /// How a login flow ended; control flow reads this, never the notices.
@@ -291,6 +291,10 @@ struct App {
     output_seq: u64,
     /// The ctrl+o full-detail viewer, when open.
     viewer: Option<Viewer>,
+    /// Main transcript row at the top of a paused view; None follows the tail.
+    conversation_scroll: Option<usize>,
+    scroll_lines: usize,
+    scroll_hint: String,
     /// The review screen's projected rows, cached between frames: the
     /// projection only rebuilds when the transcript or the output store
     /// changed (the cache's fingerprint), or the width or depth moved —
@@ -325,6 +329,8 @@ struct App {
     bottom_pinned: bool,
     live_preview_rows: usize,
     tool_label_rows: usize,
+    tool_history_limit: usize,
+    tool_history_hint: String,
     signed_in: bool,
     status_effort: Option<String>,
     /// Where extensions' `ui.*` / `session.*` requests arrive; handed to
@@ -806,6 +812,20 @@ impl App {
         self.signed_in = e_core::auth::signed_in(&e_core::auth::load(), &self.agent.model.provider);
         self.status_effort = self.agent.effort();
         self.bottom_pinned = e_core::config::settings::tui_mode() == "fullscreen";
+        self.show_thinking = e_core::config::settings::show_thinking();
+        self.thinking_hint = e_core::config::settings::get_string("thinking_hint")
+            .unwrap_or_else(|| "Thinking · ctrl o to view".into());
+        self.scroll_lines = e_core::config::settings::get_u64("scroll_lines")
+            .filter(|n| (1..=100).contains(n))
+            .unwrap_or(3) as usize;
+        self.scroll_hint = e_core::config::settings::get_string("scroll_hint")
+            .unwrap_or_else(|| "Scrolled · End to follow".into());
+        self.scroll_hint = e_core::tools::sanitize_display(&self.scroll_hint).replace('\n', " ");
+        self.tool_history_limit = e_core::config::settings::get_u64("tool_history_limit")
+            .filter(|n| *n <= 1000)
+            .unwrap_or(10) as usize;
+        self.tool_history_hint = e_core::config::settings::get_string("tool_history_hint")
+            .unwrap_or_else(|| "{count} earlier successful tools · ctrl o to view".into());
         self.live_preview_rows = e_core::config::settings::get_u64("tool_preview_rows")
             .filter(|n| *n <= 20)
             .unwrap_or(5) as usize;
@@ -813,6 +833,17 @@ impl App {
             .filter(|n| (1..=20).contains(n))
             .unwrap_or(2) as usize;
         for block in &mut self.transcript.blocks {
+            let collapsed = (block.kind == Kind::Thinking && !self.show_thinking)
+                .then(|| self.thinking_hint.clone());
+            if block.collapsed != collapsed
+                || block.tool_history_limit != self.tool_history_limit
+                || block.tool_history_hint != self.tool_history_hint
+            {
+                block.collapsed = collapsed;
+                block.tool_history_limit = self.tool_history_limit;
+                block.tool_history_hint = self.tool_history_hint.clone();
+                block.touch();
+            }
             if block.live_preview_rows != self.live_preview_rows
                 || block.tool_label_rows != self.tool_label_rows
             {
