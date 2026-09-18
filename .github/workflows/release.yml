@@ -5,7 +5,7 @@ on:
   push:
     tags: ["v*"]
   workflow_run:
-    workflows: [test]
+    workflows: [Tests]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -97,7 +97,7 @@ jobs:
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Check selected source
-        # Dev already passed the test workflow at this exact commit.
+        # Dev already passed the Tests workflow at this exact commit.
         if: github.event_name != 'workflow_run'
         run: |
           ./x check

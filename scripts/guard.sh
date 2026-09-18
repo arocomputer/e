@@ -124,7 +124,7 @@ if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'i
   say "$out"
 fi
 
-# 9. The test workflow uses the local check commands. Raw `cargo` or `npm`
+# 9. The Tests workflow uses the local check commands. Raw `cargo` or `npm`
 #    calls would create a second definition of passing, one
 #    the local check does not have; the specialized workflows (release,
 #    security, docs) are their own thing and are not fenced.
