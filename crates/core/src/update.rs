@@ -119,20 +119,16 @@ fn release_parts(version: &str) -> Option<([u64; 3], &str, u64)> {
     };
     let base = [number(values[0])?, number(values[1])?, number(values[2])?];
     if preview.is_empty() {
-        return Some((base, "stable", 0));
+        return Some((base, "production", 0));
     }
-    let parts: Vec<_> = preview.split('.').collect();
-    if parts.len() != 3 || !["dev", "beta", "pr"].contains(&parts[0]) {
+    let (channel, build) = preview.split_once('-')?;
+    if !["dev", "beta", "pr"].contains(&channel) {
         return None;
     }
-    let hash = parts[2].strip_prefix('g')?;
-    if hash.len() != 12 || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    Some((base, parts[0], number(parts[1])?))
+    Some((base, channel, number(build)?))
 }
 
-/// Published stable, dev, and beta versions can update; PR identities stay pinned.
+/// Published production, dev, and beta versions can update; PR identities stay pinned.
 pub fn is_release_version(v: &str) -> bool {
     release_parts(v).is_some_and(|(_, channel, _)| channel != "pr")
 }
@@ -150,7 +146,7 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 /// flow reads as already current, not a failure.
 pub async fn latest_tag() -> Result<Option<String>, String> {
     match crate::CHANNEL {
-        "stable" => latest_tag_from(API_LATEST).await,
+        "production" => latest_tag_from(API_LATEST).await,
         "beta" => latest_tag_from(BETA_API_LATEST).await,
         "dev" => Err(DEV_UPDATE.into()),
         _ => Ok(None),
@@ -339,7 +335,7 @@ pub async fn self_update() -> Result<Option<String>, String> {
     }
     // Local and PR builds stay pinned. Published builds follow only their
     // own channel, and unsupported platforms never download another target.
-    if !["stable", "dev", "beta"].contains(&crate::CHANNEL)
+    if !["production", "dev", "beta"].contains(&crate::CHANNEL)
         || is_dev_build()
         || !is_release_version(crate::VERSION)
         || target().is_none()

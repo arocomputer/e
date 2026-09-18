@@ -32,7 +32,7 @@ once. Nothing here is compiled into e.
 ## Run it
 
 `@intuitums/e-slack` versions itself and publishes new versions under `latest`
-with e's stable releases. Dev and beta application releases do not republish the
+with e's production releases. Dev and beta application releases do not republish the
 bot; their historical npm tags remain available. **Bump `version` in
 `package.json` in the same pull request that changes the bot**: npm refuses to
 republish a version, so an unraised version means the change ships in the
@@ -59,7 +59,7 @@ npm start
 ## Run it on a server
 
 Every release publishes the bot as `ghcr.io/intuitums/e-slack` (`:latest` on
-the stable channel, `:beta` on the beta one), so the host needs neither Node
+the production channel, `:beta` on the beta one), so the host needs neither Node
 nor a checkout of e:
 
 ```sh
@@ -79,7 +79,7 @@ docker run -d --restart unless-stopped --name e-slack \
 
 `Dockerfile` builds that same image from a checkout — for a patch of your own,
 or an architecture the release does not carry. It takes `--build-arg
-E_VERSION=0.1.0 --build-arg E_CHANNEL=stable` to pin the release it carries; the
+E_VERSION=0.1.0 --build-arg E_CHANNEL=production` to pin the release it carries; the
 base is Debian 13 because the released Linux binaries link against glibc 2.39.
 
 `--user` is what keeps the files the agent writes in the checkout owned by you

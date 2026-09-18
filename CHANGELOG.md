@@ -23,11 +23,11 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Run a headless turn with `e -p`; add `--json` for session events. `e rpc` accepts a built-in tool allowlist and returns the saved session path.
 - `e rpc` is a session server: `session.create` opens a conversation against any working directory, `session.prompt` streams its events tagged with the session and request and answers with the turn result, and sessions run side by side. Steer, interrupt, compact, fork, export, resume saved sessions, list models, and change model or effort between turns. Extension questions reach the client as `ask` lines to answer. Version-1 one-shot lines keep working unchanged.
 - Trust a workspace without the terminal with `e trust [dir]`, and reverse it with `e untrust [dir]`. An unattended session — a channel bot, a CI job — cannot answer the trust panel, and until now that left it loading none of the repository's own instructions.
-- Install the Slack channel from npm (`npm install -g @intuitums/e-slack`, or `npx @intuitums/e-slack`). It keeps its own version and publishes under `latest` with stable releases.
+- Install the Slack channel from npm (`npm install -g @intuitums/e-slack`, or `npx @intuitums/e-slack`). It keeps its own version and publishes under `latest` with production releases.
 - Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
 - Embed e with the `intuitums-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
-- Install the SDK from crates.io with `cargo add intuitums-e-sdk`. It follows semantic versioning on a version of its own, independent of the application (`intuitums-e` — the npm naming, since `e` is taken on crates.io), and each stable release publishes whichever of the two has a new version.
+- Install the SDK from crates.io with `cargo add intuitums-e-sdk`. It follows semantic versioning on a version of its own, independent of the application (`intuitums-e` — the npm naming, since `e` is taken on crates.io), and each production release publishes whichever of the two has a new version.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
 - Recall prompts from previous sessions with Up on an empty composer. Ctrl+G opens the current draft in an external editor.
@@ -67,7 +67,9 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 - **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 
-- **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the stable home. Set `E_HOME` explicitly to select another dedicated home.
+- **Upgrade:** the stable release channel is now `production`, and preview versions are `0.0.0-<channel>-<build>` (the `publish` run number) instead of `X.Y.Z-channel.N.gCOMMIT`. `install.sh` accepts `--channel production` and keeps `stable` as an alias for it; package tags and update commands keep their channel names.
+
+- **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the production home. Set `E_HOME` explicitly to select another dedicated home.
 
 - **Upgrade:** `/diff` is now the separate [e-diff](https://github.com/fschrhunt/e-diff) package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
 - **Upgrade:** `e ask` is removed. Use `e -p` for a headless turn or `e rpc` for JSONL automation. Piped stdin requires a supported headless mode.

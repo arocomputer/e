@@ -108,7 +108,7 @@ test("a different tarball under the same version fails without overwriting it", 
 
  test("an older beta retry cannot move beta backward or touch latest", async (t) => {
     const f = fixture(t);
-    const version = "1.2.3-beta.9.gabcdef012345";
+    const version = "0.0.0-beta-9";
     writeFileSync(join(f.root, "e/package.json"), JSON.stringify({name:"@intuitums/e", version, publishConfig:{tag:"beta"}}));
     let published = false;
     const lookups = [];
@@ -119,7 +119,7 @@ test("a different tarball under the same version fails without overwriting it", 
         },
         lookup: async (_, requested) => {
             lookups.push(requested);
-            if (requested === "beta") return {version:"1.2.3-beta.12.gabcdef012345"};
+            if (requested === "beta") return {version:"0.0.0-beta-12"};
             return published ? {dist:{integrity:f.integrity}} : null;
         },
     });

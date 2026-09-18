@@ -21,19 +21,32 @@ RUN apt-get update \
 ENV E_HOME=/home/e
 RUN mkdir -p /home/e && chmod 0777 /home/e
 
-# The e release the bot drives: `stable` or `beta`, and empty for the latest
+# The e release the bot drives: `production` or `beta`, and empty for the latest
 # of that channel. The channel matters as much as the version — a beta version
-# is only valid against the beta channel.
-ARG E_CHANNEL=stable
+# is only valid against the beta channel. `production` is the installer default,
+# so it passes no channel; that also works with the pre-rename installer whose
+# default is `stable`.
+ARG E_CHANNEL=production
 ARG E_VERSION=""
+# The container check (`./x container`) builds without a published release, so it
+# installs this stub `e` instead of downloading one. Published images leave it
+# empty and install the real release.
+ARG E_RELEASE_STUB=""
 RUN set -eux; \
-    curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \
-    if [ -n "$E_VERSION" ]; then \
-      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --channel "$E_CHANNEL" --version "$E_VERSION"; \
+    if [ -n "$E_RELEASE_STUB" ]; then \
+      printf '#!/bin/sh\necho "e 0.0.0-stub"\n' > /usr/local/bin/e; \
+      chmod 0755 /usr/local/bin/e; \
     else \
-      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --channel "$E_CHANNEL"; \
+      curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \
+      channel=""; \
+      if [ -n "$E_CHANNEL" ] && [ "$E_CHANNEL" != production ]; then channel="--channel $E_CHANNEL"; fi; \
+      if [ -n "$E_VERSION" ]; then \
+        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh $channel --version "$E_VERSION"; \
+      else \
+        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh $channel; \
+      fi; \
+      rm -f /tmp/install.sh; \
     fi; \
-    rm -f /tmp/install.sh; \
     e --version
 
 WORKDIR /app

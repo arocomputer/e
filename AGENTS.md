@@ -166,7 +166,7 @@ surface? Route it through `panel.rs` so it can't diverge.
   labels it `breaking` — the one label no path can apply for you.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
-- Resolve the active home through `crates/core/src/config/home.rs`: stable uses `~/.e/`,
+- Resolve the active home through `crates/core/src/config/home.rs`: production uses `~/.e/`,
   previews use their channel home, and `E_HOME` overrides either. Never read
   another tool's directory.
 - A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/

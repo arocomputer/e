@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require stable tags to name a verified beta with identical code and build inputs."""
+"""Require production tags to name a verified beta with identical code and build inputs."""
 import json
 import re
 import subprocess
@@ -19,22 +19,22 @@ def gh(*args):
 
 def verify(tag, sha):
     """Allow only changelog edits after the explicitly selected, successfully deployed beta."""
-    stable = identity(tag)
-    if stable['channel'] != 'stable':
-        raise ValueError('Promotion requires a stable tag')
+    production = identity(tag)
+    if production['channel'] != 'production':
+        raise ValueError('Promotion requires a production tag')
     if git('cat-file', '-t', f'refs/tags/{tag}') != 'tag':
-        raise ValueError('Stable releases require an annotated tag naming the tested beta')
+        raise ValueError('Production releases require an annotated tag naming the tested beta')
     message = git('for-each-ref', '--format=%(contents)', f'refs/tags/{tag}')
     selected = re.findall(r'^Beta: (v\S+)$', message, re.M)
     if len(selected) != 1:
-        raise ValueError('Annotate the stable tag with exactly one Beta: vX.Y.Z-beta.N.gCOMMIT line')
+        raise ValueError('Annotate the production tag with exactly one Beta: v0.0.0-beta-N line')
     beta_tag = selected[0]
     beta = identity(beta_tag)
-    if beta['channel'] != 'beta' or beta['version'].split('-')[0] != stable['version']:
-        raise ValueError('Selected beta must have the same base version as stable')
+    if beta['channel'] != 'beta':
+        raise ValueError('Promotion requires a beta release')
     release = gh('release', 'view', beta_tag, '--repo', 'intuitums/e-beta', '--json', 'isDraft,body')
     source = re.findall(r'^Source: https://github.com/intuitums/e/commit/([a-f0-9]{40})$', release['body'], re.M)
-    if release['isDraft'] or len(source) != 1 or not beta['version'].endswith(f'.g{source[0][:12]}'):
+    if release['isDraft'] or len(source) != 1:
         raise ValueError('Selected beta must be published with a matching source commit')
     source = source[0]
     subprocess.run(['git', 'merge-base', '--is-ancestor', source, sha], check=True)

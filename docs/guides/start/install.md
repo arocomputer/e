@@ -52,10 +52,10 @@ e leaves a package-managed installation to its package manager. In that case,
 
 ## Preview channels
 
-Preview channels let you try changes before they reach stable. There are three
+Preview channels let you try changes before they reach production. There are three
 channels:
 
-- **Stable.** The default.
+- **Production.** The default.
 - **Beta.** A selected candidate for the next release.
 - **Dev.** Follows tested changes on main.
 
@@ -69,13 +69,13 @@ npm install -g @intuitums/e@dev
 ```
 
 A preview build keeps its own home, `~/.e-beta` or `~/.e-dev`. Its settings
-and sessions stay apart from the stable installation.
+and sessions stay apart from the production installation.
 
 How a preview installs depends on the method:
 
 - Curl and brew install beta beside production.
 - npm and bun replace the version of the one package. Install `@latest` to
-  return to stable.
+  return to production.
 
 Beta binaries come from a separate repository. An existing beta installation
 needs one reinstall to adopt its new update source.

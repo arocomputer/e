@@ -237,22 +237,10 @@ fn package_ownership_survives_binary_symlinks() {
 #[test]
 fn preview_updates_never_switch_channels() {
     use e::core::update::is_newer;
-    assert!(is_newer(
-        "v0.0.2-dev.12.gabcdef012345",
-        "0.0.2-dev.9.gabcdef012345"
-    ));
-    assert!(!is_newer(
-        "v0.0.2-dev.9.gabcdef012345",
-        "0.0.2-dev.12.gabcdef012345"
-    ));
-    assert!(!is_newer("v0.0.3", "0.0.2-beta.9.gabcdef012345"));
-    assert!(!is_newer(
-        "v0.0.3-dev.12.gabcdef012345",
-        "0.0.2-beta.9.gabcdef012345"
-    ));
-    assert!(!is_newer("v0.0.3-dev.12.gabcdef012345", "0.0.2"));
-    assert!(!is_newer(
-        "v0.0.3-pr.12.gabcdef012345",
-        "0.0.2-pr.9.gabcdef012345"
-    ));
+    assert!(is_newer("v0.0.0-dev-12", "0.0.0-dev-9"));
+    assert!(!is_newer("v0.0.0-dev-9", "0.0.0-dev-12"));
+    assert!(!is_newer("v0.0.3", "0.0.0-beta-9"));
+    assert!(!is_newer("v0.0.0-dev-12", "0.0.0-beta-9"));
+    assert!(!is_newer("v0.0.0-dev-12", "0.0.2"));
+    assert!(!is_newer("v0.0.0-pr-12", "0.0.0-pr-9"));
 }

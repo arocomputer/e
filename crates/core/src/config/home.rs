@@ -44,6 +44,7 @@ pub fn home() -> PathBuf {
         "dev" | "local" => ".e-dev",
         "beta" => ".e-beta",
         "pr" => ".e-pr",
+        "production" => ".e",
         _ => ".e",
     });
     if crate::CHANNEL == "pr" {
