@@ -1,4 +1,4 @@
-name: security
+name: Security
 
 # Dependency advisories (RustSec) and the three fuzz targets. The audit runs
 # when the dependency set changes and weekly, so a CVE in an existing pin still
@@ -23,6 +23,7 @@ permissions:
 
 jobs:
   audit:
+    name: Audit
     if: github.event_name != 'schedule' || github.event.schedule == '17 6 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -37,6 +38,7 @@ jobs:
         run: cargo audit
 
   fuzz:
+    name: Fuzz - ${{ matrix.target }}
     # Exercise each parser independently on a fresh GitHub-hosted VM.
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '41 5 * * 3'
     runs-on: ubuntu-latest

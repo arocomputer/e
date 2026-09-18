@@ -65,8 +65,13 @@ repeated here.
 ./x bench    # release-mode performance budgets
 ```
 
-The `test` workflow groups the same local commands into `lint`, `unit` on Linux
-and macOS, `e2e`, `packages`, `channels`, `docs`, `glibc`, and `bench` jobs:
+The `Tests` workflow runs lint, unit tests on Linux and macOS, terminal tests,
+package checks, channels, documentation, glibc compatibility, and benchmarks.
+
+GitHub prefixes each job with its workflow, for example `Tests / Terminal` or
+`Security / Audit`. Required job names remain `changes`, `lint`, `unit (linux)`,
+and `unit (macos)` so existing PR results continue to satisfy branch protection.
+The dev publication workflow listens for a successful `Tests` run on main.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
