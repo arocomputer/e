@@ -5,7 +5,7 @@ on:
   push:
     tags: ["v*"]
   workflow_run:
-    workflows: [test]
+    workflows: [unit]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -66,8 +66,10 @@ jobs:
     if: needs.resolve.outputs.mode == 'build'
     name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
     permissions:
+      actions: read
+      checks: read
       contents: read
       pull-requests: write
     steps:
@@ -96,8 +98,15 @@ jobs:
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
+      - name: Wait for source checks
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: python3 scripts/release/checks.py "$SHA"
+
       - name: Check selected source
-        # Dev already passed the test workflow at this exact commit.
+        # Dev waits for every check workflow at this exact commit.
         if: github.event_name != 'workflow_run'
         run: |
           ./x check

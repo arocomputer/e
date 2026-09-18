@@ -1,0 +1,72 @@
+name: glibc
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+# Read-only by default; no job in this repo needs write access to anything.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: glibc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+      packages: ${{ steps.filter.outputs.packages }}
+      channels: ${{ steps.filter.outputs.channels }}
+      docs: ${{ steps.filter.outputs.docs }}
+      lock: ${{ steps.filter.outputs.lock }}
+      bench: ${{ steps.filter.outputs.bench }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci/changes.py
+
+  glibc:
+    # The release's Linux image, so the floor is proven on the pull request
+    # instead of by a user on an older distribution. Release plumbing and the
+    # lockfile both decide it, because a dependency can raise the floor.
+    name: glibc
+    needs: changes
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.lock == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.98-bullseye
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Rust cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+            target/*/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Build for the oldest glibc the release promises
+        env:
+          TARGETS: x86_64-unknown-linux-gnu
+          E_GLIBC_CEILING: "2.31"
+        run: scripts/release/build.sh

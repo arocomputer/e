@@ -227,7 +227,10 @@ scripts/packaging/smoke.sh
 
 PR CI runs installer checks only when packaging, installer, identity, updater,
 or workflow sources change. Documentation and README artwork changes do not publish dev builds.
-The test workflow and dev release selector share `scripts/ci/changes.py`.
+The check workflows and dev release selector share `scripts/ci/changes.py`.
+A successful main `unit` run starts dev qualification. Before building, the
+release workflow waits for successful lint, unit, e2e, docs, packages, channels,
+glibc, and bench runs on that exact commit. Missing or failed runs block publication.
 Dev reuses the successful test run for its exact commit and checks release identity
 again. Beta and stable candidates run the full checks before building.
 Release installation checks always run. The npm smoke check retries both installation

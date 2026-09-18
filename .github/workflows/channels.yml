@@ -1,0 +1,44 @@
+name: channels
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+# Read-only by default; no job in this repo needs write access to anything.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: channels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  channels:
+    name: channels
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci/changes.py
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.filter.outputs.channels == 'true'
+        with:
+          node-version: '24'
+      - name: Reference channels
+        if: steps.filter.outputs.channels == 'true'
+        run: ./x channels
+
+      - name: Build the Slack image
+        if: steps.filter.outputs.channels == 'true'
+        run: ./x container

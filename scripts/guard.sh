@@ -124,14 +124,18 @@ if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'i
   say "$out"
 fi
 
-# 9. The test workflow uses the local check commands. Raw `cargo` or `npm`
+# 9. The check workflows use the local check commands. Raw `cargo` or `npm`
 #    calls would create a second definition of passing, one
 #    the local check does not have; the specialized workflows (release,
-#    security, docs) are their own thing and are not fenced.
-if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/test.yml 2>/dev/null); then
-  bad "a check calls a tool directly; call ./x <step> instead
-$out"
-fi
+#    security, deploy) are their own thing and are not fenced.
+for name in lint unit e2e docs packages channels glibc bench; do
+  workflow=".github/workflows/$name.yml"
+  [ -f "$workflow" ] || continue
+  if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' "$workflow"); then
+    bad "a check calls a tool directly; call ./x <step> instead
+$workflow:$out"
+  fi
+done
 
 if [ "$fail" -eq 0 ]; then
   say "guard: all checks passed"

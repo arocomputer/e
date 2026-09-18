@@ -65,8 +65,9 @@ repeated here.
 ./x bench    # release-mode performance budgets
 ```
 
-The `test` workflow groups the same local commands into `lint`, `unit` on Linux
-and macOS, `e2e`, `packages`, `channels`, `docs`, `glibc`, and `bench` jobs:
+Separate `lint`, `unit`, `e2e`, `packages`, `channels`, `docs`, `glibc`, and
+`bench` workflows run the same local commands. Unit and package checks run on
+Linux and macOS:
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included

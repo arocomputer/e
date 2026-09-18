@@ -1,0 +1,71 @@
+name: packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+# Read-only by default; no job in this repo needs write access to anything.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: packages (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: macos
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci/changes.py
+      - name: Rust cache
+        if: matrix.name == 'linux' && (steps.filter.outputs.build == 'true' || steps.filter.outputs.packages == 'true')
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - if: steps.filter.outputs.packages == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - if: steps.filter.outputs.packages == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Package contents and native launchers
+        if: steps.filter.outputs.packages == 'true'
+        run: ./x packages
+
+      - name: Published crates
+        if: matrix.name == 'linux' && steps.filter.outputs.build == 'true'
+        run: ./x crates
+      - name: Release SBOM
+        if: matrix.name == 'linux' && (steps.filter.outputs.build == 'true' || steps.filter.outputs.packages == 'true')
+        run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
