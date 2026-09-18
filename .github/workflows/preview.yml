@@ -1,4 +1,4 @@
-name: preview
+name: Preview
 
 # Explicit requests only. PR code gets a read-only token and no publishing secrets.
 on:
@@ -27,7 +27,7 @@ jobs:
           sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
   build:
-    name: build (${{ matrix.target }})
+    name: Build - ${{ matrix.target }}
     needs: source
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30

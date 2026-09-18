@@ -1,4 +1,4 @@
-name: test
+name: Tests
 
 # Rust checks, terminal frames, packaging, and docs share the local ./x commands.
 on:
@@ -15,11 +15,12 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: test-${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   changes:
+    # Preserve required job names so existing PR results remain valid.
     name: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -108,7 +109,7 @@ jobs:
   e2e:
     # The frames and colours are pinned against the reference design, which no
     # other job looks at.
-    name: e2e
+    name: Terminal
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
@@ -146,7 +147,7 @@ jobs:
     # The guides are published on the website and embedded in the binary. A
     # change to the binary gets the contract from `./x test`; a prose-only
     # change, which skips that, gets it here.
-    name: docs
+    name: Documentation
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
@@ -171,7 +172,7 @@ jobs:
         run: ./x docs
 
   packages:
-    name: packages (${{ matrix.name }})
+    name: Packages - ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     needs: changes
@@ -217,7 +218,7 @@ jobs:
         run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
 
   channels:
-    name: channels
+    name: Channels
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: changes
@@ -237,7 +238,7 @@ jobs:
     # The release's Linux image, so the floor is proven on the pull request
     # instead of by a user on an older distribution. Release plumbing and the
     # lockfile both decide it, because a dependency can raise the floor.
-    name: glibc
+    name: glibc compatibility
     needs: changes
     if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.lock == 'true'
     runs-on: ubuntu-latest
@@ -266,7 +267,7 @@ jobs:
         run: scripts/release/build.sh
 
   bench:
-    name: bench
+    name: Benchmarks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
