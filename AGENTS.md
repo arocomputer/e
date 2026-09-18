@@ -202,14 +202,14 @@ surface? Route it through `panel.rs` so it can't diverge.
 - Never open a PR unless the developer explicitly asks you to.
 - Conventional commit titles, plain language: `fix(tui): tool trees stay
   connected after compaction`. The type is `fix`, `feat`, `perf`, `refactor`,
-  `docs`, `test`, or `chore`; the scope is the area triage labels by path —
-  `core`, `tui`, `sdk`, `bench`, `infra`, `docs` — or omitted when the change spans
-  them. The title becomes the squash commit on `main`, so write it as the
-  one line someone reads in `git log`.
-- Body: the problem in a sentence or two, then how you fixed it. Never
-  attribute work to AI: no `Co-authored-by`, `Assisted-by`, or similar
-  trailer, no model or harness line, no agent self-mention. The AI/LLM
-  rules live in CONTRIBUTING.md.
+  `docs`, `test`, or `chore`; the scope is `core`, `tui`, `sdk`, `bench`,
+  `infra`, or `docs`, or omitted when the change spans them. The title becomes
+  the squash commit on `main`, so write it as the one line someone reads in
+  `git log`.
+- Body: fill the pull request template — what the change does, why it works,
+  and how you verified it, short and in your own words. Never attribute work to
+  AI: no `Co-authored-by`, `Assisted-by`, or similar trailer, no model or
+  harness line, no agent self-mention. The AI/LLM rules live in CONTRIBUTING.md.
 - Rendering changes carry a captured frame (`scripts/ptycap.py`), not a
   description of bytes.
 - One concern per PR. If the description says "also", split it. Unrelated
