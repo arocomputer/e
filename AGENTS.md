@@ -162,8 +162,8 @@ surface? Route it through `panel.rs` so it can't diverge.
   per dialect, even when the decision is "no change here". Persisted and
   user-facing contracts (CLI, sessions, configuration, the extension protocol)
   follow `docs/guides/extend/compatibility.md`: fixtures under `crates/cli/tests/fixtures/` are release
-  artifacts, so a contract change adds or updates one in the same PR, and
-  labels it `breaking` — the one label no path can apply for you.
+  artifacts, so a contract change adds or updates one in the same PR and
+  explains the incompatibility and migration in the PR description.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
 - Resolve the active home through `crates/core/src/config/home.rs`: production uses `~/.e/`,
@@ -206,10 +206,13 @@ surface? Route it through `panel.rs` so it can't diverge.
   `infra`, or `docs`, or omitted when the change spans them. The title becomes
   the squash commit on `main`, so write it as the one line someone reads in
   `git log`.
-- Body: fill the pull request template — what the change does, why it works,
-  and how you verified it, short and in your own words. Never attribute work to
+- Body: use `.github/pull_request_template.md`. Explain the problem, what changed,
+  why it works, and the checks run with their results. Link an issue when applicable.
+  Use enough detail for review; there is no fixed sentence limit. Never attribute work to
   AI: no `Co-authored-by`, `Assisted-by`, or similar trailer, no model or
   harness line, no agent self-mention. The AI/LLM rules live in CONTRIBUTING.md.
+- Do not apply PR labels or add automatic PR labeling. Describe the change type
+  and any incompatibility in the title and template. Issue labels are separate.
 - Rendering changes carry a captured frame (`scripts/ptycap.py`), not a
   description of bytes.
 - One concern per PR. If the description says "also", split it. Unrelated

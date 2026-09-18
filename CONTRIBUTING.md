@@ -100,12 +100,23 @@ in [CODEOWNERS](.github/CODEOWNERS) and cannot merge on green checks alone.
 Title the PR as a conventional commit in plain language, scoped by area:
 `fix(tui): tool trees stay connected after compaction`. Scopes are `core`,
 `tui`, `sdk`, `bench`, `infra`, and `docs`, and the title becomes the squash
-commit on `main`. Fill the pull request template: what the change does, why it
-works, and how you verified it — short and in your own words; a large
-AI-generated description may be ignored or closed. One concern per PR — if the
-description says "also", split it. When a change alters a persisted or wire
-contract (`docs/guides/extend/compatibility.md`), say so in the description and
-apply the `breaking` label yourself.
+commit on `main`.
+
+Use the [PR template](.github/pull_request_template.md). Link a related issue when
+one exists, select the change type, explain the problem and why the change works,
+and list verification commands and results. Include captured frames for visual
+changes; remove that section when it does not apply. Write enough detail to review
+the change without a fixed sentence limit.
+
+Keep each PR about one coherent change and leave unrelated cleanup for another
+contribution. When a change alters a persisted or wire contract
+(`docs/guides/extend/compatibility.md`), explain the incompatibility and migration
+in the description.
+
+PRs do not use labels. Change types and breaking changes belong in the title and
+description, not path-based or dependency labels. Issues can still use labels.
+Template guidance is for review; automation does not label or close PRs for
+template formatting.
 
 ## AI/LLM assistance
 
