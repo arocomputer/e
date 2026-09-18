@@ -20,7 +20,7 @@ class GuardTests(unittest.TestCase):
             (root / 'crates/cli/tests/ui').mkdir(parents=True)
             (root / '.github/workflows').mkdir(parents=True)
             (root / '.github/CODEOWNERS').write_text('* @maintainer\n')
-            workflow = root / '.github/workflows/test.yml'
+            workflow = root / '.github/workflows/unit.yml'
             for command, status in [('./x test', 0), ('cargo test', 1)]:
                 with self.subTest(command=command):
                     workflow.write_text(f'run: {command}\n')

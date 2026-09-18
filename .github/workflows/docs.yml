@@ -1,0 +1,53 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+# Read-only by default; no job in this repo needs write access to anything.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    # The guides are published on the website and embedded in the binary. A
+    # change to the binary gets the contract from `./x test`; a prose-only
+    # change, which skips that, gets it here.
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci/changes.py
+
+      - name: Rust cache
+        if: steps.filter.outputs.docs == 'true' && steps.filter.outputs.build != 'true'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Docs contract
+        if: steps.filter.outputs.docs == 'true' && steps.filter.outputs.build != 'true'
+        run: ./x docs
