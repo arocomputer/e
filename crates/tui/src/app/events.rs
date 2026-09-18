@@ -76,13 +76,13 @@ impl App {
                     s.turn.phase = TurnPhase::Waiting;
                 }
                 // The next assistant text opens a fresh block; the burst
-                // that was live stays expanded where it sat.
+                // that was live keeps its source and display mode.
                 self.end_thinking_burst();
                 self.end_assistant_burst();
             }
             SessionEvent::TextDelta(delta) => {
                 // Reply text starting ends the live thinking burst — the
-                // thought stays expanded above the reply; the next burst,
+                // thought stays above the reply; the next burst,
                 // if any, opens its own block.
                 self.end_thinking_burst();
                 if let Some(s) = &mut self.active {
@@ -118,7 +118,7 @@ impl App {
             }
             SessionEvent::ToolBatchStart { calls } => {
                 // End the pre-batch reasoning where it sits. A tool tree
-                // continues only when no reply or expanded thinking
+                // continues only when no reply or retained thinking
                 // separates this batch from the previous one.
                 self.end_thinking_burst();
                 self.end_assistant_burst();

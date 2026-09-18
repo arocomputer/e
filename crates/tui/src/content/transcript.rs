@@ -92,7 +92,7 @@ pub enum Kind {
     Banner,
     User,
     Assistant,
-    /// Streamed thinking remains expanded after its burst ends. Legacy
+    /// Streamed thinking retains its source after its burst ends. Legacy
     /// summary blocks are marked done and may be absorbed by a tool tree.
     Thinking,
     Tool,
@@ -1399,7 +1399,7 @@ impl Transcript {
         None
     }
 
-    /// Continue the open tree when no reply or expanded thinking separates
+    /// Continue the open tree when no reply or retained thinking separates
     /// batches. Only legacy collapsed summaries may be absorbed; live and
     /// completed reasoning keep their own blocks and start a new tree.
     pub fn extend_tool_group(&mut self, children: Vec<ToolChild>) -> usize {

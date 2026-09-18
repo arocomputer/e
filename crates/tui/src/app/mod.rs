@@ -53,8 +53,8 @@ struct ActiveTurn {
     block: Option<usize>,
     /// The live thinking block for the current burst, if reasoning has
     /// streamed. Ending a burst detaches this so the next reasoning opens a
-    /// fresh block; the finished thought stays expanded in place — this index
-    /// is only the open segment.
+    /// fresh block. Finished thoughts retain their source and display mode;
+    /// this index is only the open segment.
     thinking_block: Option<usize>,
     turn: Turn,
     started: Instant,
