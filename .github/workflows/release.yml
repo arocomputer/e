@@ -107,6 +107,7 @@ jobs:
         env:
           CHANNEL: ${{ needs.resolve.outputs.channel }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           E_BUILD_CHANNEL="$CHANNEL" ./x release-check "$TAG"
 
@@ -134,7 +135,7 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           if [ "$CHANNEL" = stable ]; then
-            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
+            ./scripts/release-notes.sh "$TAG" > notes.md
           else
             test -n "$GH_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN for intuitums/e-beta.'; exit 1; }
             printf 'Source: https://github.com/intuitums/e/commit/%s\n\nBeta build %s.\n' "$SHA" "$TAG" > notes.md
@@ -150,7 +151,7 @@ jobs:
           fi
 
   build:
-    name: build (macos)
+    name: build-cli (macos)
     needs: [resolve, create]
     runs-on: macos-latest
     timeout-minutes: 30
@@ -197,7 +198,7 @@ jobs:
           overwrite: true
 
   build-linux:
-    name: build (${{ matrix.leg }})
+    name: build-cli (${{ matrix.leg }})
     needs: [resolve, create]
     runs-on: ${{ matrix.runner }}
     # A Linux binary links against the glibc of the image that built it, so it
@@ -340,10 +341,10 @@ jobs:
         run: |
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
           if [ "$CHANNEL" = stable ]; then
-            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
+            ./scripts/release-notes.sh "$TAG" > notes.md
             python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
             gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
-            gh release edit "$TAG" --draft=false --latest
+            gh release edit "$TAG" --notes-file notes.md --draft=false --latest
           else
             printf '%s\n' "$TAG" > "$RUNNER_TEMP/release-assets/version.txt"
             gh release upload "$TAG" "$RUNNER_TEMP/release-assets/version.txt" --clobber
@@ -480,7 +481,7 @@ jobs:
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
   crates:
-    name: crates.io
+    name: crates
     # The application's version is the release version, so previews stay on npm.
     # Core publishes first: the frontends and SDK pin its version.
     needs: [resolve, publish]

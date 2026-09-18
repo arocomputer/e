@@ -215,6 +215,6 @@ surface? Route it through `panel.rs` so it can't diverge.
 - One concern per PR. If the description says "also", split it. Unrelated
   cleanup you spotted mid-change is its own PR.
 - Behavior that changes gets a test, and a regression test fails against the
-  unfixed code for the intended reason. Anything user-visible gets a
-  `CHANGELOG.md` entry under `Unreleased`; CI, templates, and result files
-  don't.
+  unfixed code for the intended reason. Describe user-visible changes and migration
+  steps in the PR. GitHub Releases are the changelog; follow the release-note
+  format in contributing/releases.md.

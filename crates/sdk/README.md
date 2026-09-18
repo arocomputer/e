@@ -38,7 +38,7 @@ cargo add intuitums-e-sdk
 - **The SDK's API is the contract**: the types and methods
   [docs/guides/extend/sdk.md](../../docs/guides/extend/sdk.md) documents. Everything else is internal.
 - **Semantic versioning.** Before 1.0, a release that changes that API without
-  a compatible path moves the minor version and says so in the changelog;
+  a compatible path moves the minor version and says so in the GitHub release notes;
   additive and internal changes move the patch. From 1.0 the usual rules apply.
 - **Its own version, not the application's.** The SDK changes for its own
   reasons, so its version tracks only those. It depends on the core crate

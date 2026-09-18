@@ -130,8 +130,10 @@ permissions, no publishing credentials, and no persisted checkout token.
    selects current main. The workflow runs `./x check`, qualifies the build,
    builds all four platform archives, and publishes the channel installers.
 3. Test that beta. Fixes produce another beta from a newer main commit.
-4. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
-   title, introduction, and fixed groups. Create a fresh Unreleased section.
+4. Create a draft GitHub release for `vX.Y.Z` targeting the tested commit.
+   Write and review its body using the format below. Leave it unpublished;
+   the workflow attaches artifacts and publishes it after all checks pass.
+   Saving a draft does not require pushing the tag first.
 5. Qualify the final commit with `./x check` and `./x release-check vX.Y.Z`.
    Create an annotated stable tag that names the beta you tested:
 
@@ -142,8 +144,9 @@ permissions, no publishing credentials, and no persisted checkout token.
 
 The stable workflow requires the named beta to be published, to have a successful
 verified beta deployment, and to share the stable base version. Its source must
-be an ancestor of the stable commit. Only `CHANGELOG.md` may differ; any code,
-dependency, build, or other file change requires another beta. This check runs
+be an ancestor of the stable commit, and their source trees must match. Any file
+change requires another beta. Release notes live on GitHub and do not change
+the tree. This check runs
 before stable builds or publication. Retrying an already published stable release
 reuses its existing artifacts and does not retroactively require a beta marker.
 
@@ -154,15 +157,21 @@ beta or production branch is required.
 ## Release notes and the website
 
 Use `### New features`, `### Improvements`, and `### Fixes`, in that order;
-omit empty groups. Keep `## X.Y.Z` exact for extraction. Put the date below it,
-then one `###` release title and a short introduction. Bullets may wrap across
-lines. Use inline code and bold for emphasis. Put **Upgrade:** instructions
+omit empty groups. Begin the draft body with one `###` release title and a short
+introduction. GitHub supplies the version and publication date. Bullets may wrap
+across lines. Use inline code and bold for emphasis. Put **Upgrade:** instructions
 first under Improvements and **Security:** fixes under Fixes.
 
-The GitHub body comes from that version's section verbatim. The workflow
-exports the same content as `release.json`, with its version and source commit.
+GitHub Releases are the changelog. Keep pending changes and migration guidance
+in PR descriptions, then assemble the reviewed draft body before tagging.
+`./x release-check vX.Y.Z` reads and validates that draft using authenticated
+GitHub CLI access. A missing draft or malformed notes stop the release.
+
+The workflow reads the draft body again before publication and exports it as
+`release.json`, with its version and source commit. It publishes that same body,
+so the website asset and GitHub notes agree.
 The website reads that asset and GitHub's publication date, refreshing every
-five minutes. It excludes drafts, prereleases, channel pointers, and Unreleased.
+five minutes. It excludes drafts, prereleases, and channel pointers.
 The first historical release predates the asset and remains a checked-in website
 entry. New releases need no separate website copy or deployment.
 
@@ -264,7 +273,7 @@ Subsequent releases need no npm token. The token in 1Password can remain availab
 for separately authorized manual publishing.
 
 The website renders this repository's `docs/guides/`, so
-`.github/workflows/docs.yml` starts intuitums/web's Deploy workflow whenever a
+`.github/workflows/deploy.yml` starts intuitums/web's Deploy workflow whenever a
 guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
 to intuitums/web with Actions: write. Set the secret once; without it the job
 fails loudly rather than going stale silently.

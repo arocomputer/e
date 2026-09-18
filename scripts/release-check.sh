@@ -16,7 +16,7 @@ assert release['channel']==sys.argv[2], 'channel mismatch'
 assert release['version'].split('-')[0]==base, 'manifest mismatch'
 PY
   if [ "$channel" = stable ]; then
-    ./scripts/release-notes.sh "$tag" < CHANGELOG.md | python3 -c 'import sys; sys.path.insert(0,"scripts/release"); from notes import parse; parse(sys.stdin.read())'
+    ./scripts/release-notes.sh "$tag" > /dev/null
   fi
   export E_BUILD_VERSION=${tag#v} E_BUILD_CHANNEL=$channel
   export E_BUILD_COMMIT=${E_BUILD_COMMIT:-$(git rev-parse HEAD)}

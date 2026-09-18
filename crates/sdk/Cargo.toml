@@ -4,7 +4,7 @@
 name = "intuitums-e-sdk"
 # The SDK's own version, not the application's: different crates in this
 # repository change for different reasons, so an SDK release that breaks its API
-# moves this and says so in the changelog, while the application's version
+# moves this and says so in the GitHub release notes, while the application's version
 # tracks the release.
 version = "0.0.1"
 edition = "2021"

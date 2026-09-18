@@ -14,7 +14,7 @@ against, so changes to them are deliberate, not accidental.
 ### CLI
 
 Documented commands and exit statuses are user-facing. Before 1.0, an
-incompatible change requires a changelog entry and migration guidance.
+incompatible change requires release notes and migration guidance.
 
 CLI one-shot commands return these exit statuses:
 
@@ -214,7 +214,7 @@ and the frontend crates, are not a stable third-party API in themselves.
 The supported Rust SDK is the separate `intuitums-e-sdk` crate in `crates/sdk/`.
 See [SDK](sdk.md). The API it consumes is its documented contract. It
 follows semantic versioning from its first published release. Before 1.0, a
-breaking change moves the minor version and is named in the changelog.
+breaking change moves the minor version and is named in the GitHub release notes.
 
 ## Change process
 
@@ -223,5 +223,5 @@ request:
 
 1. A compatibility fixture or contract test.
 2. Migration behavior for existing user data or extensions.
-3. Documentation and a changelog entry.
+3. Documentation and release notes.
 4. Updated contract documentation in the relevant guide.

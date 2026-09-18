@@ -175,7 +175,7 @@ The name mirrors the npm naming, where `@intuitums/e` becomes `intuitums-e`.
 
 The SDK follows semantic versioning from its first published release.
 Before 1.0, a release that changes the documented API without a compatible
-path moves the minor version and names the change in the changelog.
+path moves the minor version and names the change in the GitHub release notes.
 
 The SDK depends on `intuitums-e-core` alone and pins the exact version it was
 tested against. The core's Rust items are not a stable API. See

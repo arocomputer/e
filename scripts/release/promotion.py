@@ -18,7 +18,7 @@ def gh(*args):
 
 
 def verify(tag, sha):
-    """Allow only changelog edits after the explicitly selected, successfully deployed beta."""
+    """Require the same source tree as the explicitly selected, successfully deployed beta."""
     stable = identity(tag)
     if stable['channel'] != 'stable':
         raise ValueError('Promotion requires a stable tag')
@@ -38,9 +38,9 @@ def verify(tag, sha):
         raise ValueError('Selected beta must be published with a matching source commit')
     source = source[0]
     subprocess.run(['git', 'merge-base', '--is-ancestor', source, sha], check=True)
-    changed = git('diff', '--name-only', source, sha, '--', '.', ':(exclude)CHANGELOG.md')
+    changed = git('diff', '--name-only', source, sha, '--')
     if changed:
-        raise ValueError(f'Stable differs from the tested beta outside CHANGELOG.md; publish another beta:\n{changed}')
+        raise ValueError(f'Stable differs from the tested beta ; publish another beta:\n{changed}')
     pages = gh('api', '--paginate', '--slurp',
                f'repos/intuitums/e/deployments?sha={source}&environment=beta&per_page=100')
     for page in pages:

@@ -107,6 +107,11 @@ says "also", split it. When a change alters a persisted or wire contract
 (`docs/guides/extend/compatibility.md`), add the `breaking` label yourself: the triage
 workflow can label paths, but no path tells it a contract changed.
 
+GitHub Releases are the changelog. Describe user-visible changes and migrations
+in the PR; maintainers prepare the reviewed draft using the format in
+[releases and testing](contributing/releases.md#release-notes-and-the-website).
+Do not add a separate changelog file.
+
 ## AI/LLM assistance
 
 Creating issues and pull requests with AI/LLM help is fine, on one

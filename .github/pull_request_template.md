@@ -6,7 +6,7 @@
 
 - [ ] `./x check` passes — the parity suite is the visual spec; if a rendering change fails it, fix the code, don't loosen the test
 - [ ] The guard is unchanged, or this PR says why it moved (new network host, new write path, new unsafe block)
-- [ ] `CHANGELOG.md` has an entry under `Unreleased` (skip only for pure meta: CI, templates, result files)
+- [ ] User-visible changes and migration steps are described for the release notes
 - [ ] Comments and docs touched by this change are updated
 - [ ] Persisted/extension/CLI contract changes include compatibility fixtures and migration behavior
 - [ ] Performance-sensitive changes pass `./x bench` and include before/after evidence when claiming an improvement

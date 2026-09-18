@@ -30,7 +30,7 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(self.check(), TAG)
 
     def test_code_or_build_input_changes_require_another_beta(self):
-        for path in ['src/main.rs', 'Cargo.lock', 'build.rs', '.github/workflows/release.yml']:
+        for path in ['src/main.rs', 'Cargo.lock', 'build.rs', 'CHANGELOG.md', '.github/workflows/release.yml']:
             with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'publish another beta'):
                 self.check(changed=path)
 
@@ -44,7 +44,7 @@ class PromotionTests(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.check(**options)
 
-    def test_real_tag_allows_changelog_only_and_rejects_changed_source(self):
+    def test_real_tag_accepts_identical_tree_and_rejects_any_file_change(self):
         import os
         from pathlib import Path
         import subprocess
@@ -60,9 +60,6 @@ class PromotionTests(unittest.TestCase):
             git('commit', '-qm', 'Beta source')
             source = git('rev-parse', 'HEAD')
             beta = f'v1.2.3-beta.12.g{source[:12]}'
-            Path(tmp, 'CHANGELOG.md').write_text('Release notes')
-            git('add', '.')
-            git('commit', '-qm', 'Release notes')
             git('tag', '-a', 'v1.2.3', '-m', f'Release\n\nBeta: {beta}')
             # Run real git inspection and ancestry checks in the fixture repository.
             run = subprocess.run

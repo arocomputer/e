@@ -128,7 +128,7 @@ fi
 #    calls would create a second definition of passing, one
 #    the local check does not have; the specialized workflows (release,
 #    security, docs) are their own thing and are not fenced.
-if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/checks.yml 2>/dev/null); then
+if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/test.yml 2>/dev/null); then
   bad "a check calls a tool directly; call ./x <step> instead
 $out"
 fi

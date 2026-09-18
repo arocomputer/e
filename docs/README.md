@@ -121,7 +121,7 @@ topic. No network, no build.
 To read the pages as they will appear, build the website against this
 checkout: in intuitums/web, run `E_DOCS_PATH=<path to this checkout> npm run
 preview`. Merging a guide to `main` redeploys the website
-(`.github/workflows/docs.yml`).
+(`.github/workflows/deploy.yml`).
 
 ## Adding a guide
 
