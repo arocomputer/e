@@ -14,8 +14,8 @@
 use std::path::Path;
 
 const RELEASES: &str = "https://github.com/arocomputer/e/releases";
-const BETA_RELEASES: &str = "https://github.com/intuitums/e-beta/releases";
-const BETA_API_LATEST: &str = "https://api.github.com/repos/intuitums/e-beta/releases/latest";
+const BETA_RELEASES: &str = "https://github.com/arocomputer/e-beta/releases";
+const BETA_API_LATEST: &str = "https://api.github.com/repos/arocomputer/e-beta/releases/latest";
 const DEV_UPDATE: &str =
     "Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev";
 const API_LATEST: &str = "https://api.github.com/repos/arocomputer/e/releases/latest";

@@ -29,7 +29,7 @@ when the scenario command finishes.
 ## Release channels
 
 Production releases live in `arocomputer/e`. Beta binaries live in
-`intuitums/e-beta`, with titles `0.0.0 · Beta N`. Dev publishes npm packages
+`arocomputer/e-beta`, with titles `0.0.0 · Beta N`. Dev publishes npm packages
 under `@dev`, with no GitHub Release. Preview tags and package versions carry
 the channel and the `publish` workflow run number.
 
@@ -97,7 +97,7 @@ unless auto-update is disabled in its settings.
 
 Earlier beta archives remain in `arocomputer/e`. The curl installer falls back to
 those archives for pinned historical versions and uses the previous beta pointer
-until the first release exists in `intuitums/e-beta`. Reinstall beta with the
+until the first release exists in `arocomputer/e-beta`. Reinstall beta with the
 command above once to adopt the new self-update source. Historical binaries
 cannot learn a new update URL by themselves.
 
@@ -230,7 +230,7 @@ optional platform packages. Preview builds require an explicit request.
 ## Publishing credentials
 
 Beta publishing uses `BETA_RELEASE_TOKEN`, a fine-grained token with Contents
-read/write on `intuitums/e-beta`. Save it as a repository secret in `arocomputer/e`.
+read/write on `arocomputer/e-beta`. Save it as a repository secret in `arocomputer/e`.
 The beta repository needs an initial commit so GitHub can attach release tags.
 Release bodies record the source commit in `arocomputer/e`; retries validate that
 commit is reachable from main. GitHub's ordinary workflow token handles

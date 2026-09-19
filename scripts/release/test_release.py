@@ -8,7 +8,7 @@ class ReleaseContracts(unittest.TestCase):
     def test_channel_versions_and_numeric_order(self):
         self.assertEqual(identity('v1.2.3')['npm_tag'], 'latest')
         self.assertEqual(identity('v1.2.3')['repository'], 'arocomputer/e')
-        self.assertEqual(identity('v0.0.0-beta-12')['repository'], 'intuitums/e-beta')
+        self.assertEqual(identity('v0.0.0-beta-12')['repository'], 'arocomputer/e-beta')
         self.assertEqual(identity('v0.0.0-dev-12')['repository'], '')
         self.assertEqual(identity('v0.0.0-beta-12')['command'], 'e-beta')
         self.assertGreater(version_key('0.0.0-dev-12'), version_key('0.0.0-dev-9'))
@@ -51,7 +51,7 @@ class BetaPromotion(unittest.TestCase):
                     patch('channel.subprocess.run') as run:
                 advance(tag)
             if promotes:
-                run.assert_called_once_with(['gh', 'release', 'edit', tag, '--repo', 'intuitums/e-beta', '--latest'], check=True)
+                run.assert_called_once_with(['gh', 'release', 'edit', tag, '--repo', 'arocomputer/e-beta', '--latest'], check=True)
             else:
                 run.assert_not_called()
 

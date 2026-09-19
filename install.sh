@@ -22,7 +22,7 @@ done
 [ "$channel" = stable ] && channel=production
 case "$channel" in
   production) command=e ;;
-  beta) command=e-beta; repo=intuitums/e-beta ;;
+  beta) command=e-beta; repo=arocomputer/e-beta ;;
   dev)
     # Local release qualification still tests the freshly built dev binary.
     if [ -n "${E_RELEASE_BASE:-}" ]; then command=e-dev

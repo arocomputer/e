@@ -32,7 +32,7 @@ def verify(tag, sha):
     beta = identity(beta_tag)
     if beta['channel'] != 'beta':
         raise ValueError('Promotion requires a beta release')
-    release = gh('release', 'view', beta_tag, '--repo', 'intuitums/e-beta', '--json', 'isDraft,body')
+    release = gh('release', 'view', beta_tag, '--repo', 'arocomputer/e-beta', '--json', 'isDraft,body')
     source = re.findall(r'^Source: https://github.com/arocomputer/e/commit/([a-f0-9]{40})$', release['body'], re.M)
     if release['isDraft'] or len(source) != 1:
         raise ValueError('Selected beta must be published with a matching source commit')
