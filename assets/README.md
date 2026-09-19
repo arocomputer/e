@@ -1,7 +1,7 @@
 # e artwork
 
 - [icon.svg](icon.svg): the light mark on a dark rounded square, matching the
-  favicon on e.intuitum.sh.
+  favicon on e.aro.computer.
 - [logo.svg](logo.svg): the standalone three-rectangle mark in `#252525` on a
   transparent background. Set its fill to `currentColor` when embedding inline
   if it should inherit the surrounding text color.
@@ -10,9 +10,8 @@
   `<picture>` switches to it under `prefers-color-scheme: dark`.
 
 Keep the proportions and spacing intact. Scale the SVGs rather than redrawing
-the rectangles. The website copies live in the intuitum-sh repository at
-`public/e/icon.svg` and `src/app/(sub)/e/brand-mark.tsx`; keep them aligned when
-changing the artwork.
+the rectangles. The website copies live in the arocomputer/web repository; keep
+them aligned when changing the artwork.
 
 ## Themes
 
@@ -22,7 +21,7 @@ embeds them for `e docs theme-dark` and hands them to the terminal frontend.
 ## README screenshot
 
 [readme.png](readme.png) is a frame at 26 seconds from the
-[website demo](https://e.intuitum.sh/e/demo.mp4). The recorded session uses
+[website demo](https://e.aro.computer/e/demo.mp4). The recorded session uses
 GPT-5.6 Sol with low reasoning effort to fix a JavaScript slug formatter and
 run its tests. The model and effort appear in the terminal's status row.
 
@@ -37,7 +36,7 @@ those corners onto the browser's default background; use the PNG export.
 To regenerate it from the repository root, with ffmpeg and agent-browser:
 
 ```sh
-curl -fsSL https://e.intuitum.sh/e/demo.mp4 -o /tmp/e-demo.mp4
+curl -fsSL https://e.aro.computer/e/demo.mp4 -o /tmp/e-demo.mp4
 mkdir -p target
 ffmpeg -y -ss 26 -i /tmp/e-demo.mp4 -frames:v 1 target/readme-frame.png
 python3 -m http.server 8769 --bind 127.0.0.1

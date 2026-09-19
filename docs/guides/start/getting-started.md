@@ -12,7 +12,7 @@ on ARM64 and x86-64, and works in any directory you trust.
 ## Install
 
 ```sh
-curl -fsSL https://e.intuitum.sh/install.sh | sh
+curl -fsSL https://e.aro.computer/install.sh | sh
 ```
 
 The installer verifies the release for your platform and writes the binary to

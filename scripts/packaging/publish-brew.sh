@@ -20,5 +20,5 @@ PY
 cd "$tap"
 git add "Formula/$name"
 if git diff --cached --quiet; then exit 0; fi
-git -c user.name='Intuitum releases' -c user.email='support@intuitum.sh' commit -m "chore: update e to $TAG"
+git -c user.name='arocomputer releases' -c user.email='support@aro.computer' commit -m "chore: update e to $TAG"
 git push origin HEAD:main

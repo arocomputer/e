@@ -23,7 +23,7 @@ themes/       <name>.json palettes
 e has no manifest of its own. A `package.json` belongs to npm. e reads the
 directories and takes only the dependency list from the manifest.
 
-Find packages in the [catalog](https://e.intuitum.sh/docs/catalog/) or on
+Find packages in the [catalog](https://e.aro.computer/docs/catalog/) or on
 npmjs.com. The catalog lists every npm package that carries the `e-package`
 keyword.
 

@@ -11,7 +11,7 @@ e ships as one native binary for macOS and glibc Linux, on ARM64 and x86-64.
 ## Install
 
 ```sh
-curl -fsSL https://e.intuitum.sh/install.sh | sh
+curl -fsSL https://e.aro.computer/install.sh | sh
 ```
 
 The installer picks the release for your platform, verifies its checksum, and

@@ -503,7 +503,7 @@ jobs:
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
+          curl -fsSL --retry 3 https://e.aro.computer/install.sh -o "$RUNNER_TEMP/install.sh"
           E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --version "${TAG#v}"
           "$RUNNER_TEMP/e-pinned/e" --version | grep -Fx "e ${TAG#v}"
 

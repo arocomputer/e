@@ -53,7 +53,7 @@ disposable project or worktree when trying unfinished features.
 ## Install production
 
 ```sh
-curl -fsSL https://e.intuitum.sh/install.sh | sh
+curl -fsSL https://e.aro.computer/install.sh | sh
 npm install -g @arocomputer/e
 bun add -g @arocomputer/e
 brew install arocomputer/tap/e
@@ -209,7 +209,7 @@ interactively with `cargo login` if it is rotated.
 The five `aro-e*` crates were published once at `0.0.1` and yanked when the
 application left crates.io; only `aro-e-sdk` publishes going forward.
 
-The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
+The website installer at `https://e.aro.computer/install.sh` serves the maintained
 script from main with a five-minute cache. No separate deployment is required
 for each binary release. The production homepage installation stays unchanged.
 

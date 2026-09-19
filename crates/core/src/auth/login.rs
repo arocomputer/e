@@ -376,7 +376,7 @@ fn wait_for_code(
 }
 
 /// The one e surface a browser renders: the three-bar mark, a title, a dim
-/// line — e.intuitum.sh in page form. The palette (warm paper and ink, the
+/// line — e.aro.computer in page form. The palette (warm paper and ink, the
 /// green and red status inks), the mono type, and the heading's weight and
 /// tracking are the website's values; keep them aligned with its `site.css`
 /// and `logo.tsx`. The page is self-contained — no font or asset is fetched,

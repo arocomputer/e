@@ -33,7 +33,7 @@ RUN set -eux; \
       printf '#!/bin/sh\necho "e 0.0.0-stub"\n' > /usr/local/bin/e; \
       chmod 0755 /usr/local/bin/e; \
     else \
-      curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \
+      curl -fsSL https://e.aro.computer/install.sh -o /tmp/install.sh; \
       if [ -n "$E_VERSION" ]; then \
         E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --version "$E_VERSION"; \
       else \
