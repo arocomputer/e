@@ -4,7 +4,7 @@
 
 ### Improvements
 
-- Nothing yet.
+- **Upgrade:** the website moved from `e.intuitum.sh` to `e.aro.computer`. `install.sh`, the docs, and the package metadata use the new host; the old host redirects. Reinstall with `curl -fsSL https://e.aro.computer/install.sh | sh` if a bookmark or script pinned the old URL.
 
 ## 0.0.2
 
@@ -58,7 +58,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Retain thinking behind a compact hint by default. Ctrl+O and the Show thinking setting reveal reasoning already received during the session. Long tool groups fold older successful calls while retaining failures, running work, and the complete review history.
 - Recover reply text from completed Responses API messages when a gateway omits text deltas, without duplicating streamed text. A reasoning-only finish now explains that the model supplied no answer.
 
-- The page the browser shows after `/login` wears e.intuitum.sh's look: the three-bar mark, the warm paper and ink palette in light and dark, JetBrains Mono where it is installed, and a green or red title for the outcome. A finished sign-in closes its tab where the browser allows it.
+- The page the browser shows after `/login` wears e.aro.computer's look: the three-bar mark, the warm paper and ink palette in light and dark, JetBrains Mono where it is installed, and a green or red title for the outcome. A finished sign-in closes its tab where the browser allows it.
 - **Docs:** the user guides under `docs/` are grouped by folder — `start/`, `usage/`, `customize/`, `extend/` — and front matter is their only metadata. `e docs` builds its topic list by reading those files, so the guides no longer have a second list to drift from, and `docs/README.md` explains the layout to whoever edits them. The repository's own documentation (architecture, rendering, releases) moved to `contributing/`, and a new `sessions` guide covers resuming, branching, compaction, and export (`e docs sessions`).
 
 - **Docs:** `docs/guides/start/getting-started.md` is a first run rather than a

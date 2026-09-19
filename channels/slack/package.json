@@ -4,7 +4,7 @@
   "description": "A Slack bot that runs e: one thread, one session, over `e rpc`",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://e.intuitum.sh",
+  "homepage": "https://e.aro.computer",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/arocomputer/e.git",

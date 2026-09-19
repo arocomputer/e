@@ -89,7 +89,7 @@ crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server ov
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
              `e docs` embeds them, and the website (arocomputer/web) renders
-             them at e.intuitum.sh/docs. contributing/ is the
+             them at e.aro.computer/docs. contributing/ is the
              repository's own documentation, never published.
 crates/cli/  the `e` binary, published as aro-e: src/main.rs (flags,
              rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `e`

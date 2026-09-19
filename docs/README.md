@@ -5,7 +5,7 @@
 - **GitHub** — the files themselves, as you see them here.
 - **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **e.intuitum.sh/docs** — the website, in arocomputer/web, renders each guide as
+- **e.aro.computer/docs** — the website, in arocomputer/web, renders each guide as
   a page. Its `scripts/e/docs/docs.mjs` is the one place that adapts the guides
   to it: the sidebar, link routes, and alerts.
 
@@ -46,7 +46,7 @@ contributing/          the repository's own documentation: architecture,
 - **The file stem is the `e docs` topic.** `docs/guides/customize/themes.md` is
   `e docs themes`. Stems are unique across the whole folder tree.
 - **The guide named `getting-started` is the website's landing page.**
-  `e.intuitum.sh/docs` renders that file, so its first commands are the ones a
+  `e.aro.computer/docs` renders that file, so its first commands are the ones a
   new reader copies, and a change there needs the same care as a change to the
   install script.
 - **A folder may hold assets** beside its guides — an example, an image. They

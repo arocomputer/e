@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
 
       - name: Install e
-        run: curl -fsSL https://e.intuitum.sh/install.sh | sh
+        run: curl -fsSL https://e.aro.computer/install.sh | sh
 
       - name: Run one turn
         id: turn

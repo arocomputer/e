@@ -45,7 +45,7 @@ def prepare(tag, assets, output):
     common = {
         "version": version,
         "license": "MIT",
-        "homepage": "https://e.intuitum.sh",
+        "homepage": "https://e.aro.computer",
         "repository": {"type": "git", "url": "git+https://github.com/arocomputer/e.git"},
         "publishConfig": {"access": "public", "tag": release["npm_tag"]},
     }
@@ -94,7 +94,7 @@ def prepare(tag, assets, output):
     (folder / "README.md").write_text(
         f"# e\n\nInstall with `npm install -g @arocomputer/e@{release['npm_tag']}` or "
         f"`bun add -g @arocomputer/e@{release['npm_tag']}`.\n\nRun `{command}` to start. "
-        "See https://e.intuitum.sh/docs for setup.\n\n"
+        "See https://e.aro.computer/docs for setup.\n\n"
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
@@ -121,7 +121,7 @@ def prepare(tag, assets, output):
     formula = [
         "class E < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
-        '  homepage "https://e.intuitum.sh"',
+        '  homepage "https://e.aro.computer"',
         f'  version "{version}"',
         '  license "MIT"',
         "",
