@@ -4,7 +4,21 @@
 
 ### Improvements
 
+- Nothing yet.
+
+## 0.0.3
+
+September 19, 2026
+
+### Aro hosts and tokenless npm publishing
+
+The website moves to `e.aro.computer`, and releases publish to npm through
+GitHub's OIDC identity with no stored token.
+
+### Improvements
+
 - **Upgrade:** the website moved from `e.intuitum.sh` to `e.aro.computer`. `install.sh`, the docs, and the package metadata use the new host; the old host redirects. Reinstall with `curl -fsSL https://e.aro.computer/install.sh | sh` if a bookmark or script pinned the old URL.
+- **Upgrade:** npm packages publish with trusted publishing; the `NPM_BOOTSTRAP_TOKEN` secret is gone.
 
 ## 0.0.2
 
