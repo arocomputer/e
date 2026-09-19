@@ -47,7 +47,7 @@ def prepare(tag, assets, output):
         "version": version,
         "license": "MIT",
         "homepage": "https://e.intuitum.sh",
-        "repository": {"type": "git", "url": "git+https://github.com/intuitums/e.git"},
+        "repository": {"type": "git", "url": "git+https://github.com/arocomputer/e.git"},
         "publishConfig": {"access": "public", "tag": release["npm_tag"]},
     }
     for platform, target in PLATFORMS.items():

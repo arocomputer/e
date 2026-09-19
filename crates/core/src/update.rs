@@ -13,12 +13,12 @@
 
 use std::path::Path;
 
-const RELEASES: &str = "https://github.com/intuitums/e/releases";
+const RELEASES: &str = "https://github.com/arocomputer/e/releases";
 const BETA_RELEASES: &str = "https://github.com/intuitums/e-beta/releases";
 const BETA_API_LATEST: &str = "https://api.github.com/repos/intuitums/e-beta/releases/latest";
 const DEV_UPDATE: &str =
     "Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev";
-const API_LATEST: &str = "https://api.github.com/repos/intuitums/e/releases/latest";
+const API_LATEST: &str = "https://api.github.com/repos/arocomputer/e/releases/latest";
 
 /// Release assets redirect to GitHub's download hosts. This client carries
 /// no provider credentials and must not be reused for authenticated requests.
@@ -87,11 +87,11 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     let marker = executable.parent()?.join(".e-install-method");
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
-            "homebrew-beta" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e-beta",
+            "homebrew-beta" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/e-beta",
             "homebrew-dev" => DEV_UPDATE,
             "npm-beta" => "Update with: npm install -g @intuitums/e@beta or bun add -g @intuitums/e@beta",
             "npm-dev" => "Update with: npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev",
-            "homebrew" => "Installed with Homebrew. Update with: brew upgrade intuitums/tap/e",
+            "homebrew" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/e",
             "npm" => "Installed with npm or bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
             _ => "This installation is package-managed. Update it with its package manager.",
         }),

@@ -32,7 +32,7 @@ concurrency:
 jobs:
   resolve:
     name: resolve
-    if: github.repository == 'intuitums/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    if: github.repository == 'arocomputer/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     permissions:
       # GitHub requires push access to inspect unpublished draft releases.
@@ -137,7 +137,7 @@ jobs:
             ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           else
             test -n "$GH_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN for intuitums/e-beta.'; exit 1; }
-            printf 'Source: https://github.com/intuitums/e/commit/%s\n\nBeta build %s.\n' "$SHA" "$TAG" > notes.md
+            printf 'Source: https://github.com/arocomputer/e/commit/%s\n\nBeta build %s.\n' "$SHA" "$TAG" > notes.md
           fi
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
@@ -567,7 +567,7 @@ jobs:
       - name: Check out tap
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: intuitums/homebrew-tap
+          repository: arocomputer/homebrew-tap
           path: tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       - name: Publish formula

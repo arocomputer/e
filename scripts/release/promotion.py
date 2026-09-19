@@ -33,7 +33,7 @@ def verify(tag, sha):
     if beta['channel'] != 'beta':
         raise ValueError('Promotion requires a beta release')
     release = gh('release', 'view', beta_tag, '--repo', 'intuitums/e-beta', '--json', 'isDraft,body')
-    source = re.findall(r'^Source: https://github.com/intuitums/e/commit/([a-f0-9]{40})$', release['body'], re.M)
+    source = re.findall(r'^Source: https://github.com/arocomputer/e/commit/([a-f0-9]{40})$', release['body'], re.M)
     if release['isDraft'] or len(source) != 1:
         raise ValueError('Selected beta must be published with a matching source commit')
     source = source[0]
@@ -42,12 +42,12 @@ def verify(tag, sha):
     if changed:
         raise ValueError(f'Stable differs from the tested beta outside CHANGELOG.md; publish another beta:\n{changed}')
     pages = gh('api', '--paginate', '--slurp',
-               f'repos/intuitums/e/deployments?sha={source}&environment=beta&per_page=100')
+               f'repos/arocomputer/e/deployments?sha={source}&environment=beta&per_page=100')
     for page in pages:
         for deployment in page:
             if deployment.get('payload', {}).get('tag') != beta_tag:
                 continue
-            statuses = gh('api', f'repos/intuitums/e/deployments/{deployment["id"]}/statuses')
+            statuses = gh('api', f'repos/arocomputer/e/deployments/{deployment["id"]}/statuses')
             # GitHub marks an older successful deployment inactive after a newer one succeeds.
             if any(status['state'] == 'success' for status in statuses):
                 return beta_tag

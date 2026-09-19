@@ -9,8 +9,8 @@
 </p>
 <p align="center">The coding agent you can put anywhere.</p>
 <p align="center">
-  <a href="https://github.com/intuitums/e/releases"><img alt="Release" src="https://img.shields.io/github/v/release/intuitums/e?style=flat-square&label=release&labelColor=grey&color=blue" /></a>
-  <a href="https://github.com/intuitums/e/actions/workflows/checks.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/intuitums/e/checks.yml?style=flat-square&branch=main&label=Tests" /></a>
+  <a href="https://github.com/arocomputer/e/releases"><img alt="Release" src="https://img.shields.io/github/v/release/arocomputer/e?style=flat-square&label=release&labelColor=grey&color=blue" /></a>
+  <a href="https://github.com/arocomputer/e/actions/workflows/checks.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/arocomputer/e/checks.yml?style=flat-square&branch=main&label=Tests" /></a>
 </p>
 
 [![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://e.intuitum.sh)
@@ -24,16 +24,16 @@
 curl -fsSL https://e.intuitum.sh/install.sh | sh
 ```
 
-Or download a binary from the [latest release](https://github.com/intuitums/e/releases/latest):
+Or download a binary from the [latest release](https://github.com/arocomputer/e/releases/latest):
 
 | Platform | Download |
 | --- | --- |
-| macOS · Apple Silicon | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-apple-darwin.tar.gz) |
-| macOS · Intel | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-apple-darwin.tar.gz) |
-| Linux · ARM64 | [ARM64](https://github.com/intuitums/e/releases/latest/download/e-aarch64-unknown-linux-gnu.tar.gz) |
-| Linux · x86-64 | [x86-64](https://github.com/intuitums/e/releases/latest/download/e-x86_64-unknown-linux-gnu.tar.gz) |
+| macOS · Apple Silicon | [ARM64](https://github.com/arocomputer/e/releases/latest/download/e-aarch64-apple-darwin.tar.gz) |
+| macOS · Intel | [x86-64](https://github.com/arocomputer/e/releases/latest/download/e-x86_64-apple-darwin.tar.gz) |
+| Linux · ARM64 | [ARM64](https://github.com/arocomputer/e/releases/latest/download/e-aarch64-unknown-linux-gnu.tar.gz) |
+| Linux · x86-64 | [x86-64](https://github.com/arocomputer/e/releases/latest/download/e-x86_64-unknown-linux-gnu.tar.gz) |
 
-[Checksums](https://github.com/intuitums/e/releases/latest/download/checksums.txt) ·
+[Checksums](https://github.com/arocomputer/e/releases/latest/download/checksums.txt) ·
 [Installation guide](docs/guides/start/install.md)
 
 ### Usage

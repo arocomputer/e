@@ -4,7 +4,7 @@
 #   curl -fsSL https://e.intuitum.sh/install.sh | sh
 set -eu
 
-repo="intuitums/e"
+repo="arocomputer/e"
 dir="${E_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Explicit channel/version selection never changes the default production installation.
@@ -33,7 +33,7 @@ if [ -z "$version" ] && [ "$channel" != production ]; then
   status=$(curl -sSL -w '\n%{http_code}' "https://github.com/$repo/releases/latest/download/version.txt")
   case "$status" in
     *200) version=$(printf '%s\n' "$status" | sed '$d') ;;
-    *404) version=$(curl -fsSL https://github.com/intuitums/e/releases/download/channel-beta/version.txt); repo=intuitums/e ;;
+    *404) version=$(curl -fsSL https://github.com/arocomputer/e/releases/download/channel-beta/version.txt); repo=arocomputer/e ;;
     *) echo 'Could not resolve the beta version' >&2; exit 1 ;;
   esac
 fi
@@ -93,13 +93,13 @@ if [ "$channel" = beta ] && [ -z "${E_RELEASE_BASE:-}" ]; then
   status=$(curl -sSL -o "$tmp/e.tar.gz" -w '%{http_code}' "$base/e-$target.tar.gz")
   case "$status" in
     200) downloaded=true ;;
-    404) base="https://github.com/intuitums/e/releases/download/v$version" ;;
+    404) base="https://github.com/arocomputer/e/releases/download/v$version" ;;
     *) echo 'Could not download the beta archive' >&2; exit 1 ;;
   esac
 fi
 [ "$downloaded" = true ] || curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
   echo "no release published yet — install.sh works once the first release exists" >&2
-  echo "build from source: cargo install --git https://github.com/intuitums/e" >&2
+  echo "build from source: cargo install --git https://github.com/arocomputer/e" >&2
   exit 1
 }
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"

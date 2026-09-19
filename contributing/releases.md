@@ -28,7 +28,7 @@ when the scenario command finishes.
 
 ## Release channels
 
-Production releases live in `intuitums/e`. Beta binaries live in
+Production releases live in `arocomputer/e`. Beta binaries live in
 `intuitums/e-beta`, with titles `0.0.0 · Beta N`. Dev publishes npm packages
 under `@dev`, with no GitHub Release. Preview tags and package versions carry
 the channel and the `publish` workflow run number.
@@ -65,7 +65,7 @@ use a disposable project or worktree when trying unfinished features.
 curl -fsSL https://e.intuitum.sh/install.sh | sh -s -- --channel beta
 npm install -g @intuitums/e@beta
 bun add -g @intuitums/e@beta
-brew install intuitums/tap/e-beta
+brew install arocomputer/tap/e-beta
 ```
 
 For dev, use `npm install -g @intuitums/e@dev` or
@@ -82,7 +82,7 @@ This installs `e-dev` through the checksum-verifying installer after the run's
 The artifacts expire after 14 days. Repeat with a newer run to update; the
 installed build does not self-update. Older runs without `build.json` cannot
 use this command. Production remains the default:
-no curl option, npm/bun `@latest`, or the `intuitums/tap/e` formula.
+no curl option, npm/bun `@latest`, or the `arocomputer/tap/e` formula.
 Curl and brew support side-by-side production and beta installations. npm and bun replace the
 installed version of `@intuitums/e` when switching its tag. Package installs
 carry channel-specific ownership markers; e directs updates to that manager.
@@ -95,7 +95,7 @@ unless auto-update is disabled in its settings.
 
 ### Existing preview installations
 
-Earlier beta archives remain in `intuitums/e`. The curl installer falls back to
+Earlier beta archives remain in `arocomputer/e`. The curl installer falls back to
 those archives for pinned historical versions and uses the previous beta pointer
 until the first release exists in `intuitums/e-beta`. Reinstall beta with the
 command above once to adopt the new self-update source. Historical binaries
@@ -115,7 +115,7 @@ dev builds. Remove a previous curl or brew installation before switching if its
 ```
 
 Requires `gh` authentication with access to Actions. The request returns
-immediately; find the run with `gh run list --repo intuitums/e --workflow preview.yml`.
+immediately; find the run with `gh run list --repo arocomputer/e --workflow preview.yml`.
 The installer verifies the artifact checksum and prints its source commit.
 It installs `e-pr-123` under `~/.local/bin`, or `E_INSTALL_DIR`.
 Artifacts expire after 14 days. The selected run stays pinned even if the PR
@@ -187,7 +187,7 @@ ceiling (`E_GLIBC_CEILING`, and the refusal in `install.sh`) move together.
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
-gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo intuitums/e
+gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo arocomputer/e
 ```
 
 On macOS use `shasum -a 256`. To retry dev publication, rerun failed jobs in the original
@@ -230,21 +230,21 @@ optional platform packages. Preview builds require an explicit request.
 ## Publishing credentials
 
 Beta publishing uses `BETA_RELEASE_TOKEN`, a fine-grained token with Contents
-read/write on `intuitums/e-beta`. Save it as a repository secret in `intuitums/e`.
+read/write on `intuitums/e-beta`. Save it as a repository secret in `arocomputer/e`.
 The beta repository needs an initial commit so GitHub can attach release tags.
-Release bodies record the source commit in `intuitums/e`; retries validate that
+Release bodies record the source commit in `arocomputer/e`; retries validate that
 commit is reachable from main. GitHub's ordinary workflow token handles
 production releases in the source repository.
 
 Homebrew uses `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to Contents
-read/write on `intuitums/homebrew-tap`. Deploy keys are disabled by repository
+read/write on `arocomputer/homebrew-tap`. Deploy keys are disabled by repository
 policy. Renew the token before its expiry.
 npm uses trusted publishing. Configure each package for GitHub organization
-`intuitums`, repository `e`, workflow `release.yml`, with direct publishing
+`arocomputer`, repository `e`, workflow `release.yml`, with direct publishing
 allowed. Use Node 24 with npm 11.5.1 or newer. The first publication needs an npm
 account authorized for the scope. For that first release, store a publishing token
 with permission to create packages under `@intuitums` as `NPM_BOOTSTRAP_TOKEN`
-in `intuitums/e`. Unattended publishing requires a token that can bypass 2FA.
+in `arocomputer/e`. Unattended publishing requires a token that can bypass 2FA.
 The npm job uses it as a fallback until trusted publishing is configured.
 
 After the first publication, use an interactive npm login with 2FA enabled and
@@ -253,7 +253,7 @@ npm 11.15.0 or newer to configure the application packages and the Slack bot:
 ```sh
 for package in e e-darwin-arm64 e-darwin-x64 e-linux-arm64 e-linux-x64 e-slack; do
   npm trust github "@intuitums/$package" \
-    --repository intuitums/e --file release.yml --allow-publish --yes
+    --repository arocomputer/e --file release.yml --allow-publish --yes
   sleep 2
 done
 ```
@@ -265,9 +265,9 @@ Subsequent releases need no npm token. The token in 1Password can remain availab
 for separately authorized manual publishing.
 
 The website renders this repository's `docs/guides/`, so
-`.github/workflows/docs.yml` starts intuitums/web's Deploy workflow whenever a
+`.github/workflows/docs.yml` starts arocomputer/web's Deploy workflow whenever a
 guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
-to intuitums/web with Actions: write. Set the secret once; without it the job
+to arocomputer/web with Actions: write. Set the secret once; without it the job
 fails loudly rather than going stale silently.
 
 crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish these crates

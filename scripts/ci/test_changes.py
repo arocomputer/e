@@ -55,7 +55,7 @@ class ChangesTests(unittest.TestCase):
 
     def test_rename_out_of_runtime_still_checks_old_path(self):
         pages = [[{'filename': 'assets/old.json', 'previous_filename': 'crates/core/themes/old.json'}]]
-        with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='intuitums/e'), \
+        with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='arocomputer/e'), \
                 patch('changes.subprocess.check_output', return_value=json.dumps(pages)):
             self.assertTrue(classify(changed_paths())['build'])
 

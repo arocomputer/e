@@ -88,7 +88,7 @@ crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server ov
              `-p --json` and rpc both report)
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
-             `e docs` embeds them, and the website (intuitums/web) renders
+             `e docs` embeds them, and the website (arocomputer/web) renders
              them at e.intuitum.sh/docs. contributing/ is the
              repository's own documentation, never published.
 crates/cli/  the `e` binary, published as intuitums-e: src/main.rs (flags,

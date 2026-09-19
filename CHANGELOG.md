@@ -87,6 +87,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Provider failures show a short message while retaining diagnostics privately. Quota failures stop retries; transient failures show cancellable backoff.
 - Provider-level model settings and context-window overrides survive catalog refreshes. Anthropic tool-result batching and prompt caching follow the conversation.
 - Startup and long-session rendering have performance budgets. Terminal-frame checks cover tool trees, composer placement, errors, and review colors.
+- **Upgrade:** the repository moved to the `arocomputer` organization. `e update`, `install.sh`, and the install guides use the new URLs; point an existing checkout's remote at `https://github.com/arocomputer/e`.
 
 ### Fixes
 

@@ -1,6 +1,6 @@
 name: Website
 
-# The guides live in this repository and the website (intuitums/web) renders
+# The guides live in this repository and the website (arocomputer/web) renders
 # them at build time. Without this, a merged guide would wait for the next
 # website change to appear, so start the website's deploy instead.
 on:
@@ -20,8 +20,8 @@ jobs:
     steps:
       - name: Start the website's deploy
         env:
-          # A fine-grained token limited to intuitums/web with Actions: write.
+          # A fine-grained token limited to arocomputer/web with Actions: write.
           GH_TOKEN: ${{ secrets.WEB_DEPLOY_TOKEN }}
         run: |
-          test -n "$GH_TOKEN" || { echo 'Configure WEB_DEPLOY_TOKEN to redeploy intuitums/web.'; exit 1; }
-          gh workflow run deploy.yml --repo intuitums/web --ref main
+          test -n "$GH_TOKEN" || { echo 'Configure WEB_DEPLOY_TOKEN to redeploy arocomputer/web.'; exit 1; }
+          gh workflow run deploy.yml --repo arocomputer/web --ref main

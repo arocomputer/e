@@ -7,10 +7,10 @@
   "homepage": "https://e.intuitum.sh",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/intuitums/e.git",
+    "url": "git+https://github.com/arocomputer/e.git",
     "directory": "channels/slack"
   },
-  "bugs": "https://github.com/intuitums/e/issues",
+  "bugs": "https://github.com/arocomputer/e/issues",
   "keywords": [
     "slack",
     "slack-bot",

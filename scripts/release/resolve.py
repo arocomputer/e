@@ -37,7 +37,7 @@ def resolve():
             ['gh', 'release', 'view', tag, '--repo', release['repository'], '--json', 'isDraft,targetCommitish,body'], text=True))
         # Draft releases may not have a tag until they are published.
         if release['channel'] == 'beta':
-            source = re.search(r'^Source: https://github.com/intuitums/e/commit/([a-f0-9]{40})$', metadata['body'], re.M)
+            source = re.search(r'^Source: https://github.com/arocomputer/e/commit/([a-f0-9]{40})$', metadata['body'], re.M)
             assert source, 'Beta release is missing its source commit'
             ref = source[1]
         else:

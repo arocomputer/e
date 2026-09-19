@@ -7,7 +7,7 @@ from notes import parse
 class ReleaseContracts(unittest.TestCase):
     def test_channel_versions_and_numeric_order(self):
         self.assertEqual(identity('v1.2.3')['npm_tag'], 'latest')
-        self.assertEqual(identity('v1.2.3')['repository'], 'intuitums/e')
+        self.assertEqual(identity('v1.2.3')['repository'], 'arocomputer/e')
         self.assertEqual(identity('v0.0.0-beta-12')['repository'], 'intuitums/e-beta')
         self.assertEqual(identity('v0.0.0-dev-12')['repository'], '')
         self.assertEqual(identity('v0.0.0-beta-12')['command'], 'e-beta')
