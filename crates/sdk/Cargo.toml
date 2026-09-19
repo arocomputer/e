@@ -1,7 +1,7 @@
 [package]
-# Named after the npm packages (`@intuitums/e` → `intuitums-e`, and the SDK
-# mirrors it as `intuitums-e-sdk`); the library is still `e_sdk`.
-name = "intuitums-e-sdk"
+# The library is still `e_sdk`; the package carries the `aro-` crates.io family
+# prefix (`aro-e-sdk`).
+name = "aro-e-sdk"
 # The SDK's own version, not the application's: different crates in this
 # repository change for different reasons, so an SDK release that breaks its API
 # moves this and says so in the changelog, while the application's version
@@ -11,7 +11,7 @@ edition = "2021"
 rust-version.workspace = true
 license.workspace = true
 description = "e's coding agent as a library: sessions, turns, one event stream"
-documentation = "https://docs.rs/intuitums-e-sdk"
+documentation = "https://docs.rs/aro-e-sdk"
 homepage = "https://e.intuitum.sh"
 repository = "https://github.com/arocomputer/e"
 readme = "README.md"
@@ -28,7 +28,7 @@ path = "src/lib.rs"
 # The SDK drives the core directly and never links a frontend. The core's Rust
 # API is internal, so each SDK release pins the version it was built and
 # tested against.
-e-core = { package = "intuitums-e-core", path = "../core", version = "=0.0.1" }
+e-core = { package = "aro-e-core", path = "../core", version = "=0.0.1" }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 futures = "0.3"
 thiserror = "2"
@@ -36,7 +36,7 @@ thiserror = "2"
 [dev-dependencies]
 # The integration tests share the application's test helpers, which reach the
 # core through the `e` library. Consumers of the SDK never compile it.
-e = { package = "intuitums-e", path = "../cli" }
+e = { package = "aro-e", path = "../cli" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v7"] }

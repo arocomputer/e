@@ -1,9 +1,9 @@
 [package]
-# The crates.io package name: `e` is taken there, so the application carries the
-# org prefix the npm packages already use (`@intuitums/e` → `intuitums-e`).
+# The crates.io package name: bare `e` is taken there, so the application and
+# its crates share the `aro-` family prefix.
 # The binary and its library are still `e`, so `e --version` and `use e::…`
 # are unchanged.
-name = "intuitums-e"
+name = "aro-e"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

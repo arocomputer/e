@@ -207,10 +207,10 @@ Files and saved sessions need no migration.
 ## Not a supported contract
 
 The workspace crates under `crates/` share code between the binary, the
-integration tests, and the SDK. Their public Rust items, in `intuitums-e-core`
+integration tests, and the SDK. Their public Rust items, in `aro-e-core`
 and the frontend crates, are not a stable third-party API in themselves.
 
-The supported Rust SDK is the separate `intuitums-e-sdk` crate in `crates/sdk/`.
+The supported Rust SDK is the separate `aro-e-sdk` crate in `crates/sdk/`.
 See [SDK](sdk.md). The API it consumes is its documented contract. It
 follows semantic versioning from its first published release. Before 1.0, a
 breaking change moves the minor version and is named in the changelog.

@@ -91,7 +91,7 @@ docs/        guides/: the guides, one folder per nav group, with front matter
              `e docs` embeds them, and the website (arocomputer/web) renders
              them at e.intuitum.sh/docs. contributing/ is the
              repository's own documentation, never published.
-crates/cli/  the `e` binary, published as intuitums-e: src/main.rs (flags,
+crates/cli/  the `e` binary, published as aro-e: src/main.rs (flags,
              rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `e`
              library, re-exporting core, tui, and rpc for the binary, tests,
              and fuzz targets) · tests/ (the integration suites, fixtures,
@@ -113,7 +113,7 @@ cargo test --test stream            # agent turn loop against a mock provider
 cargo test --test providers         # the four wire dialects' request/stream shapes
 cargo test --test parity            # byte-pinned rendering (run after any look change)
 cargo test --test file_tools        # read/write/edit/grep behavior
-cargo test -p intuitums-e-sdk        # embedded SDK consumer
+cargo test -p aro-e-sdk        # embedded SDK consumer
 cargo test --test toolloop          # end-to-end tool execution
 cargo test name_of_one_test         # any single test, by name substring
 ```

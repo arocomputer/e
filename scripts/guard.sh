@@ -109,7 +109,7 @@ done
 #    embeds carries no terminal with it; tui, rpc, and sdk depend on core and
 #    never on each other. Cargo enforces the imports; this pins the manifests.
 
-if out=$(grep -nE '^(e-tui|e-rpc|e-sdk|crossterm|unicode-width)\b|intuitums-e-(tui|rpc|sdk)' crates/core/Cargo.toml); then
+if out=$(grep -nE '^(e-tui|e-rpc|e-sdk|crossterm|unicode-width)\b|aro-e-(tui|rpc|sdk)' crates/core/Cargo.toml); then
   bad "crates/core depends on a frontend or a terminal library:"
   say "$out"
 fi
@@ -119,7 +119,7 @@ for frontend in tui rpc; do
     say "$out"
   fi
 done
-if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'intuitums-e"|intuitums-e-(tui|rpc)'); then
+if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'aro-e"|aro-e-(tui|rpc)'); then
   bad "crates/sdk depends on a frontend:"
   say "$out"
 fi

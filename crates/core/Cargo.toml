@@ -2,7 +2,7 @@
 # The harness without a terminal: the agent turn loop, provider dialects,
 # tools, sessions, configuration, extensions, and the embedded guides. Nothing
 # here depends on a frontend crate or a terminal library.
-name = "intuitums-e-core"
+name = "aro-e-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

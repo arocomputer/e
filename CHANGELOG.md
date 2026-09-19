@@ -26,8 +26,8 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Install the Slack channel from npm (`npm install -g @intuitums/e-slack`, or `npx @intuitums/e-slack`). It keeps its own version and publishes under `latest` with production releases.
 - Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
-- Embed e with the `intuitums-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
-- Install the SDK from crates.io with `cargo add intuitums-e-sdk`. It follows semantic versioning on a version of its own, independent of the application (`intuitums-e` — the npm naming, since `e` is taken on crates.io), and each production release publishes whichever of the two has a new version.
+- Embed e with the `aro-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
+- Install the SDK from crates.io with `cargo add aro-e-sdk`. It follows semantic versioning on a version of its own, independent of the application (`aro-e`, since bare `e` is taken on crates.io), and each production release publishes whichever of the two has a new version.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
 - Recall prompts from previous sessions with Up on an empty composer. Ctrl+G opens the current draft in an external editor.
@@ -43,7 +43,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - **Upgrade:** the `dev` and `beta` release channels are removed. Preview changes with a pinned PR build (`./x preview`) instead. Remove a previous `e-beta` or `e-dev` installation and reinstall from the production command; those binaries no longer receive updates.
 - Rewrite the README around installation and first use, with a captured terminal example.
 
-- The Rust SDK depends only on the new `intuitums-e-core` crate, so a program that embeds e no longer compiles the terminal frontend. The application now publishes as `intuitums-e-core`, `intuitums-e-tui`, `intuitums-e-rpc`, and `intuitums-e`.
+- The Rust SDK depends only on the new `aro-e-core` crate, so a program that embeds e no longer compiles the terminal frontend. The application now publishes as `aro-e-core`, `aro-e-tui`, `aro-e-rpc`, and `aro-e`.
 - Scroll the conversation with the wheel or PageUp/PageDown while keeping the draft editable. Reading earlier output pauses following; End or returning to the bottom resumes it. Fullscreen now uses a fixed conversation viewport.
 - Retain thinking behind a compact hint by default. Ctrl+O and the Show thinking setting reveal reasoning already received during the session. Long tool groups fold older successful calls while retaining failures, running work, and the complete review history.
 - Recover reply text from completed Responses API messages when a gateway omits text deltas, without duplicating streamed text. A reasoning-only finish now explains that the model supplied no answer.

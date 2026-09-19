@@ -200,10 +200,10 @@ to arocomputer/web with Actions: write. Set the secret once; without it the job
 fails loudly rather than going stale silently.
 
 crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish these crates
-and no others: `intuitums-e-core`, `intuitums-e-tui`, `intuitums-e-rpc`,
-`intuitums-e` (the binary, named after `@intuitums/e` since bare `e` is taken on
-crates.io), and `intuitums-e-sdk`. The `crates` job publishes the application
-crates in dependency order, core, tui, rpc, then `intuitums-e`, and waits for
+and no others: `aro-e-core`, `aro-e-tui`, `aro-e-rpc`,
+`aro-e` (the binary; bare `e` is taken on crates.io, so the crates share the
+`aro-` family prefix), and `aro-e-sdk`. The `crates` job publishes the application
+crates in dependency order, core, tui, rpc, then `aro-e`, and waits for
 each to reach the index, because the next manifest depends on it by version.
 It skips a version that is already published, so a retry is safe. The SDK
 publishes last. Production releases only. The application's

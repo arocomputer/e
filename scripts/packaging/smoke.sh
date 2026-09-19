@@ -28,13 +28,13 @@ try:
 finally:
     fixture.tearDown()
 PY
-npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/intuitums-e-$version.tgz"
+npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/aro-e-$version.tgz"
 test "$("$scratch/npm/bin/$command" 'argument with spaces')" = 'argument with spaces'
 cat > "$scratch/bunfig.toml" <<CFG
 [install]
 globalDir = "$scratch/bun/global"
 globalBinDir = "$scratch/bun/bin"
 CFG
-bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/intuitums-e-$version.tgz"
+bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/aro-e-$version.tgz"
 test "$("$scratch/bun/bin/$command" 'argument with spaces')" = 'argument with spaces'
 echo 'npm and bun launch the native dependency without lifecycle scripts'
