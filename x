@@ -56,7 +56,7 @@ case "$command" in
     # to end in dependency order, and the SDK is compiled by an external
     # consumer from its packed crate.
     cargo publish --dry-run --locked --allow-dirty \
-      -p intuitums-e-core -p intuitums-e-tui -p intuitums-e-rpc -p intuitums-e
+      -p aro-e-core -p aro-e-tui -p aro-e-rpc -p aro-e
     python3 scripts/check-sdk.py
     ;;
   docs)

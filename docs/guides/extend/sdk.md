@@ -7,7 +7,7 @@ order: 3
 # SDK
 
 The SDK is e's coding agent as a Rust library. It lives in `crates/sdk/` and is
-published as `intuitums-e-sdk`.
+published as `aro-e-sdk`.
 
 With the SDK you create a session against a working directory, prompt it,
 read the core's ordered event stream, and get a reply. Extension notices
@@ -18,7 +18,7 @@ terminal. You get the built-in tools, skills and `AGENTS.md` context,
 automatic compaction, on-disk session logs, and extensions.
 
 ```sh
-cargo add intuitums-e-sdk
+cargo add aro-e-sdk
 ```
 
 ## Quick start
@@ -170,14 +170,14 @@ That is the whole checkpoint story: a readable file, not opaque bytes.
 
 The SDK versions itself, separately from the e binary.
 
-The crate is named `intuitums-e-sdk` because bare `e` is taken on crates.io.
-The name mirrors the npm naming, where `@intuitums/e` becomes `intuitums-e`.
+The crate is named `aro-e-sdk` because bare `e` is taken on crates.io. The
+application crates share the same `aro-` family prefix.
 
 The SDK follows semantic versioning from its first published release.
 Before 1.0, a release that changes the documented API without a compatible
 path moves the minor version and names the change in the changelog.
 
-The SDK depends on `intuitums-e-core` alone and pins the exact version it was
+The SDK depends on `aro-e-core` alone and pins the exact version it was
 tested against. The core's Rust items are not a stable API. See
 [Compatibility](compatibility.md).
 
@@ -194,9 +194,9 @@ stabilizing an API is a deliberate act, not an accident of visibility.
 ## Building
 
 ```sh
-cargo build -p intuitums-e-sdk
-cargo test -p intuitums-e-sdk
-cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
+cargo build -p aro-e-sdk
+cargo test -p aro-e-sdk
+cargo run -p aro-e-sdk --example ask -- "what does this repository do"
 ```
 
 The package is a member of the root workspace, so `./x check` and `./x test`

@@ -1,8 +1,8 @@
 //! Ask e one question about the current directory and stream the answer.
 //!
 //! ```sh
-//! cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
-//! E_MODEL=anthropic/claude-opus-5 cargo run -p intuitums-e-sdk --example ask -- "..."
+//! cargo run -p aro-e-sdk --example ask -- "what does this repository do"
+//! E_MODEL=anthropic/claude-opus-5 cargo run -p aro-e-sdk --example ask -- "..."
 //! ```
 //!
 //! Text goes to stdout as it streams; tool activity and the final usage

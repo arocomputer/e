@@ -12,6 +12,81 @@ dependencies = [
 ]
 
 [[package]]
+name = "aro-e"
+version = "0.0.1"
+dependencies = [
+ "aro-e-core",
+ "aro-e-rpc",
+ "aro-e-tui",
+ "futures",
+ "libc",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "aro-e-core"
+version = "0.0.1"
+dependencies = [
+ "base64 0.23.1",
+ "futures",
+ "libc",
+ "pulldown-cmark",
+ "rand 0.10.2",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "aro-e-rpc"
+version = "0.0.1"
+dependencies = [
+ "aro-e-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "aro-e-sdk"
+version = "0.0.1"
+dependencies = [
+ "aro-e",
+ "aro-e-core",
+ "futures",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "aro-e-tui"
+version = "0.0.1"
+dependencies = [
+ "aro-e-core",
+ "base64 0.23.1",
+ "crossterm",
+ "libc",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unicode-width",
+ "uuid",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -597,81 +672,6 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "intuitums-e"
-version = "0.0.1"
-dependencies = [
- "futures",
- "intuitums-e-core",
- "intuitums-e-rpc",
- "intuitums-e-tui",
- "libc",
- "proptest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "intuitums-e-core"
-version = "0.0.1"
-dependencies = [
- "base64 0.23.1",
- "futures",
- "libc",
- "pulldown-cmark",
- "rand 0.10.2",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "intuitums-e-rpc"
-version = "0.0.1"
-dependencies = [
- "intuitums-e-core",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "intuitums-e-sdk"
-version = "0.0.1"
-dependencies = [
- "futures",
- "intuitums-e",
- "intuitums-e-core",
- "serde_json",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "intuitums-e-tui"
-version = "0.0.1"
-dependencies = [
- "base64 0.23.1",
- "crossterm",
- "intuitums-e-core",
- "libc",
- "pulldown-cmark",
- "serde",
- "serde_json",
- "tokio",
- "unicode-width",
- "uuid",
 ]
 
 [[package]]

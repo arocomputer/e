@@ -44,19 +44,19 @@ def main():
     assert sdk['dependencies']['e-core']['version'] == f'={app}', 'SDK must pin the current core version'
     with tempfile.TemporaryDirectory(prefix='e-sdk-consumer-') as tmp:
         root = Path(tmp)
-        stage(['intuitums-e-core', 'intuitums-e-sdk'], root)
+        stage(['aro-e-core', 'aro-e-sdk'], root)
         consumer = root / 'consumer'
         (consumer / 'src').mkdir(parents=True)
-        shutil.copyfile(root / 'intuitums-e-sdk/examples/ask.rs', consumer / 'src/main.rs')
+        shutil.copyfile(root / 'aro-e-sdk/examples/ask.rs', consumer / 'src/main.rs')
         (consumer / 'Cargo.toml').write_text('''[package]
 name = "e-sdk-consumer"
 version = "0.0.0"
 edition = "2021"
 [dependencies]
-e_sdk = { package = "intuitums-e-sdk", path = "../intuitums-e-sdk" }
+e_sdk = { package = "aro-e-sdk", path = "../aro-e-sdk" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [patch.crates-io]
-intuitums-e-core = { path = "../intuitums-e-core" }
+aro-e-core = { path = "../aro-e-core" }
 ''')
         metadata = json.loads(subprocess.check_output(
             ['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=ROOT, text=True))

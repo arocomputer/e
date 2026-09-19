@@ -449,7 +449,7 @@ jobs:
           # The application crates share the release version and publish in
           # dependency order: core, then its frontends, then the binary. A
           # retry after a partial publish finds a version already there.
-          for crate in intuitums-e-core intuitums-e-tui intuitums-e-rpc intuitums-e; do
+          for crate in aro-e-core aro-e-tui aro-e-rpc aro-e; do
             if published "$crate" "$VERSION"; then
               echo "$crate $VERSION is already published"
             else
@@ -458,12 +458,12 @@ jobs:
             fi
           done
 
-          if published intuitums-e-sdk "$SDK_VERSION"; then
-            echo "intuitums-e-sdk $SDK_VERSION is already published"
+          if published aro-e-sdk "$SDK_VERSION"; then
+            echo "aro-e-sdk $SDK_VERSION is already published"
           else
             # Not --locked: packaging the SDK resolves its dependency from the
             # registry rather than from this workspace.
-            cargo publish -p intuitums-e-sdk
+            cargo publish -p aro-e-sdk
           fi
 
   homebrew:

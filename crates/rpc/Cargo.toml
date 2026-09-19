@@ -1,7 +1,7 @@
 [package]
 # The headless frontend: `e rpc`, a JSONL session server over stdin and stdout,
 # and the turn result that `e -p --json` reports too.
-name = "intuitums-e-rpc"
+name = "aro-e-rpc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

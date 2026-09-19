@@ -20,7 +20,7 @@ session.close().await;
 ```
 
 ```sh
-cargo run -p intuitums-e-sdk --example ask -- "what does this repository do"
+cargo run -p aro-e-sdk --example ask -- "what does this repository do"
 ```
 
 See [docs/guides/extend/sdk.md](../../docs/guides/extend/sdk.md) for the API, package boundary, and usage rules.
@@ -28,11 +28,11 @@ The API is unstable until its first release declares a versioning policy.
 
 ## Versioning
 
-`intuitums-e-sdk` is published on crates.io and its versions mean something from
+`aro-e-sdk` is published on crates.io and its versions mean something from
 the first release:
 
 ```sh
-cargo add intuitums-e-sdk
+cargo add aro-e-sdk
 ```
 
 - **The SDK's API is the contract**: the types and methods
@@ -42,8 +42,8 @@ cargo add intuitums-e-sdk
   additive and internal changes move the patch. From 1.0 the usual rules apply.
 - **Its own version, not the application's.** The SDK changes for its own
   reasons, so its version tracks only those. It depends on the core crate
-  alone, `intuitums-e-core`, named after the npm packages (`@intuitums/e`) since
-  bare `e` is taken on crates.io. It pins the exact core version it was tested
+  alone, `aro-e-core`, which carries the `aro-` family prefix since bare `e`
+  is taken on crates.io. It pins the exact core version it was tested
   against; publish that core version before publishing the SDK.
 - **The core's Rust items are not a promise.** What the SDK is built
   on is internal; the contract is what this package documents
