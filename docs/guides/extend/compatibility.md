@@ -138,13 +138,12 @@ Headless responses add an optional `error_details` object and keep the
 
 ## Home directory and file permissions
 
-Each release channel has its own home directory:
+Each kind of build has its own home directory:
 
-| Channel | Home |
+| Build | Home |
 | --- | --- |
-| Stable | `~/.e` |
-| Dev and local | `~/.e-dev` |
-| Beta | `~/.e-beta` |
+| Production | `~/.e` |
+| Local (`./x dev`) | `~/.e-dev` |
 | PR builds | `~/.e-pr/COMMIT` |
 
 `E_HOME` overrides the channel default. Use a dedicated directory for

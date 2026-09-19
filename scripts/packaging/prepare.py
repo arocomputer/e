@@ -27,9 +27,8 @@ def prepare(tag, assets, output):
     version, channel, command = (release[key] for key in ("version", "channel", "command"))
     if version == "0.0.1":
         raise ValueError("v0.0.1 predates package-manager update protection")
-    if channel == "pr":
-        raise ValueError("PR builds cannot be published as packages")
-    marker_suffix = "" if channel == "production" else f"-{channel}"
+    if channel != "production":
+        raise ValueError("Only production releases are published as packages")
     checksums = {}
     for line in (assets / "checksums.txt").read_text().splitlines():
         digest, filename = line.split()
@@ -63,7 +62,7 @@ def prepare(tag, assets, output):
             ):
                 shutil.copyfileobj(source, dest)
         (folder / "bin/e").chmod(0o755)
-        (folder / "bin/.e-install-method").write_text(f"npm{marker_suffix}\n")
+        (folder / "bin/.e-install-method").write_text("npm\n")
         os_name, cpu = platform.split("-")
         manifest = dict(
             common,
@@ -119,10 +118,8 @@ def prepare(tag, assets, output):
     manifest.pop("devDependencies", None)
     manifest.pop("scripts", None)
     (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    if channel == "dev":
-        return
     formula = [
-        f"class {'E' if channel == 'production' else 'E' + channel.capitalize()} < Formula",
+        "class E < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
         '  homepage "https://e.intuitum.sh"',
         f'  version "{version}"',
@@ -147,7 +144,7 @@ def prepare(tag, assets, output):
         [
             "  def install",
             '    libexec.install "e"',
-            f'    (libexec/".e-install-method").write "homebrew{marker_suffix}\\n"',
+            f'    (libexec/".e-install-method").write "homebrew\\n"',
             f'    bin.install_symlink libexec/"e" => "{command}"',
             "  end",
             "",

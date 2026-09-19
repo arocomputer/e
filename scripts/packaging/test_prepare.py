@@ -84,40 +84,32 @@ class Packages(unittest.TestCase):
         self.assertTrue((output / "slack/LICENSE").is_file())
         self.assertEqual(list((output / "slack/src").glob("*.test.ts")), [])
 
-    def test_preview_packages_keep_the_channel_and_separate_command(self):
+    def test_preview_versions_cannot_be_published(self):
         output = self.root / "dist"
-        prepare("v0.0.0-beta-12", self.assets, output)
-        wrapper = json.loads((output / "e/package.json").read_text())
-        self.assertEqual(wrapper["publishConfig"]["tag"], "beta")
-        self.assertEqual(wrapper["bin"], {"e-beta": "bin/e"})
-        self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm-beta\n")
-        formula = (output / "e-beta.rb").read_text()
-        self.assertIn('https://github.com/arocomputer/e-beta/releases/download/', formula)
-        self.assertIn('class EBeta < Formula', formula)
-        self.assertIn('=> "e-beta"', formula)
-        wrapper = json.loads((output / "e/package.json").read_text())
-        channel = json.loads((output / "slack/package.json").read_text())
-        self.assertNotIn("tag", channel["publishConfig"])
-        self.assertEqual(channel["version"], "0.0.2")
-        self.assertEqual(wrapper["version"], "0.0.0-beta-12")
+        with self.assertRaisesRegex(ValueError, 'Only production'):
+            prepare("v0.0.0-pr-12", self.assets, output)
 
-    def test_dev_publishes_npm_without_a_formula(self):
+    def test_production_packages_use_latest_and_the_e_command(self):
         output = self.root / "dist"
-        prepare("v0.0.0-dev-12", self.assets, output)
-        package = json.loads((output / "e/package.json").read_text())
-        self.assertEqual(package["publishConfig"]["tag"], "dev")
-        self.assertEqual(package["bin"], {"e-dev": "bin/e"})
-        self.assertEqual(list(output.glob("*.rb")), [])
+        prepare("v1.2.3", self.assets, output)
+        wrapper = json.loads((output / "e/package.json").read_text())
+        self.assertEqual(wrapper["publishConfig"]["tag"], "latest")
+        self.assertEqual(wrapper["bin"], {"e": "bin/e"})
+        self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm\n")
+        formula = (output / "e.rb").read_text()
+        self.assertIn('https://github.com/arocomputer/e/releases/download/', formula)
+        self.assertIn('class E < Formula', formula)
+        self.assertIn('=> "e"', formula)
 
-    def test_slack_payload_is_identical_across_release_channels(self):
+    def test_slack_payload_is_identical_for_production_releases(self):
         payloads = []
-        for version in ['1.2.3', '0.0.0-dev-1', '0.0.0-beta-2']:
-            output = self.root / version
+        for version, folder in [('1.2.3', 'a'), ('2.0.0', 'b')]:
+            output = self.root / folder
             prepare(version, self.assets, output)
             payloads.append({str(path.relative_to(output / 'slack')): path.read_bytes()
                              for path in (output / 'slack').rglob('*') if path.is_file()})
+        # Only version-independent Slack content is shipped, so the payload matches.
         self.assertEqual(payloads[0], payloads[1])
-        self.assertEqual(payloads[1], payloads[2])
 
 
 if __name__ == "__main__":

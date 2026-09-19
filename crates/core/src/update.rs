@@ -14,10 +14,6 @@
 use std::path::Path;
 
 const RELEASES: &str = "https://github.com/arocomputer/e/releases";
-const BETA_RELEASES: &str = "https://github.com/arocomputer/e-beta/releases";
-const BETA_API_LATEST: &str = "https://api.github.com/repos/arocomputer/e-beta/releases/latest";
-const DEV_UPDATE: &str =
-    "Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev";
 const API_LATEST: &str = "https://api.github.com/repos/arocomputer/e/releases/latest";
 
 /// Release assets redirect to GitHub's download hosts. This client carries
@@ -87,10 +83,6 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     let marker = executable.parent()?.join(".e-install-method");
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
-            "homebrew-beta" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/e-beta",
-            "homebrew-dev" => DEV_UPDATE,
-            "npm-beta" => "Update with: npm install -g @intuitums/e@beta or bun add -g @intuitums/e@beta",
-            "npm-dev" => "Update with: npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev",
             "homebrew" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/e",
             "npm" => "Installed with npm or bun. Update with: npm install -g @intuitums/e or bun add -g @intuitums/e",
             _ => "This installation is package-managed. Update it with its package manager.",
@@ -122,13 +114,13 @@ fn release_parts(version: &str) -> Option<([u64; 3], &str, u64)> {
         return Some((base, "production", 0));
     }
     let (channel, build) = preview.split_once('-')?;
-    if !["dev", "beta", "pr"].contains(&channel) {
+    if channel != "pr" {
         return None;
     }
     Some((base, channel, number(build)?))
 }
 
-/// Published production, dev, and beta versions can update; PR identities stay pinned.
+/// Published production versions can update; preview identities stay pinned.
 pub fn is_release_version(v: &str) -> bool {
     release_parts(v).is_some_and(|(_, channel, _)| channel != "pr")
 }
@@ -147,8 +139,6 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 pub async fn latest_tag() -> Result<Option<String>, String> {
     match crate::CHANNEL {
         "production" => latest_tag_from(API_LATEST).await,
-        "beta" => latest_tag_from(BETA_API_LATEST).await,
-        "dev" => Err(DEV_UPDATE.into()),
         _ => Ok(None),
     }
 }
@@ -333,9 +323,9 @@ pub async fn self_update() -> Result<Option<String>, String> {
     if let Some(hint) = package_update_hint(&dest) {
         return Err(hint.into());
     }
-    // Local and PR builds stay pinned. Published builds follow only their
-    // own channel, and unsupported platforms never download another target.
-    if !["production", "dev", "beta"].contains(&crate::CHANNEL)
+    // Local and PR builds stay pinned. Published builds follow the release
+    // channel, and unsupported platforms never download another target.
+    if crate::CHANNEL != "production"
         || is_dev_build()
         || !is_release_version(crate::VERSION)
         || target().is_none()
@@ -349,10 +339,5 @@ pub async fn self_update() -> Result<Option<String>, String> {
     if !is_newer(&tag, crate::VERSION) {
         return Ok(None);
     }
-    let base = if crate::CHANNEL == "beta" {
-        BETA_RELEASES
-    } else {
-        RELEASES
-    };
-    install_from(base, &tag, &dest).await.map(Some)
+    install_from(RELEASES, &tag, &dest).await.map(Some)
 }

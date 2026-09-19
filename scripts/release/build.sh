@@ -9,7 +9,7 @@
 # binary that needs anything newer than it.
 #
 # Env: TARGETS (required), E_GLIBC_CEILING, and — when cutting a release — TAG,
-# COMMAND, E_BUILD_VERSION, E_BUILD_CHANNEL, GH_TOKEN, GH_REPO. Without TAG it
+# COMMAND, E_BUILD_VERSION, GH_TOKEN, GH_REPO. Without TAG it
 # builds and checks only, which is what CI uses.
 set -eu
 
@@ -31,7 +31,7 @@ for target in $targets; do
   rustup target add "$target"
   cargo build --release --locked --target "$target"
   tar czf "e-$target.tar.gz" -C "target/$target/release" e
-  if [ -n "$tag" ] && [ "$E_BUILD_CHANNEL" != dev ]; then
+  if [ -n "$tag" ]; then
     gh release upload "$tag" "e-$target.tar.gz" --clobber
   fi
 
@@ -71,5 +71,5 @@ sha256sum "e-$host.tar.gz" > checksums.txt 2>/dev/null ||
   shasum -a 256 "e-$host.tar.gz" > checksums.txt
 install_dir=$(mktemp -d)
 E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh \
-  --channel "$E_BUILD_CHANNEL" --version "$E_BUILD_VERSION"
+  --version "$E_BUILD_VERSION"
 "$install_dir/$COMMAND" --version | grep -Fx "e ${tag#v}"
