@@ -6,7 +6,7 @@ name = "aro-e-sdk"
 # repository change for different reasons, so an SDK release that breaks its API
 # moves this and says so in the changelog, while the application's version
 # tracks the release.
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 rust-version.workspace = true
 license.workspace = true
@@ -28,7 +28,7 @@ path = "src/lib.rs"
 # The SDK drives the core directly and never links a frontend. The core's Rust
 # API is internal, so each SDK release pins the version it was built and
 # tested against.
-e-core = { package = "aro-e-core", path = "../core", version = "=0.0.1" }
+e-core = { package = "aro-e-core", path = "../core", version = "=0.0.2" }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 futures = "0.3"
 thiserror = "2"

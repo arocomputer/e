@@ -8,7 +8,7 @@ for attempt in 1 2 3 4 5 6; do
   # A successful npm install may omit an unavailable optional platform package.
   # A fresh prefix and cache prevent that incomplete install surviving a retry.
   prefix="$work/$attempt"
-  if npm install --prefix "$prefix" --cache "$prefix/cache" "@intuitums/e@$VERSION" &&
+  if npm install --prefix "$prefix" --cache "$prefix/cache" "@arocomputer/e@$VERSION" &&
       "$prefix/node_modules/.bin/$COMMAND" --version > "$work/version" &&
       grep -Fx "e $VERSION" "$work/version"; then
     exit 0

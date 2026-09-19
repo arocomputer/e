@@ -25,8 +25,8 @@ Package managers install the same binary:
 
 ```sh
 brew install arocomputer/tap/e
-npm install -g @intuitums/e
-bun add -g @intuitums/e
+npm install -g @arocomputer/e
+bun add -g @arocomputer/e
 ```
 
 These packages carry the native binary and need no JavaScript runtime. They
@@ -38,8 +38,8 @@ Update with the method that installed e:
 
 ```sh
 e update                            # curl or a release archive
-npm install -g @intuitums/e@latest
-bun add -g @intuitums/e@latest
+npm install -g @arocomputer/e@latest
+bun add -g @arocomputer/e@latest
 brew upgrade arocomputer/tap/e
 ```
 

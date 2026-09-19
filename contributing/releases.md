@@ -54,8 +54,8 @@ disposable project or worktree when trying unfinished features.
 
 ```sh
 curl -fsSL https://e.intuitum.sh/install.sh | sh
-npm install -g @intuitums/e
-bun add -g @intuitums/e
+npm install -g @arocomputer/e
+bun add -g @arocomputer/e
 brew install arocomputer/tap/e
 ```
 
@@ -172,7 +172,7 @@ npm uses trusted publishing. Configure each package for GitHub organization
 `arocomputer`, repository `e`, workflow `release.yml`, with direct publishing
 allowed. Use Node 24 with npm 11.5.1 or newer. The first publication needs an npm
 account authorized for the scope. For that first release, store a publishing token
-with permission to create packages under `@intuitums` as `NPM_BOOTSTRAP_TOKEN`
+with permission to create packages under `@arocomputer` as `NPM_BOOTSTRAP_TOKEN`
 in `arocomputer/e`. Unattended publishing requires a token that can bypass 2FA.
 The npm job uses it as a fallback until trusted publishing is configured.
 
@@ -181,7 +181,7 @@ npm 11.15.0 or newer to configure the application packages and the Slack bot:
 
 ```sh
 for package in e e-darwin-arm64 e-darwin-x64 e-linux-arm64 e-linux-x64 e-slack; do
-  npm trust github "@intuitums/$package" \
+  npm trust github "@arocomputer/$package" \
     --repository arocomputer/e --file release.yml --allow-publish --yes
   sleep 2
 done
@@ -189,7 +189,7 @@ done
 
 Complete npm's browser authentication when prompted. An API token that bypasses
 2FA cannot configure trust relationships. Verify each package with `npm trust
-list @intuitums/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
+list @arocomputer/<package>`, then delete `NPM_BOOTSTRAP_TOKEN` from GitHub.
 Subsequent releases need no npm token. The token in 1Password can remain available
 for separately authorized manual publishing.
 

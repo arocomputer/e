@@ -31,7 +31,7 @@ once. Nothing here is compiled into e.
 
 ## Run it
 
-`@intuitums/e-slack` versions itself and publishes new versions under `latest`
+`@arocomputer/e-slack` versions itself and publishes new versions under `latest`
 with e's production releases. Dev and beta application releases do not republish the
 bot; their historical npm tags remain available. **Bump `version` in
 `package.json` in the same pull request that changes the bot**: npm refuses to
@@ -39,12 +39,12 @@ republish a version, so an unraised version means the change ships in the
 repository and nowhere else. It only needs a checkout to work in (`E_CWD`):
 
 ```sh
-npm install -g @intuitums/e-slack
+npm install -g @arocomputer/e-slack
 set -a; . ./.env; set +a
 e-slack
 ```
 
-`npx @intuitums/e-slack` does the same without a global install.
+`npx @arocomputer/e-slack` does the same without a global install.
 
 ## Develop
 
