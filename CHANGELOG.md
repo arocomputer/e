@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Improvements
+
+- Nothing yet.
+
+## 0.0.2
+
+September 19, 2026
+
 ### Packages, planning, and longer-running sessions
 
 Install shared extensions and resources, delegate tasks, and return to work with
