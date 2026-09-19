@@ -407,13 +407,14 @@ jobs:
             ghcr.io/intuitums/e-slack:latest
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
-  crates:
-    name: crates.io
-    # Core publishes first: the frontends and SDK pin its version.
+  sdk:
+    name: sdk crate
+    # The embedded SDK is the one crate that still publishes: it has no shell,
+    # Homebrew, or npm installer. It depends on core, so core publishes first.
     needs: [resolve, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
-    # Like the npm and image publications, a registry hiccup must not fail the
-    # release; the deployment report still records the outcome.
+    # A registry hiccup must not fail the release, the way the npm and image
+    # publications do not. The deployment report records the outcome.
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -423,42 +424,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Publish the crates
+      - name: Publish the SDK
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          test -n "$CARGO_REGISTRY_TOKEN" || { echo 'Configure CARGO_REGISTRY_TOKEN to publish the crates.'; exit 1; }
+          test -n "$CARGO_REGISTRY_TOKEN" || { echo 'Configure CARGO_REGISTRY_TOKEN to publish the SDK.'; exit 1; }
 
-          # The SDK versions itself; only the application follows the release.
+          # The SDK versions itself; only publish when its version is new.
           SDK_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('crates/sdk/Cargo.toml','rb'))['package']['version'])")
+          CORE_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('crates/core/Cargo.toml','rb'))['package']['version'])")
 
-          published() {
-            curl -fsS -o /dev/null "https://crates.io/api/v1/crates/$1/$2"
-          }
           # crates.io serves a new version to the index asynchronously, and a
           # crate cannot resolve a dependency until that version is visible.
           await_index() {
             for _ in $(seq 1 60); do
-              published "$1" "$2" && return 0
+              curl -fsS -o /dev/null "https://crates.io/api/v1/crates/$1/$2" && return 0
               sleep 10
             done
             return 1
           }
 
-          # The application crates share the release version and publish in
-          # dependency order: core, then its frontends, then the binary. A
-          # retry after a partial publish finds a version already there.
-          for crate in aro-e-core aro-e-tui aro-e-rpc aro-e; do
-            if published "$crate" "$VERSION"; then
-              echo "$crate $VERSION is already published"
-            else
-              cargo publish --locked -p "$crate"
-              await_index "$crate" "$VERSION" || { echo "$crate never reached the index"; exit 1; }
-            fi
-          done
+          # Core first: the SDK pins it by exact version.
+          if curl -fsS -o /dev/null "https://crates.io/api/v1/crates/aro-e-core/$CORE_VERSION"; then
+            echo "aro-e-core $CORE_VERSION is already published"
+          else
+            cargo publish --locked -p aro-e-core
+            await_index aro-e-core "$CORE_VERSION" || { echo 'aro-e-core never reached the index'; exit 1; }
+          fi
 
-          if published aro-e-sdk "$SDK_VERSION"; then
+          if curl -fsS -o /dev/null "https://crates.io/api/v1/crates/aro-e-sdk/$SDK_VERSION"; then
             echo "aro-e-sdk $SDK_VERSION is already published"
           else
             # Not --locked: packaging the SDK resolves its dependency from the
@@ -524,7 +518,7 @@ jobs:
 
   deployment:
     name: report
-    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, crates, channel]
+    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, sdk, channel]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

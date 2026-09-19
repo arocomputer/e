@@ -27,7 +27,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
 - Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
 - Embed e with the `aro-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
-- Install the SDK from crates.io with `cargo add aro-e-sdk`. It follows semantic versioning on a version of its own, independent of the application (`aro-e`, since bare `e` is taken on crates.io), and each production release publishes whichever of the two has a new version.
+- Install the SDK from crates.io with `cargo add aro-e-sdk`. It follows semantic versioning on a version of its own, independent of the application. The SDK is the only crate published; the application ships through the shell script, Homebrew, and npm.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
 - Recall prompts from previous sessions with Up on an empty composer. Ctrl+G opens the current draft in an external editor.
@@ -41,6 +41,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 ### Improvements
 
 - **Upgrade:** the npm packages moved from the `@intuitums` scope to `@arocomputer`. Reinstall with `npm install -g @arocomputer/e` (or `bun add -g @arocomputer/e`); the old `@intuitums/e` stops receiving updates. The `e update` instructions now name the new scope.
+- **Upgrade:** the application no longer publishes to crates.io. The `aro-e`, `aro-e-core`, `aro-e-tui`, and `aro-e-rpc` `0.0.1` versions are yanked; install e from the shell script, Homebrew, or npm. The embedded SDK (`aro-e-sdk`) still publishes.
 - **Upgrade:** the `dev` and `beta` release channels are removed. Preview changes with a pinned PR build (`./x preview`) instead. Remove a previous `e-beta` or `e-dev` installation and reinstall from the production command; those binaries no longer receive updates.
 - Rewrite the README around installation and first use, with a captured terminal example.
 

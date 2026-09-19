@@ -199,18 +199,16 @@ guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
 to arocomputer/web with Actions: write. Set the secret once; without it the job
 fails loudly rather than going stale silently.
 
-crates.io uses `CARGO_REGISTRY_TOKEN`, a token scoped to publish these crates
-and no others: `aro-e-core`, `aro-e-tui`, `aro-e-rpc`,
-`aro-e` (the binary; bare `e` is taken on crates.io, so the crates share the
-`aro-` family prefix), and `aro-e-sdk`. The `crates` job publishes the application
-crates in dependency order, core, tui, rpc, then `aro-e`, and waits for
-each to reach the index, because the next manifest depends on it by version.
-It skips a version that is already published, so a retry is safe. The SDK
-publishes last. Production releases only. The application's
-version is the release version; the SDK versions itself, so the job reads
-`crates/sdk/Cargo.toml` and publishes only when that version is new. Create the token at
-https://crates.io/settings/tokens and set the first publication up interactively
-with `cargo login` if the token is ever rotated.
+The application does not publish to crates.io. Its installers are the shell
+script, Homebrew, and the npm packages. The one crate that publishes is the
+embedded SDK (`aro-e-sdk`), which versions itself and is the only way to embed e
+in a Rust program. Publishing it uses `CARGO_REGISTRY_TOKEN`, a token scoped to
+`aro-e-sdk` and `aro-e-core` (the SDK depends on it) and no others. Create the
+token at https://crates.io/settings/tokens and set the first publication up
+interactively with `cargo login` if it is rotated.
+
+The five `aro-e*` crates were published once at `0.0.1` and yanked when the
+application left crates.io; only `aro-e-sdk` publishes going forward.
 
 The website installer at `https://e.intuitum.sh/install.sh` serves the maintained
 script from main with a five-minute cache. No separate deployment is required
