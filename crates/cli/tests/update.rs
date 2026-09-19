@@ -224,7 +224,7 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&marker, "npm\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()
-        .contains("bun add -g @intuitums/e"));
+        .contains("bun add -g @arocomputer/e"));
     std::fs::write(&marker, "unknown\n").unwrap();
     assert!(package_update_hint(&binary).is_some());
 }

@@ -71,7 +71,7 @@ class Packages(unittest.TestCase):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
         package = json.loads((output / "slack/package.json").read_text())
-        self.assertEqual(package["name"], "@intuitums/e-slack")
+        self.assertEqual(package["name"], "@arocomputer/e-slack")
         # The channel versions itself; mutable tags stay outside its tarball.
         self.assertEqual(package["version"], "0.0.2")
         self.assertEqual(package["publishConfig"], {"access": "public"})

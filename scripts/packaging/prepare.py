@@ -66,7 +66,7 @@ def prepare(tag, assets, output):
         os_name, cpu = platform.split("-")
         manifest = dict(
             common,
-            name=f"@intuitums/e-{platform}",
+            name=f"@arocomputer/e-{platform}",
             description=f"e binary for {platform}",
             os=[os_name],
             cpu=[cpu],
@@ -81,19 +81,19 @@ def prepare(tag, assets, output):
     shutil.copy2(ROOT / "scripts/packaging/npm-launcher", folder / "bin/e")
     manifest = dict(
         common,
-        name="@intuitums/e",
+        name="@arocomputer/e",
         description="A small, extensible coding agent for your terminal",
         bin={command: "bin/e"},
         files=["bin"],
         optionalDependencies={
-            f"@intuitums/e-{platform}": version for platform in PLATFORMS
+            f"@arocomputer/e-{platform}": version for platform in PLATFORMS
         },
     )
     (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
     (folder / "README.md").write_text(
-        f"# e\n\nInstall with `npm install -g @intuitums/e@{release['npm_tag']}` or "
-        f"`bun add -g @intuitums/e@{release['npm_tag']}`.\n\nRun `{command}` to start. "
+        f"# e\n\nInstall with `npm install -g @arocomputer/e@{release['npm_tag']}` or "
+        f"`bun add -g @arocomputer/e@{release['npm_tag']}`.\n\nRun `{command}` to start. "
         "See https://e.intuitum.sh/docs for setup.\n\n"
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"

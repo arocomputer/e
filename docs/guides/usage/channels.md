@@ -74,8 +74,8 @@ and how to run it.
 
 ### Run with npx
 
-The channel publishes with e's releases as `@intuitums/e-slack`. Run
-`npx @intuitums/e-slack` against any checkout without cloning this
+The channel publishes with e's releases as `@arocomputer/e-slack`. Run
+`npx @arocomputer/e-slack` against any checkout without cloning this
 repository. Its version matches the release it came from.
 
 ### Run on a server

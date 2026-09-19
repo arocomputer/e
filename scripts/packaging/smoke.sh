@@ -19,7 +19,7 @@ try:
     for platform in PLATFORMS:
         result = json.loads(subprocess.check_output(['npm','pack', str(root/'dist'/platform), '--json','--pack-destination',str(root)]))
         packed = list(result.values())[0] if isinstance(result, dict) else result[0]
-        dependencies['@intuitums/e-'+platform] = 'file:' + str(root / packed['filename'])
+        dependencies['@arocomputer/e-'+platform] = 'file:' + str(root / packed['filename'])
     wrapper = root/'dist/e/package.json'
     data = json.loads(wrapper.read_text())
     data['optionalDependencies'] = dependencies
@@ -28,13 +28,13 @@ try:
 finally:
     fixture.tearDown()
 PY
-npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/intuitums-e-$version.tgz"
+npm install --global --prefix "$scratch/npm" --ignore-scripts --no-audit --no-fund "$scratch/arocomputer-e-$version.tgz"
 test "$("$scratch/npm/bin/$command" 'argument with spaces')" = 'argument with spaces'
 cat > "$scratch/bunfig.toml" <<CFG
 [install]
 globalDir = "$scratch/bun/global"
 globalBinDir = "$scratch/bun/bin"
 CFG
-bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/intuitums-e-$version.tgz"
+bun install --global --config="$scratch/bunfig.toml" --ignore-scripts "$scratch/arocomputer-e-$version.tgz"
 test "$("$scratch/bun/bin/$command" 'argument with spaces')" = 'argument with spaces'
 echo 'npm and bun launch the native dependency without lifecycle scripts'

@@ -27,7 +27,7 @@ def report(needs, repository, server, run_id):
             summary.write('Release distribution results\n\n| Distribution | Result |\n| --- | --- |\n')
             for job, label in [('publish', 'Verified binaries'), ('channel', 'Website installer'),
                                ('npm', 'npm and bun'), ('homebrew', 'Homebrew'),
-                               ('container', 'Container'), ('crates', 'crates.io')]:
+                               ('container', 'Container'), ('sdk', 'SDK crate')]:
                 summary.write(f'| {label} | {needs.get(job, {}).get("result", "skipped")} |\n')
 
     deployment = post('deployments', {

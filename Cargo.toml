@@ -17,7 +17,7 @@ resolver = "2"
 # core, tui, rpc, and cli share it. The SDK and the Slack channel version
 # themselves independently.
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
@@ -25,9 +25,9 @@ homepage = "https://e.intuitum.sh"
 repository = "https://github.com/arocomputer/e"
 
 [workspace.dependencies]
-e-core = { package = "aro-e-core", path = "crates/core", version = "=0.0.1" }
-e-tui = { package = "aro-e-tui", path = "crates/tui", version = "=0.0.1" }
-e-rpc = { package = "aro-e-rpc", path = "crates/rpc", version = "=0.0.1" }
+e-core = { package = "aro-e-core", path = "crates/core", version = "=0.0.2" }
+e-tui = { package = "aro-e-tui", path = "crates/tui", version = "=0.0.2" }
+e-rpc = { package = "aro-e-rpc", path = "crates/rpc", version = "=0.0.2" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 unicode-width = "0.2"

@@ -1,5 +1,5 @@
 {
-  "name": "@intuitums/e-slack",
+  "name": "@arocomputer/e-slack",
   "version": "0.0.2",
   "description": "A Slack bot that runs e: one thread, one session, over `e rpc`",
   "type": "module",
