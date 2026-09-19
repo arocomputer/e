@@ -16,7 +16,7 @@ class PromotionTests(unittest.TestCase):
             return (message if message is not None else f'Release 1.2.3\n\nBeta: {TAG}') if args[0] == 'for-each-ref' else changed
         def gh(*args):
             if args[0] == 'release':
-                return {'isDraft': draft, 'body': f'Source: https://github.com/intuitums/e/commit/{source}'}
+                return {'isDraft': draft, 'body': f'Source: https://github.com/arocomputer/e/commit/{source}'}
             if args[-1].endswith('/statuses'):
                 return [{'state': 'success' if deployed else 'failure'}]
             return [[{'id': 12, 'payload': {'tag': TAG}}]]
@@ -73,7 +73,7 @@ class PromotionTests(unittest.TestCase):
                 return run(['git', '-C', tmp, *command[1:]], **kwargs)
             head = git('rev-parse', 'HEAD')
             with patch('promotion.git', side_effect=git), patch('promotion.gh', side_effect=[
-                    {'isDraft': False, 'body': f'Source: https://github.com/intuitums/e/commit/{source}'},
+                    {'isDraft': False, 'body': f'Source: https://github.com/arocomputer/e/commit/{source}'},
                     [[{'id': 1, 'payload': {'tag': beta}}]], [{'state': 'success'}]]), \
                     patch('promotion.subprocess.run', side_effect=ancestry):
                 self.assertEqual(verify('v1.2.3', head), beta)
@@ -83,7 +83,7 @@ class PromotionTests(unittest.TestCase):
             head = git('rev-parse', 'HEAD')
             git('tag', '-fa', 'v1.2.3', '-m', f'Release\n\nBeta: {beta}')
             with patch('promotion.git', side_effect=git), patch('promotion.gh', return_value={
-                    'isDraft': False, 'body': f'Source: https://github.com/intuitums/e/commit/{source}'}), \
+                    'isDraft': False, 'body': f'Source: https://github.com/arocomputer/e/commit/{source}'}), \
                     patch('promotion.subprocess.run', side_effect=ancestry):
                 with self.assertRaisesRegex(ValueError, 'source.rs'):
                     verify('v1.2.3', head)

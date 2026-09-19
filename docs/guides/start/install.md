@@ -24,7 +24,7 @@ Then check the build with `e --version`.
 Package managers install the same binary:
 
 ```sh
-brew install intuitums/tap/e
+brew install arocomputer/tap/e
 npm install -g @intuitums/e
 bun add -g @intuitums/e
 ```
@@ -40,7 +40,7 @@ Update with the method that installed e:
 e update                            # curl or a release archive
 npm install -g @intuitums/e@latest
 bun add -g @intuitums/e@latest
-brew upgrade intuitums/tap/e
+brew upgrade arocomputer/tap/e
 ```
 
 A curl installation checks for updates at launch and installs one in the
@@ -63,7 +63,7 @@ channels:
 curl -fsSL https://e.intuitum.sh/install.sh | sh -s -- --channel beta
 npm install -g @intuitums/e@beta
 bun add -g @intuitums/e@beta
-brew install intuitums/tap/e-beta
+brew install arocomputer/tap/e-beta
 
 npm install -g @intuitums/e@dev
 ```
@@ -103,7 +103,7 @@ docker run --rm --entrypoint e ghcr.io/intuitums/e-slack:latest --version
 Building from source needs Rust 1.98 or newer:
 
 ```sh
-cargo install --git https://github.com/intuitums/e
+cargo install --git https://github.com/arocomputer/e
 ```
 
 From a checkout, run `./x dev /path/to/project` to run the code you are

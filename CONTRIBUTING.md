@@ -10,7 +10,7 @@ new protocol message to land, say why in the PR; if it doesn't, don't add one.
 ## Getting set up
 
 ```sh
-git clone https://github.com/intuitums/e
+git clone https://github.com/arocomputer/e
 cd e
 ./x hooks
 cargo build

@@ -5,7 +5,7 @@
 - **GitHub** — the files themselves, as you see them here.
 - **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **e.intuitum.sh/docs** — the website, in intuitums/web, renders each guide as
+- **e.intuitum.sh/docs** — the website, in arocomputer/web, renders each guide as
   a page. Its `scripts/e/docs/docs.mjs` is the one place that adapts the guides
   to it: the sidebar, link routes, and alerts.
 
@@ -119,7 +119,7 @@ topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 
 To read the pages as they will appear, build the website against this
-checkout: in intuitums/web, run `E_DOCS_PATH=<path to this checkout> npm run
+checkout: in arocomputer/web, run `E_DOCS_PATH=<path to this checkout> npm run
 preview`. Merging a guide to `main` redeploys the website
 (`.github/workflows/docs.yml`).
 

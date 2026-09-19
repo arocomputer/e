@@ -23,7 +23,7 @@ def identity(version):
     return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
             'command': 'e' if channel == 'production' else f'e-{channel}',
             'npm_tag': 'latest' if channel == 'production' else channel,
-            'repository': 'intuitums/e-beta' if channel == 'beta' else 'intuitums/e' if channel == 'production' else ''}
+            'repository': 'arocomputer/e-beta' if channel == 'beta' else 'arocomputer/e' if channel == 'production' else ''}
 
 
 def version_key(version):

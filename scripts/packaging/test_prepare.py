@@ -92,7 +92,7 @@ class Packages(unittest.TestCase):
         self.assertEqual(wrapper["bin"], {"e-beta": "bin/e"})
         self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm-beta\n")
         formula = (output / "e-beta.rb").read_text()
-        self.assertIn('https://github.com/intuitums/e-beta/releases/download/', formula)
+        self.assertIn('https://github.com/arocomputer/e-beta/releases/download/', formula)
         self.assertIn('class EBeta < Formula', formula)
         self.assertIn('=> "e-beta"', formula)
         wrapper = json.loads((output / "e/package.json").read_text())

@@ -14,7 +14,7 @@ class RetryTests(unittest.TestCase):
         event = {'inputs': {'action': 'retry', 'tag': tag}}
         with patch.dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_EVENT_PATH='/event'), \
                 patch('resolve.Path.read_text', return_value=json.dumps(event)), \
-                patch('resolve.subprocess.check_output', return_value=json.dumps({'isDraft': True, 'targetCommitish': 'beta-repository-main', 'body': f'Source: https://github.com/intuitums/e/commit/{sha}'})), \
+                patch('resolve.subprocess.check_output', return_value=json.dumps({'isDraft': True, 'targetCommitish': 'beta-repository-main', 'body': f'Source: https://github.com/arocomputer/e/commit/{sha}'})), \
                 patch('resolve.git', return_value=sha) as git, \
                 patch('resolve.subprocess.run') as run:
             result = resolve()
@@ -38,12 +38,12 @@ class RetryTests(unittest.TestCase):
         sha = 'a' * 40
         event = {'workflow_run': {'conclusion': 'success', 'head_branch': 'main',
                  'event': 'push', 'head_sha': sha,
-                 'head_repository': {'full_name': 'intuitums/e'}}}
+                 'head_repository': {'full_name': 'arocomputer/e'}}}
         for paths, mode in [('README.md\nassets/readme.png', 'skip'),
                             ('crates/core/themes/dark.json', 'build')]:
             with self.subTest(paths=paths), patch.dict(os.environ,
                     GITHUB_EVENT_NAME='workflow_run', GITHUB_EVENT_PATH='/event',
-                    GITHUB_REPOSITORY='intuitums/e', GITHUB_RUN_NUMBER='12'), \
+                    GITHUB_REPOSITORY='arocomputer/e', GITHUB_RUN_NUMBER='12'), \
                     patch('resolve.Path.read_text', return_value=json.dumps(event)), \
                     patch('resolve.git', side_effect=['[workspace.package]\nversion = "1.2.3"', paths]), \
                     patch('resolve.subprocess.run'):

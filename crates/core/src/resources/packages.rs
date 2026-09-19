@@ -928,7 +928,7 @@ ext.run();
 
 const README: &str = r#"# {name}
 
-An [e](https://github.com/intuitums/e) package: any subset of `extensions/`,
+An [e](https://github.com/arocomputer/e) package: any subset of `extensions/`,
 `skills/`, `prompts/`, and `themes/`, laid out like `~/.e/` itself.
 
 Try it in place while you work on it:
@@ -1035,9 +1035,9 @@ mod tests {
                 .join("intuitums/e-diff")
         );
         assert!(Source::parse("git:github.com/../x").is_err());
-        assert!(Source::parse("git:../intuitums/e").is_err());
-        assert!(Source::parse("git:.hidden/intuitums/e").is_err());
-        assert!(Source::parse("git:github.com/intuitums/e@-bad").is_err());
+        assert!(Source::parse("git:../arocomputer/e").is_err());
+        assert!(Source::parse("git:.hidden/arocomputer/e").is_err());
+        assert!(Source::parse("git:github.com/arocomputer/e@-bad").is_err());
         assert!(Source::parse("--upload-pack=x").is_err());
         assert!(Source::parse("git:github.com").is_err());
     }

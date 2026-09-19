@@ -16,7 +16,7 @@ class CommentTests(unittest.TestCase):
     def test_install_command_only_after_success(self):
         for stage in ('building', 'publishing', 'finished'):
             for result in ('success', 'failure', 'cancelled', 'skipped'):
-                body = render(jobs(result), stage, 'https://github.com/intuitums/e/actions/runs/1')
+                body = render(jobs(result), stage, 'https://github.com/arocomputer/e/actions/runs/1')
                 self.assertEqual('npm install -g' in body, stage == 'finished' and result == 'success')
         self.assertIn('@intuitums/e@0.0.0-dev-1', render(jobs(), 'finished', 'url'))
 
@@ -29,25 +29,25 @@ class CommentTests(unittest.TestCase):
 
     def test_updates_bot_comment_only_on_matching_merged_pr(self):
         matching = {'number': 1, 'merged_at': 'today', 'merge_commit_sha': 'a' * 40,
-                    'base': {'ref': 'main', 'repo': {'full_name': 'intuitums/e'}}}
+                    'base': {'ref': 'main', 'repo': {'full_name': 'arocomputer/e'}}}
         unrelated = {**matching, 'number': 2, 'merge_commit_sha': 'b' * 40}
         comments = [
             {'id': 3, 'user': {'login': 'someone'}, 'body': MARKER},
             {'id': 4, 'user': {'login': 'github-actions[bot]'}, 'body': MARKER},
         ]
         with patch('pr_comment.api', side_effect=[[unrelated, matching], comments, {}]) as api:
-            report(jobs(), 'finished', 'intuitums/e', 'https://github.com', '100', '1')
+            report(jobs(), 'finished', 'arocomputer/e', 'https://github.com', '100', '1')
         self.assertEqual(api.call_args.args[1], 'issues/comments/4')
         self.assertEqual(api.call_args.args[3], 'PATCH')
         self.assertEqual(api.call_count, 3)
 
     def test_late_stage_cannot_replace_finished_comment(self):
         pr = {'number': 1, 'merged_at': 'today', 'merge_commit_sha': 'a' * 40,
-              'base': {'ref': 'main', 'repo': {'full_name': 'intuitums/e'}}}
+              'base': {'ref': 'main', 'repo': {'full_name': 'arocomputer/e'}}}
         comment = {'id': 4, 'user': {'login': 'github-actions[bot]'},
                    'body': MARKER + '\n<!-- run:100 attempt:1 stage:2 -->'}
         with patch('pr_comment.api', side_effect=[[pr], [comment]]) as api:
-            report(jobs(), 'building', 'intuitums/e', 'https://github.com', '100', '1')
+            report(jobs(), 'building', 'arocomputer/e', 'https://github.com', '100', '1')
         self.assertEqual(api.call_count, 2)
 
     def test_processing_timeout_has_resume_instructions(self):
@@ -66,5 +66,5 @@ class CommentTests(unittest.TestCase):
 
     def test_direct_push_has_no_pr_comment(self):
         with patch('pr_comment.api', return_value=[]) as api:
-            report(jobs(), 'finished', 'intuitums/e', 'https://github.com', '100', '1')
+            report(jobs(), 'finished', 'arocomputer/e', 'https://github.com', '100', '1')
         self.assertEqual(api.call_count, 1)

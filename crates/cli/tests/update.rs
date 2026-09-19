@@ -218,7 +218,7 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&marker, "homebrew\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()
-        .contains("brew upgrade intuitums/tap/e"));
+        .contains("brew upgrade arocomputer/tap/e"));
     #[cfg(unix)]
     {
         let alias = home.dir.join("alias");

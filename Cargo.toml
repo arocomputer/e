@@ -22,7 +22,7 @@ edition = "2021"
 rust-version = "1.98"
 license = "MIT"
 homepage = "https://e.intuitum.sh"
-repository = "https://github.com/intuitums/e"
+repository = "https://github.com/arocomputer/e"
 
 [workspace.dependencies]
 e-core = { package = "intuitums-e-core", path = "crates/core", version = "=0.0.1" }

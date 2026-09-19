@@ -359,14 +359,14 @@ fn a_release_package_installs_its_executable_under_extensions() {
     let _lock = env_lock();
     let home = Home::new("pkg-release");
     let (port, server, asset) = release_server("tool");
-    let source = Source::parse("release:intuitums/e/tool@v9").unwrap();
+    let source = Source::parse("release:arocomputer/e/tool@v9").unwrap();
     let base = format!("http://127.0.0.1:{port}");
     block(packages::install_release_from(&source, &base, &base)).unwrap();
     let requests = server.join().unwrap();
     assert!(requests[0].contains(&format!("GET /download/v9/{asset}")));
     assert!(requests[1].contains("GET /download/v9/checksums.txt"));
 
-    let root = home.dir.join("packages/releases/intuitums/e/tool");
+    let root = home.dir.join("packages/releases/arocomputer/e/tool");
     assert_eq!(source.root(), root);
     let binary = root.join("extensions/tool");
     assert!(binary.is_file());
@@ -393,16 +393,16 @@ fn a_release_package_installs_its_executable_under_extensions() {
 
     // The parse grammar and identity.
     assert_eq!(
-        Source::parse("release:Intuitums/E/tool@v9")
+        Source::parse("release:Arocomputer/E/tool@v9")
             .unwrap()
             .identity(),
-        Source::parse("release:intuitums/e/tool")
+        Source::parse("release:arocomputer/e/tool")
             .unwrap()
             .identity()
     );
-    assert!(Source::parse("release:intuitums/e").is_err());
-    assert!(Source::parse("release:intuitums/../e/tool").is_err());
-    assert!(Source::parse("release:intuitums/e/tool@-x").is_err());
+    assert!(Source::parse("release:arocomputer/e").is_err());
+    assert!(Source::parse("release:arocomputer/../e/tool").is_err());
+    assert!(Source::parse("release:arocomputer/e/tool@-x").is_err());
 }
 
 #[test]

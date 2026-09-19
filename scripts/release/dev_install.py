@@ -21,17 +21,17 @@ def install(run_id):
     """Require a main release run and successful artifact verification, then use the installer."""
     if not re.fullmatch(r'[1-9][0-9]*', run_id):
         raise ValueError('Run ID must be a positive integer')
-    run = json.loads(gh('api', f'repos/intuitums/e/actions/runs/{run_id}'))
+    run = json.loads(gh('api', f'repos/arocomputer/e/actions/runs/{run_id}'))
     if (run['path'] != '.github/workflows/release.yml' or
             run['event'] != 'workflow_run' or run['head_branch'] != 'main'):
         raise ValueError('Choose a dev publish run from main')
     pages = json.loads(gh('api', '--paginate', '--slurp',
-                         f'repos/intuitums/e/actions/runs/{run_id}/jobs?per_page=100'))
+                         f'repos/arocomputer/e/actions/runs/{run_id}/jobs?per_page=100'))
     if not any(job['name'] in ('release', 'Checksums and publish') and job['conclusion'] == 'success'
                for page in pages for job in page['jobs']):
         raise ValueError('Verified artifacts are not ready for this run')
     with tempfile.TemporaryDirectory() as tmp:
-        gh('run', 'download', run_id, '--repo', 'intuitums/e', '--name', 'verified-assets', '--dir', tmp)
+        gh('run', 'download', run_id, '--repo', 'arocomputer/e', '--name', 'verified-assets', '--dir', tmp)
         root = Path(tmp)
         info = json.loads((root / 'build.json').read_text())
         release = identity(info['version'])
