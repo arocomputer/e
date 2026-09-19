@@ -1,6 +1,7 @@
 #!/bin/sh
-# Build one runner's release archives, upload them, and prove the binary runs on
-# the oldest glibc the release promises.
+# Build one runner's release archives and prove the binary runs on the oldest
+# glibc the release promises. The workflow retains the archives and assembles
+# the release, so this script uses no `gh`.
 #
 # The macOS legs and the Linux legs share this script; the Linux legs run it in
 # a container whose glibc *is* the floor, so the floor is a decision instead of
@@ -9,8 +10,7 @@
 # binary that needs anything newer than it.
 #
 # Env: TARGETS (required), E_GLIBC_CEILING, and — when cutting a release — TAG,
-# COMMAND, E_BUILD_VERSION, GH_TOKEN, GH_REPO. Without TAG it
-# builds and checks only, which is what CI uses.
+# COMMAND, E_BUILD_VERSION. Without TAG it builds and checks only.
 set -eu
 
 targets=${TARGETS:?TARGETS is required}
@@ -31,9 +31,6 @@ for target in $targets; do
   rustup target add "$target"
   cargo build --release --locked --target "$target"
   tar czf "e-$target.tar.gz" -C "target/$target/release" e
-  if [ -n "$tag" ]; then
-    gh release upload "$tag" "e-$target.tar.gz" --clobber
-  fi
 
   if [ -n "$ceiling" ]; then
     # Every versioned GLIBC_ symbol the dynamic linker must resolve.
