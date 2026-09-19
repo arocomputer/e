@@ -79,6 +79,7 @@ Everything e remembers lives under `~/.e`:
 
 ### Move the home with `E_HOME`
 
-`E_HOME` moves the whole directory. This keeps a preview build and a local
-`./x dev` build out of each other's way. Stable e uses `~/.e`, beta uses
-`~/.e-beta`, and dev uses `~/.e-dev`. See [install](../start/install.md).
+`E_HOME` moves the whole directory. This keeps a PR preview and a local
+`./x dev` build out of each other's way. Production uses `~/.e`, a PR preview
+uses `~/.e-pr`, and a local build uses `~/.e-dev`. See
+[install](../start/install.md).

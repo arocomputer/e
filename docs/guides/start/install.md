@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Install e, keep it updated, and try preview channels.
+description: Install e, keep it updated, and try a PR preview.
 order: 2
 ---
 
@@ -50,41 +50,22 @@ background. To turn that off, set `auto_update` in
 e leaves a package-managed installation to its package manager. In that case,
 `e update` tells you so instead of replacing the binary.
 
-## Preview channels
+## Try a PR preview
 
-Preview channels let you try changes before they reach production. There are three
-channels:
-
-- **Production.** The default.
-- **Beta.** A selected candidate for the next release.
-- **Dev.** Follows tested changes on main.
+A pull request can be built on request without publishing anything, so you can
+try an unreviewed change before it merges:
 
 ```sh
-curl -fsSL https://e.intuitum.sh/install.sh | sh -s -- --channel beta
-npm install -g @intuitums/e@beta
-bun add -g @intuitums/e@beta
-brew install arocomputer/tap/e-beta
-
-npm install -g @intuitums/e@dev
+./x preview 123
 ```
 
-A preview build keeps its own home, `~/.e-beta` or `~/.e-dev`. Its settings
-and sessions stay apart from the production installation.
+The build is pinned to the PR's commit and installs as `e-pr-123` with its own
+home, `~/.e-pr/<commit>`, kept apart from production. PR code is unreviewed; use
+a disposable project. [Releases and testing](../../../contributing/releases.md)
+covers the preview workflow and the local `./x dev` build.
 
-How a preview installs depends on the method:
-
-- Curl and brew install beta beside production.
-- npm and bun replace the version of the one package. Install `@latest` to
-  return to production.
-
-Beta binaries come from a separate repository. An existing beta installation
-needs one reinstall to adopt its new update source.
-
-To install a specific version with the shell installer, pass
-`--version X.Y.Z`. For a beta version, also pass `--channel beta`.
-
-[Releases and testing](../../../contributing/releases.md) covers every
-installer, the local `./x dev` build, and PR builds.
+To install a specific production version with the shell installer, pass
+`--version X.Y.Z`. npm and bun accept the exact version after `@`.
 
 ## Requirements
 

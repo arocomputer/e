@@ -18,12 +18,12 @@ fn version_comparison() {
     assert!(!is_newer("garbage", "0.4.0"));
     // A build whose version is not release SemVer never rolls itself
     // forward: a source checkout must update via cargo, not over itself.
-    assert!(!is_newer("v9.9.9", "dev"));
+    assert!(!is_newer("v9.9.9", "local"));
     // Release SemVer — exactly three numeric segments, the shape
     // release-check demands of a tag — and only that, counts as a release.
     assert!(is_release_version("0.0.1"));
     assert!(is_release_version("v1.2.3"));
-    assert!(!is_release_version("dev"));
+    assert!(!is_release_version("local"));
     assert!(!is_release_version("1.2"));
     assert!(!is_release_version("1.2.3.4"));
 }
@@ -211,10 +211,6 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&binary, b"binary").unwrap();
     assert_eq!(package_update_hint(&binary), None);
     let marker = home.dir.join(".e-install-method");
-    std::fs::write(&marker, "homebrew-dev\n").unwrap();
-    assert!(package_update_hint(&binary)
-        .unwrap()
-        .contains("npm install -g @intuitums/e@dev"));
     std::fs::write(&marker, "homebrew\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()
@@ -233,14 +229,11 @@ fn package_ownership_survives_binary_symlinks() {
     assert!(package_update_hint(&binary).is_some());
 }
 
-/// Preview updates compare sequence numbers while preserving the installed channel.
+/// PR previews are pinned; they never roll themselves forward.
 #[test]
-fn preview_updates_never_switch_channels() {
-    use e::core::update::is_newer;
-    assert!(is_newer("v0.0.0-dev-12", "0.0.0-dev-9"));
-    assert!(!is_newer("v0.0.0-dev-9", "0.0.0-dev-12"));
-    assert!(!is_newer("v0.0.3", "0.0.0-beta-9"));
-    assert!(!is_newer("v0.0.0-dev-12", "0.0.0-beta-9"));
-    assert!(!is_newer("v0.0.0-dev-12", "0.0.2"));
+fn preview_identities_stay_pinned() {
+    use e::core::update::{is_newer, is_release_version};
     assert!(!is_newer("v0.0.0-pr-12", "0.0.0-pr-9"));
+    assert!(!is_newer("v0.0.0-pr-12", "0.0.2"));
+    assert!(!is_release_version("0.0.0-pr-9"));
 }

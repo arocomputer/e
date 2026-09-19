@@ -150,8 +150,8 @@ By contributing, you agree that your work is released under the repository's
 
 Run `./x dev /path/to/project` to use the current checkout with development state.
 Run `./x scenario streaming` for a repeatable local terminal session without a
-provider account. See [releases and testing](contributing/releases.md) for beta channels,
-PR builds, package installation, and release promotion.
+provider account. See [releases and testing](contributing/releases.md) for PR builds,
+package installation, and publishing.
 
 Provider regressions can use reviewed response fixtures under
 `crates/cli/tests/fixtures/providers/`. Existing seed fixtures are synthetic; their `origin`

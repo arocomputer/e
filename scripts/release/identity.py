@@ -7,36 +7,35 @@ import re
 import subprocess
 import tomllib
 
-VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(dev|beta|pr)-([1-9][0-9]*))?')
+VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-pr-([1-9][0-9]*))?')
 
 
 def identity(version):
     """Reject unsupported version forms rather than guessing their update channel."""
     match = VERSION.fullmatch(version.removeprefix('v'))
     if not match:
-        raise ValueError('Expected X.Y.Z or 0.0.0-{dev,beta,pr}-NUMBER')
-    channel = match[4] or 'production'
+        raise ValueError('Expected X.Y.Z or 0.0.0-pr-NUMBER')
+    channel = 'pr' if match[4] else 'production'
     title = '.'.join(match.group(1, 2, 3))
-    if channel != 'production':
-        label = 'PR' if channel == 'pr' else channel.capitalize()
-        title += f' · {label} {match[5]}'
+    if channel == 'pr':
+        title += f' · PR {match[4]}'
     return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
-            'command': 'e' if channel == 'production' else f'e-{channel}',
-            'npm_tag': 'latest' if channel == 'production' else channel,
-            'repository': 'arocomputer/e-beta' if channel == 'beta' else 'arocomputer/e' if channel == 'production' else ''}
+            'command': 'e' if channel == 'production' else 'e-pr',
+            'npm_tag': 'latest' if channel == 'production' else 'pr',
+            'repository': 'arocomputer/e'}
 
 
 def version_key(version):
-    """Order versions within one channel, including numeric preview sequence numbers."""
+    """Order pre-release versions by their numeric sequence."""
     match = VERSION.fullmatch(version.removeprefix('v'))
     if not match:
         raise ValueError('Invalid release version')
-    return (*map(int, match.group(1, 2, 3)), int(match[5] or 0))
+    return (*map(int, match.group(1, 2, 3)), int(match[4] or 0))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--channel', choices=['dev', 'beta', 'pr', 'production'], required=True)
+    parser.add_argument('--channel', choices=['pr', 'production'], required=True)
     parser.add_argument('--sequence', type=int, default=0)
     parser.add_argument('--tag')
     args = parser.parse_args()

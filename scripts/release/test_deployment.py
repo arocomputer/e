@@ -7,35 +7,33 @@ from deployment import report
 
 
 class DeploymentTests(unittest.TestCase):
-    def test_channel_mapping_and_failed_publication(self):
-        for channel, environment in [('production', 'production'), ('beta', 'beta'), ('dev', 'dev')]:
-            for outcome in ['success', 'failure', 'cancelled']:
-                with self.subTest(channel=channel, outcome=outcome):
-                    needs = {
-                        'resolve': {'result': 'success', 'outputs': {
-                            'channel': channel, 'repository': 'arocomputer/e-beta' if channel == 'beta' else 'arocomputer/e', 'sha': 'a' * 40, 'tag': 'v1.2.3', 'version': '1.2.3'}},
-                        'npm': {'result': outcome}, 'homebrew': {'result': 'skipped' if channel == 'dev' else 'success'},
-                        'channel': {'result': 'success' if outcome == 'success' else 'skipped'},
-                    }
-                    with patch.dict(os.environ, GITHUB_STEP_SUMMARY=''), \
-                            patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
-                        report(needs, 'arocomputer/e', 'https://github.com', '123')
-                    created, status = [json.loads(c.kwargs['input']) for c in call.call_args_list]
-                    self.assertEqual(created['environment'], environment)
-                    self.assertEqual(created['ref'], 'a' * 40)
-                    self.assertFalse(created['auto_merge'])
-                    self.assertEqual(created['production_environment'], channel == 'production')
-                    self.assertEqual(status['state'], 'error' if outcome == 'cancelled' else outcome)
-                    self.assertEqual(status['log_url'], 'https://github.com/arocomputer/e/actions/runs/123')
-                    self.assertEqual(status['environment_url'],
-                                     (('https://www.npmjs.com/package/@intuitums/e/v/1.2.3' if channel == 'dev' else f'https://github.com/{"arocomputer/e-beta" if channel == "beta" else "arocomputer/e"}/releases/tag/v1.2.3') if outcome == 'success' else status['log_url']))
+    def test_production_maps_to_the_production_environment(self):
+        for outcome in ['success', 'failure', 'cancelled']:
+            with self.subTest(outcome=outcome):
+                needs = {
+                    'resolve': {'result': 'success', 'outputs': {
+                        'channel': 'production', 'repository': 'arocomputer/e', 'sha': 'a' * 40, 'tag': 'v1.2.3', 'version': '1.2.3'}},
+                    'npm': {'result': outcome}, 'homebrew': {'result': 'success'},
+                    'channel': {'result': 'success' if outcome == 'success' else 'skipped'},
+                }
+                with patch.dict(os.environ, GITHUB_STEP_SUMMARY=''), \
+                        patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
+                    report(needs, 'arocomputer/e', 'https://github.com', '123')
+                created, status = [json.loads(c.kwargs['input']) for c in call.call_args_list]
+                self.assertEqual(created['environment'], 'production')
+                self.assertEqual(created['ref'], 'a' * 40)
+                self.assertFalse(created['auto_merge'])
+                self.assertTrue(created['production_environment'])
+                self.assertEqual(status['state'], 'error' if outcome == 'cancelled' else outcome)
+                self.assertEqual(status['log_url'], 'https://github.com/arocomputer/e/actions/runs/123')
+                self.assertEqual(status['environment_url'],
+                                 'https://github.com/arocomputer/e/releases/tag/v1.2.3' if outcome == 'success' else status['log_url'])
 
     def test_failed_npm_does_not_hide_verified_direct_downloads(self):
         from pathlib import Path
         import tempfile
-        needs = {'resolve': {'result': 'success', 'outputs': {'channel': 'beta', 'sha': 'a' * 40,
-                 'repository': 'arocomputer/e-beta', 'tag': 'v0.0.0-beta-1',
-                 'version': '0.0.0-beta-1'}},
+        needs = {'resolve': {'result': 'success', 'outputs': {'channel': 'production', 'sha': 'a' * 40,
+                 'repository': 'arocomputer/e', 'tag': 'v1.2.3', 'version': '1.2.3'}},
                  'publish': {'result': 'success'}, 'channel': {'result': 'success'},
                  'npm': {'result': 'failure'}, 'homebrew': {'result': 'success'}}
         with tempfile.TemporaryDirectory() as tmp, \
@@ -46,3 +44,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('| Website installer | success |', summary)
         self.assertIn('| npm and bun | failure |', summary)
         self.assertEqual(json.loads(call.call_args.kwargs['input'])['state'], 'failure')
+
+
+if __name__ == '__main__':
+    unittest.main()

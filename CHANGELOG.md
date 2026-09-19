@@ -11,7 +11,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 ### New features
 
 - Install a pinned dev binary with `./x install-dev RUN_ID` as soon as its verified artifacts are ready, without waiting for npm.
-- Test current work with dev npm/bun packages, beta installers, or a pinned PR build. Preview channels have separate state.
+- Try a change before it merges with a pinned PR build (`./x preview`). Preview builds keep separate state.
 - Run a checkout with `./x dev` and inspect repeatable terminal scenarios with `./x scenario`. Build diagnostics include the channel and source commit.
 
 - Install e through brew, npm, or bun. Releases publish the native packages automatically; package-managed installations use their package manager for updates.
@@ -40,6 +40,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 ### Improvements
 
+- **Upgrade:** the `dev` and `beta` release channels are removed. Preview changes with a pinned PR build (`./x preview`) instead. Remove a previous `e-beta` or `e-dev` installation and reinstall from the production command; those binaries no longer receive updates.
 - Rewrite the README around installation and first use, with a captured terminal example.
 
 - The Rust SDK depends only on the new `intuitums-e-core` crate, so a program that embeds e no longer compiles the terminal frontend. The application now publishes as `intuitums-e-core`, `intuitums-e-tui`, `intuitums-e-rpc`, and `intuitums-e`.

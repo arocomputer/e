@@ -41,10 +41,8 @@ pub fn home() -> PathBuf {
     }
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let directory = PathBuf::from(base).join(match crate::CHANNEL {
-        "dev" | "local" => ".e-dev",
-        "beta" => ".e-beta",
+        "local" => ".e-dev",
         "pr" => ".e-pr",
-        "production" => ".e",
         _ => ".e",
     });
     if crate::CHANNEL == "pr" {

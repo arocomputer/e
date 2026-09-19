@@ -3,23 +3,19 @@
 set -eu
 cd "$(dirname "$0")/.."
 tag=${1:-}
-channel=${E_BUILD_CHANNEL:-production}
 if [ -n "$tag" ]; then
-  python3 - "$tag" "$channel" <<'PY'
+  python3 - "$tag" <<'PY'
 import sys,tomllib
 sys.path.insert(0,'scripts/release')
 from identity import identity
 release=identity(sys.argv[1])
 m=tomllib.load(open('Cargo.toml','rb'))
 base=(m.get('workspace',{}).get('package') or m['package'])['version']
-assert release['channel']==sys.argv[2], 'channel mismatch'
-if release['channel']=='production':
-    assert release['version']==base, 'manifest mismatch'
+assert release['channel']=='production', 'release-check expects a production tag'
+assert release['version']==base, 'manifest mismatch'
 PY
-  if [ "$channel" = production ]; then
-    ./scripts/release-notes.sh "$tag" < CHANGELOG.md | python3 -c 'import sys; sys.path.insert(0,"scripts/release"); from notes import parse; parse(sys.stdin.read())'
-  fi
-  export E_BUILD_VERSION=${tag#v} E_BUILD_CHANNEL=$channel
+  ./scripts/release-notes.sh "$tag" < CHANGELOG.md | python3 -c 'import sys; sys.path.insert(0,"scripts/release"); from notes import parse; parse(sys.stdin.read())'
+  export E_BUILD_VERSION=${tag#v} E_BUILD_CHANNEL=production
   export E_BUILD_COMMIT=${E_BUILD_COMMIT:-$(git rev-parse HEAD)}
 fi
 cargo build --release --locked

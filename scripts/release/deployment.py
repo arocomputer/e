@@ -9,15 +9,12 @@ import subprocess
 def report(needs, repository, server, run_id):
     """Report completed release jobs; never substitute the workflow branch for the source."""
     release = needs['resolve']['outputs']
-    channel = release['channel']
-    assert channel in ('production', 'beta', 'dev')
-    environment = channel
-    required = ('npm',) if channel == 'dev' else ('npm', 'homebrew', 'channel')
+    environment = 'production'
+    required = ('npm', 'homebrew', 'channel')
     success = all(needs[job]['result'] == 'success' for job in required)
     state = 'success' if success else 'error' if any(job['result'] == 'cancelled' for job in needs.values()) else 'failure'
     run_url = f'{server}/{repository}/actions/runs/{run_id}'
-    release_url = (f'https://www.npmjs.com/package/@intuitums/e/v/{release["version"]}' if channel == 'dev'
-                   else f'{server}/{release["repository"]}/releases/tag/{release["tag"]}')
+    release_url = f'{server}/{release["repository"]}/releases/tag/{release["tag"]}'
 
     def post(path, data):
         """Send structured JSON through stdin so metadata never becomes shell code."""
@@ -36,7 +33,7 @@ def report(needs, repository, server, run_id):
     deployment = post('deployments', {
         'ref': release['sha'], 'environment': environment,
         'auto_merge': False, 'required_contexts': [],
-        'production_environment': channel == 'production',
+        'production_environment': True,
         'description': release['version'],
         'payload': {'tag': release['tag'], 'run_url': run_url},
     })

@@ -7,43 +7,16 @@ set -eu
 repo="arocomputer/e"
 dir="${E_INSTALL_DIR:-$HOME/.local/bin}"
 
-# Explicit channel/version selection never changes the default production installation.
-channel=production
 version=
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --channel) channel=${2:?channel required}; shift 2 ;;
     --version) version=${2:?version required}; shift 2 ;;
-    *) echo 'usage: install.sh [--channel production|beta] [--version X.Y.Z]' >&2; exit 2 ;;
+    *) echo 'usage: install.sh [--version X.Y.Z]' >&2; exit 2 ;;
   esac
 done
-# `stable` was the production channel's old name; keep the alias so an existing
-# install command does not start failing.
-[ "$channel" = stable ] && channel=production
-case "$channel" in
-  production) command=e ;;
-  beta) command=e-beta; repo=arocomputer/e-beta ;;
-  dev)
-    # Local release qualification still tests the freshly built dev binary.
-    if [ -n "${E_RELEASE_BASE:-}" ]; then command=e-dev
-    else echo 'Dev builds use npm install -g @intuitums/e@dev or bun add -g @intuitums/e@dev' >&2; exit 2; fi ;;
-  *) echo 'unknown channel' >&2; exit 2 ;; esac
-if [ -z "$version" ] && [ "$channel" != production ]; then
-  # Keep the previous beta channel usable until its successor is published.
-  status=$(curl -sSL -w '\n%{http_code}' "https://github.com/$repo/releases/latest/download/version.txt")
-  case "$status" in
-    *200) version=$(printf '%s\n' "$status" | sed '$d') ;;
-    *404) version=$(curl -fsSL https://github.com/arocomputer/e/releases/download/channel-beta/version.txt); repo=arocomputer/e ;;
-    *) echo 'Could not resolve the beta version' >&2; exit 1 ;;
-  esac
-fi
 if [ -n "$version" ]; then
   version=${version#v}
-  case "$channel" in
-    production) pattern='^[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    *) pattern="^0\.0\.0-$channel-[0-9]+$" ;;
-  esac
-  printf '%s\n' "$version" | grep -Eq "$pattern" || { echo 'version does not match channel' >&2; exit 2; }
+  printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo 'version must be X.Y.Z' >&2; exit 2; }
 fi
 
 os=$(uname -s)
@@ -87,17 +60,7 @@ base="https://github.com/$repo/releases/latest/download"
 if [ -n "$version" ]; then base="https://github.com/$repo/releases/download/v$version"; fi
 base=${E_RELEASE_BASE:-$base}
 
-# Pinned beta archives published before the repository split remain in the source repository.
-downloaded=false
-if [ "$channel" = beta ] && [ -z "${E_RELEASE_BASE:-}" ]; then
-  status=$(curl -sSL -o "$tmp/e.tar.gz" -w '%{http_code}' "$base/e-$target.tar.gz")
-  case "$status" in
-    200) downloaded=true ;;
-    404) base="https://github.com/arocomputer/e/releases/download/v$version" ;;
-    *) echo 'Could not download the beta archive' >&2; exit 1 ;;
-  esac
-fi
-[ "$downloaded" = true ] || curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
+curl -fsSL -o "$tmp/e.tar.gz" "$base/e-$target.tar.gz" || {
   echo "no release published yet — install.sh works once the first release exists" >&2
   echo "build from source: cargo install --git https://github.com/arocomputer/e" >&2
   exit 1
@@ -124,14 +87,14 @@ if [ -n "$version" ] && [ "$(./e --version)" != "e $version" ]; then
 fi
 mkdir -p "$dir"
 # Refuse to replace package-owned executables, including symlinks into their stores.
-if [ -L "$dir/$command" ] || [ -e "$dir/.e-install-method" ]; then
+if [ -L "$dir/e" ] || [ -e "$dir/.e-install-method" ]; then
   echo "destination is package-managed; choose another E_INSTALL_DIR" >&2
   exit 1
 fi
-install -m 755 e "$dir/.$command.next"
-mv -f "$dir/.$command.next" "$dir/$command"
+install -m 755 e "$dir/.e.next"
+mv -f "$dir/.e.next" "$dir/e"
 
-echo "installed $("$dir/$command" --version) to $dir/$command"
+echo "installed $("$dir/e" --version) to $dir/e"
 case ":$PATH:" in
   *":$dir:"*) ;;
   *) echo "note: $dir is not on your PATH" ;;

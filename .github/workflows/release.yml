@@ -1,23 +1,16 @@
 name: publish
 
-# Production publishes here, beta publishes in e-beta, and dev publishes only to npm.
+# Production publishes here. Preview builds are unsigned artifacts in preview.yml.
 on:
   push:
     tags: ["v*"]
-  workflow_run:
-    workflows: [Tests]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       action:
-        description: Publish a beta candidate or retry existing release packages
+        description: Retry existing release packages for a published tag
         type: choice
-        options: [beta, retry]
-        default: beta
-      commit:
-        description: Beta source commit already on main (defaults to main)
-        type: string
+        options: [retry]
+        default: retry
       tag:
         description: Existing version tag for a package retry
         type: string
@@ -32,13 +25,11 @@ concurrency:
 jobs:
   resolve:
     name: resolve
-    if: github.repository == 'arocomputer/e' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    if: github.repository == 'arocomputer/e'
     runs-on: ubuntu-latest
     permissions:
       # GitHub requires push access to inspect unpublished draft releases.
       contents: write
-      # Stable promotion reads the selected beta's verified deployment.
-      deployments: read
     outputs:
       repository: ${{ steps.release.outputs.repository }}
       tag: ${{ steps.release.outputs.tag }}
@@ -52,14 +43,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Check beta publishing access
-        if: inputs.action == 'beta' || contains(inputs.tag, '-beta.')
-        env:
-          BETA_TOKEN: ${{ secrets.BETA_RELEASE_TOKEN }}
-        run: test -n "$BETA_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN with Contents read/write on arocomputer/e-beta.'; exit 1; }
       - id: release
         env:
-          GH_TOKEN: ${{ contains(inputs.tag, '-beta.') && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release/resolve.py
   qualify:
     needs: resolve
@@ -69,17 +55,8 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Report dev build
-        if: needs.resolve.outputs.channel == 'dev'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_JOBS: ${{ toJSON(needs) }}
-          REPORT_STAGE: building
-        run: python3 scripts/release/pr_comment.py
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,8 +74,6 @@ jobs:
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Check selected source
-        # Dev already passed the Tests workflow at this exact commit.
-        if: github.event_name != 'workflow_run'
         run: |
           ./x check
           ./x ui
@@ -124,29 +99,18 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Draft
-        if: needs.resolve.outputs.channel != 'dev'
         env:
           TITLE: ${{ needs.resolve.outputs.title }}
-          CHANNEL: ${{ needs.resolve.outputs.channel }}
           SHA: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          if [ "$CHANNEL" = production ]; then
-            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
-          else
-            test -n "$GH_TOKEN" || { echo 'Configure BETA_RELEASE_TOKEN for arocomputer/e-beta.'; exit 1; }
-            printf 'Source: https://github.com/arocomputer/e/commit/%s\n\nBeta build %s.\n' "$SHA" "$TAG" > notes.md
-          fi
+          ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             test "$draft" = true || { echo 'Release is already published; use action=retry to retry packages without rebuilding.'; exit 1; }
           else
-            if [ "$CHANNEL" = production ]; then
-              gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
-            else
-              gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md
-            fi
+            gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
           fi
 
   build:
@@ -179,7 +143,7 @@ jobs:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
           E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
           E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
           # A macOS runner's libc is not a Linux floor; scripts/release/build.sh
@@ -243,7 +207,7 @@ jobs:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
           E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
           E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
           TARGETS: ${{ matrix.targets }}
@@ -290,7 +254,7 @@ jobs:
 
       - name: Download and checksum every artifact
         env:
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
@@ -330,25 +294,17 @@ jobs:
           subject-path: ${{ runner.temp }}/release-assets/*
 
       - name: Upload metadata and publish
-        if: needs.resolve.outputs.channel != 'dev'
         env:
-          CHANNEL: ${{ needs.resolve.outputs.channel }}
           SHA: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
-          if [ "$CHANNEL" = production ]; then
-            ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
-            python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
-            gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
-            gh release edit "$TAG" --draft=false --latest
-          else
-            printf '%s\n' "$TAG" > "$RUNNER_TEMP/release-assets/version.txt"
-            gh release upload "$TAG" "$RUNNER_TEMP/release-assets/version.txt" --clobber
-            gh release edit "$TAG" --draft=false --latest=false
-          fi
+          ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
+          python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
+          gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
+          gh release edit "$TAG" --draft=false --latest
 
       - name: Retain verified assets for package publication
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -367,24 +323,14 @@ jobs:
     timeout-minutes: 110
     outputs:
       failure: ${{ steps.packages.outputs.failure }}
-      cleanup: ${{ steps.cleanup.outcome }}
       verify: ${{ steps.verify.outcome }}
     permissions:
       contents: read
-      pull-requests: write
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Report dev publication
-        if: needs.resolve.outputs.channel == 'dev'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_JOBS: ${{ toJSON(needs) }}
-          REPORT_STAGE: publishing
-        run: python3 scripts/release/pr_comment.py
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -397,7 +343,7 @@ jobs:
           path: ${{ runner.temp }}/npm-assets
       - name: Prepare verified packages
         env:
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
@@ -415,26 +361,10 @@ jobs:
       - name: Publish the Slack channel
         # The bot versions itself and publishes with production only. A bot publication
         # failure does not block the application's installers or their retries.
-        if: needs.resolve.outputs.channel == 'production'
         continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: node scripts/packaging/publish-npm.mjs dist --only=slack
-      - name: Keep preview packages off latest
-        id: cleanup
-        if: needs.resolve.outputs.channel != 'production'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-          VERSION: ${{ needs.resolve.outputs.version }}
-        run: |
-          # npm may assign latest on a package's first publication despite --tag.
-          for package in dist/*/package.json; do
-            name=$(node -p 'require("./" + process.argv[1]).name' "$package")
-            latest=$(npm dist-tag ls "$name" | sed -n 's/^latest: //p')
-            if [ "$latest" = "$VERSION" ]; then
-              npm dist-tag rm "$name" latest
-            fi
-          done
 
       - name: Verify registry installation
         id: verify
@@ -445,11 +375,10 @@ jobs:
 
   container:
     name: container
-    # The image installs the release it belongs to, so it waits for one. Dev
-    # builds are npm-only and the installer has no dev channel.
+    # The image installs the release it belongs to, so it waits for one.
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel != 'dev' }}
-    # A registry hiccup must not fail the release, the way the channel package's
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    # A registry hiccup must not fail the release, the way the npm
     # publishing step does not. The deployment report still records the outcome.
     continue-on-error: true
     runs-on: ubuntu-latest
@@ -473,18 +402,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            E_CHANNEL=${{ needs.resolve.outputs.channel }}
             E_VERSION=${{ needs.resolve.outputs.version }}
           tags: |
-            ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.channel == 'production' && 'latest' || needs.resolve.outputs.channel }}
+            ghcr.io/intuitums/e-slack:latest
             ghcr.io/intuitums/e-slack:${{ needs.resolve.outputs.version }}
 
   crates:
     name: crates.io
-    # The application's version is the release version, so previews stay on npm.
     # Core publishes first: the frontends and SDK pin its version.
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'production' }}
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     # Like the npm and image publications, a registry hiccup must not fail the
     # release; the deployment report still records the outcome.
     continue-on-error: true
@@ -544,7 +471,7 @@ jobs:
     permissions:
       contents: read
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.resolve.outputs.channel != 'dev' && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -553,7 +480,7 @@ jobs:
           ref: ${{ github.sha }}
       - name: Prepare verified formula
         env:
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
@@ -578,37 +505,22 @@ jobs:
   channel:
     name: channel
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.resolve.outputs.channel != 'dev' && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Verify pinned website installer
+      - name: Verify website installer
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
-          CHANNEL: ${{ needs.resolve.outputs.channel }}
-          COMMAND: ${{ needs.resolve.outputs.command }}
         run: |
           curl -fsSL --retry 3 https://e.intuitum.sh/install.sh -o "$RUNNER_TEMP/install.sh"
-          E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL" --version "${TAG#v}"
-          "$RUNNER_TEMP/e-pinned/$COMMAND" --version | grep -Fx "e ${TAG#v}"
-      - name: Advance channel
-        env:
-          GH_TOKEN: ${{ needs.resolve.outputs.channel == 'beta' && secrets.BETA_RELEASE_TOKEN || github.token }}
-          GH_REPO: ${{ needs.resolve.outputs.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        run: python3 scripts/release/channel.py "$TAG"
-      - name: Verify current website installer
-        env:
-          CHANNEL: ${{ needs.resolve.outputs.channel }}
-          COMMAND: ${{ needs.resolve.outputs.command }}
-        run: |
-          E_INSTALL_DIR="$RUNNER_TEMP/e-current" sh "$RUNNER_TEMP/install.sh" --channel "$CHANNEL"
-          "$RUNNER_TEMP/e-current/$COMMAND" --version
+          E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --version "${TAG#v}"
+          "$RUNNER_TEMP/e-pinned/e" --version | grep -Fx "e ${TAG#v}"
 
   deployment:
     name: report
@@ -619,7 +531,6 @@ jobs:
     permissions:
       contents: read
       deployments: write
-      pull-requests: write
     steps:
       # Reporting uses this workflow's code, while the deployment records the selected release SHA.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -628,11 +539,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_JOBS: ${{ toJSON(needs) }}
         run: python3 scripts/release/deployment.py
-      - name: Update dev PR outcome
-        if: always() && needs.resolve.outputs.channel == 'dev'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_JOBS: ${{ toJSON(needs) }}
-          REPORT_STAGE: finished
-        run: python3 scripts/release/pr_comment.py

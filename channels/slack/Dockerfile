@@ -21,12 +21,8 @@ RUN apt-get update \
 ENV E_HOME=/home/e
 RUN mkdir -p /home/e && chmod 0777 /home/e
 
-# The e release the bot drives: `production` or `beta`, and empty for the latest
-# of that channel. The channel matters as much as the version — a beta version
-# is only valid against the beta channel. `production` is the installer default,
-# so it passes no channel; that also works with the pre-rename installer whose
-# default is `stable`.
-ARG E_CHANNEL=production
+# The e release the bot drives. Empty for the latest published release, or a
+# pinned `E_VERSION`. Passed by the release workflow.
 ARG E_VERSION=""
 # The container check (`./x container`) builds without a published release, so it
 # installs this stub `e` instead of downloading one. Published images leave it
@@ -38,12 +34,10 @@ RUN set -eux; \
       chmod 0755 /usr/local/bin/e; \
     else \
       curl -fsSL https://e.intuitum.sh/install.sh -o /tmp/install.sh; \
-      channel=""; \
-      if [ -n "$E_CHANNEL" ] && [ "$E_CHANNEL" != production ]; then channel="--channel $E_CHANNEL"; fi; \
       if [ -n "$E_VERSION" ]; then \
-        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh $channel --version "$E_VERSION"; \
+        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --version "$E_VERSION"; \
       else \
-        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh $channel; \
+        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh; \
       fi; \
       rm -f /tmp/install.sh; \
     fi; \

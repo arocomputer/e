@@ -13,7 +13,7 @@ fn main() {
     let version =
         std::env::var("E_BUILD_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
     let channel = std::env::var("E_BUILD_CHANNEL").unwrap_or_else(|_| "local".into());
-    assert!(["local", "production", "dev", "beta", "pr"].contains(&channel.as_str()));
+    assert!(["local", "production", "pr"].contains(&channel.as_str()));
     if channel == "production" {
         assert_eq!(
             version,
