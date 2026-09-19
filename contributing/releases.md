@@ -196,7 +196,9 @@ The website renders this repository's `docs/guides/`, so
 `.github/workflows/docs.yml` starts arocomputer/web's Deploy workflow whenever a
 guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
 to arocomputer/web with Actions: write. Set the secret once; without it the job
-fails loudly rather than going stale silently.
+fails loudly rather than going stale silently. If the job reports the token
+was rejected, its PAT expired or was revoked: mint a new one with the same
+scope and replace the secret.
 
 The application does not publish to crates.io. Its installers are the shell
 script, Homebrew, and the npm packages. The one crate that publishes is the

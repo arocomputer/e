@@ -24,4 +24,5 @@ jobs:
           GH_TOKEN: ${{ secrets.WEB_DEPLOY_TOKEN }}
         run: |
           test -n "$GH_TOKEN" || { echo 'Configure WEB_DEPLOY_TOKEN to redeploy arocomputer/web.'; exit 1; }
+          gh api repos/arocomputer/web --jq .full_name >/dev/null || { echo 'WEB_DEPLOY_TOKEN was rejected by GitHub. Rotate it: a fine-grained token on arocomputer/web with Actions: write, stored as WEB_DEPLOY_TOKEN in arocomputer/e settings.'; exit 1; }
           gh workflow run deploy.yml --repo arocomputer/web --ref main
