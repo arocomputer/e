@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aro-e"
-version = "0.0.3"
+version = "0.0.2"
 dependencies = [
  "aro-e-core",
  "aro-e-rpc",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "aro-e-core"
-version = "0.0.3"
+version = "0.0.2"
 dependencies = [
  "base64 0.23.1",
  "futures",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "aro-e-rpc"
-version = "0.0.3"
+version = "0.0.2"
 dependencies = [
  "aro-e-core",
  "serde",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "aro-e-sdk"
-version = "0.0.3"
+version = "0.0.2"
 dependencies = [
  "aro-e",
  "aro-e-core",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "aro-e-tui"
-version = "0.0.3"
+version = "0.0.2"
 dependencies = [
  "aro-e-core",
  "base64 0.23.1",
