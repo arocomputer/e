@@ -143,8 +143,6 @@ jobs:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
           E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
           E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
           # A macOS runner's libc is not a Linux floor; scripts/release/build.sh
           # checks the glibc ceiling on the Linux legs instead.
@@ -207,8 +205,6 @@ jobs:
           E_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
           E_BUILD_CHANNEL: ${{ needs.resolve.outputs.channel }}
           E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
           TARGETS: ${{ matrix.targets }}
           COMMAND: ${{ needs.resolve.outputs.command }}
