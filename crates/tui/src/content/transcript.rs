@@ -118,7 +118,6 @@ pub enum Kind {
 /// version so full-document Markdown parsing stays within a fixed work rate.
 struct RenderCache {
     width: usize,
-    phase: bool,
     generation: u64,
     rendered_at: std::time::Instant,
     lines: Vec<String>,
@@ -420,18 +419,17 @@ impl Block {
 
     /// Render for tests: the same rows lines() caches, without the cache.
     pub fn lines_for_test(&self, theme: &Theme, width: usize) -> Vec<String> {
-        self.render(theme, width, true)
+        self.render(theme, width)
     }
 
-    fn lines(&mut self, theme: &Theme, width: usize, blink_on: bool) -> &[String] {
-        // Only a running tool row renders differently across blink phases.
-        // Pin every other block to one phase so the blink tick can't
-        // invalidate the whole transcript's caches during a turn.
-        let phase = blink_on && self.animates();
+    /// This block's rows at `width`, cached. Nothing in the transcript
+    /// blinks (the activity row below it does), so the blink tick never
+    /// invalidates a cache.
+    fn lines(&mut self, theme: &Theme, width: usize) -> &[String] {
         let geometry_matches = self
             .cache
             .as_ref()
-            .is_some_and(|cache| cache.width == width && cache.phase == phase);
+            .is_some_and(|cache| cache.width == width);
         let current = self
             .cache
             .as_ref()
@@ -442,10 +440,9 @@ impl Block {
                 cache.rendered_at.elapsed() < stream_render_interval(self.text.len())
             });
         if !geometry_matches || (!current && !within_stream_budget) {
-            let lines = self.render(theme, width, phase);
+            let lines = self.render(theme, width);
             self.cache = Some(RenderCache {
                 width,
-                phase,
                 generation: self.generation,
                 rendered_at: std::time::Instant::now(),
                 lines,
@@ -484,7 +481,7 @@ impl Block {
             // The cached path: the projection pays only for blocks whose
             // content actually changed, sharing the main transcript's cache.
             return self
-                .lines(theme, width, false)
+                .lines(theme, width)
                 .iter()
                 .cloned()
                 .map(|row| (row, None))
@@ -533,13 +530,8 @@ impl Block {
         rows
     }
 
-    /// Tool status is steady; only the separate activity row blinks.
-    fn animates(&self) -> bool {
-        false
-    }
-
     /// This block's rows at `width`, uncached; [`Block::lines`] caches them.
-    fn render(&self, theme: &Theme, width: usize, _blink_on: bool) -> Vec<String> {
+    fn render(&self, theme: &Theme, width: usize) -> Vec<String> {
         match self.kind {
             Kind::Banner => self.banner_rows(theme),
             Kind::User => self.user_rows(theme, width),
@@ -1447,15 +1439,11 @@ impl Transcript {
     }
 
     pub fn render(&mut self, theme: &Theme, width: usize) -> Vec<String> {
-        self.render_animated(theme, width, true)
-    }
-
-    pub fn render_animated(&mut self, theme: &Theme, width: usize, blink_on: bool) -> Vec<String> {
         let mut out = Vec::new();
         let mut prev: Option<Kind> = None;
         for block in &mut self.blocks {
             let kind = block.kind;
-            let lines = block.lines(theme, width, blink_on);
+            let lines = block.lines(theme, width);
             if lines.is_empty() {
                 continue;
             }
@@ -1554,20 +1542,20 @@ mod tests {
         );
     }
 
-    /// The blink phase must not invalidate finished blocks: during a turn the
-    /// tick flips the phase twice a second, and re-rendering the whole
-    /// transcript's markdown on each flip is what made streaming lag.
+    /// A repaint must not invalidate finished blocks: during a turn the
+    /// tick repaints twice a second, and re-rendering the whole
+    /// transcript's markdown each time is what made streaming lag.
     #[test]
-    fn blink_flip_keeps_static_block_cache() {
+    fn a_repaint_keeps_static_block_cache() {
         let theme = theme();
         let mut block = Block::new(Kind::Assistant, "some **finished** reply");
-        block.lines(&theme, 80, true);
+        block.lines(&theme, 80);
         let cached = block.cache.as_ref().unwrap().lines.as_ptr();
-        block.lines(&theme, 80, false);
+        block.lines(&theme, 80);
         assert_eq!(
             block.cache.as_ref().unwrap().lines.as_ptr(),
             cached,
-            "a blink flip re-rendered a block with no running tool"
+            "a repaint re-rendered a finished block"
         );
     }
 
@@ -1592,7 +1580,7 @@ mod tests {
         let theme = theme();
         let mut block = Block::new(Kind::Assistant, "");
         block.append_streaming("first");
-        block.lines(&theme, 80, true);
+        block.lines(&theme, 80);
         let rendered_generation = block.cache.as_ref().unwrap().generation;
 
         block.append_streaming(" second");
@@ -1601,10 +1589,10 @@ mod tests {
 
         block.finish_streaming();
         assert!(block.cache.is_none(), "the final render was not forced");
-        assert!(block.lines(&theme, 80, true).join("\n").contains("second"));
+        assert!(block.lines(&theme, 80).join("\n").contains("second"));
     }
 
-    /// Running calls remain attached and blink ticks do not invalidate their cache.
+    /// Running calls remain attached and a repaint does not invalidate their cache.
     #[test]
     fn running_tool_paints_as_an_attached_steady_row() {
         let theme = theme();
@@ -1621,10 +1609,10 @@ mod tests {
         assert!(tree[1].contains("Running true"));
         assert!(tree[1].contains('├'));
         assert!(tree[2].contains('└'));
-        // The block's own cache is phase-stable.
-        block.lines(&theme, 80, true);
+        // A repaint reuses the block's own cache.
+        block.lines(&theme, 80);
         let cached = block.cache.as_ref().unwrap().lines.as_ptr();
-        block.lines(&theme, 80, false);
+        block.lines(&theme, 80);
         assert_eq!(block.cache.as_ref().unwrap().lines.as_ptr(), cached);
 
         block.finish_tool(1, ToolOutcome::Completed, "done".into(), "");

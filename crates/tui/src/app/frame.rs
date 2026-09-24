@@ -95,9 +95,7 @@ impl App {
             .as_ref()
             .map(|turn| (turn.started.elapsed().as_millis() / 500) % 2 == 0)
             .unwrap_or(true);
-        let mut lines = self
-            .transcript
-            .render_animated(&self.theme, width, blink_on);
+        let mut lines = self.transcript.render(&self.theme, width);
         let dock_start = lines.len();
         let activity = self
             .ext_activity

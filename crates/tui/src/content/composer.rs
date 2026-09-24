@@ -48,7 +48,6 @@ pub struct Editor {
 pub enum EditorResult {
     Consumed,
     Submit(String),
-    Ignored,
 }
 
 impl Default for Editor {
