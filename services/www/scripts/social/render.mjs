@@ -20,16 +20,15 @@ const h = (type, style, ...children) => ({
   props: { style, children },
 });
 
-/** The supplied ulo wordmark at `height`, in the surrounding ink color. */
+/** The bar-free ulo wordmark at `height`, in the surrounding ink color. */
 const logo = (height) => ({
   type: "svg",
   props: {
-    width: height * 5,
+    width: (height * 13) / 3,
     height,
-    viewBox: "0 0 150 30",
+    viewBox: "20 0 130 30",
     fill: "currentColor",
     children: [
-      { type: "path", props: { d: "M10 30H0V0H10V30Z" } },
       { type: "path", props: { d: "M20 30V0H30V20H50V0H60V30H20Z" } },
       { type: "path", props: { d: "M65 30V0H75V20H105V30H65Z" } },
       {
