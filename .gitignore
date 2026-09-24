@@ -15,10 +15,8 @@
 .DS_Store
 
 # Environment
-.env
 
 # Editor files
-.vscode/
 .zed/
 .idea/
 *.swp
@@ -45,3 +43,5 @@ channels/**/e-slack-state.json
 
 # generated release packages (prepare.py output)
 /dist/
+config.bat
+node_modules

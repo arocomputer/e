@@ -75,6 +75,16 @@ fn a_failed_write_leaves_nothing_to_undo() {
     let _ = std::fs::remove_dir_all(&ws);
     std::fs::create_dir_all(ws.join("locked")).unwrap();
     std::fs::set_permissions(ws.join("locked"), std::fs::Permissions::from_mode(0o500)).unwrap();
+    // Root (CI containers, sandboxes) ignores directory permissions; then
+    // the failed write this test pins cannot be injected, so skip.
+    let probe = ws.join("locked/.probe");
+    if std::fs::write(&probe, b"x").is_ok() {
+        std::fs::set_permissions(ws.join("locked"), std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&ws);
+        eprintln!("skipped: permission-based fault injection is inert for this user");
+        return;
+    }
     let runtime = ToolRuntime::default();
     let cancel = AtomicBool::new(false);
     let out = runtime.run_streaming(
