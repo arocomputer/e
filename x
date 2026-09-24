@@ -52,6 +52,12 @@ case "$command" in
     ;;
   crates)
     [ "$#" -eq 0 ] || usage
+    # Cargo's temporary publication registry caches crates by version. Reusing
+    # it can verify old source when an unreleased version has not changed.
+    # Give each check a fresh registry and build directory, including in CI.
+    CARGO_TARGET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ulo-crates.XXXXXX")
+    export CARGO_TARGET_DIR
+    trap 'rm -rf "$CARGO_TARGET_DIR"' EXIT HUP INT TERM
     # The published crates: the application crates are packaged and built end
     # to end in dependency order, and the SDK is compiled by an external
     # consumer from its packed crate.
