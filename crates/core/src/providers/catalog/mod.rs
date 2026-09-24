@@ -19,7 +19,8 @@ pub use remote::{refresh_remote, refresh_remote_within, REMOTE_REFRESH_MS};
 pub enum Api {
     /// OpenAI chat-completions dialect (`/chat/completions`, SSE deltas).
     Completions,
-    /// The responses dialect behind the ChatGPT backend (OAuth + account id).
+    /// The Responses dialect: the ChatGPT backend (OAuth + account id) or a
+    /// plain-key `{base}/responses` mount (see `ResponsesMount`).
     Responses,
     /// The Anthropic Messages dialect (`/v1/messages`, x-api-key).
     Anthropic,
