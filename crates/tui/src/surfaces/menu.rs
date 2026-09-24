@@ -460,38 +460,12 @@ impl Menu {
         row
     }
 
+    /// The band: header, the visible window of rows (or the empty notice),
+    /// framed by [`crate::panel::frame`].
     pub fn render(&self, theme: &Theme, width: usize) -> Vec<String> {
         let count = self.filtered.len();
-        let visible = self.max_visible();
-        let window_end = (self.window_start + visible).min(count);
-
-        // A tab-less header is uniformly dim — `Commands 7 · Type to
-        // filter` before the first keystroke, the bare noun and count once
-        // a filter is live (the composer already shows the typed query). A
-        // tabbed header brightens its title and lays the tabs out two
-        // spaces apart, the active one `[bracketed]`, degrading to a
-        // `{noun} [active]` compact form and finally the active tab alone.
-        let header = if self.tabs.is_empty() {
-            let mut header_plain = if self.query.is_empty() {
-                format!("{} {count} · Type to filter", self.title)
-            } else {
-                format!("{} {count}", self.title)
-            };
-            if count > visible {
-                // Scroll range, right-aligned with the reference's
-                // one-column margin.
-                let range = format!("{}–{}", self.window_start + 1, window_end);
-                let pad =
-                    width.saturating_sub(1 + visible_width(&header_plain) + range.chars().count());
-                if pad > 1 {
-                    header_plain.push_str(&" ".repeat(pad));
-                    header_plain.push_str(&range);
-                }
-            }
-            theme.fg("dim", &header_plain)
-        } else {
-            self.tabbed_header(theme, width, count)
-        };
+        let window_end = (self.window_start + self.max_visible()).min(count);
+        let header = self.header(theme, width, count, window_end);
 
         let mut body: Vec<String> = Vec::new();
         if count == 0 {
@@ -503,114 +477,14 @@ impl Menu {
             .max()
             .unwrap_or(0)
             .min(36);
-        // The sessions rows lay their `workspace · age · N turns` cluster
-        // in shared fixed columns past the longest title — the reference's
-        // self-sizing metadata layout.
-        let session_columns = (self.kind == MenuKind::Sessions).then(|| {
-            let mut cols = (0usize, 0usize, 0usize, 0usize);
-            for &i in &self.filtered {
-                let item = &self.items[i];
-                let (workspace, age, turns) = split_session_meta(&item.meta);
-                cols.0 = cols.0.max(visible_width(&item.label));
-                cols.1 = cols.1.max(visible_width(workspace));
-                cols.2 = cols.2.max(visible_width(age));
-                cols.3 = cols.3.max(visible_width(turns));
-            }
-            cols
-        });
+        let session_columns = (self.kind == MenuKind::Sessions).then(|| self.session_columns());
         for slot in self.window_start..window_end {
             let item = &self.items[self.filtered[slot]];
-            let selected = slot == self.selected;
-            let (open, close) = self.row_style(theme, selected);
-            if let Some((title_max, ws_col, age_col, turns_col)) = session_columns {
-                // Title middle-ellipsized into its column; workspace and
-                // turns left-aligned, age right-aligned; metadata hides
-                // entirely when the title would drop below twelve cells.
-                let (workspace, age, turns) = split_session_meta(&item.meta);
-                let meta_width = if ws_col + age_col + turns_col == 0 {
-                    0
-                } else {
-                    ws_col + 3 + age_col + 3 + turns_col
-                };
-                let content_width = width.saturating_sub(1);
-                let available_title = content_width.saturating_sub(2 + 4 + meta_width);
-                let show_meta = meta_width > 0 && available_title >= 12;
-                let measured = title_max.max(visible_width(&item.label));
-                let title_budget = if show_meta {
-                    measured.min(available_title)
-                } else {
-                    width.saturating_sub(2)
-                };
-                let title = middle_ellipsize(&item.label, title_budget);
-                let mut content = title.clone();
-                if show_meta {
-                    let meta_start = title_budget + 4;
-                    content.push_str(&" ".repeat(meta_start.saturating_sub(visible_width(&title))));
-                    content.push_str(workspace);
-                    content.push_str(&" ".repeat(ws_col - visible_width(workspace)));
-                    content.push_str(" · ");
-                    content.push_str(&" ".repeat(age_col - visible_width(age)));
-                    content.push_str(age);
-                    content.push_str(" · ");
-                    content.push_str(turns);
-                }
-                body.push(crate::markdown::clip_styled(
-                    &format!("  {open}{content}{close}"),
-                    width,
-                ));
-                continue;
-            }
-            // The label, with the query's matched chars brightened: each hit
-            // resets to bold and reopens the row's own dress after — the
-            // reference's way of showing why a filtered row matched.
-            let marks = if self.query.is_empty() {
-                Vec::new()
-            } else {
-                fuzzy_positions(&self.query, &item.label).unwrap_or_default()
+            let (open, close) = self.row_style(theme, slot == self.selected);
+            let content = match &session_columns {
+                Some(columns) => session_row(item, columns, width),
+                None => self.item_row(item, &open, label_width, width),
             };
-            // File rows project through the reference's path segmentation;
-            // every other picker shows its label whole. Source indices ride
-            // along so match marks survive an ellipsized projection.
-            let projected: Vec<(char, Option<usize>)> = if self.kind == MenuKind::Files {
-                project_path(&item.label, width.saturating_sub(3))
-            } else {
-                item.label
-                    .chars()
-                    .enumerate()
-                    .map(|(i, c)| (c, Some(i)))
-                    .collect()
-            };
-            let mut content = String::new();
-            for (c, source) in &projected {
-                if source.map(|i| marks.contains(&i)).unwrap_or(false) {
-                    content.push_str(&format!("\x1b[1m{c}\x1b[0m{open}"));
-                } else {
-                    content.push(*c);
-                }
-            }
-            let shown_width: usize = projected.iter().map(|(c, _)| c.width().unwrap_or(0)).sum();
-            content.push_str(&" ".repeat(label_width.saturating_sub(shown_width)));
-            if !item.description.is_empty() {
-                // The model picker's facts column sits two spaces past the
-                // longest id, the skills picker's source scope four — the
-                // reference's inline column gap; every other picker keeps
-                // the three-space gap.
-                let gap = match self.kind {
-                    MenuKind::Models => "  ",
-                    MenuKind::Skills => "    ",
-                    _ => "   ",
-                };
-                content.push_str(gap);
-                content.push_str(&item.description);
-            }
-            if !item.meta.is_empty() {
-                let pad = width
-                    .saturating_sub(1 + 2 + visible_width(&content) + visible_width(&item.meta));
-                if pad > 3 {
-                    content.push_str(&" ".repeat(pad));
-                    content.push_str(&item.meta);
-                }
-            }
             // Escape-aware clipping: SGR runs are zero columns and a cut row
             // closes its styles instead of severing a sequence mid-run.
             body.push(crate::markdown::clip_styled(
@@ -622,6 +496,153 @@ impl Menu {
         // short match list.
         crate::panel::frame(theme, width, header, body)
     }
+
+    /// A tab-less header is uniformly dim — `Commands 7 · Type to filter`
+    /// before the first keystroke, the bare noun and count once a filter is
+    /// live (the composer already shows the typed query), with the scroll
+    /// range right-aligned when rows hide. A tabbed header brightens its
+    /// title and lays the tabs out two spaces apart, the active one
+    /// `[bracketed]`, degrading to a `{noun} [active]` compact form and
+    /// finally the active tab alone.
+    fn header(&self, theme: &Theme, width: usize, count: usize, window_end: usize) -> String {
+        if !self.tabs.is_empty() {
+            return self.tabbed_header(theme, width, count);
+        }
+        let mut header_plain = if self.query.is_empty() {
+            format!("{} {count} · Type to filter", self.title)
+        } else {
+            format!("{} {count}", self.title)
+        };
+        if count > self.max_visible() {
+            // Scroll range, right-aligned with the reference's one-column margin.
+            let range = format!("{}–{}", self.window_start + 1, window_end);
+            let pad =
+                width.saturating_sub(1 + visible_width(&header_plain) + range.chars().count());
+            if pad > 1 {
+                header_plain.push_str(&" ".repeat(pad));
+                header_plain.push_str(&range);
+            }
+        }
+        theme.fg("dim", &header_plain)
+    }
+
+    /// The sessions rows lay their `workspace · age · N turns` cluster in
+    /// shared fixed columns past the longest title — the reference's
+    /// self-sizing metadata layout. Measured across every match, not just
+    /// the visible window.
+    fn session_columns(&self) -> SessionColumns {
+        let mut cols = SessionColumns::default();
+        for &i in &self.filtered {
+            let item = &self.items[i];
+            let (workspace, age, turns) = split_session_meta(&item.meta);
+            cols.title = cols.title.max(visible_width(&item.label));
+            cols.workspace = cols.workspace.max(visible_width(workspace));
+            cols.age = cols.age.max(visible_width(age));
+            cols.turns = cols.turns.max(visible_width(turns));
+        }
+        cols
+    }
+
+    /// An ordinary row's content: the label, with the query's matched chars
+    /// brightened — each hit resets to bold and reopens the row's own dress
+    /// (`open`) after, the reference's way of showing why a filtered row
+    /// matched — padded to `label_width`, then the description and the
+    /// right-aligned meta.
+    fn item_row(&self, item: &MenuItem, open: &str, label_width: usize, width: usize) -> String {
+        let marks = if self.query.is_empty() {
+            Vec::new()
+        } else {
+            fuzzy_positions(&self.query, &item.label).unwrap_or_default()
+        };
+        // File rows project through the reference's path segmentation;
+        // every other picker shows its label whole. Source indices ride
+        // along so match marks survive an ellipsized projection.
+        let projected: Vec<(char, Option<usize>)> = if self.kind == MenuKind::Files {
+            project_path(&item.label, width.saturating_sub(3))
+        } else {
+            item.label
+                .chars()
+                .enumerate()
+                .map(|(i, c)| (c, Some(i)))
+                .collect()
+        };
+        let mut content = String::new();
+        for (c, source) in &projected {
+            if source.map(|i| marks.contains(&i)).unwrap_or(false) {
+                content.push_str(&format!("\x1b[1m{c}\x1b[0m{open}"));
+            } else {
+                content.push(*c);
+            }
+        }
+        let shown_width: usize = projected.iter().map(|(c, _)| c.width().unwrap_or(0)).sum();
+        content.push_str(&" ".repeat(label_width.saturating_sub(shown_width)));
+        if !item.description.is_empty() {
+            // The model picker's facts column sits two spaces past the
+            // longest id, the skills picker's source scope four — the
+            // reference's inline column gap; every other picker keeps the
+            // three-space gap.
+            let gap = match self.kind {
+                MenuKind::Models => "  ",
+                MenuKind::Skills => "    ",
+                _ => "   ",
+            };
+            content.push_str(gap);
+            content.push_str(&item.description);
+        }
+        if !item.meta.is_empty() {
+            let pad =
+                width.saturating_sub(1 + 2 + visible_width(&content) + visible_width(&item.meta));
+            if pad > 3 {
+                content.push_str(&" ".repeat(pad));
+                content.push_str(&item.meta);
+            }
+        }
+        content
+    }
+}
+
+/// The widest title and each metadata column across the session matches.
+#[derive(Default)]
+struct SessionColumns {
+    title: usize,
+    workspace: usize,
+    age: usize,
+    turns: usize,
+}
+
+/// A session row's content: title middle-ellipsized into its column;
+/// workspace and turns left-aligned, age right-aligned; metadata hides
+/// entirely when the title would drop below twelve cells.
+fn session_row(item: &MenuItem, cols: &SessionColumns, width: usize) -> String {
+    let (workspace, age, turns) = split_session_meta(&item.meta);
+    let meta_width = if cols.workspace + cols.age + cols.turns == 0 {
+        0
+    } else {
+        cols.workspace + 3 + cols.age + 3 + cols.turns
+    };
+    let content_width = width.saturating_sub(1);
+    let available_title = content_width.saturating_sub(2 + 4 + meta_width);
+    let show_meta = meta_width > 0 && available_title >= 12;
+    let measured = cols.title.max(visible_width(&item.label));
+    let title_budget = if show_meta {
+        measured.min(available_title)
+    } else {
+        width.saturating_sub(2)
+    };
+    let title = middle_ellipsize(&item.label, title_budget);
+    let mut content = title.clone();
+    if show_meta {
+        let meta_start = title_budget + 4;
+        content.push_str(&" ".repeat(meta_start.saturating_sub(visible_width(&title))));
+        content.push_str(workspace);
+        content.push_str(&" ".repeat(cols.workspace - visible_width(workspace)));
+        content.push_str(" · ");
+        content.push_str(&" ".repeat(cols.age - visible_width(age)));
+        content.push_str(age);
+        content.push_str(" · ");
+        content.push_str(turns);
+    }
+    content
 }
 
 /// A session row's `workspace · age · N turns` cluster, split back into
