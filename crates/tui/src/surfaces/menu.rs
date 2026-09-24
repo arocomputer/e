@@ -700,66 +700,15 @@ pub fn project_path(label: &str, width: usize) -> Vec<(char, Option<usize>)> {
     let is_dir = label.ends_with('/');
     let path_len = if is_dir { chars.len() - 1 } else { chars.len() };
     let path = &chars[..path_len];
-    let cell = |c: &char| c.width().unwrap_or(0);
-    let vw = |s: &[char]| s.iter().map(cell).sum::<usize>();
     let slash_width = usize::from(is_dir);
-    let indexed = |range: std::ops::Range<usize>| -> Vec<(char, Option<usize>)> {
-        range.map(|i| (chars[i], Some(i))).collect()
-    };
-    // Prefix/suffix of a char range by display width.
-    let prefix_by = |start: usize, end: usize, budget: usize| -> usize {
-        let mut used = 0;
-        let mut taken = start;
-        while taken < end && used + cell(&chars[taken]) <= budget {
-            used += cell(&chars[taken]);
-            taken += 1;
-        }
-        taken - start
-    };
-    let suffix_by = |start: usize, end: usize, budget: usize| -> usize {
-        let mut used = 0;
-        let mut taken = end;
-        while taken > start && used + cell(&chars[taken - 1]) <= budget {
-            used += cell(&chars[taken - 1]);
-            taken -= 1;
-        }
-        end - taken
-    };
-    // One segment, ellipsized to `budget`: middle placement splits evenly,
-    // prefix-biased keeps three quarters of the head.
-    let ellipsized = |start: usize, end: usize, budget: usize, middle: bool| {
-        let mut out: Vec<(char, Option<usize>)> = Vec::new();
-        if budget == 0 || start >= end {
-            return out;
-        }
-        if vw(&chars[start..end]) <= budget {
-            return indexed(start..end);
-        }
-        if budget == 1 {
-            out.push(('…', None));
-            return out;
-        }
-        let content = budget - 1;
-        let (front, back) = if middle {
-            (content.div_ceil(2), content / 2)
-        } else {
-            (content - content / 4, content / 4)
-        };
-        let head = prefix_by(start, end, front);
-        let tail = suffix_by(start, end, back);
-        out.extend(indexed(start..start + head));
-        out.push(('…', None));
-        out.extend(indexed(end - tail..end));
-        out
-    };
     let with_slash = |mut out: Vec<(char, Option<usize>)>| {
         if is_dir {
             out.push(('/', Some(path_len)));
         }
         out
     };
-    if vw(path) + slash_width <= width {
-        return with_slash(indexed(0..path_len));
+    if cells(path) + slash_width <= width {
+        return with_slash(indexed(&chars, 0..path_len));
     }
     let basename_start = path
         .iter()
@@ -770,15 +719,77 @@ pub fn project_path(label: &str, width: usize) -> Vec<(char, Option<usize>)> {
     // prefix-biased (directories keep one cell for their slash).
     if basename_start == 0 || width < 8 {
         let budget = width.saturating_sub(slash_width);
-        return with_slash(ellipsized(basename_start, path_len, budget, false));
+        return with_slash(ellipsized(&chars, basename_start, path_len, budget, false));
     }
     let dirname_end = basename_start - 1;
-    let directory_budget = vw(&chars[..dirname_end]).min((width / 3).clamp(3, 12));
+    let directory_budget = cells(&chars[..dirname_end]).min((width / 3).clamp(3, 12));
     let basename_budget = width - directory_budget - 1 - slash_width;
-    let mut out = ellipsized(0, dirname_end, directory_budget, true);
+    let mut out = ellipsized(&chars, 0, dirname_end, directory_budget, true);
     out.push(('/', Some(dirname_end)));
-    out.extend(ellipsized(basename_start, path_len, basename_budget, false));
+    out.extend(ellipsized(
+        &chars,
+        basename_start,
+        path_len,
+        basename_budget,
+        false,
+    ));
     with_slash(out)
+}
+
+/// Display cells of a char slice.
+fn cells(chars: &[char]) -> usize {
+    chars.iter().map(|c| c.width().unwrap_or(0)).sum()
+}
+
+/// The chars in `range`, each carrying its source index.
+fn indexed(chars: &[char], range: std::ops::Range<usize>) -> Vec<(char, Option<usize>)> {
+    range.map(|i| (chars[i], Some(i))).collect()
+}
+
+/// One path segment `start..end`, ellipsized to `budget` cells: middle
+/// placement splits evenly, prefix-biased keeps three quarters of the head.
+fn ellipsized(
+    chars: &[char],
+    start: usize,
+    end: usize,
+    budget: usize,
+    middle: bool,
+) -> Vec<(char, Option<usize>)> {
+    let mut out: Vec<(char, Option<usize>)> = Vec::new();
+    if budget == 0 || start >= end {
+        return out;
+    }
+    if cells(&chars[start..end]) <= budget {
+        return indexed(chars, start..end);
+    }
+    if budget == 1 {
+        out.push(('…', None));
+        return out;
+    }
+    let content = budget - 1;
+    let (front, back) = if middle {
+        (content.div_ceil(2), content / 2)
+    } else {
+        (content - content / 4, content / 4)
+    };
+    // Prefix and suffix of the segment by display width.
+    let cell = |i: usize| chars[i].width().unwrap_or(0);
+    let mut used = 0;
+    let mut head = start;
+    while head < end && used + cell(head) <= front {
+        used += cell(head);
+        head += 1;
+    }
+    used = 0;
+    let mut tail = end;
+    while tail > start && used + cell(tail - 1) <= back {
+        used += cell(tail - 1);
+        tail -= 1;
+    }
+    out.extend(indexed(chars, start..head));
+    out.push(('…', None));
+    out.extend(indexed(chars, tail..end));
+    out
 }
 
 /// Pick the widest hint variant that fits — the reference degrades its nav
