@@ -223,23 +223,41 @@ struct ProviderEntry {
 #[serde(untagged)]
 enum ModelEntry {
     Id(String),
-    Detailed {
-        id: String,
-        #[serde(default)]
-        context_window: Option<u64>,
-        #[serde(default)]
-        effort: Vec<String>,
-        #[serde(default)]
-        thinking: Option<String>,
-        #[serde(default)]
-        max_output: Option<u64>,
-        #[serde(default)]
-        supports_tools: Option<bool>,
-        #[serde(default)]
-        image_input: Option<bool>,
-        #[serde(default)]
-        pricing: Option<Pricing>,
-    },
+    Detailed(UserModel),
+}
+
+/// One model's own declarations in models.json; anything unset falls back
+/// to its provider entry, then to what the model already had.
+#[derive(Deserialize, Default)]
+struct UserModel {
+    id: String,
+    #[serde(default)]
+    context_window: Option<u64>,
+    #[serde(default)]
+    effort: Vec<String>,
+    #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
+    max_output: Option<u64>,
+    #[serde(default)]
+    supports_tools: Option<bool>,
+    #[serde(default)]
+    image_input: Option<bool>,
+    #[serde(default)]
+    pricing: Option<Pricing>,
+}
+
+impl ModelEntry {
+    /// A bare id declares nothing but itself.
+    fn into_user_model(self) -> UserModel {
+        match self {
+            ModelEntry::Id(id) => UserModel {
+                id,
+                ..UserModel::default()
+            },
+            ModelEntry::Detailed(decl) => decl,
+        }
+    }
 }
 
 /// Configuration problems that caused user-declared providers to be omitted.
@@ -277,11 +295,11 @@ pub fn config_warnings() -> Vec<String> {
             ));
         }
         for model in entry.models {
-            if let ModelEntry::Detailed {
+            if let ModelEntry::Detailed(UserModel {
                 id,
                 thinking: Some(thinking),
                 ..
-            } = model
+            }) = model
             {
                 if Thinking::parse(&thinking).is_none() {
                     warnings.push(format!("models.json: provider {provider}, model {id}: unknown thinking mode `{thinking}`"));
@@ -291,6 +309,7 @@ pub fn config_warnings() -> Vec<String> {
     }
     warnings
 }
+
 /// Built-ins plus `~/.e/models.json` — and the file wins on a name clash,
 /// the same rule as themes: never override what the user declared.
 pub fn catalog() -> Vec<Model> {
@@ -302,211 +321,302 @@ pub fn catalog() -> Vec<Model> {
             modelsdev::apply(model, facts);
         }
     }
-    // Keep the source of a resolved window long enough for the remote overlay
-    // to distinguish a built-in fallback from the user's final value.
-    let mut context_overrides = std::collections::HashSet::new();
-    // Discovery must distinguish an explicit image setting from a default.
-    let mut image_overrides = std::collections::HashMap::new();
-    if let Ok(json) = std::fs::read_to_string(home::home().join("models.json")) {
-        if let Ok(file) = serde_json::from_str::<ModelsFile>(&json) {
-            for (provider, entry) in file.providers {
-                // A partial entry — "correct this one field" — must inherit
-                // the built-in provider's transport and defaults rather than
-                // silently swapping dialect and endpoint. Otherwise tweaking
-                // a context window on an Anthropic model would send that
-                // model's requests (and its credential) to an unrelated
-                // gateway's Chat Completions endpoint.
-                let builtin = crate::providers::registry::find(&provider);
-                let api = match entry.api.as_deref() {
-                    Some(name) => match Api::parse(name) {
-                        Some(api) => api,
-                        // Keep the built-in provider intact; an invalid user
-                        // override is a configuration warning, never a
-                        // process-wide panic.
-                        None => continue,
-                    },
-                    None => builtin.map(|p| p.api()).unwrap_or(Api::Completions),
-                };
-                let catalog_strategy = entry
-                    .catalog
-                    .or_else(|| builtin.map(|provider| provider.catalog))
-                    .unwrap_or_default();
-                let responses_mount = entry
-                    .responses_mount
-                    .or_else(|| builtin.map(|provider| provider.responses_mount))
-                    .unwrap_or_default();
-                let provider_supports_tools = entry
-                    .supports_tools
-                    .or_else(|| builtin.map(|provider| provider.supports_tools))
-                    .unwrap_or(true);
-                let provider_image_input = entry
-                    .image_input
-                    .or_else(|| builtin.map(|provider| provider.image_input))
-                    .unwrap_or(false);
-                let Some(base) = entry
-                    .base_url
-                    .clone()
-                    .or_else(|| builtin.map(|p| p.base_url.clone()))
-                else {
-                    continue;
-                };
-                if let Some(image_input) = entry.image_input {
-                    image_overrides.insert(provider.clone(), image_input);
-                }
-                // Provider fields describe one deployment and apply to its
-                // built-in seed models too — transport, capabilities, and
-                // the defaults (window, output ceiling, effort, thinking,
-                // pricing) alike. Per-model declarations below can still
-                // narrow capabilities without changing what newly
-                // discovered sibling ids inherit.
-                for existing in models.iter_mut().filter(|m| m.provider == provider) {
-                    existing.base_url = base.clone();
-                    existing.api = api;
-                    existing.catalog = catalog_strategy;
-                    existing.responses_mount = responses_mount;
-                    existing.provider_supports_tools = provider_supports_tools;
-                    existing.provider_image_input = provider_image_input;
-                    if let Some(supports_tools) = entry.supports_tools {
-                        existing.supports_tools = supports_tools;
-                    }
-                    if let Some(image_input) = entry.image_input {
-                        existing.image_input = image_input;
-                    }
-                    if let Some(window) = entry.context_window {
-                        existing.context_window = window;
-                        context_overrides.insert((provider.clone(), existing.id.clone()));
-                    }
-                    if let Some(max_output) = entry.max_output {
-                        existing.max_output = Some(max_output);
-                    }
-                    if let Some(effort) = entry.effort.as_ref().filter(|e| !e.is_empty()) {
-                        existing.effort = effort.clone();
-                    }
-                    if let Some(thinking) = entry.thinking.as_deref().and_then(Thinking::parse) {
-                        existing.thinking = thinking;
-                    }
-                    if let Some(pricing) = &entry.pricing {
-                        existing.pricing = Some(pricing.clone());
-                    }
-                }
-                for model in entry.models {
-                    let (
-                        id,
-                        window,
-                        effort,
-                        thinking,
-                        max_output,
-                        supports_tools,
-                        image_input,
-                        pricing,
-                    ) = match model {
-                        ModelEntry::Id(id) => (id, None, Vec::new(), None, None, None, None, None),
-                        ModelEntry::Detailed {
-                            id,
-                            context_window,
-                            effort,
-                            thinking,
-                            max_output,
-                            supports_tools,
-                            image_input,
-                            pricing,
-                        } => (
-                            id,
-                            context_window,
-                            effort,
-                            thinking,
-                            max_output,
-                            supports_tools,
-                            image_input,
-                            pricing,
-                        ),
-                    };
-                    // Inherit the assembled seed, or start a non-seed id from
-                    // its feed facts. Explicit values below win in either case.
-                    let existing = models
-                        .iter()
-                        .find(|m| m.provider == provider && m.id == id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            let mut model = Model {
-                                provider: provider.clone(),
-                                id: id.clone(),
-                                base_url: base.clone(),
-                                api,
-                                catalog: catalog_strategy,
-                                responses_mount,
-                                provider_supports_tools,
-                                provider_image_input,
-                                effort: Vec::new(),
-                                thinking: Thinking::Manual,
-                                context_window: 200_000,
-                                max_output: None,
-                                supports_tools: provider_supports_tools,
-                                image_input: provider_image_input,
-                                pricing: None,
-                            };
-                            if let Some(facts) = facts.get(&(provider.clone(), id.clone())) {
-                                modelsdev::apply(&mut model, facts);
-                            }
-                            model
-                        });
-                    let has_context_override = window.is_some() || entry.context_window.is_some();
-                    let resolved = Model {
-                        provider: provider.clone(),
-                        id,
-                        base_url: base.clone(),
-                        api,
-                        catalog: catalog_strategy,
-                        responses_mount,
-                        provider_supports_tools,
-                        provider_image_input,
-                        effort: match (&entry.effort, &effort) {
-                            // Per-model declaration wins…
-                            (_, e) if !e.is_empty() => e.clone(),
-                            // …then the per-provider default from the file…
-                            (Some(e), _) if !e.is_empty() => e.clone(),
-                            // …then the model's own effort.
-                            _ => existing.effort,
-                        },
-                        thinking: match (&thinking, &entry.thinking) {
-                            (Some(t), _) | (_, Some(t)) => match Thinking::parse(t) {
-                                Some(thinking) => thinking,
-                                // A malformed per-model declaration should
-                                // not make `doctor` or startup unusable.
-                                None => continue,
-                            },
-                            // …then the model's own declaration.
-                            _ => existing.thinking,
-                        },
-                        context_window: window
-                            .or(entry.context_window)
-                            .unwrap_or(existing.context_window),
-                        max_output: max_output.or(entry.max_output).or(existing.max_output),
-                        supports_tools: supports_tools
-                            .or(entry.supports_tools)
-                            .unwrap_or(existing.supports_tools),
-                        image_input: image_input
-                            .or(entry.image_input)
-                            .unwrap_or(existing.image_input),
-                        pricing: pricing
-                            .or_else(|| entry.pricing.clone())
-                            .or(existing.pricing),
-                    };
-                    models.retain(|m| !(m.provider == resolved.provider && m.id == resolved.id));
-                    if has_context_override {
-                        context_overrides.insert((resolved.provider.clone(), resolved.id.clone()));
-                    }
-                    models.push(resolved);
-                }
-            }
+    let mut overrides = Overrides::default();
+    if let Some(file) = models_file() {
+        for (provider, entry) in file.providers {
+            apply_provider(&mut models, &mut overrides, &facts, provider, entry);
         }
     }
     // The overlay runs last so it can attach to user-declared providers too.
     // It adds unclaimed ids (with their feed facts) and replaces seed windows
     // with live reports, but never replaces a context window the user
     // explicitly declared.
-    remote_overlay(&mut models, &context_overrides, &image_overrides, &facts);
+    remote_overlay(&mut models, &overrides.context, &overrides.image, &facts);
     models
+}
+
+/// `~/.e/models.json`, when it exists and parses; `config_warnings` reports
+/// why it doesn't.
+fn models_file() -> Option<ModelsFile> {
+    let json = std::fs::read_to_string(home::home().join("models.json")).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+/// What models.json explicitly declared, for the remote overlay to respect.
+#[derive(Default)]
+struct Overrides {
+    /// Keep the source of a resolved window long enough for the remote
+    /// overlay to distinguish a built-in fallback from the user's final value.
+    context: std::collections::HashSet<(String, String)>,
+    /// Discovery must distinguish an explicit image setting from a default,
+    /// keyed by provider.
+    image: std::collections::HashMap<String, bool>,
+}
+
+/// A provider's transport and provider-wide capabilities, shared by every
+/// model it serves: resolved from a models.json entry, copied from an
+/// assembled model, or read from the registry.
+struct Deployment {
+    base_url: String,
+    api: Api,
+    catalog: crate::providers::registry::CatalogStrategy,
+    responses_mount: crate::providers::registry::ResponsesMount,
+    supports_tools: bool,
+    image_input: bool,
+}
+
+impl Deployment {
+    /// Resolve the entry against the built-in provider of the same name.
+    /// `None` skips the entry: an unknown dialect, or no base URL at all.
+    fn from_entry(provider: &str, entry: &ProviderEntry) -> Option<Self> {
+        // A partial entry — "correct this one field" — must inherit
+        // the built-in provider's transport and defaults rather than
+        // silently swapping dialect and endpoint. Otherwise tweaking
+        // a context window on an Anthropic model would send that
+        // model's requests (and its credential) to an unrelated
+        // gateway's Chat Completions endpoint.
+        let builtin = crate::providers::registry::find(provider);
+        let api = match entry.api.as_deref() {
+            // An unknown dialect skips the entry and keeps the built-in
+            // provider intact; an invalid user override is a configuration
+            // warning, never a process-wide panic.
+            Some(name) => Api::parse(name)?,
+            None => builtin.map(|p| p.api()).unwrap_or(Api::Completions),
+        };
+        let catalog = entry
+            .catalog
+            .or_else(|| builtin.map(|provider| provider.catalog))
+            .unwrap_or_default();
+        let responses_mount = entry
+            .responses_mount
+            .or_else(|| builtin.map(|provider| provider.responses_mount))
+            .unwrap_or_default();
+        let supports_tools = entry
+            .supports_tools
+            .or_else(|| builtin.map(|provider| provider.supports_tools))
+            .unwrap_or(true);
+        let image_input = entry
+            .image_input
+            .or_else(|| builtin.map(|provider| provider.image_input))
+            .unwrap_or(false);
+        let base_url = entry
+            .base_url
+            .clone()
+            .or_else(|| builtin.map(|p| p.base_url.clone()))?;
+        Some(Self {
+            base_url,
+            api,
+            catalog,
+            responses_mount,
+            supports_tools,
+            image_input,
+        })
+    }
+
+    /// The deployment an assembled model already carries (models.json
+    /// overrides included).
+    fn from_model(model: &Model) -> Self {
+        Self {
+            base_url: model.base_url.clone(),
+            api: model.api,
+            catalog: model.catalog,
+            responses_mount: model.responses_mount,
+            supports_tools: model.provider_supports_tools,
+            image_input: model.provider_image_input,
+        }
+    }
+
+    /// A registry provider's own deployment.
+    fn from_builtin(provider: &crate::providers::registry::Provider) -> Self {
+        Self {
+            base_url: provider.base_url.clone(),
+            api: provider.api(),
+            catalog: provider.catalog,
+            responses_mount: provider.responses_mount,
+            supports_tools: provider.supports_tools,
+            image_input: provider.image_input,
+        }
+    }
+
+    /// Point a model at this deployment.
+    fn apply(&self, model: &mut Model) {
+        model.base_url = self.base_url.clone();
+        model.api = self.api;
+        model.catalog = self.catalog;
+        model.responses_mount = self.responses_mount;
+        model.provider_supports_tools = self.supports_tools;
+        model.provider_image_input = self.image_input;
+    }
+
+    /// A model this deployment serves that no seed declares: provider
+    /// defaults, then its feed facts.
+    fn new_model(&self, provider: &str, id: &str, facts: &modelsdev::FactsMap) -> Model {
+        let mut model = Model {
+            provider: provider.to_string(),
+            id: id.to_string(),
+            base_url: self.base_url.clone(),
+            api: self.api,
+            catalog: self.catalog,
+            responses_mount: self.responses_mount,
+            provider_supports_tools: self.supports_tools,
+            provider_image_input: self.image_input,
+            effort: Vec::new(),
+            thinking: Thinking::Manual,
+            context_window: 200_000,
+            max_output: None,
+            supports_tools: self.supports_tools,
+            image_input: self.image_input,
+            pricing: None,
+        };
+        if let Some(facts) = facts.get(&(provider.to_string(), id.to_string())) {
+            modelsdev::apply(&mut model, facts);
+        }
+        model
+    }
+}
+
+/// Fold one models.json provider entry into the catalog: its deployment and
+/// defaults onto the seeds, then each model it declares.
+fn apply_provider(
+    models: &mut Vec<Model>,
+    overrides: &mut Overrides,
+    facts: &modelsdev::FactsMap,
+    provider: String,
+    mut entry: ProviderEntry,
+) {
+    let Some(deployment) = Deployment::from_entry(&provider, &entry) else {
+        return;
+    };
+    if let Some(image_input) = entry.image_input {
+        overrides.image.insert(provider.clone(), image_input);
+    }
+    // Provider fields describe one deployment and apply to its
+    // built-in seed models too — transport, capabilities, and
+    // the defaults (window, output ceiling, effort, thinking,
+    // pricing) alike. Per-model declarations below can still
+    // narrow capabilities without changing what newly
+    // discovered sibling ids inherit.
+    for existing in models.iter_mut().filter(|m| m.provider == provider) {
+        deployment.apply(existing);
+        apply_provider_defaults(existing, &entry);
+        if entry.context_window.is_some() {
+            overrides
+                .context
+                .insert((provider.clone(), existing.id.clone()));
+        }
+    }
+    for declared in std::mem::take(&mut entry.models)
+        .into_iter()
+        .map(ModelEntry::into_user_model)
+    {
+        // Inherit the assembled seed, or start a non-seed id from
+        // its feed facts. Explicit values below win in either case.
+        let existing = models
+            .iter()
+            .find(|m| m.provider == provider && m.id == declared.id)
+            .cloned()
+            .unwrap_or_else(|| deployment.new_model(&provider, &declared.id, facts));
+        let has_context_override =
+            declared.context_window.is_some() || entry.context_window.is_some();
+        let Some(resolved) = declared_model(&provider, &entry, &deployment, declared, existing)
+        else {
+            continue;
+        };
+        models.retain(|m| !(m.provider == resolved.provider && m.id == resolved.id));
+        if has_context_override {
+            overrides
+                .context
+                .insert((resolved.provider.clone(), resolved.id.clone()));
+        }
+        models.push(resolved);
+    }
+}
+
+/// A provider entry's explicit defaults, applied over a seed model.
+fn apply_provider_defaults(model: &mut Model, entry: &ProviderEntry) {
+    if let Some(supports_tools) = entry.supports_tools {
+        model.supports_tools = supports_tools;
+    }
+    if let Some(image_input) = entry.image_input {
+        model.image_input = image_input;
+    }
+    if let Some(window) = entry.context_window {
+        model.context_window = window;
+    }
+    if let Some(max_output) = entry.max_output {
+        model.max_output = Some(max_output);
+    }
+    if let Some(effort) = entry.effort.as_ref().filter(|e| !e.is_empty()) {
+        model.effort = effort.clone();
+    }
+    if let Some(thinking) = entry.thinking.as_deref().and_then(Thinking::parse) {
+        model.thinking = thinking;
+    }
+    if let Some(pricing) = &entry.pricing {
+        model.pricing = Some(pricing.clone());
+    }
+}
+
+/// A declared model: its own values, then the provider entry's, then what
+/// `existing` already had. `None` when the thinking mode it would use is
+/// malformed.
+fn declared_model(
+    provider: &str,
+    entry: &ProviderEntry,
+    deployment: &Deployment,
+    declared: UserModel,
+    existing: Model,
+) -> Option<Model> {
+    let effort = if !declared.effort.is_empty() {
+        // Per-model declaration wins…
+        declared.effort
+    } else {
+        match &entry.effort {
+            // …then the per-provider default from the file…
+            Some(e) if !e.is_empty() => e.clone(),
+            // …then the model's own effort.
+            _ => existing.effort,
+        }
+    };
+    let thinking = match declared.thinking.as_ref().or(entry.thinking.as_ref()) {
+        // A malformed per-model declaration should
+        // not make `doctor` or startup unusable.
+        Some(t) => Thinking::parse(t)?,
+        // …then the model's own declaration.
+        None => existing.thinking,
+    };
+    Some(Model {
+        provider: provider.to_string(),
+        id: declared.id,
+        base_url: deployment.base_url.clone(),
+        api: deployment.api,
+        catalog: deployment.catalog,
+        responses_mount: deployment.responses_mount,
+        provider_supports_tools: deployment.supports_tools,
+        provider_image_input: deployment.image_input,
+        effort,
+        thinking,
+        context_window: declared
+            .context_window
+            .or(entry.context_window)
+            .unwrap_or(existing.context_window),
+        max_output: declared
+            .max_output
+            .or(entry.max_output)
+            .or(existing.max_output),
+        supports_tools: declared
+            .supports_tools
+            .or(entry.supports_tools)
+            .unwrap_or(existing.supports_tools),
+        image_input: declared
+            .image_input
+            .or(entry.image_input)
+            .unwrap_or(existing.image_input),
+        pricing: declared
+            .pricing
+            .or_else(|| entry.pricing.clone())
+            .or(existing.pricing),
+    })
 }
 
 #[derive(Deserialize, Default)]
