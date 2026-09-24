@@ -502,6 +502,12 @@ async fn build_checks_the_home_can_persist_before_any_turn() {
         std::fs::Permissions::from_mode(0o500)
     })
     .unwrap();
+    // Root (CI containers, sandboxes) ignores directory permissions; then
+    // the unwritable home this test pins cannot be injected, so skip.
+    if std::fs::write(sessions.join(".probe"), b"x").is_ok() {
+        eprintln!("skipped: permission-based fault injection is inert for this user");
+        return;
+    }
     let result = Session::builder()
         .home(&home.0)
         .model("mock/test")

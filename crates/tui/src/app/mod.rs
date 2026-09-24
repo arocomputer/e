@@ -87,6 +87,17 @@ struct QueueReview {
     visible: bool,
 }
 
+impl QueueReview {
+    /// Keep the composer's text as the selected entry's draft, marking it
+    /// edited when it changed.
+    fn stash(&mut self, text: String) {
+        if self.entries[self.selected].1 != text {
+            self.entries[self.selected].1 = text;
+            self.dirty[self.selected] = true;
+        }
+    }
+}
+
 /// Asynchronous work landing back in the frame loop.
 enum AppJob {
     /// An input hook's verdict on a submitted line: consume/replace/notice.
@@ -405,9 +416,9 @@ impl App {
     }
 
     /// Queued-prompt review keys, the reference's grammar: ↑ on an empty
-    /// composer while prompts wait opens the newest for editing (queue
-    /// draining pauses); ↑/↓ step older/newer, ↓ past the newest hides the
-    /// draft; Enter commits edits back to the queue and resumes — an empty
+    /// composer while prompts wait opens the newest for editing (the turn
+    /// keeps steering meanwhile); ↑/↓ step older/newer, ↓ past the newest
+    /// hides the draft; Enter commits edits back to the queue — an empty
     /// draft leaves its entry unchanged; Backspace on an emptied draft
     /// deletes the entry. Returns true when the key was consumed.
     fn queue_review_key(&mut self, code: KeyCode) -> bool {
@@ -419,103 +430,129 @@ impl App {
             return false;
         }
         let Some(mut review) = self.queue_review.take() else {
-            if code == KeyCode::Up && self.editor.is_empty() && self.active.is_some() {
-                let entries = self.agent.queue_snapshot();
-                let Some(selected) = entries.len().checked_sub(1) else {
-                    return false;
-                };
-                let dirty = vec![false; entries.len()];
-                self.editor.set_text(&entries[selected].1);
-                self.queue_review = Some(QueueReview {
-                    entries,
-                    dirty,
-                    selected,
-                    visible: true,
-                });
-                return true;
-            }
-            return false;
-        };
-        let stash = |review: &mut QueueReview, text: String| {
-            if review.entries[review.selected].1 != text {
-                review.entries[review.selected].1 = text;
-                review.dirty[review.selected] = true;
-            }
+            return code == KeyCode::Up && self.open_queue_review();
         };
         let consumed = match code {
-            KeyCode::Up => {
-                if review.visible {
-                    stash(&mut review, self.editor.expanded_text());
-                    if review.selected > 0 {
-                        review.selected -= 1;
-                        self.editor.set_text(&review.entries[review.selected].1);
-                    }
-                    true
-                } else if self.editor.is_empty() {
-                    review.visible = true;
-                    self.editor.set_text(&review.entries[review.selected].1);
-                    true
-                } else {
-                    false
-                }
-            }
+            KeyCode::Up => self.review_older(&mut review),
             KeyCode::Down if review.visible => {
-                stash(&mut review, self.editor.expanded_text());
-                if review.selected + 1 < review.entries.len() {
-                    review.selected += 1;
-                    self.editor.set_text(&review.entries[review.selected].1);
-                } else {
-                    self.editor.set_text("");
-                    review.visible = false;
-                }
+                self.review_newer(&mut review);
                 true
             }
             // Enter with the draft hidden and new text typed is a fresh
             // prompt: fall through so the ordinary submit takes it (and
             // closes the review).
             KeyCode::Enter if review.visible || self.editor.is_empty() => {
-                // The visible draft commits only when it holds text — an
-                // emptied draft sends its entry unchanged.
-                if review.visible && !self.editor.is_empty() {
-                    stash(&mut review, self.editor.expanded_text());
-                }
-                if review.dirty.iter().any(|d| *d) {
-                    // Only edited entries rewrite: a trim drops an entry that
-                    // emptied, and leaves untouched entries verbatim — a
-                    // multi-line prompt's trailing newline is not the user's
-                    // doing. An edit to an entry the turn already drained
-                    // lands as a fresh prompt, not a resurrection.
-                    let mut edits = Vec::new();
-                    let mut removed = Vec::new();
-                    for ((key, entry), dirty) in review.entries.iter().zip(&review.dirty) {
-                        if !dirty {
-                            continue;
-                        }
-                        match entry.trim() {
-                            "" => removed.push(*key),
-                            trimmed => edits.push((*key, trimmed.to_string())),
-                        }
-                    }
-                    self.agent.update_queued(edits, removed);
-                }
-                self.editor.set_text("");
+                self.commit_queue_review(review);
                 return true;
             }
             KeyCode::Backspace if review.visible && self.editor.is_empty() => {
-                let (key, _) = review.entries.remove(review.selected);
-                review.dirty.remove(review.selected);
-                self.agent.update_queued(Vec::new(), vec![key]);
+                self.delete_reviewed(&mut review);
+                // Deleting the last entry ends the review.
                 if review.entries.is_empty() {
                     return true;
                 }
-                review.selected = review.selected.min(review.entries.len() - 1);
-                self.editor.set_text(&review.entries[review.selected].1);
                 true
             }
             _ => false,
         };
         self.queue_review = Some(review);
         consumed
+    }
+
+    /// ↑ on an empty composer during a turn with prompts queued: load the
+    /// newest into the composer. False when there is nothing to review.
+    fn open_queue_review(&mut self) -> bool {
+        if !self.editor.is_empty() || self.active.is_none() {
+            return false;
+        }
+        let entries = self.agent.queue_snapshot();
+        let Some(selected) = entries.len().checked_sub(1) else {
+            return false;
+        };
+        let dirty = vec![false; entries.len()];
+        self.editor.set_text(&entries[selected].1);
+        self.queue_review = Some(QueueReview {
+            entries,
+            dirty,
+            selected,
+            visible: true,
+        });
+        true
+    }
+
+    /// ↑ in the review: keep the draft and step to the older entry, or show
+    /// the hidden draft again when the composer is empty.
+    fn review_older(&mut self, review: &mut QueueReview) -> bool {
+        if review.visible {
+            review.stash(self.editor.expanded_text());
+            if review.selected > 0 {
+                review.selected -= 1;
+                self.editor.set_text(&review.entries[review.selected].1);
+            }
+            true
+        } else if self.editor.is_empty() {
+            review.visible = true;
+            self.editor.set_text(&review.entries[review.selected].1);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// ↓ in the review: keep the draft and step to the newer entry, or hide
+    /// the draft past the newest.
+    fn review_newer(&mut self, review: &mut QueueReview) {
+        review.stash(self.editor.expanded_text());
+        if review.selected + 1 < review.entries.len() {
+            review.selected += 1;
+            self.editor.set_text(&review.entries[review.selected].1);
+        } else {
+            self.editor.set_text("");
+            review.visible = false;
+        }
+    }
+
+    /// Enter in the review: write the edited entries back to the queue and
+    /// close the review.
+    fn commit_queue_review(&mut self, mut review: QueueReview) {
+        // The visible draft commits only when it holds text — an
+        // emptied draft sends its entry unchanged.
+        if review.visible && !self.editor.is_empty() {
+            review.stash(self.editor.expanded_text());
+        }
+        if review.dirty.iter().any(|d| *d) {
+            // Only edited entries rewrite: a trim drops an entry that
+            // emptied, and leaves untouched entries verbatim — a
+            // multi-line prompt's trailing newline is not the user's
+            // doing. An edit to an entry the turn already drained
+            // lands as a fresh prompt, not a resurrection.
+            let mut edits = Vec::new();
+            let mut removed = Vec::new();
+            for ((key, entry), dirty) in review.entries.iter().zip(&review.dirty) {
+                if !dirty {
+                    continue;
+                }
+                match entry.trim() {
+                    "" => removed.push(*key),
+                    trimmed => edits.push((*key, trimmed.to_string())),
+                }
+            }
+            self.agent.update_queued(edits, removed);
+        }
+        self.editor.set_text("");
+    }
+
+    /// Backspace on an emptied draft: remove its entry from the queue and
+    /// load the nearest remaining one.
+    fn delete_reviewed(&mut self, review: &mut QueueReview) {
+        let (key, _) = review.entries.remove(review.selected);
+        review.dirty.remove(review.selected);
+        self.agent.update_queued(Vec::new(), vec![key]);
+        if review.entries.is_empty() {
+            return;
+        }
+        review.selected = review.selected.min(review.entries.len() - 1);
+        self.editor.set_text(&review.entries[review.selected].1);
     }
 
     /// Close the review without committing the visible draft. The draft is

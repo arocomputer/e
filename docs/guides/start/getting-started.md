@@ -12,21 +12,21 @@ on ARM64 and x86-64, and works in any directory you trust.
 ## Install
 
 ```sh
-curl -fsSL https://ulo.sh/install.sh | sh
+git clone https://github.com/arocomputer/ulo.git
+cd ulo
+cargo build
 ```
 
-The installer verifies the release for your platform and writes the binary to
-`~/.local/bin`. Run `ulo --version` to print the build you have.
-[Install](install.md) covers package managers, preview channels, and builds
-from source.
+ulo is in development, with public packages paused. This requires the Rust
+toolchain and builds `target/debug/ulo`. [Install](install.md) covers local
+builds and PR previews.
 
 ## Open a project
 
-Start ulo in the directory you want it to work in:
+From the source checkout, start ulo in the project you want it to work in:
 
 ```sh
-cd your-project
-ulo
+./x dev /path/to/your-project
 ```
 
 On the first visit, ulo asks whether you trust the directory. Trust lets ulo load

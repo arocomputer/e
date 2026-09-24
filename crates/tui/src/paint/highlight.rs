@@ -1,15 +1,16 @@
 //! A profile-driven syntax highlighter for code panels.
 //!
-//! Four styles only — keyword, string/number, literal, comment — matching
-//! the reference design's approach: enough color to read code, nothing that
-//! fights the grayscale ramp. Colors come from the active theme's syntax
-//! tokens, so panels stay palette-correct in both light and dark.
+//! Four styles by default — keyword, string/number, literal, comment —
+//! matching the reference design's approach: enough color to read code,
+//! nothing that fights the grayscale ramp. Colors come from the active
+//! theme's syntax tokens, so panels stay palette-correct in both light and
+//! dark; `highlight_block_with_tokens` callers may add function and type ink.
 //!
 //! The reference contract, pinned by tests: a language the profile table
 //! doesn't know renders raw — no generic fallback coloring — and an
-//! unlabeled fence may be inferred from its content (the caller prints the
-//! inferred label). Literals (`true`, `nil`, `None`…) wear the number color,
-//! one step dimmer than keywords.
+//! unlabeled fence renders raw too; nothing infers a language from content.
+//! Literals (`true`, `nil`, `None`…) wear the number color, one step dimmer
+//! than keywords.
 
 use crate::theme::Theme;
 
@@ -671,138 +672,142 @@ fn word_matches(profile: &Profile, words: &[&str], tok: &str) -> bool {
     }
 }
 
+/// Highlight one line of a block, carrying `in_block_comment` across lines.
+/// The scan reads a char slice, never re-slicing the original line: summing
+/// the UTF-8 prefix per char would be an O(n²) stall on long single-line
+/// tool output (minified JSON, log lines).
 fn highlight_one(
     profile: &Profile,
     line: &str,
     in_block_comment: &mut bool,
     ink: [&str; 6],
 ) -> String {
-    let [kw, strn, num, com, function, ty] = ink;
+    let [_, strn, num, com, _, _] = ink;
     let mut out = String::with_capacity(line.len() + 16);
     let chars: Vec<char> = line.chars().collect();
+    let block_start: Vec<char> = profile
+        .block_comment
+        .as_ref()
+        .map(|b| b.start.chars().collect())
+        .unwrap_or_default();
+    let block_end: Vec<char> = profile
+        .block_comment
+        .as_ref()
+        .map(|b| b.end.chars().collect())
+        .unwrap_or_default();
+    let line_markers: Vec<Vec<char>> = profile
+        .line_comments
+        .iter()
+        .map(|marker| marker.chars().collect())
+        .collect();
     let mut i = 0;
     while i < chars.len() {
-        // Inside a block comment: consume to its terminator or line end.
-        if *in_block_comment {
-            let end: Vec<char> = profile
-                .block_comment
-                .as_ref()
-                .map(|b| b.end.chars().collect())
-                .unwrap_or_default();
-            let start = i;
-            let mut closed = false;
-            while i < chars.len() {
-                if !end.is_empty() && chars[i..].starts_with(&end[..]) {
-                    i += end.len();
-                    closed = true;
-                    break;
-                }
-                i += 1;
-            }
-            if closed {
-                *in_block_comment = false;
-            }
-            let tok: String = chars[start..i].iter().collect();
-            push_styled(&mut out, com, &tok);
-            continue;
-        }
+        let start = i;
         let c = chars[i];
-        // A block comment opener (checked before line markers: lua's
-        // `--[[` must win over `--`).
-        if let Some(block) = &profile.block_comment {
-            let start_marker: Vec<char> = block.start.chars().collect();
-            if chars[i..].starts_with(&start_marker[..]) {
-                *in_block_comment = true;
-                let start = i;
-                i += start_marker.len();
-                let end: Vec<char> = block.end.chars().collect();
-                while i < chars.len() {
-                    if chars[i..].starts_with(&end[..]) {
-                        i += end.len();
-                        *in_block_comment = false;
-                        break;
-                    }
-                    i += 1;
-                }
-                let tok: String = chars[start..i].iter().collect();
-                push_styled(&mut out, com, &tok);
-                continue;
-            }
-        }
-        // Comment to end of line. The marker comparison reads the char
-        // slice at i directly — slicing the original line would re-sum the
-        // UTF-8 prefix per char, an O(n²) stall on long single-line tool
-        // output (minified JSON, log lines).
-        if profile.line_comments.iter().any(|marker| {
-            let m: Vec<char> = marker.chars().collect();
-            chars[i..].starts_with(&m[..])
-        }) {
-            let rest: String = chars[i..].iter().collect();
-            push_styled(&mut out, com, &rest);
+        if *in_block_comment {
+            // Inside a block comment: consume to its terminator or line end.
+            i = block_comment_end(&chars, i, &block_end, in_block_comment);
+            push_styled(&mut out, com, &collect(&chars[start..i]));
+        } else if profile.block_comment.is_some() && chars[i..].starts_with(&block_start) {
+            // A block comment opener, checked before line markers: lua's
+            // `--[[` must win over `--`.
+            *in_block_comment = true;
+            i = block_comment_end(&chars, i + block_start.len(), &block_end, in_block_comment);
+            push_styled(&mut out, com, &collect(&chars[start..i]));
+        } else if line_markers.iter().any(|m| chars[i..].starts_with(m)) {
+            // Comment to end of line.
+            push_styled(&mut out, com, &collect(&chars[i..]));
             break;
-        }
-        // Strings, in the profile's own quote set.
-        if profile.quotes.contains(&c) {
-            let quote = c;
-            let start = i;
+        } else if profile.quotes.contains(&c) {
+            // Strings, in the profile's own quote set.
+            i = string_end(&chars, i);
+            push_styled(&mut out, strn, &collect(&chars[start..i]));
+        } else if c.is_ascii_digit() && (i == 0 || !is_word_char(chars[i - 1])) {
+            i = run_end(&chars, i, |c| is_word_char(c) || c == '.');
+            push_styled(&mut out, num, &collect(&chars[start..i]));
+        } else if is_word_char(c) {
+            i = run_end(&chars, i, is_word_char);
+            let tok = collect(&chars[start..i]);
+            push_styled(&mut out, word_style(profile, &tok, &chars[i..], ink), &tok);
+        } else {
+            out.push(c);
             i += 1;
-            while i < chars.len() {
-                if chars[i] == '\\' {
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == quote {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            let tok: String = chars[start..i.min(chars.len())].iter().collect();
-            push_styled(&mut out, strn, &tok);
-            continue;
         }
-        // Numbers.
-        if c.is_ascii_digit() && (i == 0 || !is_word_char(chars[i - 1])) {
-            let start = i;
-            while i < chars.len() && (is_word_char(chars[i]) || chars[i] == '.') {
-                i += 1;
-            }
-            let tok: String = chars[start..i].iter().collect();
-            push_styled(&mut out, num, &tok);
-            continue;
-        }
-        // Words → keywords (accent) or literals (the number gray).
-        if is_word_char(c) {
-            let start = i;
-            while i < chars.len() && is_word_char(chars[i]) {
-                i += 1;
-            }
-            let tok: String = chars[start..i].iter().collect();
-            if !kw.is_empty() && word_matches(profile, profile.keywords, &tok) {
-                push_styled(&mut out, kw, &tok);
-            } else if !num.is_empty() && word_matches(profile, profile.literals, &tok) {
-                push_styled(&mut out, num, &tok);
-            } else if !function.is_empty()
-                && chars[i..].iter().find(|c| !c.is_whitespace()) == Some(&'(')
-            {
-                push_styled(&mut out, function, &tok);
-            } else if !ty.is_empty()
-                && ([
-                    "number", "string", "boolean", "void", "bool", "int", "float", "usize", "isize",
-                ]
-                .contains(&tok.as_str())
-                    || (tok.starts_with(char::is_uppercase) && tok.chars().any(char::is_lowercase)))
-            {
-                push_styled(&mut out, ty, &tok);
-            } else {
-                out.push_str(&tok);
-            }
-            continue;
-        }
-        out.push(c);
-        i += 1;
     }
     out
+}
+
+fn collect(chars: &[char]) -> String {
+    chars.iter().collect()
+}
+
+/// Scan a block comment body from `i` to just past its `end` marker, or to
+/// the line's end while it stays open; clears `in_block_comment` on close.
+fn block_comment_end(
+    chars: &[char],
+    mut i: usize,
+    end: &[char],
+    in_block_comment: &mut bool,
+) -> usize {
+    while i < chars.len() {
+        if !end.is_empty() && chars[i..].starts_with(end) {
+            *in_block_comment = false;
+            return i + end.len();
+        }
+        i += 1;
+    }
+    i
+}
+
+/// Just past the string opened by the quote at `i`: its matching close, or
+/// the line's end. A backslash escapes the next char.
+fn string_end(chars: &[char], mut i: usize) -> usize {
+    let quote = chars[i];
+    i += 1;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if chars[i] == quote {
+            i += 1;
+            break;
+        }
+        i += 1;
+    }
+    i.min(chars.len())
+}
+
+/// The end of the run of chars from `i` that satisfy `part`.
+fn run_end(chars: &[char], mut i: usize, part: impl Fn(char) -> bool) -> usize {
+    while i < chars.len() && part(chars[i]) {
+        i += 1;
+    }
+    i
+}
+
+/// A word's style: keywords, then literals (the number gray), then a call
+/// (`rest` opens with `(`) as a function, then a type name; "" leaves it plain.
+/// A category whose ink is empty never matches.
+fn word_style<'a>(profile: &Profile, tok: &str, rest: &[char], ink: [&'a str; 6]) -> &'a str {
+    let [kw, _, num, _, function, ty] = ink;
+    if !kw.is_empty() && word_matches(profile, profile.keywords, tok) {
+        kw
+    } else if !num.is_empty() && word_matches(profile, profile.literals, tok) {
+        num
+    } else if !function.is_empty() && rest.iter().find(|c| !c.is_whitespace()) == Some(&'(') {
+        function
+    } else if !ty.is_empty()
+        && ([
+            "number", "string", "boolean", "void", "bool", "int", "float", "usize", "isize",
+        ]
+        .contains(&tok)
+            || (tok.starts_with(char::is_uppercase) && tok.chars().any(char::is_lowercase)))
+    {
+        ty
+    } else {
+        ""
+    }
 }
 
 #[cfg(test)]

@@ -71,63 +71,10 @@ pub struct Report {
     pub warnings: Vec<String>,
 }
 
+/// Gather the doctor report: build identity, home and configuration health,
+/// every provider ulo can speak to, and the running extensions.
 pub fn report(host: &crate::extensions::ExtensionHost) -> Report {
-    let credentials = auth::load();
-    let catalog = super::catalog::catalog();
-    let mut providers = Vec::new();
-    for provider in super::registry::all() {
-        let authentication = match credentials.get(&provider.name) {
-            Some(Credential::ApiKey { .. }) => "api_key",
-            Some(Credential::OAuth { .. }) => "oauth",
-            None if provider.auth.none => "none",
-            None => "missing",
-        };
-        providers.push(ProviderDiagnostic {
-            name: provider.name.clone(),
-            display: provider.display.clone(),
-            tier: provider.tier.as_str().into(),
-            dialect: provider.api().as_str().into(),
-            catalog: provider.catalog.as_str().into(),
-            responses_mount: provider.responses_mount.as_str().into(),
-            base_url: safe_base_url(&provider.base_url),
-            authentication: authentication.into(),
-            signed_in: auth::signed_in(&credentials, &provider.name),
-            models: catalog
-                .iter()
-                .filter(|model| model.provider == provider.name)
-                .count(),
-        });
-    }
-    for model in &catalog {
-        if super::registry::find(&model.provider).is_some()
-            || providers
-                .iter()
-                .any(|provider| provider.name == model.provider)
-        {
-            continue;
-        }
-        let authentication = match credentials.get(&model.provider) {
-            Some(Credential::ApiKey { .. }) => "api_key",
-            Some(Credential::OAuth { .. }) => "oauth",
-            None => "missing",
-        };
-        providers.push(ProviderDiagnostic {
-            name: model.provider.clone(),
-            display: model.provider.clone(),
-            tier: "experimental".into(),
-            dialect: model.api.as_str().into(),
-            catalog: model.catalog.as_str().into(),
-            responses_mount: model.responses_mount.as_str().into(),
-            base_url: safe_base_url(&model.base_url),
-            authentication: authentication.into(),
-            signed_in: credentials.contains_key(&model.provider),
-            models: catalog
-                .iter()
-                .filter(|candidate| candidate.provider == model.provider)
-                .count(),
-        });
-    }
-
+    let providers = providers();
     let home = crate::config::home::home();
     Report {
         version: crate::VERSION.into(),
@@ -147,20 +94,7 @@ pub fn report(host: &crate::extensions::ExtensionHost) -> Report {
             stdout_tty: std::io::stdout().is_terminal(),
             term: safe_env("TERM"),
         },
-        configuration: ConfigurationDiagnostic {
-            settings: json_status(
-                &crate::config::home::settings_path(),
-                crate::config::settings::FORMAT_VERSION,
-            ),
-            auth: json_status(
-                &crate::config::home::auth_path(),
-                crate::auth::FORMAT_VERSION,
-            ),
-            trust: json_status(
-                &home.join("trust.json"),
-                crate::config::trust::FORMAT_VERSION,
-            ),
-        },
+        configuration: configuration(&home),
         providers,
         extensions: host
             .diagnostic_status()
@@ -175,6 +109,103 @@ pub fn report(host: &crate::extensions::ExtensionHost) -> Report {
             .into_iter()
             .map(|warning| sanitize_line(&warning))
             .collect(),
+    }
+}
+
+/// Every registry provider, then each provider only models.json declares.
+fn providers() -> Vec<ProviderDiagnostic> {
+    let credentials = auth::load();
+    let catalog = super::catalog::catalog();
+    let mut providers: Vec<ProviderDiagnostic> = super::registry::all()
+        .iter()
+        .map(|provider| registry_provider(provider, &credentials, &catalog))
+        .collect();
+    for model in &catalog {
+        if super::registry::find(&model.provider).is_some()
+            || providers
+                .iter()
+                .any(|provider| provider.name == model.provider)
+        {
+            continue;
+        }
+        providers.push(declared_provider(model, &credentials, &catalog));
+    }
+    providers
+}
+
+/// A provider from the registry, described by its own data.
+fn registry_provider(
+    provider: &super::registry::Provider,
+    credentials: &auth::AuthFile,
+    catalog: &[super::catalog::Model],
+) -> ProviderDiagnostic {
+    let authentication = match credentials.get(&provider.name) {
+        Some(Credential::ApiKey { .. }) => "api_key",
+        Some(Credential::OAuth { .. }) => "oauth",
+        None if provider.auth.none => "none",
+        None => "missing",
+    };
+    ProviderDiagnostic {
+        name: provider.name.clone(),
+        display: provider.display.clone(),
+        tier: provider.tier.as_str().into(),
+        dialect: provider.api().as_str().into(),
+        catalog: provider.catalog.as_str().into(),
+        responses_mount: provider.responses_mount.as_str().into(),
+        base_url: safe_base_url(&provider.base_url),
+        authentication: authentication.into(),
+        signed_in: auth::signed_in(credentials, &provider.name),
+        models: model_count(catalog, &provider.name),
+    }
+}
+
+/// A provider only models.json declares, described by its first model.
+fn declared_provider(
+    model: &super::catalog::Model,
+    credentials: &auth::AuthFile,
+    catalog: &[super::catalog::Model],
+) -> ProviderDiagnostic {
+    let authentication = match credentials.get(&model.provider) {
+        Some(Credential::ApiKey { .. }) => "api_key",
+        Some(Credential::OAuth { .. }) => "oauth",
+        None => "missing",
+    };
+    ProviderDiagnostic {
+        name: model.provider.clone(),
+        display: model.provider.clone(),
+        tier: "experimental".into(),
+        dialect: model.api.as_str().into(),
+        catalog: model.catalog.as_str().into(),
+        responses_mount: model.responses_mount.as_str().into(),
+        base_url: safe_base_url(&model.base_url),
+        authentication: authentication.into(),
+        signed_in: credentials.contains_key(&model.provider),
+        models: model_count(catalog, &model.provider),
+    }
+}
+
+fn model_count(catalog: &[super::catalog::Model], provider: &str) -> usize {
+    catalog
+        .iter()
+        .filter(|model| model.provider == provider)
+        .count()
+}
+
+/// Whether each of the home's JSON files parses at a supported format.
+fn configuration(home: &Path) -> ConfigurationDiagnostic {
+    ConfigurationDiagnostic {
+        settings: json_status(
+            &crate::config::home::settings_path(),
+            crate::config::settings::FORMAT_VERSION,
+        ),
+        auth: json_status(
+            &crate::config::home::auth_path(),
+            crate::auth::FORMAT_VERSION,
+        ),
+        trust: json_status(
+            &home.join("trust.json"),
+            crate::config::trust::FORMAT_VERSION,
+        ),
     }
 }
 

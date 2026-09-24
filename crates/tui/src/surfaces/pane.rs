@@ -117,14 +117,17 @@ pub struct Section {
     horizontal: usize,
     /// Rows painted last frame, for paging and the mouse.
     rows: usize,
-    /// Rows the wrapped content came to last frame (text and markdown),
-    /// so the cursor can travel the whole of it, not just one page.
-    painted: usize,
+    /// The rows the wrapped content came to last frame (text and
+    /// markdown), styled: the cursor travels all of them, not just one
+    /// page, and an attachment takes the ones it selected.
+    wrapped: Vec<String>,
     /// The frame row the section's body started on last frame.
     start: usize,
 }
 
 impl Section {
+    /// A section from its `ui.pane` JSON; `index` names it when it has no id.
+    /// None for an unknown `kind`.
     fn from_json(value: &Value, index: usize) -> Option<Section> {
         let kind = value.get("kind").and_then(Value::as_str)?;
         let body = || {
@@ -139,59 +142,10 @@ impl Section {
                 value
                     .get("items")
                     .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(i, item)| {
-                                let field = |key: &str| {
-                                    item.get(key)
-                                        .and_then(Value::as_str)
-                                        .map(flat)
-                                        .unwrap_or_default()
-                                };
-                                let label = match item.as_str() {
-                                    Some(plain) => flat(plain),
-                                    None => field("label"),
-                                };
-                                let id = match field("id") {
-                                    id if id.is_empty() => {
-                                        if label.is_empty() {
-                                            i.to_string()
-                                        } else {
-                                            label.clone()
-                                        }
-                                    }
-                                    id => id,
-                                };
-                                Item {
-                                    id,
-                                    label,
-                                    detail: field("detail"),
-                                    token: item
-                                        .get("token")
-                                        .and_then(Value::as_str)
-                                        .map(str::to_string),
-                                }
-                            })
-                            .collect()
-                    })
+                    .map(|items| items.iter().enumerate().map(item_of).collect())
                     .unwrap_or_default(),
             ),
-            "diff" => {
-                // The row grammar names the file on its first row; a
-                // section titled with the same name would say it twice.
-                let title = value.get("title").and_then(Value::as_str).map(flat);
-                let rows: Vec<String> = ulo_core::tools::diffview::from_unified(&body())
-                    .lines()
-                    .map(str::to_string)
-                    .collect();
-                let rows = match (&title, rows.first()) {
-                    (Some(title), Some(first)) if first == title => rows[1..].to_vec(),
-                    _ => rows,
-                };
-                Content::Diff(rows)
-            }
+            "diff" => Content::Diff(diff_rows(value, &body())),
             "text" => Content::Text(body()),
             "markdown" => Content::Markdown(body()),
             "rows" => Content::Rows(
@@ -222,7 +176,7 @@ impl Section {
             scroll: 0,
             horizontal: 0,
             rows: 1,
-            painted: 1,
+            wrapped: Vec::new(),
             start: 0,
         };
         if let (Content::List(items), Some(selected)) = (
@@ -244,7 +198,7 @@ impl Section {
             Content::Diff(rows) => rows.len(),
             Content::Rows(rows) => rows.len(),
             // Wrapped at paint time; the row count is remembered then.
-            Content::Text(_) | Content::Markdown(_) => self.painted.max(1),
+            Content::Text(_) | Content::Markdown(_) => self.wrapped.len().max(1),
         }
     }
 
@@ -269,7 +223,7 @@ impl Section {
         self.anchor = old.anchor;
         // A fresh section has not been painted; without the old length the
         // clamp below would send a scrolled text section back to its top.
-        self.painted = old.painted;
+        self.wrapped = old.wrapped.clone();
         if let (Content::List(items), Some(before)) = (&self.content, old.selected()) {
             if let Some(index) = items.iter().position(|item| item.id == before.id) {
                 self.cursor = index;
@@ -289,8 +243,10 @@ impl Section {
         self.scroll = self.scroll.min(last);
     }
 
-    /// The plain text of the rows `lo..=hi`, for an attachment.
-    fn lines(&self, width: usize) -> Vec<String> {
+    /// The plain text of every row, for an attachment; the caller takes
+    /// the selected `lo..=hi` slice. Text and markdown give the rows they
+    /// were painted as, since those are what the cursor and anchor index.
+    fn lines(&self) -> Vec<String> {
         match &self.content {
             Content::List(items) => items
                 .iter()
@@ -307,9 +263,62 @@ impl Section {
                 .iter()
                 .map(|spans| spans.iter().map(|s| s.text.as_str()).collect::<String>())
                 .collect(),
-            Content::Text(text) => wrap_styled(text, width.max(8)),
-            Content::Markdown(text) => text.lines().map(str::to_string).collect(),
+            Content::Text(_) | Content::Markdown(_) => self
+                .wrapped
+                .iter()
+                .map(|row| ulo_core::tools::strip_ansi(row))
+                .collect(),
         }
+    }
+}
+
+/// A list item from JSON: a bare string is its label; an object carries
+/// `label`, `detail`, `token`, and `id`. The id falls back to the label,
+/// then to the item's position `i`.
+fn item_of((i, item): (usize, &Value)) -> Item {
+    let field = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .map(flat)
+            .unwrap_or_default()
+    };
+    let label = match item.as_str() {
+        Some(plain) => flat(plain),
+        None => field("label"),
+    };
+    let id = match field("id") {
+        id if id.is_empty() => {
+            if label.is_empty() {
+                i.to_string()
+            } else {
+                label.clone()
+            }
+        }
+        id => id,
+    };
+    Item {
+        id,
+        label,
+        detail: field("detail"),
+        token: item
+            .get("token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+/// A diff section's unified `body` in ulo's row grammar. The grammar names the
+/// file on its first row; a section titled with the same name would say it
+/// twice, so that row drops.
+fn diff_rows(value: &Value, body: &str) -> Vec<String> {
+    let title = value.get("title").and_then(Value::as_str).map(flat);
+    let rows: Vec<String> = ulo_core::tools::diffview::from_unified(body)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    match (&title, rows.first()) {
+        (Some(title), Some(first)) if first == title => rows[1..].to_vec(),
+        _ => rows,
     }
 }
 
@@ -495,10 +504,10 @@ impl Pane {
     /// Snapshot the selected rows (or the cursor row) for the composer.
     /// The label names the section when it has a title (a file path, say),
     /// else the pane.
-    fn attach(&mut self, width: usize) -> Action {
+    fn attach(&mut self) -> Action {
         let pane_title = self.title.clone();
         let section = self.section();
-        let lines = section.lines(width);
+        let lines = section.lines();
         if lines.is_empty() {
             return Action::None;
         }
@@ -525,7 +534,7 @@ impl Pane {
     }
 
     /// Keys while the pane owns focus. ctrl+c never reaches here.
-    pub fn key(&mut self, key: KeyEvent, width: usize) -> Action {
+    pub fn key(&mut self, key: KeyEvent) -> Action {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let page = self.section().rows.max(1) as isize;
         match key.code {
@@ -559,7 +568,7 @@ impl Pane {
                     }
                     action
                 } else {
-                    self.attach(width)
+                    self.attach()
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => self.step(-1, shift),
@@ -662,8 +671,42 @@ impl Pane {
     /// with its rows, the hint on the last row.
     pub fn render(&mut self, theme: &Theme, width: usize, height: usize) -> Vec<String> {
         let available = height.saturating_sub(5);
-        // Row budget: lists take up to LIST_ROWS, every other section
-        // shares what is left; a section title and a divider cost a row.
+        let each = self.scrolling_rows(available);
+        let mut body: Vec<String> = Vec::new();
+        let focused_index = self.focus;
+        let focused = self.focused;
+        for (index, section) in self.sections.iter_mut().enumerate() {
+            if index > 0 {
+                body.push(theme.fg("border", &"─".repeat(width)));
+            }
+            if !section.title.is_empty() {
+                body.push(theme.fg("dim", &clip_styled(&section.title, width)));
+            }
+            let rows = if section.is_list() {
+                section.len().clamp(1, LIST_ROWS)
+            } else {
+                each.max(1)
+            };
+            let owns = focused && index == focused_index;
+            section.paint(theme, width, rows, owns, &mut body);
+        }
+        if self.clipped {
+            body.push(theme.fg("dim", "… clipped: the pane holds 256 KiB"));
+        }
+        body.truncate(available);
+        body.resize(available, String::new());
+        let header = self.header(theme, width);
+        let mut rows = panel::frame(theme, width, header, body);
+        rows.push(theme.fg("dim", &clip_styled(&self.hint, width)));
+        rows.truncate(height);
+        rows.into_iter()
+            .map(|row| clip_styled(&row, width))
+            .collect()
+    }
+
+    /// Row budget: lists take up to LIST_ROWS, every other section shares
+    /// what is left of `available`; a section title and a divider cost a row.
+    fn scrolling_rows(&self, available: usize) -> usize {
         let count = self.sections.len();
         let chrome: usize = self
             .sections
@@ -680,135 +723,129 @@ impl Pane {
             .map(|s| s.len().clamp(1, LIST_ROWS))
             .sum();
         let scrolling = self.sections.iter().filter(|s| !s.is_list()).count();
-        let each = body_rows
+        body_rows
             .saturating_sub(list_rows)
             .checked_div(scrolling)
-            .unwrap_or(0);
+            .unwrap_or(0)
+    }
 
-        let mut body: Vec<String> = Vec::new();
-        let focused_index = self.focus;
-        let focused = self.focused;
-        for (index, section) in self.sections.iter_mut().enumerate() {
-            if index > 0 {
-                body.push(theme.fg("border", &"─".repeat(width)));
-            }
-            if !section.title.is_empty() {
-                body.push(theme.fg("dim", &clip_styled(&section.title, width)));
-            }
-            let rows = if section.is_list() {
-                section.len().clamp(1, LIST_ROWS)
-            } else {
-                each.max(1)
-            };
-            section.rows = rows;
-            section.start = 3 + body.len();
-            let owns = focused && index == focused_index;
-            let painted = match &section.content {
-                Content::List(items) => {
-                    let selected = section.cursor;
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| {
-                            let detail = &item.detail;
-                            let label = clip_styled(
-                                &item.label,
-                                width.saturating_sub(visible_width(detail) + 1),
-                            );
-                            let pad =
-                                width.saturating_sub(visible_width(&label) + visible_width(detail));
-                            let label = if i == selected {
-                                bold(&theme.fg("userMessageText", &label))
-                            } else {
-                                theme.fg(item.token.as_deref().unwrap_or("dim"), &label)
-                            };
-                            let detail = theme.fg("dim", detail);
-                            format!("{label}{}{detail}", " ".repeat(pad))
-                        })
-                        .collect::<Vec<_>>()
-                }
-                Content::Diff(rows) => rows
-                    .iter()
-                    .map(|line| {
-                        diff_row_style(theme, line)
-                            .unwrap_or_else(|| theme.fg("customMessageText", line))
-                    })
-                    .collect(),
-                Content::Text(text) => wrap_styled(text, width.max(8)),
-                Content::Markdown(text) => render_markdown(theme, text, width.max(8)),
-                Content::Rows(rows) => rows
-                    .iter()
-                    .map(|spans| paint_spans(theme, spans, width))
-                    .collect(),
-            };
-            // Wrapped kinds learn their length at paint time.
-            if matches!(section.content, Content::Text(_) | Content::Markdown(_)) {
-                let len = painted.len().max(1);
-                section.cursor = section.cursor.min(len - 1);
-                section.scroll = section.scroll.min(len - 1);
-            }
-            if section.cursor < section.scroll {
-                section.scroll = section.cursor;
-            }
-            if section.cursor >= section.scroll + rows {
-                section.scroll = section.cursor + 1 - rows;
-            }
-            let range = section
-                .anchor
-                .map(|a| (a.min(section.cursor), a.max(section.cursor)));
-            let mut shown = 0;
-            for (i, row) in painted.iter().enumerate().skip(section.scroll).take(rows) {
-                let mut text = if section.horizontal > 0 && !section.is_list() {
-                    let skipped: String = ulo_core::tools::strip_ansi(row)
-                        .chars()
-                        .skip(section.horizontal)
-                        .collect();
-                    theme.fg("dim", &skipped)
-                } else {
-                    row.clone()
-                };
-                text = clip_styled(&text, width);
-                if range.is_some_and(|(lo, hi)| i >= lo && i <= hi) {
-                    text = format!("\x1b[7m{text}\x1b[27m");
-                } else if owns && !section.is_list() && i == section.cursor {
-                    text = bold(&text);
-                }
-                body.push(text);
-                shown += 1;
-            }
-            for _ in shown..rows {
-                body.push(String::new());
-            }
-            // Text and markdown keep their painted length for paging.
-            if matches!(section.content, Content::Text(_) | Content::Markdown(_)) {
-                section.painted = painted.len().max(1);
-            }
-        }
-        if self.clipped {
-            body.push(theme.fg("dim", "… clipped: the pane holds 256 KiB"));
-        }
-        body.truncate(available);
-        body.resize(available, String::new());
+    /// The title row with a `×` close button at the right edge (its column
+    /// is remembered for the mouse), bright while the pane has focus.
+    fn header(&mut self, theme: &Theme, width: usize) -> String {
         let title = clip_styled(&self.title, width.saturating_sub(2));
         let header = format!(
             "{title}{}×",
             " ".repeat(width.saturating_sub(visible_width(&title) + 1))
         );
         self.close_column = width.saturating_sub(1);
-        let header = theme.fg(
+        theme.fg(
             if self.focused {
                 "userMessageText"
             } else {
                 "dim"
             },
             &header,
-        );
-        let mut rows = panel::frame(theme, width, header, body);
-        rows.push(theme.fg("dim", &clip_styled(&self.hint, width)));
-        rows.truncate(height);
-        rows.into_iter()
-            .map(|row| clip_styled(&row, width))
-            .collect()
+        )
+    }
+}
+
+impl Section {
+    /// Paint this section's window of `rows` rows onto `body`, blank-padded,
+    /// remembering where it landed for the mouse and paging. The window
+    /// follows the cursor; the selection paints in reverse video, and the
+    /// cursor row of a focused (`owns`) non-list section in bold.
+    fn paint(
+        &mut self,
+        theme: &Theme,
+        width: usize,
+        rows: usize,
+        owns: bool,
+        body: &mut Vec<String>,
+    ) {
+        self.rows = rows;
+        self.start = 3 + body.len();
+        let painted = self.paint_content(theme, width);
+        let wrapped = matches!(self.content, Content::Text(_) | Content::Markdown(_));
+        // Wrapped kinds learn their length at paint time.
+        if wrapped {
+            let len = painted.len().max(1);
+            self.cursor = self.cursor.min(len - 1);
+            self.scroll = self.scroll.min(len - 1);
+        }
+        if self.cursor < self.scroll {
+            self.scroll = self.cursor;
+        }
+        if self.cursor >= self.scroll + rows {
+            self.scroll = self.cursor + 1 - rows;
+        }
+        let range = self
+            .anchor
+            .map(|a| (a.min(self.cursor), a.max(self.cursor)));
+        let mut shown = 0;
+        for (i, row) in painted.iter().enumerate().skip(self.scroll).take(rows) {
+            let mut text = if self.horizontal > 0 && !self.is_list() {
+                let skipped: String = ulo_core::tools::strip_ansi(row)
+                    .chars()
+                    .skip(self.horizontal)
+                    .collect();
+                theme.fg("dim", &skipped)
+            } else {
+                row.clone()
+            };
+            text = clip_styled(&text, width);
+            if range.is_some_and(|(lo, hi)| i >= lo && i <= hi) {
+                text = format!("\x1b[7m{text}\x1b[27m");
+            } else if owns && !self.is_list() && i == self.cursor {
+                text = bold(&text);
+            }
+            body.push(text);
+            shown += 1;
+        }
+        for _ in shown..rows {
+            body.push(String::new());
+        }
+        // Text and markdown keep their painted rows for paging and
+        // attaching.
+        if wrapped {
+            self.wrapped = painted;
+        }
+    }
+
+    /// Every row of the content, styled at `width`, before windowing. A list
+    /// row brightens the selected label and right-aligns its dim detail.
+    fn paint_content(&self, theme: &Theme, width: usize) -> Vec<String> {
+        match &self.content {
+            Content::List(items) => items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    let detail = &item.detail;
+                    let label =
+                        clip_styled(&item.label, width.saturating_sub(visible_width(detail) + 1));
+                    let pad = width.saturating_sub(visible_width(&label) + visible_width(detail));
+                    let label = if i == self.cursor {
+                        bold(&theme.fg("userMessageText", &label))
+                    } else {
+                        theme.fg(item.token.as_deref().unwrap_or("dim"), &label)
+                    };
+                    let detail = theme.fg("dim", detail);
+                    format!("{label}{}{detail}", " ".repeat(pad))
+                })
+                .collect(),
+            Content::Diff(rows) => rows
+                .iter()
+                .map(|line| {
+                    diff_row_style(theme, line)
+                        .unwrap_or_else(|| theme.fg("customMessageText", line))
+                })
+                .collect(),
+            Content::Text(text) => wrap_styled(text, width.max(8)),
+            Content::Markdown(text) => render_markdown(theme, text, width.max(8)),
+            Content::Rows(rows) => rows
+                .iter()
+                .map(|spans| paint_spans(theme, spans, width))
+                .collect(),
+        }
     }
 }
 
@@ -842,28 +879,24 @@ mod tests {
     fn moving_through_a_list_reports_the_selection_and_enter_moves_on() {
         let mut pane = pane();
         assert_eq!(
-            pane.key(key(KeyCode::Down), 40),
+            pane.key(key(KeyCode::Down)),
             Action::Select {
                 section: "files".into(),
                 id: "b.rs".into()
             }
         );
+        assert_eq!(pane.key(key(KeyCode::Down)), Action::None, "already last");
         assert_eq!(
-            pane.key(key(KeyCode::Down), 40),
-            Action::None,
-            "already last"
-        );
-        assert_eq!(
-            pane.key(key(KeyCode::Enter), 40),
+            pane.key(key(KeyCode::Enter)),
             Action::Activate {
                 section: "files".into(),
                 id: "b.rs".into()
             }
         );
         assert_eq!(pane.focus, 1, "Enter on a list focuses the next section");
-        assert_eq!(pane.key(key(KeyCode::Esc), 40), Action::None);
+        assert_eq!(pane.key(key(KeyCode::Esc)), Action::None);
         assert_eq!(pane.focus, 0, "Esc returns to the first section");
-        assert_eq!(pane.key(key(KeyCode::Esc), 40), Action::Close);
+        assert_eq!(pane.key(key(KeyCode::Esc)), Action::Close);
     }
 
     #[test]
@@ -874,12 +907,12 @@ mod tests {
         pane.render(&theme, 40, 20);
         for _ in 0..2 {
             assert_eq!(
-                pane.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT), 40),
+                pane.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT)),
                 Action::None
             );
         }
         assert_eq!(pane.sections[1].anchor, Some(0));
-        let Action::Attach { label, content } = pane.key(key(KeyCode::Enter), 40) else {
+        let Action::Attach { label, content } = pane.key(key(KeyCode::Enter)) else {
             panic!("expected an attachment");
         };
         // The file row, the context row, and the removed row.
@@ -895,10 +928,55 @@ mod tests {
         assert!(!pane.focused, "attaching hands focus back to the composer");
     }
 
+    /// The last painted row of a one-section pane, attached from the end.
+    fn attach_last_row(kind: &str, body: &str, width: usize) -> (String, Vec<String>) {
+        let mut pane = Pane::from_request(
+            "notes",
+            &json!({"id": "notes", "title": "Notes", "sections": [{"kind": kind, "body": body}]}),
+        )
+        .unwrap();
+        pane.focused = true;
+        let theme = crate::theme::resolve("dark", false);
+        pane.render(&theme, width, 30);
+        pane.key(key(KeyCode::End));
+        let Action::Attach { content, .. } = pane.key(key(KeyCode::Enter)) else {
+            panic!("expected an attachment");
+        };
+        let rows = pane.sections[0]
+            .wrapped
+            .iter()
+            .map(|row| ulo_core::tools::strip_ansi(row))
+            .collect();
+        (content, rows)
+    }
+
+    #[test]
+    fn a_markdown_attachment_takes_the_rendered_row_under_the_cursor() {
+        // The cursor walks rendered rows; the source has fewer lines than
+        // the paragraph wraps to, so a source-line attachment would take
+        // the wrong text.
+        let body = "# Notes\n\nalpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+        let (content, rows) = attach_last_row("markdown", body, 24);
+        let last = rows.last().unwrap();
+        assert!(rows.len() > body.lines().count(), "{rows:?}");
+        assert_eq!(content, format!("From the Notes pane:\n{last}"));
+    }
+
+    #[test]
+    fn a_text_attachment_wraps_at_the_pane_width() {
+        let body = "one two three four five six seven eight nine ten eleven twelve";
+        let (content, rows) = attach_last_row("text", body, 20);
+        assert_eq!(rows, wrap_styled(body, 20));
+        assert_eq!(
+            content,
+            format!("From the Notes pane:\n{}", rows.last().unwrap())
+        );
+    }
+
     #[test]
     fn an_update_keeps_the_cursor_on_the_same_item_and_a_missing_id_resets() {
         let mut pane = pane();
-        pane.key(key(KeyCode::Down), 40);
+        pane.key(key(KeyCode::Down));
         let fresh = Pane::from_request(
             "diff",
             &json!({"id": "diff", "sections": [
@@ -928,10 +1006,7 @@ mod tests {
     #[test]
     fn unknown_keys_go_to_the_owner_and_the_split_obeys_the_layout() {
         let mut pane = pane();
-        assert_eq!(
-            pane.key(key(KeyCode::Char('x')), 40),
-            Action::Key("x".into())
-        );
+        assert_eq!(pane.key(key(KeyCode::Char('x'))), Action::Key("x".into()));
         let layout = ulo_core::config::layout::parse(
             r#"{"panes":{"diff":{"side":"right","width":30}},"split_min":100}"#,
         )
@@ -989,7 +1064,7 @@ mod tests {
         // is one row tall.
         pane.render(&theme, 40, 12);
         for _ in 0..30 {
-            pane.key(key(KeyCode::Down), 40);
+            pane.key(key(KeyCode::Down));
         }
         let plain: Vec<String> = pane
             .render(&theme, 40, 12)

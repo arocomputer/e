@@ -10,13 +10,14 @@
 
 use std::collections::VecDeque;
 use std::future::{Future, IntoFuture};
+use std::ops::ControlFlow::{self, Break, Continue};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::Stream;
 
-use ulo_core::agent::SessionEvent;
+use ulo_core::agent::{SessionEvent, ToolCallPresentation};
 use ulo_core::providers::catalog::Pricing;
 use ulo_core::providers::{ChatMessage, Usage};
 use ulo_core::tools::{OutputStream, ToolOutcome};
@@ -307,22 +308,7 @@ impl<'s> Turn<'s> {
                 Some(Event::Text(delta))
             }
             SessionEvent::ReasoningDelta(delta) => Some(Event::Reasoning(delta)),
-            SessionEvent::ToolBatchStart { calls } => {
-                self.reply.tools.calls += calls.len() as u64;
-                self.announced.extend(calls.iter().map(|call| call.id));
-                self.unended.extend(calls.iter().map(|call| call.id));
-                // One announcement per call keeps the stream flat; the
-                // batch boundary is visible as the run of `ToolCall`s
-                // before the first `ToolStart`.
-                let mut announced = calls.into_iter().map(|call| Event::ToolCall {
-                    id: call.id,
-                    name: call.name,
-                    arguments: call.arguments,
-                });
-                let first = announced.next();
-                self.pending_events.extend(announced);
-                first
-            }
+            SessionEvent::ToolBatchStart { calls } => self.announce(calls),
             SessionEvent::ToolStart { id } => Some(Event::ToolStart { id }),
             SessionEvent::ToolOutput { id, stream, chunk } => {
                 Some(Event::ToolOutput { id, stream, chunk })
@@ -371,30 +357,15 @@ impl<'s> Turn<'s> {
                 reason,
             } => {
                 let reason = format!("{}: {reason}", cause.label());
-                self.reply.warnings.push(format!(
-                    "{reason} — retrying ({attempt}/{limit}) in {delay_secs}s"
-                ));
-                Some(Event::Retry {
-                    attempt,
-                    limit,
-                    delay: Duration::from_secs(delay_secs),
-                    reason,
-                })
+                Some(self.warn_retry(attempt, limit, delay_secs, reason))
             }
             SessionEvent::Steered(text) => Some(Event::Steered(text)),
             SessionEvent::Discarded(texts) => Some(Event::Discarded(texts)),
             SessionEvent::Named(name) => Some(Event::Named(name)),
-            SessionEvent::Warning(warning) => {
-                self.reply.warnings.push(warning.clone());
-                Some(Event::Warning(warning))
-            }
-            SessionEvent::SleepStopped { duration_secs } => {
-                let warning = format!(
-                    "the process slept for {duration_secs}s; the turn stopped with its partial work committed"
-                );
-                self.reply.warnings.push(warning.clone());
-                Some(Event::Warning(warning))
-            }
+            SessionEvent::Warning(warning) => Some(self.warn(warning)),
+            SessionEvent::SleepStopped { duration_secs } => Some(self.warn(format!(
+                "the process slept for {duration_secs}s; the turn stopped with its partial work committed"
+            ))),
             SessionEvent::Error(message) => {
                 self.error = Some(message);
                 None
@@ -403,18 +374,7 @@ impl<'s> Turn<'s> {
             // the session's private sidecar; the message is the contract.
             SessionEvent::ErrorDetails(_) => None,
             SessionEvent::TurnEnd { aborted } => {
-                // Calls cancelled before they ran produce no `ToolEnd`: the
-                // batch was announced, so they belong in this turn's failure
-                // count, settled here once so a late detached event can
-                // never double-count one.
-                self.reply.tools.failures += self.unended.len() as u64;
-                self.unended.clear();
-                self.reply.stop = if aborted {
-                    Stop::Cancelled
-                } else {
-                    Stop::Complete
-                };
-                self.state = State::Done;
+                self.end(aborted);
                 None
             }
             SessionEvent::TurnStart
@@ -422,6 +382,144 @@ impl<'s> Turn<'s> {
             | SessionEvent::Recovered { .. }
             | SessionEvent::Slept { .. }
             | SessionEvent::Instructions { .. } => None,
+        }
+    }
+
+    /// Count a tool batch and announce it. One announcement per call keeps
+    /// the stream flat; the batch boundary is visible as the run of
+    /// `ToolCall`s before the first `ToolStart`. The first is returned, the
+    /// rest queue behind it.
+    fn announce(&mut self, calls: Vec<ToolCallPresentation>) -> Option<Event> {
+        self.reply.tools.calls += calls.len() as u64;
+        self.announced.extend(calls.iter().map(|call| call.id));
+        self.unended.extend(calls.iter().map(|call| call.id));
+        let mut announced = calls.into_iter().map(|call| Event::ToolCall {
+            id: call.id,
+            name: call.name,
+            arguments: call.arguments,
+        });
+        let first = announced.next();
+        self.pending_events.extend(announced);
+        first
+    }
+
+    /// Record a retry among the reply's warnings and report it.
+    fn warn_retry(&mut self, attempt: u32, limit: u32, delay_secs: u64, reason: String) -> Event {
+        self.reply.warnings.push(format!(
+            "{reason} — retrying ({attempt}/{limit}) in {delay_secs}s"
+        ));
+        Event::Retry {
+            attempt,
+            limit,
+            delay: Duration::from_secs(delay_secs),
+            reason,
+        }
+    }
+
+    /// Record a warning in the reply and report it.
+    fn warn(&mut self, warning: String) -> Event {
+        self.reply.warnings.push(warning.clone());
+        Event::Warning(warning)
+    }
+
+    /// Close the turn at `TurnEnd`. Calls cancelled before they ran produce
+    /// no `ToolEnd`: the batch was announced, so they belong in this turn's
+    /// failure count, settled here once so a late detached event can never
+    /// double-count one.
+    fn end(&mut self, aborted: bool) {
+        self.reply.tools.failures += self.unended.len() as u64;
+        self.unended.clear();
+        self.reply.stop = if aborted {
+            Stop::Cancelled
+        } else {
+            Stop::Complete
+        };
+        self.state = State::Done;
+    }
+
+    /// Before the turn is sent: drain a dropped turn's tail, run a deferred
+    /// clear, hand out startup notices, then start. `Break` is what
+    /// `poll_next` returns; `Continue` polls again.
+    fn poll_start(&mut self, cx: &mut Context<'_>) -> ControlFlow<Poll<Option<Event>>> {
+        // A dropped turn's tail comes first: the core will not
+        // start a new turn while it still counts the old one as
+        // running, so drain to its `TurnEnd`.
+        if self.session.stale {
+            match self.session.events.poll_recv(cx) {
+                Poll::Ready(Some(SessionEvent::TurnEnd { .. })) => {
+                    self.session.stale = false;
+                }
+                Poll::Ready(Some(_)) => {}
+                Poll::Ready(None) => {
+                    if std::mem::take(&mut self.session.pending_clear) {
+                        self.session.reset_agent();
+                    }
+                    self.error = Some(CLOSED.into());
+                    self.state = State::Done;
+                }
+                Poll::Pending => return Break(Poll::Pending),
+            }
+            return Continue(());
+        }
+        // A clear deferred out of a dropped turn's final commits
+        // runs once the tail is drained: the prompt and the reset
+        // share this section, so nothing can commit after it.
+        if std::mem::take(&mut self.session.pending_clear) {
+            self.session.reset_agent();
+        }
+        // Extension startup diagnostics predate the turn, so they
+        // come out before it begins.
+        if let Some(notice) = self.session.startup_notices.pop_front() {
+            return Break(Poll::Ready(Some(Event::Notice(notice))));
+        }
+        let State::Pending(start) = std::mem::replace(&mut self.state, State::Running) else {
+            return Continue(());
+        };
+        self.start(start);
+        Continue(())
+    }
+
+    /// While the turn runs: the next core event this turn owns, else an
+    /// extension notice. `Break` is what `poll_next` returns; `Continue`
+    /// polls again.
+    fn poll_running(&mut self, cx: &mut Context<'_>) -> ControlFlow<Poll<Option<Event>>> {
+        match self.session.events.poll_recv(cx) {
+            Poll::Ready(Some(event)) => {
+                // A tool event for a call this turn never
+                // announced is a cancelled turn's detached task
+                // reporting late; it belongs to an earlier
+                // reply, not this one's stats.
+                let late = matches!(
+                    &event,
+                    SessionEvent::ToolStart { id }
+                    | SessionEvent::ToolOutput { id, .. }
+                    | SessionEvent::ToolEnd { id, .. }
+                        if !self.announced.contains(id)
+                );
+                if late {
+                    return Continue(());
+                }
+                match self.observe(event) {
+                    Some(event) => Break(Poll::Ready(Some(event))),
+                    None => Continue(()),
+                }
+            }
+            Poll::Ready(None) => {
+                self.error = Some(CLOSED.into());
+                self.state = State::Done;
+                Continue(())
+            }
+            // Extension notices fill the gaps between core events,
+            // never displace one: the core stream keeps its order
+            // and a chatty extension cannot starve model output.
+            Poll::Pending => {
+                if let Some(notices) = self.session.notices.as_mut() {
+                    if let Poll::Ready(Some(notice)) = notices.poll_recv(cx) {
+                        return Break(Poll::Ready(Some(Event::Notice(notice))));
+                    }
+                }
+                Break(Poll::Pending)
+            }
         }
     }
 }
@@ -434,84 +532,13 @@ impl Stream for Turn<'_> {
             if let Some(event) = self.pending_events.pop_front() {
                 return Poll::Ready(Some(event));
             }
-            match self.state {
+            let step = match self.state {
                 State::Done => return Poll::Ready(None),
-                State::Pending(_) => {
-                    // A dropped turn's tail comes first: the core will not
-                    // start a new turn while it still counts the old one as
-                    // running, so drain to its `TurnEnd`.
-                    if self.session.stale {
-                        match self.session.events.poll_recv(cx) {
-                            Poll::Ready(Some(SessionEvent::TurnEnd { .. })) => {
-                                self.session.stale = false;
-                            }
-                            Poll::Ready(Some(_)) => continue,
-                            Poll::Ready(None) => {
-                                if std::mem::take(&mut self.session.pending_clear) {
-                                    self.session.reset_agent();
-                                }
-                                self.error = Some(CLOSED.into());
-                                self.state = State::Done;
-                            }
-                            Poll::Pending => return Poll::Pending,
-                        }
-                        continue;
-                    }
-                    // A clear deferred out of a dropped turn's final commits
-                    // runs once the tail is drained: the prompt and the reset
-                    // share this section, so nothing can commit after it.
-                    if std::mem::take(&mut self.session.pending_clear) {
-                        self.session.reset_agent();
-                    }
-                    // Extension startup diagnostics predate the turn, so they
-                    // come out before it begins.
-                    if let Some(notice) = self.session.startup_notices.pop_front() {
-                        return Poll::Ready(Some(Event::Notice(notice)));
-                    }
-                    let State::Pending(start) = std::mem::replace(&mut self.state, State::Running)
-                    else {
-                        continue;
-                    };
-                    self.start(start);
-                }
-                State::Running => {
-                    match self.session.events.poll_recv(cx) {
-                        Poll::Ready(Some(event)) => {
-                            // A tool event for a call this turn never
-                            // announced is a cancelled turn's detached task
-                            // reporting late; it belongs to an earlier
-                            // reply, not this one's stats.
-                            let late = matches!(
-                                &event,
-                                SessionEvent::ToolStart { id }
-                                | SessionEvent::ToolOutput { id, .. }
-                                | SessionEvent::ToolEnd { id, .. }
-                                    if !self.announced.contains(id)
-                            );
-                            if late {
-                                continue;
-                            }
-                            if let Some(event) = self.observe(event) {
-                                return Poll::Ready(Some(event));
-                            }
-                        }
-                        Poll::Ready(None) => {
-                            self.error = Some(CLOSED.into());
-                            self.state = State::Done;
-                        }
-                        // Extension notices fill the gaps between core events,
-                        // never displace one: the core stream keeps its order
-                        // and a chatty extension cannot starve model output.
-                        Poll::Pending => {
-                            if let Some(notices) = self.session.notices.as_mut() {
-                                if let Poll::Ready(Some(notice)) = notices.poll_recv(cx) {
-                                    return Poll::Ready(Some(Event::Notice(notice)));
-                                }
-                            }
-                            return Poll::Pending;
-                        }
-                    }
-                }
+                State::Pending(_) => self.poll_start(cx),
+                State::Running => self.poll_running(cx),
+            };
+            if let Break(poll) = step {
+                return poll;
             }
         }
     }

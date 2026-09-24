@@ -19,21 +19,15 @@
 
 ### Installation
 
+ulo is in development. Public releases and package-manager distributions are
+paused. Build and run this checkout with the Rust toolchain:
+
 ```sh
-# macOS and Linux
-curl -fsSL https://ulo.sh/install.sh | sh
+git clone https://github.com/arocomputer/ulo.git
+cd ulo
+./x dev /path/to/project
 ```
 
-Or download a binary from the [latest release](https://github.com/arocomputer/ulo/releases/latest):
-
-| Platform | Download |
-| --- | --- |
-| macOS · Apple Silicon | [ARM64](https://github.com/arocomputer/ulo/releases/latest/download/ulo-aarch64-apple-darwin.tar.gz) |
-| macOS · Intel | [x86-64](https://github.com/arocomputer/ulo/releases/latest/download/ulo-x86_64-apple-darwin.tar.gz) |
-| Linux · ARM64 | [ARM64](https://github.com/arocomputer/ulo/releases/latest/download/ulo-aarch64-unknown-linux-gnu.tar.gz) |
-| Linux · x86-64 | [x86-64](https://github.com/arocomputer/ulo/releases/latest/download/ulo-x86_64-unknown-linux-gnu.tar.gz) |
-
-[Checksums](https://github.com/arocomputer/ulo/releases/latest/download/checksums.txt) ·
 [Installation guide](docs/guides/start/install.md)
 
 ### Usage

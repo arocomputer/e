@@ -48,8 +48,8 @@ installer's exact bytes. No email credentials are needed for local checks.
 
 ## Browser review
 
-Inspect desktop and 390px layouts. Check the wordmark, mobile menu, four
-installer methods, arrow-key selection, copy feedback, FAQ, and footer.
+Inspect desktop and 390px layouts. Check the wordmark, mobile menu,
+development notice, source-build link, FAQ, and footer.
 Check docs navigation, search results and empty states, code copy, section
 anchors, and keyboard focus restoration. The sidebar must reach its final
 item at short viewport heights without scrolling the page behind it.
@@ -72,4 +72,4 @@ wordmark or share-card layout.
 
 Published stable GitHub releases supply `/changelog`. Drafts, prereleases,
 and `Unreleased` stay hidden. A failed refresh retains the last good cached
-list for up to a day, then uses the bundled first-release entry.
+list for up to a day. With no available releases, the page points to source builds.

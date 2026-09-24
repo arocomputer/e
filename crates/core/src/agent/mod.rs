@@ -53,6 +53,9 @@ fn clone_request(r: &Request) -> Request {
     }
 }
 
+/// Why a compaction left history as it was because the user cancelled it.
+const COMPACTION_CANCELLED: &str = "compaction cancelled; history was preserved";
+
 /// Build and install a checkpoint without exposing a partial history swap.
 /// Cancellation stops the provider request; failed summaries leave the log intact.
 async fn compact_log(
@@ -73,14 +76,14 @@ async fn compact_log(
     }
     tokio::select! {
         biased;
-        _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+        _ = wait_cancelled(cancel) => return Err(COMPACTION_CANCELLED.into()),
         _ = log.events.send(SessionEvent::Compacting) => {}
     }
     // Reserve completion capacity before doing work or changing history.
     // Once installed, the checkpoint can then be published without an await.
     let completion = tokio::select! {
         biased;
-        _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+        _ = wait_cancelled(cancel) => return Err(COMPACTION_CANCELLED.into()),
         result = log.events.reserve() => result.map_err(|_| "session event receiver closed; history was preserved".to_string())?,
     };
     let session_id = log
@@ -93,20 +96,56 @@ async fn compact_log(
     if let Some(h) = host {
         h.event("compact_start", serde_json::json!({})).await;
     }
-    let summary = tokio::select! {
-        result = compact::summarize(log.model.clone(), &older, session_id, focus.as_deref()) => result?,
-        _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+    let summary = summarize_older(log, &older, session_id, cancel, host, focus).await?;
+    let mut projected = vec![ChatMessage::user(compact::seed(&summary.text))];
+    projected.extend(kept.iter().cloned());
+    let tokens = compact::estimate_request_tokens(system, &projected);
+    if tokens >= compact::estimate_request_tokens(system, &history)
+        || compact::should_compact(tokens, log.model.context_window)
+    {
+        return Err("compaction did not reduce context enough; history was preserved".into());
+    }
+    if cancel.load(Ordering::SeqCst) {
+        return Err(COMPACTION_CANCELLED.into());
+    }
+    install_checkpoint(log, &summary, kept, history, cancel).await?;
+    if let Some(h) = host {
+        h.event("compact_end", serde_json::json!({"summary": summary.text}))
+            .await;
+    }
+    completion.send(SessionEvent::Compacted {
+        summary: summary.text,
+        context_tokens: tokens,
+        response: summary.response,
+        pricing: log.model.pricing.clone(),
+    });
+    Ok(true)
+}
+
+/// Summarize the older messages, then let a `compact_summary` hook rewrite
+/// the text, warning when the stored summary lacks expected sections. Esc
+/// abandons either step.
+async fn summarize_older(
+    log: &TurnLog,
+    older: &[ChatMessage],
+    session_id: String,
+    cancel: &AtomicBool,
+    host: Option<&Arc<crate::extensions::ExtensionHost>>,
+    focus: Option<String>,
+) -> Result<compact::Summary, String> {
+    let mut summary = tokio::select! {
+        result = compact::summarize(log.model.clone(), older, session_id, focus.as_deref()) => result?,
+        _ = wait_cancelled(cancel) => return Err(COMPACTION_CANCELLED.into()),
     };
     // Extensions get the last word on the summary, not the history: the
     // hook is bounded and fails open, so a silent one changes nothing.
-    let mut summary = summary;
     if let Some(h) = host.filter(|h| h.has_hook("compact_summary")) {
         let rewritten = {
             let hook = h.hook_compact_summary(&summary.text);
             tokio::pin!(hook);
             tokio::select! {
                 text = &mut hook => text,
-                _ = wait_cancelled(cancel) => return Err("compaction cancelled; history was preserved".into()),
+                _ = wait_cancelled(cancel) => return Err(COMPACTION_CANCELLED.into()),
             }
         };
         if let Some(text) = rewritten {
@@ -124,17 +163,19 @@ async fn compact_log(
             )))
             .await;
     }
-    let mut projected = vec![ChatMessage::user(compact::seed(&summary.text))];
-    projected.extend(kept.iter().cloned());
-    let tokens = compact::estimate_request_tokens(system, &projected);
-    if tokens >= compact::estimate_request_tokens(system, &history)
-        || compact::should_compact(tokens, log.model.context_window)
-    {
-        return Err("compaction did not reduce context enough; history was preserved".into());
-    }
-    if cancel.load(Ordering::SeqCst) {
-        return Err("compaction cancelled; history was preserved".into());
-    }
+    Ok(summary)
+}
+
+/// Swap the checkpoint into the log on a blocking thread. It installs only
+/// if history still matches the snapshot it was built from and the save
+/// succeeds; otherwise history stays as it was.
+async fn install_checkpoint(
+    log: &TurnLog,
+    summary: &compact::Summary,
+    kept: Vec<ChatMessage>,
+    history: Vec<ChatMessage>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<(), String> {
     let writer = log.clone();
     let checkpoint = summary.text.clone();
     let response = summary.response.clone();
@@ -152,21 +193,11 @@ async fn compact_log(
     .map_err(|error| format!("compaction commit failed: {error}"))?;
     if !installed {
         if cancel.load(Ordering::SeqCst) {
-            return Err("compaction cancelled; history was preserved".into());
+            return Err(COMPACTION_CANCELLED.into());
         }
         return Err("compaction could not be installed; history changed or could not be saved; history was preserved".into());
     }
-    if let Some(h) = host {
-        h.event("compact_end", serde_json::json!({"summary": summary.text}))
-            .await;
-    }
-    completion.send(SessionEvent::Compacted {
-        summary: summary.text,
-        context_tokens: tokens,
-        response: summary.response,
-        pricing: log.model.pricing.clone(),
-    });
-    Ok(true)
+    Ok(())
 }
 
 /// Resolve when Esc (or any interrupt) has been requested. Polled on a short
@@ -187,6 +218,52 @@ async fn sleep_cancellable(delay: Duration, cancel: &AtomicBool) -> bool {
         _ = tokio::time::sleep(delay) => true,
         _ = wait_cancelled(cancel) => false,
     }
+}
+
+/// Supervise one run on the runtime: its heartbeat, its workers (the first
+/// runs `compact_only`; a continuation compacts only when no prompt is
+/// waiting), and the `turn_end` event once the run settles.
+fn spawn_supervisor(context: turn::Context, compact_only: bool) -> tokio::task::JoinHandle<()> {
+    // The heartbeat belongs to the supervisor too. If the turn worker
+    // panics, it is stopped instead of leaking into later turns.
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let heartbeat = tokio::spawn(wake::heartbeat(
+        context.wake.clone(),
+        heartbeat_stop.clone(),
+        Duration::from_secs(1),
+    ));
+    let events = context.events.clone();
+    let host = context.host.clone();
+    let pending = context.pending.clone();
+    let compact_requested = context.compact_requested.clone();
+    let mut first_worker = true;
+    let spawn_worker = move || {
+        let compact_only = if first_worker {
+            compact_only
+        } else {
+            context
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .items
+                .is_empty()
+        };
+        first_worker = false;
+        tokio::spawn(crate::config::home::scope(
+            context.log.home.clone(),
+            turn::run(context.clone(), compact_only),
+        ))
+    };
+    tokio::spawn(async move {
+        let aborted = supervise_turn(spawn_worker, events, pending, compact_requested).await;
+        heartbeat_stop.store(true, Ordering::SeqCst);
+        heartbeat.abort();
+        let _ = heartbeat.await;
+        if let Some(h) = &host {
+            h.event("turn_end", serde_json::json!({"aborted": aborted}))
+                .await;
+        }
+    })
 }
 
 /// Own completion and the submission race. A prompt arriving before the
@@ -920,26 +997,19 @@ impl Agent {
         self.start(system, true);
     }
 
+    /// Run a turn (or, with `compact_only`, just a checkpoint) under a fresh
+    /// cancellation token. The supervisor owns the run from here.
     fn start(&mut self, system: String, compact_only: bool) {
         // A detached task retains its turn's permanently cancelled token.
         self.cancel = Arc::new(AtomicBool::new(false));
-        let log = self.log();
-        let events = self.events.clone();
-        let history = self.history.clone();
+        let context = self.turn_context(system);
+        self.turn_task = Some(spawn_supervisor(context, compact_only));
+    }
 
-        let cancel = self.cancel.clone();
+    /// Everything the turn's workers share, captured now: later model or
+    /// option changes apply to the next turn, not this one.
+    fn turn_context(&self, system: String) -> turn::Context {
         let model = self.model.clone();
-        let cwd = self.cwd.clone();
-        let effort = self.effort();
-        let pending = self.pending.clone();
-        let host = self.host.clone();
-        let tool_seq = self.tool_seq.clone();
-        let active_tools = self.active_tools.clone();
-        let wake = self.wake.clone();
-        let compact_requested = self.compact_requested.clone();
-        let compact_focus = self.compact_focus.clone();
-        let instructions_loaded = self.instructions_loaded.clone();
-        let tool_runtime = self.tools.clone();
         let tool_mode = if model.supports_tools {
             self.options.tool_mode
         } else {
@@ -959,75 +1029,27 @@ impl Agent {
                 (ToolMode::All, None) => system,
             }
         });
-
-        // The heartbeat belongs to the supervisor too. If the turn worker
-        // panics, it is stopped instead of leaking into later turns.
-        let heartbeat_stop = Arc::new(AtomicBool::new(false));
-        let heartbeat = tokio::spawn(wake::heartbeat(
-            wake.clone(),
-            heartbeat_stop.clone(),
-            Duration::from_secs(1),
-        ));
-        let lifecycle_events = events.clone();
-        let lifecycle_host = host.clone();
-        let lifecycle_pending = pending.clone();
-        let lifecycle_compact = compact_requested.clone();
-        let context = turn::Context {
-            log,
-            events,
-            history,
-            cancel,
+        turn::Context {
+            log: self.log(),
+            events: self.events.clone(),
+            history: self.history.clone(),
+            cancel: self.cancel.clone(),
             model,
-            cwd,
-            effort,
-            pending,
-            host,
-            tool_seq,
-            active_tools,
-            wake,
+            cwd: self.cwd.clone(),
+            effort: self.effort(),
+            pending: self.pending.clone(),
+            host: self.host.clone(),
+            tool_seq: self.tool_seq.clone(),
+            active_tools: self.active_tools.clone(),
+            wake: self.wake.clone(),
             system,
             allowed_tools,
-            compact_requested,
-            compact_focus,
-            instructions_loaded,
-            tool_runtime,
+            compact_requested: self.compact_requested.clone(),
+            compact_focus: self.compact_focus.clone(),
+            instructions_loaded: self.instructions_loaded.clone(),
+            tool_runtime: self.tools.clone(),
             tool_mode,
-        };
-        let mut first_worker = true;
-        let spawn_worker = move || {
-            let compact_only = if first_worker {
-                compact_only
-            } else {
-                context
-                    .pending
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .items
-                    .is_empty()
-            };
-            first_worker = false;
-            tokio::spawn(crate::config::home::scope(
-                context.log.home.clone(),
-                turn::run(context.clone(), compact_only),
-            ))
-        };
-        let turn_task = tokio::spawn(async move {
-            let aborted = supervise_turn(
-                spawn_worker,
-                lifecycle_events,
-                lifecycle_pending,
-                lifecycle_compact,
-            )
-            .await;
-            heartbeat_stop.store(true, Ordering::SeqCst);
-            heartbeat.abort();
-            let _ = heartbeat.await;
-            if let Some(h) = &lifecycle_host {
-                h.event("turn_end", serde_json::json!({"aborted": aborted}))
-                    .await;
-            }
-        });
-        self.turn_task = Some(turn_task);
+        }
     }
 
     pub fn interrupt(&mut self) {
@@ -1041,8 +1063,8 @@ impl Drop for Agent {
     }
 }
 
-/// Dispatch one tool call: extension hooks may block it, an extension that
-/// owns the name serves it, otherwise the built-in runs on a blocking thread.
+/// What one tool call runs with: the policy that may refuse it, the host
+/// that may guard or serve it, and where its output goes.
 struct ToolRunContext {
     tools: Arc<tools::ToolRuntime>,
     host: Option<std::sync::Arc<crate::extensions::ExtensionHost>>,
@@ -1058,159 +1080,190 @@ struct ToolRunContext {
     events: mpsc::Sender<SessionEvent>,
 }
 
+/// Dispatch one tool call: the turn's policy or extension hooks may block
+/// it, an extension that owns the name serves it, otherwise the built-in
+/// runs on a blocking thread.
 async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools::ToolOutput {
+    if let Some(refused) = refusal(&context, name) {
+        return refused;
+    }
+    // Hooks still guard allowlisted built-ins, but an extension cannot replace
+    // one by claiming the same name.
+    let builtins_only = context.allowed_tools.is_some();
+    if let (ToolMode::All, Some(h)) = (context.tool_mode, &context.host) {
+        if let Some(stopped) = hook_tool_call(h, name, arguments, &context.cancel).await {
+            return stopped;
+        }
+        if !builtins_only && h.owns_tool(name) {
+            return run_extension_tool(h, name, arguments, &context).await;
+        }
+    }
+    run_builtin(context, name, arguments).await
+}
+
+/// Why this call cannot run at all, checked before any hook sees it: an
+/// extension narrowed the toolset, the turn was cancelled, tools are off, or
+/// the request's allowlist leaves the name out.
+fn refusal(context: &ToolRunContext, name: &str) -> Option<tools::ToolOutput> {
+    let blocked = |content: String| tool_output(content, tools::ToolOutcome::Blocked, "blocked");
+    if let Some(active) = &context.active_tools {
+        if !active.iter().any(|a| a == name) && !tools::always_available(name) {
+            return Some(blocked(format!(
+                "tool {name} is not active right now — an extension narrowed the toolset"
+            )));
+        }
+    }
+    if context.cancel.load(Ordering::SeqCst) {
+        return Some(tool_output(
+            "tool cancelled before execution".into(),
+            tools::ToolOutcome::Cancelled,
+            "cancelled",
+        ));
+    }
+    if !context.tool_mode.allows() {
+        return Some(blocked(format!("tool blocked by no-tools mode: {name}")));
+    }
+    // Enforce the request's list at execution too. The advertised schemas are
+    // not a security boundary because a provider can still emit any tool name.
+    if let Some(allowed) = &context.allowed_tools {
+        if !allowed.iter().any(|a| a == name) && !tools::always_available(name) {
+            return Some(blocked(format!(
+                "tool blocked by the request's tool allowlist: {name}"
+            )));
+        }
+    }
+    None
+}
+
+/// Run the extensions' `tool_call` hooks. Some output means the call ends
+/// here: a hook blocked it or the turn was cancelled while they ran.
+async fn hook_tool_call(
+    h: &crate::extensions::ExtensionHost,
+    name: &str,
+    arguments: &str,
+    cancel: &AtomicBool,
+) -> Option<tools::ToolOutput> {
+    // The hook chain is bounded per extension, but Esc must not wait out
+    // even one silent hook's timeout: race it against the cancel flag.
+    // Dropping the hook future also drops its pending-map entry.
+    let hook = h.hook_tool_call(name, arguments);
+    tokio::pin!(hook);
+    let blocked = tokio::select! {
+        verdict = &mut hook => verdict,
+        _ = wait_cancelled(cancel) => {
+            return Some(tool_output(
+                "tool cancelled".into(),
+                tools::ToolOutcome::Cancelled,
+                "cancelled",
+            ));
+        }
+    };
+    blocked.map(|reason| {
+        tool_output(
+            format!("Tool call blocked by extension: {reason}"),
+            tools::ToolOutcome::Blocked,
+            "blocked",
+        )
+    })
+}
+
+/// Call the extension that owns `name`, streaming its progress as tool
+/// output, and shape its result into a tool row.
+async fn run_extension_tool(
+    h: &crate::extensions::ExtensionHost,
+    name: &str,
+    arguments: &str,
+    context: &ToolRunContext,
+) -> tools::ToolOutput {
+    let (events, id) = (&context.events, context.id);
+    let (progress, mut updates) = mpsc::channel(64);
+    let call = h.call_tool_streaming(name, arguments, progress);
+    tokio::pin!(call);
+    let result = loop {
+        tokio::select! {
+            result = &mut call => break result,
+            update = updates.recv() => {
+                if let Some(update) = update {
+                    forward_extension_update(events, id, update).await;
+                }
+            }
+            _ = wait_cancelled(&context.cancel) => {
+                return tool_output(
+                    "extension tool cancelled".into(),
+                    tools::ToolOutcome::Cancelled,
+                    "cancelled",
+                );
+            }
+        }
+    };
+    // The response and the last queued update can become ready in
+    // the same select tick. Preserve wire order by draining every
+    // update the host accepted before publishing the final result.
+    while let Ok(update) = updates.try_recv() {
+        forward_extension_update(events, id, update).await;
+    }
+    // An extension tool may name the session as a side effect; the
+    // UI applies it on SessionEvent::Named.
+    if let Some(new_name) = result.session_name.clone() {
+        let _ = events.send(SessionEvent::Named(new_name)).await;
+    }
+    extension_output(result, &context.tools)
+}
+
+/// An extension tool's result as a tool row. The row and the viewer take
+/// the extension's shape when it gives one; the model still reads `content`
+/// alone. A diff body is converted to the reference row grammar here so the
+/// viewer paints it like a built-in edit's.
+fn extension_output(
+    result: crate::extensions::ToolResult,
+    tool_runtime: &tools::ToolRuntime,
+) -> tools::ToolOutput {
+    let outcome = if result.is_error {
+        tools::ToolOutcome::Failed
+    } else {
+        tools::ToolOutcome::Completed
+    };
+    let summary = result
+        .summary
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| tools::sanitize_display(&s))
+        .unwrap_or_else(|| {
+            if outcome.is_error() {
+                "error".into()
+            } else {
+                "done".into()
+            }
+        });
+    // `display` is the extension's text for the viewer: sanitized
+    // like the summary, so a control sequence paints as characters.
+    let display = match (result.format, result.display) {
+        (crate::extensions::Format::Diff, body) => {
+            let rows = tools::diffview::from_unified(&tools::sanitize_display(
+                body.as_deref().unwrap_or(&result.content),
+            ));
+            (!rows.is_empty()).then(|| tools::truncate(rows))
+        }
+        (_, Some(body)) => Some(tools::truncate(tools::sanitize_display(&body))),
+        (_, None) => None,
+    };
+    tools::ToolOutput {
+        content: tool_runtime.cap(result.content),
+        outcome,
+        summary,
+        display,
+    }
+}
+
+/// Run a built-in tool on a blocking thread, previewing its live output.
+async fn run_builtin(context: ToolRunContext, name: &str, arguments: &str) -> tools::ToolOutput {
     let ToolRunContext {
         tools: tool_runtime,
-        host,
-        tool_mode,
-        allowed_tools,
-        active_tools,
         cwd,
         cancel,
         id,
         events,
+        ..
     } = context;
-    if let Some(active) = &active_tools {
-        if !active.iter().any(|a| a == name) && !tools::always_available(name) {
-            return tools::ToolOutput {
-                content: format!(
-                    "tool {name} is not active right now — an extension narrowed the toolset"
-                ),
-                outcome: tools::ToolOutcome::Blocked,
-                summary: "blocked".into(),
-                display: None,
-            };
-        }
-    }
-    if cancel.load(Ordering::SeqCst) {
-        return tools::ToolOutput {
-            content: "tool cancelled before execution".into(),
-            outcome: tools::ToolOutcome::Cancelled,
-            summary: "cancelled".into(),
-            display: None,
-        };
-    }
-    if !tool_mode.allows() {
-        return tools::ToolOutput {
-            content: format!("tool blocked by no-tools mode: {name}"),
-            outcome: tools::ToolOutcome::Blocked,
-            summary: "blocked".into(),
-            display: None,
-        };
-    }
-    // Enforce the request's list at execution too. The advertised schemas are
-    // not a security boundary because a provider can still emit any tool name.
-    if let Some(allowed) = &allowed_tools {
-        if !allowed.iter().any(|a| a == name) && !tools::always_available(name) {
-            return tools::ToolOutput {
-                content: format!("tool blocked by the request's tool allowlist: {name}"),
-                outcome: tools::ToolOutcome::Blocked,
-                summary: "blocked".into(),
-                display: None,
-            };
-        }
-    }
-    // Hooks still guard allowlisted built-ins, but an extension cannot replace
-    // one by claiming the same name.
-    let builtins_only = allowed_tools.is_some();
-    if let (ToolMode::All, Some(h)) = (tool_mode, &host) {
-        // The hook chain is bounded per extension, but Esc must not wait out
-        // even one silent hook's timeout: race it against the cancel flag.
-        // Dropping the hook future also drops its pending-map entry.
-        let hook = h.hook_tool_call(name, arguments);
-        tokio::pin!(hook);
-        let blocked = tokio::select! {
-            verdict = &mut hook => verdict,
-            _ = wait_cancelled(&cancel) => {
-                return tools::ToolOutput {
-                    content: "tool cancelled".into(),
-                    outcome: tools::ToolOutcome::Cancelled,
-                    summary: "cancelled".into(),
-                    display: None,
-                };
-            }
-        };
-        if let Some(reason) = blocked {
-            return tools::ToolOutput {
-                content: format!("Tool call blocked by extension: {reason}"),
-                outcome: tools::ToolOutcome::Blocked,
-                summary: "blocked".into(),
-                display: None,
-            };
-        }
-        if !builtins_only && h.owns_tool(name) {
-            let (progress, mut updates) = mpsc::channel(64);
-            let call = h.call_tool_streaming(name, arguments, progress);
-            tokio::pin!(call);
-            let result = loop {
-                tokio::select! {
-                    result = &mut call => break result,
-                    update = updates.recv() => {
-                        if let Some(update) = update {
-                            forward_extension_update(&events, id, update).await;
-                        }
-                    }
-                    _ = wait_cancelled(&cancel) => {
-                        return tools::ToolOutput {
-                            content: "extension tool cancelled".into(),
-                            outcome: tools::ToolOutcome::Cancelled,
-                            summary: "cancelled".into(),
-                            display: None,
-                        };
-                    }
-                }
-            };
-            // The response and the last queued update can become ready in
-            // the same select tick. Preserve wire order by draining every
-            // update the host accepted before publishing the final result.
-            while let Ok(update) = updates.try_recv() {
-                forward_extension_update(&events, id, update).await;
-            }
-            // An extension tool may name the session as a side effect; the
-            // UI applies it on SessionEvent::Named.
-            if let Some(new_name) = result.session_name.clone() {
-                let _ = events.send(SessionEvent::Named(new_name)).await;
-            }
-            let outcome = if result.is_error {
-                tools::ToolOutcome::Failed
-            } else {
-                tools::ToolOutcome::Completed
-            };
-            // The row and the viewer take the extension's shape when it
-            // gives one; the model still reads `content` alone. A diff
-            // body is converted to the reference row grammar here so the
-            // viewer paints it like a built-in edit's.
-            let summary = result
-                .summary
-                .filter(|s| !s.trim().is_empty())
-                .map(|s| tools::sanitize_display(&s))
-                .unwrap_or_else(|| {
-                    if outcome.is_error() {
-                        "error".into()
-                    } else {
-                        "done".into()
-                    }
-                });
-            // `display` is the extension's text for the viewer: sanitized
-            // like the summary, so a control sequence paints as characters.
-            let display = match (result.format, result.display) {
-                (crate::extensions::Format::Diff, body) => {
-                    let rows = tools::diffview::from_unified(&tools::sanitize_display(
-                        body.as_deref().unwrap_or(&result.content),
-                    ));
-                    (!rows.is_empty()).then(|| tools::truncate(rows))
-                }
-                (_, Some(body)) => Some(tools::truncate(tools::sanitize_display(&body))),
-                (_, None) => None,
-            };
-            return tools::ToolOutput {
-                content: tool_runtime.cap(result.content),
-                outcome,
-                summary,
-                display,
-            };
-        }
-    }
     let name = name.to_string();
     let arguments = arguments.to_string();
     tokio::task::spawn_blocking(move || {
@@ -1225,12 +1278,21 @@ async fn run_tool(context: ToolRunContext, name: &str, arguments: &str) -> tools
         })
     })
     .await
-    .unwrap_or(tools::ToolOutput {
-        content: "tool panicked".into(),
-        outcome: tools::ToolOutcome::Failed,
-        summary: "error".into(),
+    .unwrap_or(tool_output(
+        "tool panicked".into(),
+        tools::ToolOutcome::Failed,
+        "error",
+    ))
+}
+
+/// A tool row with no viewer body of its own.
+fn tool_output(content: String, outcome: tools::ToolOutcome, summary: &str) -> tools::ToolOutput {
+    tools::ToolOutput {
+        content,
+        outcome,
+        summary: summary.into(),
         display: None,
-    })
+    }
 }
 
 async fn forward_extension_update(

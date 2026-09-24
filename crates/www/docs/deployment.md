@@ -22,10 +22,11 @@ traffic. See [contact delivery](contact.md).
 
 ## Cutover
 
-Publish the renamed CLI release before redirecting the old product domain.
+The product is in development; the website points to source builds instead
+of public packages. Redirect the old product domain to that website.
 `src/worker.ts` supports the old host, including prefixed bookmarks, but it
 does not take ownership of that hostname on a routine deploy. Move the old
-host only after the installer works, then remove its domain route from the
+host only after the new website is live, then remove its domain route from the
 old repository's Wrangler configuration so a later Aro deploy cannot take it back.
 
 The repository-wide [migration checklist](../../../contributing/migration.md)

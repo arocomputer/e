@@ -6,17 +6,12 @@
 import Ulo from "@/sites/ulo/layouts/Ulo.astro";
 import SiteFrame from "@/sites/ulo/components/SiteFrame.astro";
 import ReleaseText from "@/sites/ulo/components/ReleaseText.astro";
-import {
-  cachedReleases,
-  groups,
-  type Release,
-} from "@/sites/ulo/data/releases";
-import firstRelease from "@/sites/ulo/data/first-release.json";
+import { cachedReleases, groups } from "@/sites/ulo/data/releases";
 import "@/sites/ulo/styles/changelog.css";
 
 export const prerender = false;
 
-const releases = await cachedReleases([firstRelease as Release]);
+const releases = await cachedReleases([]);
 const date = new Intl.DateTimeFormat("en-US", {
   month: "long",
   day: "numeric",
@@ -37,6 +32,15 @@ Astro.response.headers.set(
 >
   <SiteFrame>
     <article class="ulo-changelog">
+      {releases.length === 0 && (
+        <section>
+          <h1>In development</h1>
+          <p>
+            There are no public releases available.{" "}
+            <a href="/docs/install">Build from source</a> to try ulo.
+          </p>
+        </section>
+      )}
       {releases.map((release, index) => {
         const id = `v${release.version.replaceAll(".", "-")}`;
         const url = release.url;

@@ -18,6 +18,7 @@ use crate::markdown::visible_width;
 use crate::render::{self, bold};
 use crate::theme::Theme;
 use ulo_core::auth::{self};
+use ulo_core::providers::registry::{self, Provider};
 
 pub enum AuthStage {
     /// The method choice; `selected` indexes the two options. The root:
@@ -40,6 +41,17 @@ pub enum AuthStage {
         message: String,
         back: BackTarget,
     },
+}
+
+/// The row Up (`up`) or Down moves to in a list of `len` rows, wrapping at
+/// either end.
+pub fn step(selected: usize, len: usize, up: bool) -> usize {
+    let len = len.max(1);
+    if up {
+        (selected + len - 1) % len
+    } else {
+        (selected + 1) % len
+    }
 }
 
 /// Where a finished flow returns: the list it belongs to, selection preserved.
@@ -94,127 +106,29 @@ pub(crate) fn choice_row(
     row
 }
 
+/// The panel's rows for `stage`. `mask_count` is the masked key's length
+/// in the API-key entry.
 pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize) -> Vec<String> {
     let dim = |s: &str| theme.fg("dim", s);
     match stage {
-        AuthStage::Choose { selected } => vec![
-            String::new(),
-            dim("   Sign in"),
-            String::new(),
-            choice_row(
-                theme,
-                *selected == 0,
-                "Sign in with an account",
-                "subscription — opens the browser",
-                width,
-            ),
-            choice_row(
-                theme,
-                *selected == 1,
-                "Sign in with an API key",
-                if ulo_core::CHANNEL == "production" {
-                    "stored in ~/.ulo/auth.json"
-                } else {
-                    "stored in this channel's auth.json"
-                },
-                width,
-            ),
-            String::new(),
-            dim("   ↑↓ Choose · Enter Continue · Esc Cancel"),
-        ],
-        AuthStage::Account { selected } => {
-            let mut rows = vec![
-                String::new(),
-                dim("   Sign in with an account"),
-                String::new(),
-            ];
-            let auth = auth::load();
-            for (i, provider) in ulo_core::providers::registry::oauth_providers()
-                .iter()
-                .enumerate()
-            {
-                let connected = auth::signed_in(&auth, &provider.name);
-                let description = if connected {
-                    "signed in"
-                } else {
-                    &provider.auth.oauth_hint
-                };
-                rows.push(choice_row(
-                    theme,
-                    *selected == i,
-                    &provider.display,
-                    description,
-                    width,
-                ));
-            }
-            rows.push(String::new());
-            rows.push(dim(&format!(
-                "   ↑↓ Choose · Enter Continue · {} Back · Esc Close",
-                render::backspace_label(),
-            )));
-            rows
-        }
-        AuthStage::Key { selected } => {
-            let mut rows = vec![
-                String::new(),
-                dim("   Sign in with an API key"),
-                String::new(),
-            ];
-            let auth = auth::load();
-            for (i, provider) in ulo_core::providers::registry::key_providers()
-                .iter()
-                .enumerate()
-            {
-                let connected = auth::signed_in(&auth, &provider.name);
-                let description = if connected {
-                    "signed in"
-                } else {
-                    &provider.auth.key_hint
-                };
-                rows.push(choice_row(
-                    theme,
-                    *selected == i,
-                    &provider.display,
-                    description,
-                    width,
-                ));
-            }
-            rows.push(String::new());
-            rows.push(dim(&format!(
-                "   ↑↓ Choose · Enter Continue · {} Back · Esc Close",
-                render::backspace_label(),
-            )));
-            rows
-        }
-        AuthStage::ApiKey { provider } => {
-            let entry = if mask_count == 0 {
-                format!(
-                    "{}{}",
-                    bold(&theme.fg("userMessageText", "   ┃ ")),
-                    dim("Paste or type a key")
-                )
-            } else {
-                bold(&theme.fg(
-                    "userMessageText",
-                    &format!(
-                        "   ┃ {}",
-                        "•".repeat(mask_count.min(width.saturating_sub(6)))
-                    ),
-                ))
-            };
-            vec![
-                String::new(),
-                dim(&format!(
-                    "   Paste your {} API key",
-                    ulo_core::providers::catalog::display_name(provider)
-                )),
-                entry,
-                dim(&format!(
-                    "   Enter saves · {} Back · Esc Close",
-                    render::backspace_label()
-                )),
-            ]
-        }
+        AuthStage::Choose { selected } => choose_rows(theme, width, *selected),
+        AuthStage::Account { selected } => provider_rows(
+            theme,
+            width,
+            *selected,
+            "   Sign in with an account",
+            registry::oauth_providers(),
+            |provider| &provider.auth.oauth_hint,
+        ),
+        AuthStage::Key { selected } => provider_rows(
+            theme,
+            width,
+            *selected,
+            "   Sign in with an API key",
+            registry::key_providers(),
+            |provider| &provider.auth.key_hint,
+        ),
+        AuthStage::ApiKey { provider } => api_key_rows(theme, width, provider, mask_count),
         AuthStage::Waiting { .. } => vec![
             String::new(),
             dim("   Sign in with an account"),
@@ -239,5 +153,117 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 dim("   Enter Continue · Esc Close"),
             ]
         }
+    }
+}
+
+/// The root: account or API key, with where the key is stored.
+fn choose_rows(theme: &Theme, width: usize, selected: usize) -> Vec<String> {
+    vec![
+        String::new(),
+        theme.fg("dim", "   Sign in"),
+        String::new(),
+        choice_row(
+            theme,
+            selected == 0,
+            "Sign in with an account",
+            "subscription — opens the browser",
+            width,
+        ),
+        choice_row(
+            theme,
+            selected == 1,
+            "Sign in with an API key",
+            if ulo_core::CHANNEL == "production" {
+                "stored in ~/.ulo/auth.json"
+            } else {
+                "stored in this channel's auth.json"
+            },
+            width,
+        ),
+        String::new(),
+        theme.fg("dim", "   ↑↓ Choose · Enter Continue · Esc Cancel"),
+    ]
+}
+
+/// A provider list under `title`: each provider by display name, described
+/// by `hint` unless it is already signed in.
+fn provider_rows(
+    theme: &Theme,
+    width: usize,
+    selected: usize,
+    title: &str,
+    providers: Vec<&'static Provider>,
+    hint: fn(&'static Provider) -> &'static str,
+) -> Vec<String> {
+    let mut rows = vec![String::new(), theme.fg("dim", title), String::new()];
+    let auth = auth::load();
+    for (i, provider) in providers.into_iter().enumerate() {
+        let description = if auth::signed_in(&auth, &provider.name) {
+            "signed in"
+        } else {
+            hint(provider)
+        };
+        rows.push(choice_row(
+            theme,
+            selected == i,
+            &provider.display,
+            description,
+            width,
+        ));
+    }
+    rows.push(String::new());
+    rows.push(theme.fg(
+        "dim",
+        &format!(
+            "   ↑↓ Choose · Enter Continue · {} Back · Esc Close",
+            render::backspace_label(),
+        ),
+    ));
+    rows
+}
+
+/// Key entry: the `┃` rail over a placeholder, or one `•` per typed char.
+fn api_key_rows(theme: &Theme, width: usize, provider: &str, mask_count: usize) -> Vec<String> {
+    let dim = |s: &str| theme.fg("dim", s);
+    let entry = if mask_count == 0 {
+        format!(
+            "{}{}",
+            bold(&theme.fg("userMessageText", "   ┃ ")),
+            dim("Paste or type a key")
+        )
+    } else {
+        bold(&theme.fg(
+            "userMessageText",
+            &format!(
+                "   ┃ {}",
+                "•".repeat(mask_count.min(width.saturating_sub(6)))
+            ),
+        ))
+    };
+    vec![
+        String::new(),
+        dim(&format!(
+            "   Paste your {} API key",
+            ulo_core::providers::catalog::display_name(provider)
+        )),
+        entry,
+        dim(&format!(
+            "   Enter saves · {} Back · Esc Close",
+            render::backspace_label()
+        )),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step;
+
+    #[test]
+    fn up_and_down_move_opposite_ways_and_wrap() {
+        assert_eq!(step(0, 3, false), 1);
+        assert_eq!(step(2, 3, false), 0);
+        assert_eq!(step(1, 3, true), 0);
+        assert_eq!(step(0, 3, true), 2);
+        assert_eq!(step(0, 0, true), 0);
     }
 }

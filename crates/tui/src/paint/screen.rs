@@ -165,178 +165,211 @@ impl Screen {
     /// emits interactively.
     fn paint_to(&mut self, frame: Vec<String>, out: &mut impl Write) -> io::Result<()> {
         let lines = frame.as_slice();
-        // Changes to terminal-owned history are deliberately ignored. Only
-        // compare the reachable suffix, and only search for its first change.
-        let start = self
-            .viewport_top
-            .saturating_sub(self.anchor)
-            .min(lines.len());
-        let first_changed =
-            (start..lines.len().max(self.prev.len())).find(|&i| self.prev.get(i) != lines.get(i));
-        if first_changed.is_none() && !self.redraw_pending {
-            return Ok(());
-        }
+        let first_changed = match self.first_change(lines) {
+            Some(index) => index,
+            None if self.redraw_pending => 0,
+            None => return Ok(()),
+        };
         if self.debug_frames {
-            use std::io::Write as _;
-            let f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/ulo-frames.log");
-            if let Ok(mut f) = f {
-                let _ = writeln!(f, "== frame {} rows ==", lines.len());
-                for l in lines {
-                    let _ = writeln!(f, "{:?}", l);
-                }
-            }
+            log_frame(lines);
         }
-        let cols = self.cols as usize;
         let rows = self.rows as usize;
         let len = lines.len();
-        let shrank = len < self.prev.len();
-        if shrank && (self.anchor + len <= self.viewport_top || len >= rows) {
+        if len < self.prev.len() && (self.anchor + len <= self.viewport_top || len >= rows) {
             // A full-height frame has already scrolled pre-launch rows away.
             // Rebase its tail on every shrink so the dock stays bottom-pinned.
             // Short inline frames retain their launch anchor while visible.
             self.anchor = 0;
             self.viewport_top = len.saturating_sub(rows);
         }
-        let anchor = self.anchor;
-        let first_changed = first_changed.unwrap_or(0);
-
-        // A line that fills the row leaves the cursor in the pending-wrap
-        // state, where erase-to-end clears the cell under it — eating the
-        // line's last character. Full rows need no erase at all.
-        let put = |out: &mut dyn Write, line: &str| -> io::Result<()> {
-            if visible_width(line) > cols {
-                // An overlong line would wrap physically and desync the row
-                // differ — clip it; producers should wrap, this is the net.
-                write!(out, "{}", clip_styled(line, cols))
-            } else if visible_width(line) == cols {
-                write!(out, "{line}")
-            } else {
-                write!(out, "{line}\x1b[K")
-            }
-        };
 
         write!(out, "\x1b[?2026h\x1b[?25l")?;
-
         match route(
             first_changed,
             len,
-            anchor,
+            self.anchor,
             self.viewport_top,
             rows,
             self.redraw_pending,
         ) {
-            Route::Redraw => {
-                write!(out, "\r\x1b[H\x1b[2J")?;
-                self.anchor = 0;
-                self.viewport_top = len.saturating_sub(rows);
-                for (i, line) in lines[self.viewport_top..].iter().enumerate() {
-                    if i > 0 {
-                        write!(out, "\r\n")?;
-                    }
-                    put(out, line)?;
-                }
-                self.shadow = (0..rows)
-                    .map(|r| {
-                        let b = r + self.viewport_top;
-                        if b < len {
-                            Some(lines[b].clone())
-                        } else {
-                            Some(String::new())
-                        }
-                    })
-                    .collect();
-            }
-            Route::Flow => {
-                // Bring the first changed row to a paintable position: one
-                // past the bottom means it scrolls in with a single newline;
-                // otherwise it is already on screen where it was painted.
-                let pos = (anchor + first_changed).saturating_sub(self.viewport_top);
-                if pos >= rows {
-                    // One past the bottom: the first changed row scrolls in
-                    // with a single newline and paints at the bottom row.
-                    write!(out, "\r\x1b[{rows};1H")?;
-                    writeln!(out)?;
-                } else {
-                    write!(out, "\r\x1b[{};1H", pos + 1)?;
-                }
-                for (i, line) in lines[first_changed..len].iter().enumerate() {
-                    if i > 0 {
-                        write!(out, "\r\n")?;
-                    }
-                    put(out, line)?;
-                }
-                let top = (anchor + len).saturating_sub(rows);
-                let total = top - self.viewport_top;
-                self.viewport_top = top;
-                let drained = total.min(rows);
-                self.shadow.drain(0..drained);
-                self.shadow
-                    .extend((0..drained).map(|_| Some(String::new())));
-                // The flowed rows landed at their mapping positions; rows
-                // the flow pushed into the scrollback leave the screen.
-                for (offset, line) in lines[first_changed..len].iter().enumerate() {
-                    let r = (anchor + first_changed + offset) as i64 - top as i64;
-                    if r >= 0 && (r as usize) < rows {
-                        self.shadow[r as usize] = Some(line.clone());
-                    }
-                }
-            }
-            Route::Diff { scroll } => {
-                // The window moved down the frame: scroll the display up so
-                // the top rows enter the terminal's scrollback and blank
-                // rows appear at the bottom for the new content. The `\r`
-                // homes the cursor without resolving a pending wrap (#123).
-                if scroll > 0 {
-                    write!(out, "\r\x1b[{rows};1H")?;
-                    for _ in 0..scroll {
-                        writeln!(out)?;
-                    }
-                    let drained = scroll.min(rows);
-                    self.shadow.drain(0..drained);
-                    self.shadow
-                        .extend((0..drained).map(|_| Some(String::new())));
-                }
-                self.viewport_top += scroll;
-                let actions = plan(lines, rows, anchor, self.viewport_top, &self.shadow);
-                // Runs of adjacent dirty rows: position once, then `\r\n`
-                // between rows. The `\r` before the absolute position is what
-                // keeps the differ independent of the terminal's pending-wrap
-                // state.
-                let mut at = 0usize;
-                while at < actions.len() {
-                    let mut end = at + 1;
-                    while end < actions.len() && actions[end].row == actions[end - 1].row + 1 {
-                        end += 1;
-                    }
-                    write!(out, "\r\x1b[{};1H", actions[at].row + 1)?;
-                    for (i, action) in actions[at..end].iter().enumerate() {
-                        if i > 0 {
-                            write!(out, "\r\n")?;
-                        }
-                        match action.write {
-                            Some(line) => {
-                                put(out, line)?;
-                                self.shadow[action.row] = Some(line.to_string());
-                            }
-                            None => {
-                                // Below the frame: leave the row blank.
-                                write!(out, "\x1b[2K")?;
-                                self.shadow[action.row] = Some(String::new());
-                            }
-                        }
-                    }
-                    at = end;
-                }
-            }
+            Route::Redraw => self.redraw(lines, out)?,
+            Route::Flow => self.flow(lines, first_changed, out)?,
+            Route::Diff { scroll } => self.diff(lines, scroll, out)?,
         }
         self.redraw_pending = false;
         write!(out, "\x1b[?2026l")?;
         out.flush()?;
         self.prev = frame;
         Ok(())
+    }
+
+    /// The first row that differs from the last frame, or None when nothing
+    /// changed. Changes to terminal-owned history are deliberately ignored:
+    /// only the reachable suffix is compared.
+    fn first_change(&self, lines: &[String]) -> Option<usize> {
+        let start = self
+            .viewport_top
+            .saturating_sub(self.anchor)
+            .min(lines.len());
+        (start..lines.len().max(self.prev.len())).find(|&i| self.prev.get(i) != lines.get(i))
+    }
+
+    /// [`Route::Redraw`]: clear the screen and paint the visible tail from the
+    /// top row, re-seeding the shadow from it.
+    fn redraw(&mut self, lines: &[String], out: &mut impl Write) -> io::Result<()> {
+        let rows = self.rows as usize;
+        let len = lines.len();
+        write!(out, "\r\x1b[H\x1b[2J")?;
+        self.anchor = 0;
+        self.viewport_top = len.saturating_sub(rows);
+        put_rows(out, &lines[self.viewport_top..], self.cols as usize)?;
+        self.shadow = (0..rows)
+            .map(|r| {
+                let b = r + self.viewport_top;
+                if b < len {
+                    Some(lines[b].clone())
+                } else {
+                    Some(String::new())
+                }
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// [`Route::Flow`]: print every row from the first change onward and let
+    /// the terminal scroll them past the bottom into its history.
+    fn flow(
+        &mut self,
+        lines: &[String],
+        first_changed: usize,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        let rows = self.rows as usize;
+        let len = lines.len();
+        let anchor = self.anchor;
+        // Bring the first changed row to a paintable position: one past the
+        // bottom means it scrolls in with a single newline and paints at the
+        // bottom row; otherwise it is already on screen where it was painted.
+        let pos = (anchor + first_changed).saturating_sub(self.viewport_top);
+        if pos >= rows {
+            write!(out, "\r\x1b[{rows};1H")?;
+            writeln!(out)?;
+        } else {
+            write!(out, "\r\x1b[{};1H", pos + 1)?;
+        }
+        put_rows(out, &lines[first_changed..len], self.cols as usize)?;
+        let top = (anchor + len).saturating_sub(rows);
+        let total = top - self.viewport_top;
+        self.viewport_top = top;
+        self.scroll_shadow(total);
+        // The flowed rows landed at their mapping positions; rows the flow
+        // pushed into the scrollback leave the screen.
+        for (offset, line) in lines[first_changed..len].iter().enumerate() {
+            let r = (anchor + first_changed + offset) as i64 - top as i64;
+            if r >= 0 && (r as usize) < rows {
+                self.shadow[r as usize] = Some(line.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// [`Route::Diff`]: scroll the display `scroll` rows, then rewrite only
+    /// the rows [`plan`] marks dirty at their absolute positions.
+    fn diff(&mut self, lines: &[String], scroll: usize, out: &mut impl Write) -> io::Result<()> {
+        let rows = self.rows as usize;
+        let cols = self.cols as usize;
+        // The window moved down the frame: scroll the display up so the top
+        // rows enter the terminal's scrollback and blank rows appear at the
+        // bottom for the new content. The `\r` homes the cursor without
+        // resolving a pending wrap (#123).
+        if scroll > 0 {
+            write!(out, "\r\x1b[{rows};1H")?;
+            for _ in 0..scroll {
+                writeln!(out)?;
+            }
+            self.scroll_shadow(scroll);
+        }
+        self.viewport_top += scroll;
+        let actions = plan(lines, rows, self.anchor, self.viewport_top, &self.shadow);
+        // Runs of adjacent dirty rows: position once, then `\r\n` between
+        // rows. The `\r` before the absolute position is what keeps the
+        // differ independent of the terminal's pending-wrap state.
+        let mut at = 0usize;
+        while at < actions.len() {
+            let mut end = at + 1;
+            while end < actions.len() && actions[end].row == actions[end - 1].row + 1 {
+                end += 1;
+            }
+            write!(out, "\r\x1b[{};1H", actions[at].row + 1)?;
+            for (i, action) in actions[at..end].iter().enumerate() {
+                if i > 0 {
+                    write!(out, "\r\n")?;
+                }
+                match action.write {
+                    Some(line) => {
+                        put(out, line, cols)?;
+                        self.shadow[action.row] = Some(line.to_string());
+                    }
+                    None => {
+                        // Below the frame: leave the row blank.
+                        write!(out, "\x1b[2K")?;
+                        self.shadow[action.row] = Some(String::new());
+                    }
+                }
+            }
+            at = end;
+        }
+        Ok(())
+    }
+
+    /// The display scrolled `by` rows: the top shadow rows left for the
+    /// scrollback, and blank rows entered at the bottom.
+    fn scroll_shadow(&mut self, by: usize) {
+        let drained = by.min(self.rows as usize);
+        self.shadow.drain(0..drained);
+        self.shadow
+            .extend((0..drained).map(|_| Some(String::new())));
+    }
+}
+
+/// Write one row at the cursor. A line that fills the row leaves the cursor
+/// in the pending-wrap state, where erase-to-end clears the cell under it —
+/// eating the line's last character. Full rows need no erase at all.
+fn put(out: &mut dyn Write, line: &str, cols: usize) -> io::Result<()> {
+    let width = visible_width(line);
+    if width > cols {
+        // An overlong line would wrap physically and desync the row differ —
+        // clip it; producers should wrap, this is the net.
+        write!(out, "{}", clip_styled(line, cols))
+    } else if width == cols {
+        write!(out, "{line}")
+    } else {
+        write!(out, "{line}\x1b[K")
+    }
+}
+
+/// Write consecutive rows from the cursor, `\r\n` between them.
+fn put_rows(out: &mut dyn Write, lines: &[String], cols: usize) -> io::Result<()> {
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            write!(out, "\r\n")?;
+        }
+        put(out, line, cols)?;
+    }
+    Ok(())
+}
+
+/// `ULO_DEBUG_FRAMES`: append each painted frame's rows to /tmp/ulo-frames.log.
+fn log_frame(lines: &[String]) {
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/ulo-frames.log");
+    if let Ok(mut f) = f {
+        let _ = writeln!(f, "== frame {} rows ==", lines.len());
+        for l in lines {
+            let _ = writeln!(f, "{:?}", l);
+        }
     }
 }
 

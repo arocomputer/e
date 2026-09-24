@@ -73,7 +73,6 @@ impl StreamEnd {
 pub enum Event {
     TextDelta(String),
     ReasoningDelta(String),
-    /// Bytes of tool-call argument JSON just streamed. Argument assembly is
     /// A provider began streaming one tool request. `key` is stable within
     /// this response even when the provider has not supplied the call id yet
     /// (for example, a chat-completions tool index).
@@ -97,9 +96,10 @@ pub enum Event {
     /// Disjoint counters from the terminal usage frame. Dialects normalize
     /// inclusive wire totals before this crosses the provider seam.
     Usage(Usage),
-    /// A Responses-dialect reasoning item (verbatim JSON): the API demands
-    /// it be resent ahead of the function calls it produced, so the agent
-    /// stores it in history and the dialect replays it.
+    /// A reasoning item as JSON, for the dialect to replay: a Responses
+    /// reasoning item, an Anthropic signed or redacted thinking block, or a
+    /// Gemini thought. The agent stores it in history ahead of the calls it
+    /// produced, and the dialect that made it resends it.
     ReasoningItem(String),
     Done(StreamEnd),
     /// The provider call failed; `err.cause` decides whether the agent may

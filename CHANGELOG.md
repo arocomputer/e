@@ -4,13 +4,17 @@
 
 ### Improvements
 
+- Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.
+
 - Renamed the product to ulo, including the CLI, Rust crates, npm packages, Homebrew formula, environment variables, and project configuration. Existing state directories remain readable until moved; see the migration section in the installation guide.
 - Moved the product website into `crates/www`, using the new wordmark and `ulo.sh`. The website builds its guides and installer from the same checkout as the application.
 - **Upgrade:** npm packages publish with trusted publishing; the `NPM_BOOTSTRAP_TOKEN` secret is gone.
 
 ### Fixes
 
-- Nothing yet.
+- Attaching a selection from an extension's Markdown pane takes the rendered rows you selected, not whichever source lines had the same numbers.
+- Attaching from an extension's text pane wraps at the pane's width, not the whole terminal's, so the attached lines match the ones you selected.
+- A foreground `bash` command whose exit status can't be read no longer leaves a reader thread spinning when a child process still holds the output pipe open.
 
 ## 0.0.2
 

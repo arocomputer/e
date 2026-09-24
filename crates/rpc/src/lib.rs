@@ -267,6 +267,11 @@ struct Server {
     next_ask: u64,
     /// Lines a synchronous method wants written after its own response.
     also: Vec<String>,
+    /// Stdin is closed. EOF means no more requests, not stop: a version-1
+    /// caller writes its line and closes stdin at once, and its turn must
+    /// still run to the answer. Draining serves everything but new lines
+    /// until the last turn ends.
+    draining: bool,
 }
 
 enum Flow {
@@ -275,6 +280,58 @@ enum Flow {
 }
 
 impl Server {
+    /// A server with no sessions that has not been greeted yet.
+    fn new(
+        host: Arc<ExtensionHost>,
+        defaults: Options,
+        out: mpsc::Sender<String>,
+        ended: mpsc::Sender<String>,
+    ) -> Self {
+        Self {
+            host,
+            defaults,
+            out,
+            ended,
+            sessions: HashMap::new(),
+            greeted: false,
+            ask: false,
+            asks: HashMap::new(),
+            next_ask: 0,
+            also: Vec::new(),
+            draining: false,
+        }
+    }
+
+    /// One read from stdin: a request line is served, EOF starts draining,
+    /// and a read error ends the loop. Some when the loop should stop.
+    async fn on_input(&mut self, line: Option<std::io::Result<Option<String>>>) -> Option<Stop> {
+        match line {
+            Some(Ok(Some(line))) => {
+                if line.trim().is_empty() {
+                    return None;
+                }
+                match self.handle_line(&line).await {
+                    Flow::Continue => None,
+                    Flow::Shutdown => Some(Stop::Requested),
+                }
+            }
+            Some(Ok(None)) | None => {
+                self.draining = true;
+                (self.active_turns() == 0).then_some(Stop::Closed)
+            }
+            Some(Err(error)) => {
+                // Fatal, same as a too-large extension line is fatal to
+                // its reader: an oversized or unterminated line leaves
+                // the stream mid-line with no safe resync point.
+                self.emit(
+                    json!({"id": null, "error": format!("invalid request: {error}")}).to_string(),
+                )
+                .await;
+                Some(Stop::Closed)
+            }
+        }
+    }
+
     async fn emit(&self, line: String) {
         let _ = self.out.send(line).await;
     }
@@ -348,38 +405,15 @@ impl Server {
         Flow::Continue
     }
 
+    /// Answer every method that responds at once, by name.
     fn dispatch(&mut self, method: &str, params: &Value) -> Result<Value, String> {
         match method {
-            "hello" => {
-                let params: params::Hello = params::decode(params)?;
-                self.greeted = true;
-                self.ask = params.ask.unwrap_or(false);
-                Ok(json!({
-                    "protocol": PROTOCOL,
-                    "version": ulo_core::VERSION,
-                    "channel": ulo_core::CHANNEL,
-                    "commit": ulo_core::COMMIT,
-                    "cwd": std::env::current_dir().unwrap_or_default().display().to_string(),
-                    "home": ulo_core::config::home::home().display().to_string(),
-                    "methods": METHODS,
-                    "ask": self.ask,
-                }))
-            }
+            "hello" => self.hello(params),
             "models.list" => Ok(models_list()),
             "session.create" => self.create(params),
             "session.list" => Ok(sessions_list(params::decode(params)?)),
             "session.info" => Ok(self.slot(params)?.info()),
-            "session.steer" => {
-                let slot = self.slot(params)?;
-                let args: params::Steer = params::decode(params)?;
-                let text = args.text;
-                let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
-                if agent.steer(text) {
-                    Ok(json!({"held": true}))
-                } else {
-                    Err("no turn is running; use session.prompt".into())
-                }
-            }
+            "session.steer" => self.steer(params),
             "session.interrupt" => {
                 let slot = self.slot(params)?;
                 slot.agent
@@ -400,47 +434,84 @@ impl Server {
             }
             "session.fork" => self.fork(params),
             "session.export" => self.export(params),
-            "session.close" => {
-                let id = text_param(params, "session")?;
-                let slot = self
-                    .sessions
-                    .remove(&id)
-                    .ok_or_else(|| format!("unknown session `{id}`"))?;
-                slot.agent
-                    .lock()
-                    .unwrap_or_else(|ulo| ulo.into_inner())
-                    .interrupt();
-                // A prompt still running gets its answer now: the forwarder
-                // will see the agent go, not a `TurnEnd`.
-                if let Some(turn) = slot
-                    .turn
-                    .lock()
-                    .unwrap_or_else(|ulo| ulo.into_inner())
-                    .take()
-                {
-                    self.also
-                        .push(json!({"id": turn.request, "error": "session closed"}).to_string());
-                }
-                Ok(json!({}))
-            }
-            "ask.reply" => {
-                let n = params
-                    .get("ask")
-                    .and_then(Value::as_u64)
-                    .ok_or("ask is required")?;
-                let request = self
-                    .asks
-                    .remove(&n)
-                    .ok_or_else(|| format!("no open ask {n}"))?;
-                let answer = params
-                    .get("result")
-                    .cloned()
-                    .unwrap_or_else(|| json!({"cancelled": true}));
-                request.respond(Ok(answer));
-                Ok(json!({}))
-            }
+            "session.close" => self.close(params),
+            "ask.reply" => self.ask_reply(params),
             other => Err(format!("unknown method `{other}`")),
         }
+    }
+
+    /// `hello`: record what the client handles and describe this server.
+    fn hello(&mut self, params: &Value) -> Result<Value, String> {
+        let params: params::Hello = params::decode(params)?;
+        self.greeted = true;
+        self.ask = params.ask.unwrap_or(false);
+        Ok(json!({
+            "protocol": PROTOCOL,
+            "version": ulo_core::VERSION,
+            "channel": ulo_core::CHANNEL,
+            "commit": ulo_core::COMMIT,
+            "cwd": std::env::current_dir().unwrap_or_default().display().to_string(),
+            "home": ulo_core::config::home::home().display().to_string(),
+            "methods": METHODS,
+            "ask": self.ask,
+        }))
+    }
+
+    /// `session.steer`: hold text for the running turn's next step.
+    fn steer(&self, params: &Value) -> Result<Value, String> {
+        let slot = self.slot(params)?;
+        let args: params::Steer = params::decode(params)?;
+        let text = args.text;
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
+        if agent.steer(text) {
+            Ok(json!({"held": true}))
+        } else {
+            Err("no turn is running; use session.prompt".into())
+        }
+    }
+
+    /// `session.close`: forget a session and stop its turn.
+    fn close(&mut self, params: &Value) -> Result<Value, String> {
+        let id = text_param(params, "session")?;
+        let slot = self
+            .sessions
+            .remove(&id)
+            .ok_or_else(|| format!("unknown session `{id}`"))?;
+        slot.agent
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner())
+            .interrupt();
+        // A prompt still running gets its answer now: the forwarder
+        // will see the agent go, not a `TurnEnd`.
+        if let Some(turn) = slot
+            .turn
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner())
+            .take()
+        {
+            self.also
+                .push(json!({"id": turn.request, "error": "session closed"}).to_string());
+        }
+        Ok(json!({}))
+    }
+
+    /// `ask.reply`: answer an extension's forwarded question; no `result`
+    /// reads as cancelled.
+    fn ask_reply(&mut self, params: &Value) -> Result<Value, String> {
+        let n = params
+            .get("ask")
+            .and_then(Value::as_u64)
+            .ok_or("ask is required")?;
+        let request = self
+            .asks
+            .remove(&n)
+            .ok_or_else(|| format!("no open ask {n}"))?;
+        let answer = params
+            .get("result")
+            .cloned()
+            .unwrap_or_else(|| json!({"cancelled": true}));
+        request.respond(Ok(answer));
+        Ok(json!({}))
     }
 
     fn slot(&self, params: &Value) -> Result<Arc<Slot>, String> {
@@ -894,6 +965,7 @@ fn sessions_list(params: params::List) -> Value {
     })
 }
 
+/// The termination signals the server exits on: SIGTERM and SIGHUP.
 #[cfg(unix)]
 struct Signals {
     terminate: tokio::signal::unix::Signal,
@@ -910,12 +982,40 @@ impl Signals {
         })
     }
 
+    /// The exit status for the next termination signal.
     async fn recv(&mut self) -> i32 {
         tokio::select! {
             _ = self.terminate.recv() => 143,
             _ = self.hangup.recv() => 129,
         }
     }
+}
+
+/// Without unix signals the serve loop has none to wait for.
+#[cfg(not(unix))]
+struct Signals;
+
+#[cfg(not(unix))]
+impl Signals {
+    fn new() -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    /// Never resolves.
+    async fn recv(&mut self) -> i32 {
+        std::future::pending().await
+    }
+}
+
+/// Why the serve loop stopped.
+enum Stop {
+    /// Input is over — stdin closed and the last turn ended, or a line
+    /// broke the framing.
+    Closed,
+    /// The client sent `shutdown` with stdin still open.
+    Requested,
+    /// A termination signal, with the exit status it maps to.
+    Signal(i32),
 }
 
 /// Serve until stdin closes or the client says `shutdown`. `requests` is
@@ -927,21 +1027,75 @@ pub async fn serve(
     mut requests: mpsc::Receiver<HostRequest>,
     mut notices: mpsc::Receiver<String>,
 ) -> std::io::Result<()> {
-    let (out, mut out_rx) = mpsc::channel::<String>(1024);
-    let writer = tokio::spawn(async move {
-        let mut stdout = tokio::io::stdout();
-        while let Some(line) = out_rx.recv().await {
-            if stdout.write_all(line.as_bytes()).await.is_err()
-                || stdout.write_all(b"\n").await.is_err()
-            {
-                return;
+    let (out, out_rx) = mpsc::channel::<String>(1024);
+    let writer = tokio::spawn(write_stdout(out_rx));
+    let mut lines = spawn_stdin_reader();
+    let (ended, mut turns_ended) = mpsc::channel::<String>(64);
+    let mut server = Server::new(host.clone(), defaults.clone(), out, ended);
+    let mut signals = Signals::new()?;
+    let stop = loop {
+        let stop = tokio::select! {
+            line = lines.recv(), if !server.draining => server.on_input(line).await,
+            Some(request) = requests.recv() => {
+                server.host_request(request).await;
+                None
             }
+            Some(notice) = notices.recv() => {
+                if server.greeted {
+                    server.emit(json!({"type": "notice", "message": notice}).to_string()).await;
+                }
+                None
+            }
+            Some(id) = turns_ended.recv() => {
+                server.turn_ended(&id);
+                (server.draining && server.active_turns() == 0).then_some(Stop::Closed)
+            }
+            status = signals.recv() => Some(Stop::Signal(status)),
+        };
+        if let Some(stop) = stop {
+            break stop;
         }
-        let _ = stdout.flush().await;
-    });
-    // A dedicated reader: the select below must never cancel a read
-    // mid-line, and the blocking stdin handle cannot be woken for shutdown.
-    let (lines_tx, mut lines) = mpsc::channel::<std::io::Result<Option<String>>>(16);
+    };
+    // Stop owned shell groups before extension cleanup.
+    ulo_core::tools::kill_tracked_processes();
+    server.interrupt_all();
+    if let Stop::Signal(status) = stop {
+        // `process::exit` is intentional — the blocking stdin reader cannot
+        // be cancelled, so returning from main could hang shutdown forever.
+        host.shutdown().await;
+        std::process::exit(status);
+    }
+    drop(server);
+    host.shutdown().await;
+    let _ = writer.await;
+    if matches!(stop, Stop::Requested) {
+        // `shutdown` arrived with stdin still open. Tokio's blocking stdin
+        // reader cannot be cancelled, and a returning main would wait on it
+        // forever — so leave the way the signal path does, after the flush.
+        std::process::exit(0);
+    }
+    Ok(())
+}
+
+/// Write each outgoing line to stdout, newline-terminated, until the
+/// channel closes or stdout does; flush on a clean close.
+async fn write_stdout(mut lines: mpsc::Receiver<String>) {
+    let mut stdout = tokio::io::stdout();
+    while let Some(line) = lines.recv().await {
+        if stdout.write_all(line.as_bytes()).await.is_err()
+            || stdout.write_all(b"\n").await.is_err()
+        {
+            return;
+        }
+    }
+    let _ = stdout.flush().await;
+}
+
+/// A dedicated reader: the serve loop's select must never cancel a read
+/// mid-line, and the blocking stdin handle cannot be woken for shutdown.
+/// Delivers each bounded read, ending after EOF or the first error.
+fn spawn_stdin_reader() -> mpsc::Receiver<std::io::Result<Option<String>>> {
+    let (lines_tx, lines) = mpsc::channel::<std::io::Result<Option<String>>>(16);
     tokio::spawn(async move {
         let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
         loop {
@@ -952,143 +1106,7 @@ pub async fn serve(
             }
         }
     });
-    let (ended, mut turns_ended) = mpsc::channel::<String>(64);
-    let mut server = Server {
-        host: host.clone(),
-        defaults: defaults.clone(),
-        out,
-        ended,
-        sessions: HashMap::new(),
-        greeted: false,
-        ask: false,
-        asks: HashMap::new(),
-        next_ask: 0,
-        also: Vec::new(),
-    };
-    #[cfg(unix)]
-    let mut signals = Signals::new()?;
-    let mut requested_shutdown = false;
-    // EOF means no more requests, not stop: a version-1 caller writes its
-    // line and closes stdin at once, and its turn must still run to the
-    // answer. Draining serves everything but new lines until the last turn
-    // ends.
-    let mut draining = false;
-    loop {
-        #[cfg(unix)]
-        let status = tokio::select! {
-            line = lines.recv(), if !draining => match line {
-                Some(Ok(Some(line))) => {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    match server.handle_line(&line).await {
-                        Flow::Continue => continue,
-                        Flow::Shutdown => {
-                            requested_shutdown = true;
-                            break;
-                        }
-                    }
-                }
-                Some(Ok(None)) | None => {
-                    draining = true;
-                    if server.active_turns() == 0 {
-                        break;
-                    }
-                    continue;
-                }
-                Some(Err(error)) => {
-                    // Fatal, same as a too-large extension line is fatal to
-                    // its reader: an oversized or unterminated line leaves
-                    // the stream mid-line with no safe resync point.
-                    server.emit(json!({"id": null, "error": format!("invalid request: {error}")}).to_string()).await;
-                    break;
-                }
-            },
-            Some(request) = requests.recv() => {
-                server.host_request(request).await;
-                continue;
-            }
-            Some(notice) = notices.recv() => {
-                if server.greeted {
-                    server.emit(json!({"type": "notice", "message": notice}).to_string()).await;
-                }
-                continue;
-            }
-            Some(id) = turns_ended.recv() => {
-                server.turn_ended(&id);
-                if draining && server.active_turns() == 0 {
-                    break;
-                }
-                continue;
-            }
-            status = signals.recv() => status,
-        };
-        #[cfg(not(unix))]
-        let status: i32 = tokio::select! {
-            line = lines.recv(), if !draining => match line {
-                Some(Ok(Some(line))) => {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    match server.handle_line(&line).await {
-                        Flow::Continue => continue,
-                        Flow::Shutdown => {
-                            requested_shutdown = true;
-                            break;
-                        }
-                    }
-                }
-                Some(Ok(None)) | None => {
-                    draining = true;
-                    if server.active_turns() == 0 {
-                        break;
-                    }
-                    continue;
-                }
-                Some(Err(error)) => {
-                    server.emit(json!({"id": null, "error": format!("invalid request: {error}")}).to_string()).await;
-                    break;
-                }
-            },
-            Some(request) = requests.recv() => {
-                server.host_request(request).await;
-                continue;
-            }
-            Some(notice) = notices.recv() => {
-                if server.greeted {
-                    server.emit(json!({"type": "notice", "message": notice}).to_string()).await;
-                }
-                continue;
-            }
-            Some(id) = turns_ended.recv() => {
-                server.turn_ended(&id);
-                if draining && server.active_turns() == 0 {
-                    break;
-                }
-                continue;
-            }
-        };
-        // Signal: stop owned shell groups before extension cleanup.
-        // `process::exit` is intentional — the blocking stdin reader cannot
-        // be cancelled, so returning from main could hang shutdown forever.
-        ulo_core::tools::kill_tracked_processes();
-        server.interrupt_all();
-        host.shutdown().await;
-        std::process::exit(status);
-    }
-    let by_request = requested_shutdown;
-    ulo_core::tools::kill_tracked_processes();
-    server.interrupt_all();
-    drop(server);
-    host.shutdown().await;
-    let _ = writer.await;
-    if by_request {
-        // `shutdown` arrived with stdin still open. Tokio's blocking stdin
-        // reader cannot be cancelled, and a returning main would wait on it
-        // forever — so leave the way the signal path does, after the flush.
-        std::process::exit(0);
-    }
-    Ok(())
+    lines
 }
 
 #[cfg(test)]

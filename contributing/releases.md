@@ -135,8 +135,9 @@ The GitHub body comes from that version's section verbatim. The workflow
 exports the same content as `release.json`, with its version and source commit.
 The website reads that asset and GitHub's publication date, refreshing every
 five minutes. It excludes drafts, prereleases, and Unreleased.
-The first historical release predates the asset and remains a checked-in website
-entry. New releases need no separate website copy or deployment.
+The website does not keep a bundled historical release, so withdrawing all
+GitHub releases leaves an empty changelog with source-build instructions.
+New releases need no separate website copy or deployment.
 
 ## Verification and retrying publication
 

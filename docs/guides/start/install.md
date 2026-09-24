@@ -6,35 +6,29 @@ order: 2
 
 # Install
 
-ulo ships as one native binary for macOS and glibc Linux, on ARM64 and x86-64.
+ulo is in development. Public releases, npm packages, and the Homebrew formula
+have been withdrawn. Use the Rust toolchain to build it locally.
 
 ## Install
 
 ```sh
-curl -fsSL https://ulo.sh/install.sh | sh
+git clone https://github.com/arocomputer/ulo.git
+cd ulo
+./x dev /path/to/project
 ```
 
-The installer picks the release for your platform, verifies its checksum, and
-writes the binary to `~/.local/bin`. Set `ULO_INSTALL_DIR` to choose another
-directory. If your shell's `PATH` does not include that directory, add it.
-Then check the build with `ulo --version`.
+`./x dev` builds the current checkout and runs it in the selected project.
+Local builds use `~/.ulo-dev` and do not self-update. To inspect the build,
+run `cargo run -- --version` from the checkout.
 
 ### Package managers
 
-Package managers install the same binary:
-
-```sh
-brew install arocomputer/tap/ulo
-npm install -g @arocomputer/ulo
-bun add -g @arocomputer/ulo
-```
-
-These packages carry the native binary and need no JavaScript runtime. They
-arrive with the first package-enabled release.
+Package-manager installations are unavailable during development. The npm
+scope for the first public release has not been finalized.
 
 ## Migrate an existing installation
 
-The product was previously named `e`. Install `ulo` with the commands above,
+The product was previously named `e`. Build `ulo` with the commands above,
 then update command invocations and `E_*` environment variables to `ULO_*`.
 The explicit configuration override is now `ULO_HOME`.
 

@@ -34,9 +34,9 @@ the first public ulo release. Enable publication as described in
 6. Verify shell, Homebrew, npm, and bun installations on supported platforms.
    Verify `ulo --version`, `ulo doctor`, existing state, and package-manager
    update protection.
-7. Deploy the prepared Aro website cleanup only after the new installer works.
-   It removes the migrated product source, changes the product directory link,
-   and redirects the old domain and `/e` bookmarks to `ulo.sh`.
+7. The Aro website cleanup removes the migrated product source, changes the
+   product directory link, and redirects the old domain and `/e` bookmarks to
+   `ulo.sh`. During development, the new website points to source builds.
 
 ## Cloudflare
 

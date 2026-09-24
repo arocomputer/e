@@ -187,64 +187,16 @@ impl SessionBuilder {
         home::with_home(resolve_home(self.home.clone()), || log::list(&cwd))
     }
 
+    /// Resolve every option and start the session: fails on a missing
+    /// workspace, an unavailable model or effort, an unknown tool, a home
+    /// that cannot persist, or a resume file another ulo holds.
     pub async fn build(self) -> Result<Session, Error> {
         let cwd = resolve_cwd(self.cwd);
         let home = resolve_home(self.home);
-        // These checks read workspace metadata and home configuration, and
-        // the persistence probe writes a temporary file. Run them on the
-        // blocking pool so a slow disk cannot stall a current-thread runtime.
-        let model_query = self.model.clone();
-        let probe_cwd = cwd.clone();
-        let blocking_home = home.clone();
         let persist = self.persist && self.resume.is_none();
-        let model = tokio::task::spawn_blocking(move || -> Result<Model, Error> {
-            let meta = std::fs::metadata(&probe_cwd).map_err(|error| Error::Cwd {
-                path: probe_cwd.clone(),
-                reason: error.to_string(),
-            })?;
-            if !meta.is_dir() {
-                return Err(Error::Cwd {
-                    path: probe_cwd,
-                    reason: "not a directory".into(),
-                });
-            }
-            home::with_home(blocking_home, || {
-                let model = resolve_model(model_query.as_deref())?;
-                // Persistence is checked up front like every other option: a
-                // home that cannot create logs must fail here, not keep the
-                // first prompt memory-only behind a warning.
-                if persist {
-                    SessionLog::preflight(&probe_cwd).map_err(Error::Session)?;
-                }
-                Ok(model)
-            })
-        })
-        .await
-        .map_err(|_| Error::Session(std::io::Error::other("session build task panicked")))??;
-        if let Some(effort) = &self.effort {
-            if !model.effort.iter().any(|level| level == effort) {
-                return Err(Error::Effort {
-                    model: catalog::slug(&model),
-                    effort: effort.clone(),
-                    supported: if model.effort.is_empty() {
-                        "none".into()
-                    } else {
-                        model.effort.join(", ")
-                    },
-                });
-            }
-        }
-        let (tool_mode, allowed_tools) = match self.tools {
-            Tools::All => (ToolMode::All, None),
-            Tools::None => (ToolMode::None, None),
-            Tools::Only(names) => {
-                if let Some(unknown) = names.iter().find(|name| !ulo_core::tools::is_builtin(name))
-                {
-                    return Err(Error::UnknownTool(unknown.clone()));
-                }
-                (ToolMode::All, Some(names))
-            }
-        };
+        let model = preflight(cwd.clone(), home.clone(), self.model.clone(), persist).await?;
+        check_effort(&model, self.effort.as_deref())?;
+        let (tool_mode, allowed_tools) = tool_policy(self.tools)?;
         let options = AgentOptions {
             cwd: Some(cwd),
             home: Some(home.clone()),
@@ -255,79 +207,18 @@ impl SessionBuilder {
         };
         let (mut agent, events) = Agent::with_options(model, options);
         let cwd = agent.cwd();
-
         if let Some(path) = &self.resume {
-            // Ownership first: a file another ulo is appending to must not be
-            // replayed into a second, diverging history. The read and parse
-            // run on the blocking pool: a large session must not stall the
-            // executor (and every other future on a current-thread runtime).
-            let resume_path = path.clone();
-            let blocking_home = home.clone();
-            let (session, messages, name) = tokio::task::spawn_blocking(move || {
-                home::with_home(blocking_home, || {
-                    let session = SessionLog::reopen(&resume_path)?;
-                    let messages = SessionLog::load(&resume_path)?;
-                    Ok::<_, std::io::Error>((session, messages, log::name_of(&resume_path)))
-                })
-            })
-            .await
-            .map_err(|_| Error::Session(std::io::Error::other("session load task panicked")))??;
-            agent.load_history(messages);
-            agent.set_session(Some(session));
-            agent.adopt_session_name(name);
+            resume(&mut agent, path, &home).await?;
         } else if !self.history.is_empty() {
-            let messages = self.history;
-            if self.persist {
-                let blocking_home = home.clone();
-                let seed_cwd = cwd.clone();
-                let model = agent.model_slug();
-                let (session, messages) = tokio::task::spawn_blocking(move || {
-                    home::with_home(blocking_home, || {
-                        let session = SessionLog::create_with(&seed_cwd, &model, &messages)?;
-                        Ok::<_, std::io::Error>((session, messages))
-                    })
-                })
-                .await
-                .map_err(|_| {
-                    Error::Session(std::io::Error::other("session seed task panicked"))
-                })??;
-                agent.load_history(messages);
-                agent.set_session(Some(session));
-            } else {
-                agent.load_history(messages);
-            }
+            seed(&mut agent, self.history, self.persist, &home, &cwd).await?;
         }
-
         let (host, notices, startup_notices) = if self.extensions {
-            let (sender, mut receiver) = mpsc::channel(256);
-            // Startup diagnostics arrive on the bounded channel while the
-            // host is still starting; read them as they come so a home with
-            // many broken extensions cannot fill it and stall startup.
-            let start = home::scope(
-                home.clone(),
-                ExtensionHost::start_in(sender, cwd, Vec::new(), None),
-            );
-            tokio::pin!(start);
-            let mut startup_notices = VecDeque::new();
-            let host = loop {
-                tokio::select! {
-                    host = &mut start => break host,
-                    Some(notice) = receiver.recv() => startup_notices.push_back(notice),
-                }
-            };
-            // The host reports a failed extension in the same poll it
-            // finishes, so its last notices are still queued when the loop
-            // ends. Left there, they would reach the first turn only when no
-            // core event happened to be ready ahead of them.
-            while let Ok(notice) = receiver.try_recv() {
-                startup_notices.push_back(notice);
-            }
+            let (host, receiver, startup_notices) = start_extensions(&home, cwd).await;
             agent.set_host(host.clone());
             (Some(host), Some(receiver), startup_notices)
         } else {
             (None, None, VecDeque::new())
         };
-
         Ok(Session {
             agent,
             events,
@@ -340,6 +231,164 @@ impl SessionBuilder {
             pending_clear: false,
         })
     }
+}
+
+/// Check the workspace is a directory, resolve the model in the home, and,
+/// when a new log will be written, probe that the home can write one.
+///
+/// These checks read workspace metadata and home configuration, and
+/// the persistence probe writes a temporary file. Run them on the
+/// blocking pool so a slow disk cannot stall a current-thread runtime.
+async fn preflight(
+    cwd: PathBuf,
+    home: PathBuf,
+    model_query: Option<String>,
+    persist: bool,
+) -> Result<Model, Error> {
+    tokio::task::spawn_blocking(move || -> Result<Model, Error> {
+        let meta = std::fs::metadata(&cwd).map_err(|error| Error::Cwd {
+            path: cwd.clone(),
+            reason: error.to_string(),
+        })?;
+        if !meta.is_dir() {
+            return Err(Error::Cwd {
+                path: cwd,
+                reason: "not a directory".into(),
+            });
+        }
+        home::with_home(home, || {
+            let model = resolve_model(model_query.as_deref())?;
+            // Persistence is checked up front like every other option: a
+            // home that cannot create logs must fail here, not keep the
+            // first prompt memory-only behind a warning.
+            if persist {
+                SessionLog::preflight(&cwd).map_err(Error::Session)?;
+            }
+            Ok(model)
+        })
+    })
+    .await
+    .map_err(|_| Error::Session(std::io::Error::other("session build task panicked")))?
+}
+
+/// A requested effort must be one of the model's declared levels.
+fn check_effort(model: &Model, effort: Option<&str>) -> Result<(), Error> {
+    let Some(effort) = effort else {
+        return Ok(());
+    };
+    if model.effort.iter().any(|level| level == effort) {
+        return Ok(());
+    }
+    Err(Error::Effort {
+        model: catalog::slug(model),
+        effort: effort.to_string(),
+        supported: if model.effort.is_empty() {
+            "none".into()
+        } else {
+            model.effort.join(", ")
+        },
+    })
+}
+
+/// The agent's tool mode and allowlist for `tools`; an allowlist may name
+/// built-ins only.
+fn tool_policy(tools: Tools) -> Result<(ToolMode, Option<Vec<String>>), Error> {
+    match tools {
+        Tools::All => Ok((ToolMode::All, None)),
+        Tools::None => Ok((ToolMode::None, None)),
+        Tools::Only(names) => {
+            if let Some(unknown) = names.iter().find(|name| !ulo_core::tools::is_builtin(name)) {
+                return Err(Error::UnknownTool(unknown.clone()));
+            }
+            Ok((ToolMode::All, Some(names)))
+        }
+    }
+}
+
+/// Continue the saved session at `path`: take its lock, load its active
+/// branch, and adopt its name.
+///
+/// Ownership first: a file another ulo is appending to must not be
+/// replayed into a second, diverging history. The read and parse
+/// run on the blocking pool: a large session must not stall the
+/// executor (and every other future on a current-thread runtime).
+async fn resume(agent: &mut Agent, path: &Path, home: &Path) -> Result<(), Error> {
+    let resume_path = path.to_path_buf();
+    let blocking_home = home.to_path_buf();
+    let (session, messages, name) = tokio::task::spawn_blocking(move || {
+        home::with_home(blocking_home, || {
+            let session = SessionLog::reopen(&resume_path)?;
+            let messages = SessionLog::load(&resume_path)?;
+            Ok::<_, std::io::Error>((session, messages, log::name_of(&resume_path)))
+        })
+    })
+    .await
+    .map_err(|_| Error::Session(std::io::Error::other("session load task panicked")))??;
+    agent.load_history(messages);
+    agent.set_session(Some(session));
+    agent.adopt_session_name(name);
+    Ok(())
+}
+
+/// Seed the conversation with host-supplied messages, written to a new
+/// session log first when persisting.
+async fn seed(
+    agent: &mut Agent,
+    messages: Vec<Message>,
+    persist: bool,
+    home: &Path,
+    cwd: &Path,
+) -> Result<(), Error> {
+    if !persist {
+        agent.load_history(messages);
+        return Ok(());
+    }
+    let blocking_home = home.to_path_buf();
+    let seed_cwd = cwd.to_path_buf();
+    let model = agent.model_slug();
+    let (session, messages) = tokio::task::spawn_blocking(move || {
+        home::with_home(blocking_home, || {
+            let session = SessionLog::create_with(&seed_cwd, &model, &messages)?;
+            Ok::<_, std::io::Error>((session, messages))
+        })
+    })
+    .await
+    .map_err(|_| Error::Session(std::io::Error::other("session seed task panicked")))??;
+    agent.load_history(messages);
+    agent.set_session(Some(session));
+    Ok(())
+}
+
+/// Start the home's extensions in `cwd`. Returns the host, the channel its
+/// later notices arrive on, and the diagnostics it raised while starting.
+async fn start_extensions(
+    home: &Path,
+    cwd: PathBuf,
+) -> (Arc<ExtensionHost>, mpsc::Receiver<String>, VecDeque<String>) {
+    let (sender, mut receiver) = mpsc::channel(256);
+    // Startup diagnostics arrive on the bounded channel while the
+    // host is still starting; read them as they come so a home with
+    // many broken extensions cannot fill it and stall startup.
+    let start = home::scope(
+        home.to_path_buf(),
+        ExtensionHost::start_in(sender, cwd, Vec::new(), None),
+    );
+    tokio::pin!(start);
+    let mut startup_notices = VecDeque::new();
+    let host = loop {
+        tokio::select! {
+            host = &mut start => break host,
+            Some(notice) = receiver.recv() => startup_notices.push_back(notice),
+        }
+    };
+    // The host reports a failed extension in the same poll it
+    // finishes, so its last notices are still queued when the loop
+    // ends. Left there, they would reach the first turn only when no
+    // core event happened to be ready ahead of them.
+    while let Ok(notice) = receiver.try_recv() {
+        startup_notices.push_back(notice);
+    }
+    (host, receiver, startup_notices)
 }
 
 fn resolve_cwd(cwd: Option<PathBuf>) -> PathBuf {
