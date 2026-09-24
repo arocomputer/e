@@ -125,6 +125,8 @@ pub struct Section {
 }
 
 impl Section {
+    /// A section from its `ui.pane` JSON; `index` names it when it has no id.
+    /// None for an unknown `kind`.
     fn from_json(value: &Value, index: usize) -> Option<Section> {
         let kind = value.get("kind").and_then(Value::as_str)?;
         let body = || {
@@ -139,59 +141,10 @@ impl Section {
                 value
                     .get("items")
                     .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(i, item)| {
-                                let field = |key: &str| {
-                                    item.get(key)
-                                        .and_then(Value::as_str)
-                                        .map(flat)
-                                        .unwrap_or_default()
-                                };
-                                let label = match item.as_str() {
-                                    Some(plain) => flat(plain),
-                                    None => field("label"),
-                                };
-                                let id = match field("id") {
-                                    id if id.is_empty() => {
-                                        if label.is_empty() {
-                                            i.to_string()
-                                        } else {
-                                            label.clone()
-                                        }
-                                    }
-                                    id => id,
-                                };
-                                Item {
-                                    id,
-                                    label,
-                                    detail: field("detail"),
-                                    token: item
-                                        .get("token")
-                                        .and_then(Value::as_str)
-                                        .map(str::to_string),
-                                }
-                            })
-                            .collect()
-                    })
+                    .map(|items| items.iter().enumerate().map(item_of).collect())
                     .unwrap_or_default(),
             ),
-            "diff" => {
-                // The row grammar names the file on its first row; a
-                // section titled with the same name would say it twice.
-                let title = value.get("title").and_then(Value::as_str).map(flat);
-                let rows: Vec<String> = e_core::tools::diffview::from_unified(&body())
-                    .lines()
-                    .map(str::to_string)
-                    .collect();
-                let rows = match (&title, rows.first()) {
-                    (Some(title), Some(first)) if first == title => rows[1..].to_vec(),
-                    _ => rows,
-                };
-                Content::Diff(rows)
-            }
+            "diff" => Content::Diff(diff_rows(value, &body())),
             "text" => Content::Text(body()),
             "markdown" => Content::Markdown(body()),
             "rows" => Content::Rows(
@@ -289,7 +242,8 @@ impl Section {
         self.scroll = self.scroll.min(last);
     }
 
-    /// The plain text of the rows `lo..=hi`, for an attachment.
+    /// The plain text of every row, for an attachment; the caller takes
+    /// the selected `lo..=hi` slice.
     fn lines(&self, width: usize) -> Vec<String> {
         match &self.content {
             Content::List(items) => items
@@ -310,6 +264,56 @@ impl Section {
             Content::Text(text) => wrap_styled(text, width.max(8)),
             Content::Markdown(text) => text.lines().map(str::to_string).collect(),
         }
+    }
+}
+
+/// A list item from JSON: a bare string is its label; an object carries
+/// `label`, `detail`, `token`, and `id`. The id falls back to the label,
+/// then to the item's position `i`.
+fn item_of((i, item): (usize, &Value)) -> Item {
+    let field = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .map(flat)
+            .unwrap_or_default()
+    };
+    let label = match item.as_str() {
+        Some(plain) => flat(plain),
+        None => field("label"),
+    };
+    let id = match field("id") {
+        id if id.is_empty() => {
+            if label.is_empty() {
+                i.to_string()
+            } else {
+                label.clone()
+            }
+        }
+        id => id,
+    };
+    Item {
+        id,
+        label,
+        detail: field("detail"),
+        token: item
+            .get("token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+/// A diff section's unified `body` in e's row grammar. The grammar names the
+/// file on its first row; a section titled with the same name would say it
+/// twice, so that row drops.
+fn diff_rows(value: &Value, body: &str) -> Vec<String> {
+    let title = value.get("title").and_then(Value::as_str).map(flat);
+    let rows: Vec<String> = e_core::tools::diffview::from_unified(body)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    match (&title, rows.first()) {
+        (Some(title), Some(first)) if first == title => rows[1..].to_vec(),
+        _ => rows,
     }
 }
 
@@ -662,8 +666,42 @@ impl Pane {
     /// with its rows, the hint on the last row.
     pub fn render(&mut self, theme: &Theme, width: usize, height: usize) -> Vec<String> {
         let available = height.saturating_sub(5);
-        // Row budget: lists take up to LIST_ROWS, every other section
-        // shares what is left; a section title and a divider cost a row.
+        let each = self.scrolling_rows(available);
+        let mut body: Vec<String> = Vec::new();
+        let focused_index = self.focus;
+        let focused = self.focused;
+        for (index, section) in self.sections.iter_mut().enumerate() {
+            if index > 0 {
+                body.push(theme.fg("border", &"─".repeat(width)));
+            }
+            if !section.title.is_empty() {
+                body.push(theme.fg("dim", &clip_styled(&section.title, width)));
+            }
+            let rows = if section.is_list() {
+                section.len().clamp(1, LIST_ROWS)
+            } else {
+                each.max(1)
+            };
+            let owns = focused && index == focused_index;
+            section.paint(theme, width, rows, owns, &mut body);
+        }
+        if self.clipped {
+            body.push(theme.fg("dim", "… clipped: the pane holds 256 KiB"));
+        }
+        body.truncate(available);
+        body.resize(available, String::new());
+        let header = self.header(theme, width);
+        let mut rows = panel::frame(theme, width, header, body);
+        rows.push(theme.fg("dim", &clip_styled(&self.hint, width)));
+        rows.truncate(height);
+        rows.into_iter()
+            .map(|row| clip_styled(&row, width))
+            .collect()
+    }
+
+    /// Row budget: lists take up to LIST_ROWS, every other section shares
+    /// what is left of `available`; a section title and a divider cost a row.
+    fn scrolling_rows(&self, available: usize) -> usize {
         let count = self.sections.len();
         let chrome: usize = self
             .sections
@@ -680,135 +718,128 @@ impl Pane {
             .map(|s| s.len().clamp(1, LIST_ROWS))
             .sum();
         let scrolling = self.sections.iter().filter(|s| !s.is_list()).count();
-        let each = body_rows
+        body_rows
             .saturating_sub(list_rows)
             .checked_div(scrolling)
-            .unwrap_or(0);
+            .unwrap_or(0)
+    }
 
-        let mut body: Vec<String> = Vec::new();
-        let focused_index = self.focus;
-        let focused = self.focused;
-        for (index, section) in self.sections.iter_mut().enumerate() {
-            if index > 0 {
-                body.push(theme.fg("border", &"─".repeat(width)));
-            }
-            if !section.title.is_empty() {
-                body.push(theme.fg("dim", &clip_styled(&section.title, width)));
-            }
-            let rows = if section.is_list() {
-                section.len().clamp(1, LIST_ROWS)
-            } else {
-                each.max(1)
-            };
-            section.rows = rows;
-            section.start = 3 + body.len();
-            let owns = focused && index == focused_index;
-            let painted = match &section.content {
-                Content::List(items) => {
-                    let selected = section.cursor;
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| {
-                            let detail = &item.detail;
-                            let label = clip_styled(
-                                &item.label,
-                                width.saturating_sub(visible_width(detail) + 1),
-                            );
-                            let pad =
-                                width.saturating_sub(visible_width(&label) + visible_width(detail));
-                            let label = if i == selected {
-                                bold(&theme.fg("userMessageText", &label))
-                            } else {
-                                theme.fg(item.token.as_deref().unwrap_or("dim"), &label)
-                            };
-                            let detail = theme.fg("dim", detail);
-                            format!("{label}{}{detail}", " ".repeat(pad))
-                        })
-                        .collect::<Vec<_>>()
-                }
-                Content::Diff(rows) => rows
-                    .iter()
-                    .map(|line| {
-                        diff_row_style(theme, line)
-                            .unwrap_or_else(|| theme.fg("customMessageText", line))
-                    })
-                    .collect(),
-                Content::Text(text) => wrap_styled(text, width.max(8)),
-                Content::Markdown(text) => render_markdown(theme, text, width.max(8)),
-                Content::Rows(rows) => rows
-                    .iter()
-                    .map(|spans| paint_spans(theme, spans, width))
-                    .collect(),
-            };
-            // Wrapped kinds learn their length at paint time.
-            if matches!(section.content, Content::Text(_) | Content::Markdown(_)) {
-                let len = painted.len().max(1);
-                section.cursor = section.cursor.min(len - 1);
-                section.scroll = section.scroll.min(len - 1);
-            }
-            if section.cursor < section.scroll {
-                section.scroll = section.cursor;
-            }
-            if section.cursor >= section.scroll + rows {
-                section.scroll = section.cursor + 1 - rows;
-            }
-            let range = section
-                .anchor
-                .map(|a| (a.min(section.cursor), a.max(section.cursor)));
-            let mut shown = 0;
-            for (i, row) in painted.iter().enumerate().skip(section.scroll).take(rows) {
-                let mut text = if section.horizontal > 0 && !section.is_list() {
-                    let skipped: String = e_core::tools::strip_ansi(row)
-                        .chars()
-                        .skip(section.horizontal)
-                        .collect();
-                    theme.fg("dim", &skipped)
-                } else {
-                    row.clone()
-                };
-                text = clip_styled(&text, width);
-                if range.is_some_and(|(lo, hi)| i >= lo && i <= hi) {
-                    text = format!("\x1b[7m{text}\x1b[27m");
-                } else if owns && !section.is_list() && i == section.cursor {
-                    text = bold(&text);
-                }
-                body.push(text);
-                shown += 1;
-            }
-            for _ in shown..rows {
-                body.push(String::new());
-            }
-            // Text and markdown keep their painted length for paging.
-            if matches!(section.content, Content::Text(_) | Content::Markdown(_)) {
-                section.painted = painted.len().max(1);
-            }
-        }
-        if self.clipped {
-            body.push(theme.fg("dim", "… clipped: the pane holds 256 KiB"));
-        }
-        body.truncate(available);
-        body.resize(available, String::new());
+    /// The title row with a `×` close button at the right edge (its column
+    /// is remembered for the mouse), bright while the pane has focus.
+    fn header(&mut self, theme: &Theme, width: usize) -> String {
         let title = clip_styled(&self.title, width.saturating_sub(2));
         let header = format!(
             "{title}{}×",
             " ".repeat(width.saturating_sub(visible_width(&title) + 1))
         );
         self.close_column = width.saturating_sub(1);
-        let header = theme.fg(
+        theme.fg(
             if self.focused {
                 "userMessageText"
             } else {
                 "dim"
             },
             &header,
-        );
-        let mut rows = panel::frame(theme, width, header, body);
-        rows.push(theme.fg("dim", &clip_styled(&self.hint, width)));
-        rows.truncate(height);
-        rows.into_iter()
-            .map(|row| clip_styled(&row, width))
-            .collect()
+        )
+    }
+}
+
+impl Section {
+    /// Paint this section's window of `rows` rows onto `body`, blank-padded,
+    /// remembering where it landed for the mouse and paging. The window
+    /// follows the cursor; the selection paints in reverse video, and the
+    /// cursor row of a focused (`owns`) non-list section in bold.
+    fn paint(
+        &mut self,
+        theme: &Theme,
+        width: usize,
+        rows: usize,
+        owns: bool,
+        body: &mut Vec<String>,
+    ) {
+        self.rows = rows;
+        self.start = 3 + body.len();
+        let painted = self.paint_content(theme, width);
+        let wrapped = matches!(self.content, Content::Text(_) | Content::Markdown(_));
+        // Wrapped kinds learn their length at paint time.
+        if wrapped {
+            let len = painted.len().max(1);
+            self.cursor = self.cursor.min(len - 1);
+            self.scroll = self.scroll.min(len - 1);
+        }
+        if self.cursor < self.scroll {
+            self.scroll = self.cursor;
+        }
+        if self.cursor >= self.scroll + rows {
+            self.scroll = self.cursor + 1 - rows;
+        }
+        let range = self
+            .anchor
+            .map(|a| (a.min(self.cursor), a.max(self.cursor)));
+        let mut shown = 0;
+        for (i, row) in painted.iter().enumerate().skip(self.scroll).take(rows) {
+            let mut text = if self.horizontal > 0 && !self.is_list() {
+                let skipped: String = e_core::tools::strip_ansi(row)
+                    .chars()
+                    .skip(self.horizontal)
+                    .collect();
+                theme.fg("dim", &skipped)
+            } else {
+                row.clone()
+            };
+            text = clip_styled(&text, width);
+            if range.is_some_and(|(lo, hi)| i >= lo && i <= hi) {
+                text = format!("\x1b[7m{text}\x1b[27m");
+            } else if owns && !self.is_list() && i == self.cursor {
+                text = bold(&text);
+            }
+            body.push(text);
+            shown += 1;
+        }
+        for _ in shown..rows {
+            body.push(String::new());
+        }
+        // Text and markdown keep their painted length for paging.
+        if wrapped {
+            self.painted = painted.len().max(1);
+        }
+    }
+
+    /// Every row of the content, styled at `width`, before windowing. A list
+    /// row brightens the selected label and right-aligns its dim detail.
+    fn paint_content(&self, theme: &Theme, width: usize) -> Vec<String> {
+        match &self.content {
+            Content::List(items) => items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    let detail = &item.detail;
+                    let label =
+                        clip_styled(&item.label, width.saturating_sub(visible_width(detail) + 1));
+                    let pad = width.saturating_sub(visible_width(&label) + visible_width(detail));
+                    let label = if i == self.cursor {
+                        bold(&theme.fg("userMessageText", &label))
+                    } else {
+                        theme.fg(item.token.as_deref().unwrap_or("dim"), &label)
+                    };
+                    let detail = theme.fg("dim", detail);
+                    format!("{label}{}{detail}", " ".repeat(pad))
+                })
+                .collect(),
+            Content::Diff(rows) => rows
+                .iter()
+                .map(|line| {
+                    diff_row_style(theme, line)
+                        .unwrap_or_else(|| theme.fg("customMessageText", line))
+                })
+                .collect(),
+            Content::Text(text) => wrap_styled(text, width.max(8)),
+            Content::Markdown(text) => render_markdown(theme, text, width.max(8)),
+            Content::Rows(rows) => rows
+                .iter()
+                .map(|spans| paint_spans(theme, spans, width))
+                .collect(),
+        }
     }
 }
 
