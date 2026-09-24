@@ -13,6 +13,9 @@ pub(super) struct Attachments {
 }
 
 impl App {
+    /// Ctrl+C is global, including during trust and login. The first press
+    /// cancels work and clears transient input; a second press exits without
+    /// recording a trust decision or waiting for cancellation to finish.
     pub(super) fn interrupt_or_exit(&mut self) {
         if self
             .armed_at
