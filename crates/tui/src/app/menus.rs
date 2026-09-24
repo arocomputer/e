@@ -3,69 +3,56 @@
 
 use super::*;
 
+/// The built-in commands as the `/` picker lists them, before grouping by
+/// category: (command, description). Selecting one runs the command.
+const BUILTIN_COMMANDS: &[(&str, &str)] = &[
+    ("/login", "sign in to a provider — account or API key"),
+    ("/models", "switch the model"),
+    ("/effort", "show or set reasoning effort"),
+    ("/scoped-models", "choose which models ctrl+p cycles"),
+    ("/reload", "reload extensions, themes, and config"),
+    ("/resume", "resume a saved session"),
+    (
+        "/tree",
+        "rewind to an earlier point in this session and branch",
+    ),
+    ("/new", "start a fresh session"),
+    (
+        "/fork",
+        "continue in a new session file seeded with this one — /fork <name>",
+    ),
+    (
+        "/export",
+        "write this session as a self-contained HTML page — /export <path>",
+    ),
+    ("/copy", "copy the last reply"),
+    (
+        "/compact",
+        "summarize into a fresh session — /compact <focus> steers what it keeps",
+    ),
+    (
+        "/usage",
+        "tokens and estimated cost by model — /usage 24h|7d|30d|all",
+    ),
+    ("/undo", "put back what the last write or edit replaced"),
+    (
+        "/trust",
+        "trust this directory (loads its AGENTS.md, .e resources)",
+    ),
+    ("/settings", "change preferences"),
+    ("/help", "show commands"),
+    ("/version", "show the version"),
+    ("/quit", "exit"),
+];
+
 impl App {
+    /// The `/` picker's rows: the built-ins grouped by category, then prompt
+    /// templates, then extension commands.
     pub(super) fn command_items(&self) -> Vec<MenuItem> {
-        let mut items = vec![
-            MenuItem::new(
-                "/login",
-                "sign in to a provider — account or API key",
-                "/login",
-            ),
-            MenuItem::new("/models", "switch the model", "/models"),
-            MenuItem::new("/effort", "show or set reasoning effort", "/effort"),
-            MenuItem::new(
-                "/scoped-models",
-                "choose which models ctrl+p cycles",
-                "/scoped-models",
-            ),
-            MenuItem::new(
-                "/reload",
-                "reload extensions, themes, and config",
-                "/reload",
-            ),
-            MenuItem::new("/resume", "resume a saved session", "/resume"),
-            MenuItem::new(
-                "/tree",
-                "rewind to an earlier point in this session and branch",
-                "/tree",
-            ),
-            MenuItem::new("/new", "start a fresh session", "/new"),
-            MenuItem::new(
-                "/fork",
-                "continue in a new session file seeded with this one — /fork <name>",
-                "/fork",
-            ),
-            MenuItem::new(
-                "/export",
-                "write this session as a self-contained HTML page — /export <path>",
-                "/export",
-            ),
-            MenuItem::new("/copy", "copy the last reply", "/copy"),
-            MenuItem::new(
-                "/compact",
-                "summarize into a fresh session — /compact <focus> steers what it keeps",
-                "/compact",
-            ),
-            MenuItem::new(
-                "/usage",
-                "tokens and estimated cost by model — /usage 24h|7d|30d|all",
-                "/usage",
-            ),
-            MenuItem::new(
-                "/undo",
-                "put back what the last write or edit replaced",
-                "/undo",
-            ),
-            MenuItem::new(
-                "/trust",
-                "trust this directory (loads its AGENTS.md, .e resources)",
-                "/trust",
-            ),
-            MenuItem::new("/settings", "change preferences", "/settings"),
-            MenuItem::new("/help", "show commands", "/help"),
-            MenuItem::new("/version", "show the version", "/version"),
-            MenuItem::new("/quit", "exit", "/quit"),
-        ];
+        let mut items: Vec<MenuItem> = BUILTIN_COMMANDS
+            .iter()
+            .map(|(command, description)| MenuItem::new(command, description, command))
+            .collect();
         // Every row carries a right-aligned category, brightening with the
         // selected row: a built-in gets its functional group, a prompt
         // template reads `Prompt`, an extension command `Extension`.
@@ -337,27 +324,6 @@ impl App {
     /// The picker itself, from the current catalog — no refresh side effects,
     /// so the rebuild-on-refresh arm cannot loop.
     pub(super) fn build_model_menu(&mut self) {
-        /// `200K context · 8K output` — exact multiples compact to K/M,
-        /// anything else stays raw, the reference's fact grammar.
-        fn model_facts(m: &e_core::providers::catalog::Model) -> String {
-            fn token_fact(tokens: u64, suffix: &str) -> String {
-                if tokens >= 1_000_000 && tokens.is_multiple_of(1_000_000) {
-                    format!("{}M {suffix}", tokens / 1_000_000)
-                } else if tokens >= 1_000 && tokens.is_multiple_of(1_000) {
-                    format!("{}K {suffix}", tokens / 1_000)
-                } else {
-                    format!("{tokens} {suffix}")
-                }
-            }
-            let mut facts = Vec::new();
-            if m.context_window > 0 {
-                facts.push(token_fact(m.context_window, "context"));
-            }
-            if let Some(output) = m.max_output {
-                facts.push(token_fact(output, "output"));
-            }
-            facts.join(" · ")
-        }
         let available = model::provider_grouped(model::available());
         if available.is_empty() {
             self.notice("no models available — use /login to sign in to a provider".into());
@@ -508,30 +474,7 @@ impl App {
         {
             self.menu = None;
         }
-        // File picker: the last token starts with '@'.
-        if let Some(token) = text
-            .split_whitespace()
-            .last()
-            .filter(|t| t.starts_with('@'))
-        {
-            let query = token[1..].to_string();
-            match &mut self.menu {
-                Some(m) if m.kind == MenuKind::Files => m.set_query(&query),
-                _ => self.open_file_menu(&query),
-            }
-            return;
-        }
-        // Skills picker: the last token starts with '$'.
-        if let Some(token) = text
-            .split_whitespace()
-            .last()
-            .filter(|t| t.starts_with('$'))
-        {
-            let query = token[1..].to_string();
-            match &mut self.menu {
-                Some(m) if m.kind == MenuKind::Skills => m.set_query(&query),
-                _ => self.open_skills_menu(&query),
-            }
+        if self.sync_token_picker(&text) {
             return;
         }
         // Auto pickers close when their trigger text is gone.
@@ -541,6 +484,29 @@ impl App {
         ) {
             self.menu = None;
         }
+    }
+
+    /// The file picker when the last token starts with '@', the skills
+    /// picker when it starts with '$'. True when one of them is open.
+    fn sync_token_picker(&mut self, text: &str) -> bool {
+        let Some(token) = text.split_whitespace().last() else {
+            return false;
+        };
+        if let Some(query) = token.strip_prefix('@') {
+            match &mut self.menu {
+                Some(m) if m.kind == MenuKind::Files => m.set_query(query),
+                _ => self.open_file_menu(query),
+            }
+            return true;
+        }
+        if let Some(query) = token.strip_prefix('$') {
+            match &mut self.menu {
+                Some(m) if m.kind == MenuKind::Skills => m.set_query(query),
+                _ => self.open_skills_menu(query),
+            }
+            return true;
+        }
+        false
     }
 
     /// Enter on an open picker. Returns true when the key was consumed.
@@ -601,56 +567,86 @@ impl App {
                 // Closing without Ctrl+S discards the staged edits.
                 self.staged_scope = None;
             }
-            MenuKind::Skills => {
-                // Replace the $token, then send the skill body as context.
-                let text = self.editor.text();
-                let start = text
-                    .rfind('$')
-                    .map(|at| text[..at].chars().count())
-                    .unwrap_or(0);
-                self.editor.replace_suffix(start, "");
-                let rest = self.editor.expanded_text().trim_end().to_string();
-                self.discard_composer_images();
-
-                self.editor.set_text("");
-                if let Some(skill) = e_core::resources::skills::get(&item.value, &self.agent.cwd())
-                {
-                    // The directory rides along, exactly as the system-prompt
-                    // catalog carries it: a body that says "see reference.md"
-                    // strands the model without the path it lives at.
-                    let body = format!(
-                        "{}\n\n[skill directory: {} — files this skill references live there]",
-                        skill.body,
-                        skill.dir.display()
-                    );
-                    let combined = if rest.is_empty() {
-                        body
-                    } else {
-                        format!("{body}\n\n{rest}")
-                    };
-                    self.prompt(combined);
-                }
-            }
-            MenuKind::Models => {
-                if let Some(found) = model::resolve(&item.value) {
-                    if let Err(error) = persist_model(&found) {
-                        self.notice(format!("could not save model choice: {error}"));
-                        return true;
-                    }
-                    self.notice(format!("model set to {}", model::slug(&found)));
-                    self.agent.model = found;
-                    self.refresh_status_cache();
-                    self.emit(
-                        "model_change",
-                        serde_json::json!({"model": self.agent.model_slug()}),
-                    );
-                }
-            }
+            MenuKind::Skills => self.use_skill(&item.value),
+            MenuKind::Models => self.select_model(&item.value),
             MenuKind::Tree => {
                 self.rewind_to_node(&item.value);
             }
             MenuKind::Extension => self.answer_ui_select(&item),
         }
         true
+    }
+    /// A skill picked from the `$` picker: replace the $token, then send the
+    /// skill body as context ahead of the rest of the draft.
+    fn use_skill(&mut self, name: &str) {
+        let text = self.editor.text();
+        let start = text
+            .rfind('$')
+            .map(|at| text[..at].chars().count())
+            .unwrap_or(0);
+        self.editor.replace_suffix(start, "");
+        let rest = self.editor.expanded_text().trim_end().to_string();
+        self.discard_composer_images();
+
+        self.editor.set_text("");
+        let Some(skill) = e_core::resources::skills::get(name, &self.agent.cwd()) else {
+            return;
+        };
+        // The directory rides along, exactly as the system-prompt
+        // catalog carries it: a body that says "see reference.md"
+        // strands the model without the path it lives at.
+        let body = format!(
+            "{}\n\n[skill directory: {} — files this skill references live there]",
+            skill.body,
+            skill.dir.display()
+        );
+        let combined = if rest.is_empty() {
+            body
+        } else {
+            format!("{body}\n\n{rest}")
+        };
+        self.prompt(combined);
+    }
+
+    /// A model picked from /models: switch to it and persist the choice.
+    fn select_model(&mut self, slug: &str) {
+        let Some(found) = model::resolve(slug) else {
+            return;
+        };
+        if let Err(error) = persist_model(&found) {
+            self.notice(format!("could not save model choice: {error}"));
+            return;
+        }
+        self.notice(format!("model set to {}", model::slug(&found)));
+        self.agent.model = found;
+        self.refresh_status_cache();
+        self.emit(
+            "model_change",
+            serde_json::json!({"model": self.agent.model_slug()}),
+        );
+    }
+}
+
+/// `200K context · 8K output` — exact multiples compact to K/M,
+/// anything else stays raw, the reference's fact grammar.
+fn model_facts(m: &e_core::providers::catalog::Model) -> String {
+    let mut facts = Vec::new();
+    if m.context_window > 0 {
+        facts.push(token_fact(m.context_window, "context"));
+    }
+    if let Some(output) = m.max_output {
+        facts.push(token_fact(output, "output"));
+    }
+    facts.join(" · ")
+}
+
+/// One model fact: a token count, compacted to K/M when exact.
+fn token_fact(tokens: u64, suffix: &str) -> String {
+    if tokens >= 1_000_000 && tokens.is_multiple_of(1_000_000) {
+        format!("{}M {suffix}", tokens / 1_000_000)
+    } else if tokens >= 1_000 && tokens.is_multiple_of(1_000) {
+        format!("{}K {suffix}", tokens / 1_000)
+    } else {
+        format!("{tokens} {suffix}")
     }
 }
