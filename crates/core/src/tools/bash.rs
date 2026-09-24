@@ -465,7 +465,12 @@ where
         &mut on_output,
     ) {
         Ok(exited) => exited,
-        Err(error) => return failure(&format!("bash: {error}")),
+        Err(error) => {
+            // Still kill the group and stop the readers: a reader whose
+            // pipe a descendant holds open would otherwise spin forever.
+            pipes.close(child.id(), &mut capture, &mut on_output);
+            return failure(&format!("bash: {error}"));
+        }
     };
     pipes.close(child.id(), &mut capture, &mut on_output);
     capture.flush_carries(&mut on_output);
