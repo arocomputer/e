@@ -21,7 +21,7 @@
 //! Parsing uses pulldown-cmark; rendering owns the width, so blocks land on
 //! their final lines directly.
 
-use pulldown_cmark::{Alignment, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use unicode_width::UnicodeWidthChar;
 
 use crate::highlight::highlight_block;
@@ -740,46 +740,15 @@ impl<'a> Document<'a> {
             Event::Start(Tag::Item) => self.start_item(start),
             Event::End(TagEnd::Item) => self.end_item(),
             Event::TaskListMarker(done) => self.current_task = Some(done),
-            Event::Start(Tag::CodeBlock(kind)) => {
-                let lang = match kind {
-                    pulldown_cmark::CodeBlockKind::Fenced(l) => {
-                        l.split_whitespace().next().unwrap_or("").to_string()
-                    }
-                    _ => String::new(),
-                };
-                self.code = Some((lang, String::new()));
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some((lang, buffer)) = self.code.take() {
-                    let lines = code_panel(self.theme, &buffer, &lang, self.width);
-                    push_block(&mut self.out, lines);
-                }
-            }
-            Event::Start(Tag::Table(aligns)) => {
-                self.table = Some(TableState {
-                    header: Vec::new(),
-                    rows: Vec::new(),
-                    aligns,
-                    in_header: false,
-                });
-            }
+            Event::Start(Tag::CodeBlock(kind)) => self.start_code(kind),
+            Event::End(TagEnd::CodeBlock) => self.end_code(),
+            Event::Start(Tag::Table(aligns)) => self.start_table(aligns),
             Event::Start(Tag::TableHead) => self.set_table_head(true),
             Event::End(TagEnd::TableHead) => self.set_table_head(false),
-            Event::Start(Tag::TableRow) => {
-                if let Some(t) = &mut self.table {
-                    if !t.in_header {
-                        t.rows.push(Vec::new());
-                    }
-                }
-            }
+            Event::Start(Tag::TableRow) => self.start_table_row(),
             Event::Start(Tag::TableCell) => self.inline.clear(),
             Event::End(TagEnd::TableCell) => self.end_table_cell(),
-            Event::End(TagEnd::Table) => {
-                if let Some(t) = self.table.take() {
-                    let lines = render_table(&t.header, &t.rows, &t.aligns, self.width);
-                    push_block(&mut self.out, lines);
-                }
-            }
+            Event::End(TagEnd::Table) => self.end_table(),
             Event::Rule => push_block(&mut self.out, vec![rule()]),
             // The reference strips bold/italic markers inside a heading
             // rather than nesting SGR into the level style.
@@ -945,6 +914,47 @@ impl<'a> Document<'a> {
             }
         }
         self.inline.clear();
+    }
+
+    /// Open a code block; a fence's first info word names its language.
+    fn start_code(&mut self, kind: CodeBlockKind) {
+        let lang = match kind {
+            CodeBlockKind::Fenced(l) => l.split_whitespace().next().unwrap_or("").to_string(),
+            _ => String::new(),
+        };
+        self.code = Some((lang, String::new()));
+    }
+
+    fn end_code(&mut self) {
+        if let Some((lang, buffer)) = self.code.take() {
+            let lines = code_panel(self.theme, &buffer, &lang, self.width);
+            push_block(&mut self.out, lines);
+        }
+    }
+
+    fn start_table(&mut self, aligns: Vec<Alignment>) {
+        self.table = Some(TableState {
+            header: Vec::new(),
+            rows: Vec::new(),
+            aligns,
+            in_header: false,
+        });
+    }
+
+    /// Body rows open a row for their cells; the header collects separately.
+    fn start_table_row(&mut self) {
+        if let Some(t) = &mut self.table {
+            if !t.in_header {
+                t.rows.push(Vec::new());
+            }
+        }
+    }
+
+    fn end_table(&mut self) {
+        if let Some(t) = self.table.take() {
+            let lines = render_table(&t.header, &t.rows, &t.aligns, self.width);
+            push_block(&mut self.out, lines);
+        }
     }
 
     fn set_table_head(&mut self, in_header: bool) {
