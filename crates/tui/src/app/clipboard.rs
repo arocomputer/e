@@ -16,82 +16,36 @@ const OSASCRIPT: &str = "/usr/bin/osascript";
 #[cfg(target_os = "macos")]
 const SIPS: &str = "/usr/bin/sips";
 
-/// Run a helper, bounded. `Ok` carries the exit status and the capped
-/// stdout; `Err` is a spawn failure (`Missing` — try the next helper) or a
-/// timeout / over-cap read (give up, the payload is unusable either way).
+/// Why a bounded helper run produced nothing usable: the helper is not
+/// installed (`Missing` — try the next helper), or it failed, timed out, or
+/// overran the cap (`Failed` — give up, the payload is unusable either way).
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) enum RunError {
     Missing,
     Failed(String),
 }
 
+/// A finished helper run: its exit status and its capped stdout.
 struct RunOutput {
     success: bool,
     stdout: Vec<u8>,
 }
 
+/// Run a helper, bounded by [`READ_TIMEOUT`] and [`MAX_IMAGE_BYTES`]. Every
+/// exit path kills the helper's process group and reaps the helper.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn run(program: &str, args: &[&str]) -> Result<RunOutput, RunError> {
-    use std::io::Read as _;
-    use std::os::unix::process::CommandExt as _;
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        // Its own process group, so the kill below reaches any forked
-        // descendant still holding the pipe (the bash tool's pattern).
-        .process_group(0)
-        .spawn()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                RunError::Missing
-            } else {
-                RunError::Failed(format!("{program}: {error}"))
-            }
-        })?;
-    let Some(mut stdout) = child.stdout.take() else {
+    let mut child = spawn_grouped(program, args)?;
+    let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
         return Err(RunError::Failed(format!("{program}: no stdout pipe")));
     };
-
-    // Read (bounded) on a helper thread so the deadline can fire even when
-    // the child never closes its pipe; the pipe dies with the kill below.
-    // A second channel carries the reader's exit, so a pathological process
-    // that escaped the group and still holds the pipe can only ever cost a
-    // bounded wait — never a hang, and never a bricked clipboard.
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let (done_sender, done_receiver) = std::sync::mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let mut buffer = Vec::new();
-        let mut chunk = [0u8; 8192];
-        loop {
-            match stdout.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(read) => {
-                    buffer.extend_from_slice(&chunk[..read]);
-                    if buffer.len() as u64 > MAX_IMAGE_BYTES {
-                        break;
-                    }
-                }
-            }
-        }
-        let _ = sender.send(buffer);
-        let _ = done_sender.send(());
-    });
-
-    let stdout = match receiver.recv_timeout(READ_TIMEOUT) {
+    let reader = Reader::spawn(stdout);
+    let stdout = match reader.output.recv_timeout(READ_TIMEOUT) {
         Ok(buffer) => buffer,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            e_core::tools::kill_group(child.id());
-            let _ = child.wait();
-            await_reader(&done_receiver);
-            return Err(RunError::Failed(format!(
-                "{program} did not finish within {}s",
-                READ_TIMEOUT.as_secs()
-            )));
+            return Err(give_up(&mut child, &reader, program));
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Vec::new(),
     };
@@ -100,41 +54,122 @@ fn run(program: &str, args: &[&str]) -> Result<RunOutput, RunError> {
         // full pipe and never exit on its own — kill the group first.
         e_core::tools::kill_group(child.id());
         let _ = child.wait();
-        let _ = reader.join();
+        let _ = reader.thread.join();
         return Err(RunError::Failed(format!(
             "{program} output exceeded the {} MiB image limit",
             MAX_IMAGE_BYTES / (1024 * 1024)
         )));
     }
-    // Give the helper a bounded chance to exit on its own; kill the whole
-    // group while the child is unreaped either way — its pid is still the
-    // valid group id then, and cannot yet have been reused.
-    let deadline = std::time::Instant::now() + READ_TIMEOUT;
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            _ => {
-                e_core::tools::kill_group(child.id());
-                let _ = child.wait();
-                await_reader(&done_receiver);
-                return Err(RunError::Failed(format!(
-                    "{program} did not finish within {}s",
-                    READ_TIMEOUT.as_secs()
-                )));
-            }
-        }
+    let Some(success) = wait_for_exit(&mut child) else {
+        return Err(give_up(&mut child, &reader, program));
     };
     // The leader has exited, but a forked descendant may still hold the
     // pipe and block the reader — take the group down before waiting for
     // the reader's exit.
     e_core::tools::kill_group(child.id());
     let _ = child.wait();
-    await_reader(&done_receiver);
-    let _ = reader.join();
+    await_reader(&reader.done);
+    let _ = reader.thread.join();
     Ok(RunOutput { success, stdout })
+}
+
+/// Start the helper with stdout piped, in its own process group, so the
+/// kill in [`run`] reaches any forked descendant still holding the pipe
+/// (the bash tool's pattern).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn spawn_grouped(program: &str, args: &[&str]) -> Result<std::process::Child, RunError> {
+    use std::os::unix::process::CommandExt as _;
+    use std::process::{Command, Stdio};
+    Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                RunError::Missing
+            } else {
+                RunError::Failed(format!("{program}: {error}"))
+            }
+        })
+}
+
+/// Give the helper a bounded chance to exit on its own: its success, or
+/// None when it outlived the deadline. The caller kills the whole group
+/// while the child is unreaped either way — its pid is still the valid
+/// group id then, and cannot yet have been reused.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn wait_for_exit(child: &mut std::process::Child) -> Option<bool> {
+    let deadline = std::time::Instant::now() + READ_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.success()),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// The helper ran past its deadline: kill its group, reap it, and report
+/// the timeout.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn give_up(child: &mut std::process::Child, reader: &Reader, program: &str) -> RunError {
+    e_core::tools::kill_group(child.id());
+    let _ = child.wait();
+    await_reader(&reader.done);
+    RunError::Failed(format!(
+        "{program} did not finish within {}s",
+        READ_TIMEOUT.as_secs()
+    ))
+}
+
+/// Read (bounded) on a helper thread so the deadline can fire even when
+/// the child never closes its pipe; the pipe dies with the group kill.
+/// A second channel carries the reader's exit, so a pathological process
+/// that escaped the group and still holds the pipe can only ever cost a
+/// bounded wait — never a hang, and never a bricked clipboard.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+struct Reader {
+    /// What was read, once the pipe closed or the cap was passed.
+    output: std::sync::mpsc::Receiver<Vec<u8>>,
+    /// Signalled when the thread is about to exit.
+    done: std::sync::mpsc::Receiver<()>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl Reader {
+    /// Drain `stdout` until it closes or passes [`MAX_IMAGE_BYTES`].
+    fn spawn(mut stdout: std::process::ChildStdout) -> Self {
+        use std::io::Read as _;
+        let (sender, output) = std::sync::mpsc::channel();
+        let (done_sender, done) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                match stdout.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        buffer.extend_from_slice(&chunk[..read]);
+                        if buffer.len() as u64 > MAX_IMAGE_BYTES {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = sender.send(buffer);
+            let _ = done_sender.send(());
+        });
+        Self {
+            output,
+            done,
+            thread,
+        }
+    }
 }
 
 /// Wait briefly for the reader thread to finish. A process that escaped
@@ -164,14 +199,11 @@ pub(super) fn read() -> Result<Paste, String> {
     }
 }
 
+/// JXA reaches AppKit's pasteboard directly. It keeps e dependency-free but
+/// avoids AppleScript's expensive clipboard coercion (roughly 40–60 ms
+/// rather than 700 ms for the same screenshot in a local benchmark).
 #[cfg(target_os = "macos")]
-fn platform_images() -> Result<Vec<ImageInput>, String> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    // JXA reaches AppKit's pasteboard directly. It keeps e dependency-free but
-    // avoids AppleScript's expensive clipboard coercion (roughly 40–60 ms
-    // rather than 700 ms for the same screenshot in a local benchmark).
-    const SCRIPT: &str = r#"
+const SCRIPT: &str = r#"
 ObjC.import("AppKit");
 function run(argv) {
     const pasteboard = $.NSPasteboard.generalPasteboard;
@@ -201,6 +233,13 @@ function run(argv) {
 }
 "#;
 
+/// A copied image on macOS: the pasteboard's image files, else its bitmap
+/// exported to a private temp file (converted to PNG when it isn't
+/// readable as is).
+#[cfg(target_os = "macos")]
+fn platform_images() -> Result<Vec<ImageInput>, String> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
     // The system temp dir, not the e home: the export is transient and is
     // removed below, and osascript's write itself cannot be size-capped —
     // the bound is enforced when the file is read back.
@@ -220,48 +259,54 @@ function run(argv) {
         .open(&raw_path)
         .map_err(|error| format!("clipboard: {error}"))?;
 
-    let result = (|| {
-        let output = run(OSASCRIPT, &["-l", "JavaScript", "-e", SCRIPT, raw]).map_err(unusable)?;
-        if !output.success {
-            return Err("clipboard could not be read".into());
-        }
-        let mut file_error = None;
-        if let Some(encoded) = output.stdout.strip_prefix(b"files\0") {
-            // osascript appends a newline after its result. The JXA result's
-            // final NUL marks the exact payload, preserving newlines in names.
-            let end = encoded
-                .iter()
-                .rposition(|byte| *byte == 0)
-                .unwrap_or(encoded.len());
-            let paths = encoded[..end]
-                .split(|byte| *byte == 0)
-                .filter(|path| !path.is_empty())
-                .map(|path| String::from_utf8(path.to_vec()))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| "clipboard file path is not valid UTF-8".to_string())?;
-            match ImageInput::from_paths(&paths) {
-                Ok(images) => return Ok(images),
-                Err(error) => file_error = Some(error),
-            }
-        }
-        if raw_path.metadata().is_ok_and(|metadata| metadata.len() > 0) {
-            return match ImageInput::from_path(&raw_path) {
-                Ok(image) => Ok(vec![image]),
-                Err(_) => {
-                    let converted =
-                        run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
-                    if !converted.success {
-                        return Err("clipboard image could not be converted to PNG".into());
-                    }
-                    ImageInput::from_path(&png_path).map(|image| vec![image])
-                }
-            };
-        }
-        Err(file_error.unwrap_or_else(|| "clipboard does not contain a supported image".into()))
-    })();
+    let result = read_pasteboard(raw, png);
     let _ = std::fs::remove_file(&raw_path);
     let _ = std::fs::remove_file(&png_path);
     result
+}
+
+/// Run the JXA export into `raw`, then prefer the listed image files, else
+/// the exported bitmap, converting it into `png` when needed.
+#[cfg(target_os = "macos")]
+fn read_pasteboard(raw: &str, png: &str) -> Result<Vec<ImageInput>, String> {
+    let raw_path = std::path::Path::new(raw);
+    let output = run(OSASCRIPT, &["-l", "JavaScript", "-e", SCRIPT, raw]).map_err(unusable)?;
+    if !output.success {
+        return Err("clipboard could not be read".into());
+    }
+    let mut file_error = None;
+    if let Some(encoded) = output.stdout.strip_prefix(b"files\0") {
+        // osascript appends a newline after its result. The JXA result's
+        // final NUL marks the exact payload, preserving newlines in names.
+        let end = encoded
+            .iter()
+            .rposition(|byte| *byte == 0)
+            .unwrap_or(encoded.len());
+        let paths = encoded[..end]
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| String::from_utf8(path.to_vec()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "clipboard file path is not valid UTF-8".to_string())?;
+        match ImageInput::from_paths(&paths) {
+            Ok(images) => return Ok(images),
+            Err(error) => file_error = Some(error),
+        }
+    }
+    if raw_path.metadata().is_ok_and(|metadata| metadata.len() > 0) {
+        return match ImageInput::from_path(raw_path) {
+            Ok(image) => Ok(vec![image]),
+            Err(_) => {
+                let converted =
+                    run(SIPS, &["-s", "format", "png", raw, "--out", png]).map_err(unusable)?;
+                if !converted.success {
+                    return Err("clipboard image could not be converted to PNG".into());
+                }
+                ImageInput::from_path(std::path::Path::new(png)).map(|image| vec![image])
+            }
+        };
+    }
+    Err(file_error.unwrap_or_else(|| "clipboard does not contain a supported image".into()))
 }
 
 #[cfg(target_os = "macos")]
