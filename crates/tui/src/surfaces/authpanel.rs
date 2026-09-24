@@ -43,6 +43,17 @@ pub enum AuthStage {
     },
 }
 
+/// The row Up (`up`) or Down moves to in a list of `len` rows, wrapping at
+/// either end.
+pub fn step(selected: usize, len: usize, up: bool) -> usize {
+    let len = len.max(1);
+    if up {
+        (selected + len - 1) % len
+    } else {
+        (selected + 1) % len
+    }
+}
+
 /// Where a finished flow returns: the list it belongs to, selection preserved.
 #[derive(Clone, Copy)]
 pub enum BackTarget {
@@ -241,4 +252,18 @@ fn api_key_rows(theme: &Theme, width: usize, provider: &str, mask_count: usize) 
             render::backspace_label()
         )),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step;
+
+    #[test]
+    fn up_and_down_move_opposite_ways_and_wrap() {
+        assert_eq!(step(0, 3, false), 1);
+        assert_eq!(step(2, 3, false), 0);
+        assert_eq!(step(1, 3, true), 0);
+        assert_eq!(step(0, 3, true), 2);
+        assert_eq!(step(0, 0, true), 0);
+    }
 }

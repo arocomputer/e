@@ -565,9 +565,7 @@ impl App {
     /// then an extension surface, then whichever panel or picker is open,
     /// and the composer last.
     fn on_key(&mut self, k: KeyEvent, cols: usize, rows: usize) {
-        if self.global_key(k, cols, rows)
-            || self.extension_key(k, cols)
-            || self.panel_key(k, cols, rows)
+        if self.global_key(k, cols, rows) || self.extension_key(k) || self.panel_key(k, cols, rows)
         {
             return;
         }
@@ -614,7 +612,7 @@ impl App {
     /// The side pane and the extension panel, when they own the keyboard.
     /// ctrl+c never reaches here: [`App::global_key`] keeps it e's. True
     /// when the key was taken.
-    fn extension_key(&mut self, k: KeyEvent, cols: usize) -> bool {
+    fn extension_key(&mut self, k: KeyEvent) -> bool {
         let free = self.panels_closed() && !self.ui_input_open();
         if self.pane.is_some()
             && free
@@ -630,7 +628,7 @@ impl App {
             // The pane owns the keyboard: e navigates it,
             // and chords it does not use go to the owner.
             if let Some(pane) = self.pane.as_mut() {
-                let action = pane.key(k, cols);
+                let action = pane.key(k);
                 self.pane_action(action);
             }
         } else if self.ext_panel.as_ref().is_some_and(|p| p.interactive) && self.panels_closed() {
@@ -770,15 +768,11 @@ impl App {
             }
             (AuthStage::Account { selected }, KeyCode::Up | KeyCode::Down) => {
                 let n = e_core::providers::registry::oauth_providers().len();
-                *selected = (*selected + 1) % n.max(1);
+                *selected = authpanel::step(*selected, n, k.code == KeyCode::Up);
             }
-            (AuthStage::Key { selected }, KeyCode::Up) => {
+            (AuthStage::Key { selected }, KeyCode::Up | KeyCode::Down) => {
                 let n = e_core::providers::registry::key_providers().len();
-                *selected = (*selected + n - 1) % n.max(1);
-            }
-            (AuthStage::Key { selected }, KeyCode::Down) => {
-                let n = e_core::providers::registry::key_providers().len();
-                *selected = (*selected + 1) % n.max(1);
+                *selected = authpanel::step(*selected, n, k.code == KeyCode::Up);
             }
             (AuthStage::Account { selected }, KeyCode::Enter) => {
                 let choice = *selected;

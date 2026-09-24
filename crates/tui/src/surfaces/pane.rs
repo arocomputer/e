@@ -117,9 +117,10 @@ pub struct Section {
     horizontal: usize,
     /// Rows painted last frame, for paging and the mouse.
     rows: usize,
-    /// Rows the wrapped content came to last frame (text and markdown),
-    /// so the cursor can travel the whole of it, not just one page.
-    painted: usize,
+    /// The rows the wrapped content came to last frame (text and
+    /// markdown), styled: the cursor travels all of them, not just one
+    /// page, and an attachment takes the ones it selected.
+    wrapped: Vec<String>,
     /// The frame row the section's body started on last frame.
     start: usize,
 }
@@ -175,7 +176,7 @@ impl Section {
             scroll: 0,
             horizontal: 0,
             rows: 1,
-            painted: 1,
+            wrapped: Vec::new(),
             start: 0,
         };
         if let (Content::List(items), Some(selected)) = (
@@ -197,7 +198,7 @@ impl Section {
             Content::Diff(rows) => rows.len(),
             Content::Rows(rows) => rows.len(),
             // Wrapped at paint time; the row count is remembered then.
-            Content::Text(_) | Content::Markdown(_) => self.painted.max(1),
+            Content::Text(_) | Content::Markdown(_) => self.wrapped.len().max(1),
         }
     }
 
@@ -222,7 +223,7 @@ impl Section {
         self.anchor = old.anchor;
         // A fresh section has not been painted; without the old length the
         // clamp below would send a scrolled text section back to its top.
-        self.painted = old.painted;
+        self.wrapped = old.wrapped.clone();
         if let (Content::List(items), Some(before)) = (&self.content, old.selected()) {
             if let Some(index) = items.iter().position(|item| item.id == before.id) {
                 self.cursor = index;
@@ -243,8 +244,9 @@ impl Section {
     }
 
     /// The plain text of every row, for an attachment; the caller takes
-    /// the selected `lo..=hi` slice.
-    fn lines(&self, width: usize) -> Vec<String> {
+    /// the selected `lo..=hi` slice. Text and markdown give the rows they
+    /// were painted as, since those are what the cursor and anchor index.
+    fn lines(&self) -> Vec<String> {
         match &self.content {
             Content::List(items) => items
                 .iter()
@@ -261,8 +263,11 @@ impl Section {
                 .iter()
                 .map(|spans| spans.iter().map(|s| s.text.as_str()).collect::<String>())
                 .collect(),
-            Content::Text(text) => wrap_styled(text, width.max(8)),
-            Content::Markdown(text) => text.lines().map(str::to_string).collect(),
+            Content::Text(_) | Content::Markdown(_) => self
+                .wrapped
+                .iter()
+                .map(|row| e_core::tools::strip_ansi(row))
+                .collect(),
         }
     }
 }
@@ -499,10 +504,10 @@ impl Pane {
     /// Snapshot the selected rows (or the cursor row) for the composer.
     /// The label names the section when it has a title (a file path, say),
     /// else the pane.
-    fn attach(&mut self, width: usize) -> Action {
+    fn attach(&mut self) -> Action {
         let pane_title = self.title.clone();
         let section = self.section();
-        let lines = section.lines(width);
+        let lines = section.lines();
         if lines.is_empty() {
             return Action::None;
         }
@@ -529,7 +534,7 @@ impl Pane {
     }
 
     /// Keys while the pane owns focus. ctrl+c never reaches here.
-    pub fn key(&mut self, key: KeyEvent, width: usize) -> Action {
+    pub fn key(&mut self, key: KeyEvent) -> Action {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let page = self.section().rows.max(1) as isize;
         match key.code {
@@ -563,7 +568,7 @@ impl Pane {
                     }
                     action
                 } else {
-                    self.attach(width)
+                    self.attach()
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => self.step(-1, shift),
@@ -799,9 +804,10 @@ impl Section {
         for _ in shown..rows {
             body.push(String::new());
         }
-        // Text and markdown keep their painted length for paging.
+        // Text and markdown keep their painted rows for paging and
+        // attaching.
         if wrapped {
-            self.painted = painted.len().max(1);
+            self.wrapped = painted;
         }
     }
 
@@ -873,28 +879,24 @@ mod tests {
     fn moving_through_a_list_reports_the_selection_and_enter_moves_on() {
         let mut pane = pane();
         assert_eq!(
-            pane.key(key(KeyCode::Down), 40),
+            pane.key(key(KeyCode::Down)),
             Action::Select {
                 section: "files".into(),
                 id: "b.rs".into()
             }
         );
+        assert_eq!(pane.key(key(KeyCode::Down)), Action::None, "already last");
         assert_eq!(
-            pane.key(key(KeyCode::Down), 40),
-            Action::None,
-            "already last"
-        );
-        assert_eq!(
-            pane.key(key(KeyCode::Enter), 40),
+            pane.key(key(KeyCode::Enter)),
             Action::Activate {
                 section: "files".into(),
                 id: "b.rs".into()
             }
         );
         assert_eq!(pane.focus, 1, "Enter on a list focuses the next section");
-        assert_eq!(pane.key(key(KeyCode::Esc), 40), Action::None);
+        assert_eq!(pane.key(key(KeyCode::Esc)), Action::None);
         assert_eq!(pane.focus, 0, "Esc returns to the first section");
-        assert_eq!(pane.key(key(KeyCode::Esc), 40), Action::Close);
+        assert_eq!(pane.key(key(KeyCode::Esc)), Action::Close);
     }
 
     #[test]
@@ -905,12 +907,12 @@ mod tests {
         pane.render(&theme, 40, 20);
         for _ in 0..2 {
             assert_eq!(
-                pane.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT), 40),
+                pane.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT)),
                 Action::None
             );
         }
         assert_eq!(pane.sections[1].anchor, Some(0));
-        let Action::Attach { label, content } = pane.key(key(KeyCode::Enter), 40) else {
+        let Action::Attach { label, content } = pane.key(key(KeyCode::Enter)) else {
             panic!("expected an attachment");
         };
         // The file row, the context row, and the removed row.
@@ -926,10 +928,55 @@ mod tests {
         assert!(!pane.focused, "attaching hands focus back to the composer");
     }
 
+    /// The last painted row of a one-section pane, attached from the end.
+    fn attach_last_row(kind: &str, body: &str, width: usize) -> (String, Vec<String>) {
+        let mut pane = Pane::from_request(
+            "notes",
+            &json!({"id": "notes", "title": "Notes", "sections": [{"kind": kind, "body": body}]}),
+        )
+        .unwrap();
+        pane.focused = true;
+        let theme = crate::theme::resolve("dark", false);
+        pane.render(&theme, width, 30);
+        pane.key(key(KeyCode::End));
+        let Action::Attach { content, .. } = pane.key(key(KeyCode::Enter)) else {
+            panic!("expected an attachment");
+        };
+        let rows = pane.sections[0]
+            .wrapped
+            .iter()
+            .map(|row| e_core::tools::strip_ansi(row))
+            .collect();
+        (content, rows)
+    }
+
+    #[test]
+    fn a_markdown_attachment_takes_the_rendered_row_under_the_cursor() {
+        // The cursor walks rendered rows; the source has fewer lines than
+        // the paragraph wraps to, so a source-line attachment would take
+        // the wrong text.
+        let body = "# Notes\n\nalpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+        let (content, rows) = attach_last_row("markdown", body, 24);
+        let last = rows.last().unwrap();
+        assert!(rows.len() > body.lines().count(), "{rows:?}");
+        assert_eq!(content, format!("From the Notes pane:\n{last}"));
+    }
+
+    #[test]
+    fn a_text_attachment_wraps_at_the_pane_width() {
+        let body = "one two three four five six seven eight nine ten eleven twelve";
+        let (content, rows) = attach_last_row("text", body, 20);
+        assert_eq!(rows, wrap_styled(body, 20));
+        assert_eq!(
+            content,
+            format!("From the Notes pane:\n{}", rows.last().unwrap())
+        );
+    }
+
     #[test]
     fn an_update_keeps_the_cursor_on_the_same_item_and_a_missing_id_resets() {
         let mut pane = pane();
-        pane.key(key(KeyCode::Down), 40);
+        pane.key(key(KeyCode::Down));
         let fresh = Pane::from_request(
             "diff",
             &json!({"id": "diff", "sections": [
@@ -959,10 +1006,7 @@ mod tests {
     #[test]
     fn unknown_keys_go_to_the_owner_and_the_split_obeys_the_layout() {
         let mut pane = pane();
-        assert_eq!(
-            pane.key(key(KeyCode::Char('x')), 40),
-            Action::Key("x".into())
-        );
+        assert_eq!(pane.key(key(KeyCode::Char('x'))), Action::Key("x".into()));
         let layout = e_core::config::layout::parse(
             r#"{"panes":{"diff":{"side":"right","width":30}},"split_min":100}"#,
         )
@@ -1017,7 +1061,7 @@ mod tests {
         // is one row tall.
         pane.render(&theme, 40, 12);
         for _ in 0..30 {
-            pane.key(key(KeyCode::Down), 40);
+            pane.key(key(KeyCode::Down));
         }
         let plain: Vec<String> = pane
             .render(&theme, 40, 12)
