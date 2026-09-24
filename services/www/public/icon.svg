@@ -1,7 +1,5 @@
-<svg width="150" height="30" viewBox="0 0 150 30" xmlns="http://www.w3.org/2000/svg">
-<style>path{fill:#000}@media(prefers-color-scheme:dark){path{fill:#fff}}</style>
-<path d="M10 30H0V0H10V30Z"/>
-<path d="M20 30V0H30V20H50V0H60V30H20Z"/>
-<path d="M65 30V0H75V20H105V30H65Z"/>
-<path d="M150 30V0H110V30H150ZM140 20H120V10H140V20Z"/>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+<style>.tile{fill:#242424}.letter{fill:#fafafa}@media(prefers-color-scheme:dark){.tile{fill:#fafafa}.letter{fill:#242424}}</style>
+<path class="tile" d="M32 2C56 2 62 8 62 32S56 62 32 62S2 56 2 32S8 2 32 2Z"/>
+<path class="letter" d="M16 44V20H24V36H40V20H48V44H16Z"/>
 </svg>
