@@ -25,31 +25,24 @@ pub fn read_result_schema() -> Value {
     )
 }
 
+/// Serve a kept result by id: the lines matching `query` when one is given,
+/// otherwise the byte window at `offset`. Arguments are checked in order
+/// (id, then that the id is kept, then limit and offset) so each failure
+/// names the first thing wrong.
 pub fn read_result(args: &Value, _cwd: &std::path::Path, state: &super::ToolRuntime) -> ToolOutput {
     let Some(id) = args["id"].as_u64() else {
-        return ToolOutput {
-            content: "read_result: missing integer id".into(),
-            outcome: ToolOutcome::Failed,
-            summary: "bad arguments".into(),
-            display: None,
-        };
+        return failed("read_result: missing integer id".into(), "bad arguments");
     };
     let Some(full) = state.result(id) else {
-        return ToolOutput {
-            content: format!(
+        return failed(
+            format!(
                 "read_result: no result {id} — it was never kept, or was evicted; rerun the command"
             ),
-            outcome: ToolOutcome::Failed,
-            summary: "not found".into(),
-            display: None,
-        };
+            "not found",
+        );
     };
-    let bad_arguments = |message: String| ToolOutput {
-        content: format!("read_result: {message}"),
-        outcome: ToolOutcome::Failed,
-        summary: "bad arguments".into(),
-        display: None,
-    };
+    let bad_arguments =
+        |message: String| failed(format!("read_result: {message}"), "bad arguments");
     // The same lenient integer reading as `read`: a numeric string or an
     // integral float silently ignored would re-serve the first window.
     let limit = match super::integer_arg(args, "limit") {
@@ -63,45 +56,50 @@ pub fn read_result(args: &Value, _cwd: &std::path::Path, state: &super::ToolRunt
         Ok(offset) => offset.unwrap_or(0),
         Err(message) => return bad_arguments(message),
     };
-    if let Some(query) = args["query"].as_str().filter(|q| !q.is_empty()) {
-        let mut out = String::new();
-        let mut matches = 0usize;
-        let mut cut = false;
-        for (index, line) in full.lines().enumerate() {
-            if !line.contains(query) {
-                continue;
-            }
-            matches += 1;
-            let row = format!("{}\t{line}\n", index + 1);
-            if out.len() + row.len() > limit {
-                cut = true;
-                break;
-            }
-            out.push_str(&row);
-        }
-        if cut {
-            out.push_str("… [more matches beyond the byte limit; narrow the query]\n");
-        }
-        let content = if matches == 0 {
-            format!("no lines contain {query:?}")
-        } else {
-            out
-        };
-        return ToolOutput {
-            content,
-            outcome: ToolOutcome::Completed,
-            summary: format!("{matches} matches"),
-            display: None,
-        };
+    match args["query"].as_str().filter(|q| !q.is_empty()) {
+        Some(query) => matching_lines(&full, query, limit),
+        None => byte_window(&full, id, offset, limit),
     }
+}
+
+/// Every line of `full` containing `query`, numbered from 1, until the next
+/// row would pass `limit` bytes.
+fn matching_lines(full: &str, query: &str, limit: usize) -> ToolOutput {
+    let mut out = String::new();
+    let mut matches = 0usize;
+    let mut cut = false;
+    for (index, line) in full.lines().enumerate() {
+        if !line.contains(query) {
+            continue;
+        }
+        matches += 1;
+        let row = format!("{}\t{line}\n", index + 1);
+        if out.len() + row.len() > limit {
+            cut = true;
+            break;
+        }
+        out.push_str(&row);
+    }
+    if cut {
+        out.push_str("… [more matches beyond the byte limit; narrow the query]\n");
+    }
+    let content = if matches == 0 {
+        format!("no lines contain {query:?}")
+    } else {
+        out
+    };
+    completed(content, format!("{matches} matches"))
+}
+
+/// Up to `limit` bytes of result `id` from `offset`, widened to character
+/// boundaries, with a footer naming the next offset or the end.
+fn byte_window(full: &str, id: u64, offset: u64, limit: usize) -> ToolOutput {
     let total = full.len();
     let Some(offset) = usize::try_from(offset).ok().filter(|o| *o < total) else {
-        return ToolOutput {
-            content: format!("offset {offset} is past the end of result {id} ({total} bytes)"),
-            outcome: ToolOutcome::Failed,
-            summary: "past the end".into(),
-            display: None,
-        };
+        return failed(
+            format!("offset {offset} is past the end of result {id} ({total} bytes)"),
+            "past the end",
+        );
     };
     let mut start = offset;
     while !full.is_char_boundary(start) {
@@ -129,10 +127,25 @@ pub fn read_result(args: &Value, _cwd: &std::path::Path, state: &super::ToolRunt
             "; end of result".to_string()
         }
     ));
+    completed(content, format!("{} bytes", end - start))
+}
+
+/// A failed read with the model-facing `content` and the row's `summary`.
+fn failed(content: String, summary: &str) -> ToolOutput {
+    ToolOutput {
+        content,
+        outcome: ToolOutcome::Failed,
+        summary: summary.into(),
+        display: None,
+    }
+}
+
+/// A served read.
+fn completed(content: String, summary: String) -> ToolOutput {
     ToolOutput {
         content,
         outcome: ToolOutcome::Completed,
-        summary: format!("{} bytes", end - start),
+        summary,
         display: None,
     }
 }
