@@ -59,7 +59,7 @@
     "pagefind": "1.5.2",
     "prettier": "3.9.8",
     "prettier-plugin-astro": "^1.0",
-    "typescript": "^5",
+    "typescript": "^7",
     "typescript-eslint": "^8",
     "wrangler": "4.135.0"
   }
