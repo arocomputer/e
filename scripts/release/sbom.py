@@ -7,14 +7,14 @@ import subprocess
 import sys
 
 
-FILENAME = 'e-release-sbom'
+FILENAME = 'ulo-release-sbom'
 
 
 def application_bom(metadata):
     """Find the binary package's output in either a workspace or a root package."""
-    apps = [p for p in metadata['packages'] if p['name'] == 'aro-e']
+    apps = [p for p in metadata['packages'] if p['name'] == 'ulo']
     if len(apps) != 1:
-        raise ValueError('Expected one aro-e application package')
+        raise ValueError('Expected one ulo application package')
     return Path(apps[0]['manifest_path']).parent / f'{FILENAME}.json'
 
 
@@ -28,7 +28,7 @@ def generate(destination):
         subprocess.run(['cargo', 'cyclonedx', '--format', 'json', '--spec-version', '1.5',
                         '--all', '--target', 'all', '--override-filename', FILENAME], check=True)
         bom = json.loads(source.read_text())
-        if bom['metadata']['component']['name'] != 'aro-e':
+        if bom['metadata']['component']['name'] != 'ulo':
             raise ValueError('Generated SBOM does not describe the application')
         shutil.copyfile(source, destination)
     finally:

@@ -145,7 +145,7 @@ impl Screen {
             redraw_pending: false,
             cols,
             rows,
-            debug_frames: std::env::var("E_DEBUG_FRAMES").is_ok(),
+            debug_frames: std::env::var("ULO_DEBUG_FRAMES").is_ok(),
         }
     }
 
@@ -181,7 +181,7 @@ impl Screen {
             let f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/e-frames.log");
+                .open("/tmp/ulo-frames.log");
             if let Ok(mut f) = f {
                 let _ = writeln!(f, "== frame {} rows ==", lines.len());
                 for l in lines {
@@ -420,7 +420,7 @@ struct PaintThreadGuard {
 impl Drop for PaintThreadGuard {
     fn drop(&mut self) {
         let (lock, wake) = &*self.mailbox;
-        let mut mailbox = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut mailbox = lock.lock().unwrap_or_else(|ulo| ulo.into_inner());
         mailbox.stopped = true;
         if !mailbox.shutdown && mailbox.failure.is_none() {
             let sequence = mailbox.posted;
@@ -500,9 +500,9 @@ impl Painter {
             let (lock, wake) = &*shared;
             loop {
                 let (frame, resize, shutdown) = {
-                    let mut box_ = lock.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut box_ = lock.lock().unwrap_or_else(|ulo| ulo.into_inner());
                     while box_.frame.is_none() && box_.resize.is_none() && !box_.shutdown {
-                        box_ = wake.wait(box_).unwrap_or_else(|e| e.into_inner());
+                        box_ = wake.wait(box_).unwrap_or_else(|ulo| ulo.into_inner());
                     }
                     (box_.frame.take(), box_.resize.take(), box_.shutdown)
                 };
@@ -519,7 +519,7 @@ impl Painter {
                         review.switch(&mut screen, frame.alternate)?;
                         screen.paint_to(frame.lines, &mut io::stdout().lock())
                     }));
-                    let mut mailbox = lock.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut mailbox = lock.lock().unwrap_or_else(|ulo| ulo.into_inner());
                     match painted {
                         Ok(Ok(())) => mailbox.complete(sequence),
                         Ok(Err(error)) => {
@@ -549,7 +549,7 @@ impl Painter {
 
     fn post(&self, update: impl FnOnce(&mut PaintMailbox)) {
         let (lock, wake) = &*self.mailbox;
-        update(&mut lock.lock().unwrap_or_else(|e| e.into_inner()));
+        update(&mut lock.lock().unwrap_or_else(|ulo| ulo.into_inner()));
         wake.notify_one();
     }
 
@@ -576,7 +576,7 @@ impl Painter {
 
     pub fn status(&self) -> PaintStatus {
         let (lock, _) = &*self.mailbox;
-        lock.lock().unwrap_or_else(|e| e.into_inner()).status()
+        lock.lock().unwrap_or_else(|ulo| ulo.into_inner()).status()
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {

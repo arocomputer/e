@@ -1,0 +1,35 @@
+---
+/** Independently scrollable topic groups, focusable for keyboard scrolling. `current` is the page's route. */
+import type { DocNavGroup } from "./data";
+
+interface Props {
+  groups: DocNavGroup[];
+  current: string;
+}
+
+const { groups, current } = Astro.props;
+const here = (href: string) => (href === current ? "page" : undefined);
+---
+
+<nav class="ulo-doc-nav" aria-label="Documentation" tabindex="0">
+  <div class="ulo-doc-topics">
+    {groups.map((group) => (
+      <div class="ulo-doc-group">
+        <p>
+          <a
+            class="ulo-doc-group-link"
+            aria-current={here(group.href)}
+            href={`${group.href}#top`}
+          >
+            {group.label}
+          </a>
+        </p>
+        {group.links.map(([href, title]) => (
+          <a aria-current={here(href)} href={`${href}#top`}>
+            {title}
+          </a>
+        ))}
+      </div>
+    ))}
+  </div>
+</nav>

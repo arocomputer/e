@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP stdio tool bridge for e. Configure `extensions.mcp` in settings.json:
+ * MCP stdio tool bridge for ulo. Configure `extensions.mcp` in settings.json:
  *   {"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/safe/root"]}
  *
  * This targets the stable 2025-11-25 stdio lifecycle used by current SDKs'
@@ -61,7 +61,7 @@ function routeMcp(line) {
   }
   // This tool-only bridge cannot answer server-initiated sampling/roots/etc.
   if (Object.hasOwn(message, "id") && message.method) {
-    writeMcp({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported by e MCP tool bridge" } });
+    writeMcp({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported by ulo MCP tool bridge" } });
   }
 }
 
@@ -89,7 +89,7 @@ async function startMcp(config) {
   await callMcp("initialize", {
     protocolVersion: "2025-11-25",
     capabilities: {},
-    clientInfo: { name: "e-mcp-bridge", version: "1.0.0" },
+    clientInfo: { name: "ulo-mcp-bridge", version: "1.0.0" },
   });
   writeMcp({ jsonrpc: "2.0", method: "notifications/initialized" });
   const tools = [];
@@ -134,7 +134,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       return;
     }
     if (method === "tool_call") {
-      const token = `e-${id}`;
+      const token = `ulo-${id}`;
       progress.set(token, id);
       try {
         const result = await callMcp("tools/call", {

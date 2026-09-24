@@ -1,7 +1,7 @@
 //! The live half of the catalog: every signed-in provider's own
 //! `GET /models` is fetched in the background, cached in
-//! `~/.e/models-store.json`, and merged with the declared tables. New ids
-//! appear with no e release, and provider-reported context windows replace
+//! `~/.ulo/models-store.json`, and merged with the declared tables. New ids
+//! appear with no ulo release, and provider-reported context windows replace
 //! built-in seeds but not explicit user overrides. Failures stay silent so an
 //! offline launch does not care.
 
@@ -17,7 +17,7 @@ fn store_path() -> std::path::PathBuf {
 }
 
 /// Model ids each provider reported, from the cache. A new model a gateway
-/// ships appears here on the next refresh — no e release involved. A
+/// ships appears here on the next refresh — no ulo release involved. A
 /// discovered id takes its facts (window, effort, thinking, pricing) from
 /// models.dev; a window the gateway itself reports wins over that. Explicit
 /// provider image settings remain final for discovered ids too.
@@ -59,7 +59,7 @@ pub(super) fn remote_overlay(
                     })
                 })
         else {
-            continue; // only providers e knows how to speak to
+            continue; // only providers ulo knows how to speak to
         };
         if catalog_strategy == crate::providers::registry::CatalogStrategy::None {
             // The provider's live discovery is off. A cache entry can
@@ -201,7 +201,7 @@ pub async fn refresh_remote_within(max_age_ms: u64) {
         }
         let fresh = stored
             .get(&provider)
-            .and_then(|e| e.get("checked_at"))
+            .and_then(|ulo| ulo.get("checked_at"))
             .and_then(|v| v.as_u64())
             .map(|at| now.saturating_sub(at) < max_age_ms)
             .unwrap_or(false);
@@ -325,7 +325,7 @@ async fn fetch_models(
             // pair on every inference call.
             if catalog_strategy == crate::providers::registry::CatalogStrategy::Chatgpt {
                 request
-                    .header("originator", "e")
+                    .header("originator", "ulo")
                     .header("OpenAI-Beta", "responses=experimental")
             } else {
                 request
@@ -423,7 +423,7 @@ mod tests {
     use crate::providers::catalog::{Api, Model};
     use crate::providers::registry::{CatalogStrategy, ResponsesMount};
 
-    // E_HOME is process-global; serialize tests that set it.
+    // ULO_HOME is process-global; serialize tests that set it.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn seeded_model(provider: &str, catalog: CatalogStrategy) -> Model {
@@ -447,16 +447,16 @@ mod tests {
     }
 
     fn with_temp_home(name: &str, body: impl FnOnce(&std::path::Path)) {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let dir = std::env::temp_dir().join(format!(
-            "e-remote-overlay-{name}-{}-{}",
+            "ulo-remote-overlay-{name}-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("E_HOME", &dir);
+        std::env::set_var("ULO_HOME", &dir);
         body(&dir);
-        std::env::remove_var("E_HOME");
+        std::env::remove_var("ULO_HOME");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

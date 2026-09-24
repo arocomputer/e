@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use e::core::tools::{self, ToolOutcome};
+use ulo::core::tools::{self, ToolOutcome};
 
 fn run_cmd(cmd: &str, timeout: u64) -> tools::ToolOutput {
     let args = serde_json::json!({ "command": cmd, "timeout": timeout });

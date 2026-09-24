@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * scaffold — the wire-protocol helper for e extensions.
+ * scaffold — the wire-protocol helper for ulo extensions.
  *
- * An e extension is a bare process speaking JSONL over stdin/stdout; the
+ * An ulo extension is a bare process speaking JSONL over stdin/stdout; the
  * framing (id routing, the initialize manifest, dispatch) is the same for
  * every extension. This file is that shared plumbing: `connect()` turns
  * your handlers into a running extension using only Node.js built-ins.
@@ -14,7 +14,7 @@
  *   ext.run();
  *
  * Handlers (each optional; returning undefined means "nothing to say").
- * Handlers receive e's `params` object as sent — command/tool get
+ * Handlers receive ulo's `params` object as sent — command/tool get
  * `{name, args}` / `{name, arguments}`, hooks get their own params.
  *
  *   initialize(params)     — stash config ({extensions_config}), before the
@@ -43,11 +43,11 @@
  *   panelClosed()          — the user (or another panel) closed yours
  *   paneSelect({pane, section, id})   — the side pane's cursor moved to an item
  *   paneActivate({pane, section, id}) — Enter on a pane item
- *   paneKey({pane, key})   — a pane chord e did not use
+ *   paneKey({pane, key})   — a pane chord ulo did not use
  *   paneClosed({pane})     — the user (or another pane) closed yours
  *
- * Asking e — every call returns a promise of the result, rejected with
- * e's error text (for instance "no ui" under `e rpc`):
+ * Asking ulo — every call returns a promise of the result, rejected with
+ * ulo's error text (for instance "no ui" under `ulo rpc`):
  *
  *   ext.ui.notify(message, tone?)          ext.ui.show({title, body, format})
  *   ext.ui.select(title, options)          ext.ui.confirm(title, message?)
@@ -69,9 +69,9 @@
  * hook needed to read them.
  *
  * A thrown error is answered as a protocol error (startup errors are fatal
- * to launch, as e documents; runtime errors just fail that call).
+ * to launch, as ulo documents; runtime errors just fail that call).
  *
- * Run directly (dropped into ~/.e/extensions/, which users do by accident
+ * Run directly (dropped into ~/.ulo/extensions/, which users do by accident
  * since examples import it from there), this file answers initialize with
  * a minimal manifest and idles — a silent, harmless no-op extension.
  */
@@ -108,7 +108,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
     }
   }
 
-  // Flags e parsed from the command line ("flags" notification; also rides
+  // Flags ulo parsed from the command line ("flags" notification; also rides
   // hook.startup params). flag()/flagPassed() read them from any handler.
   let lastFlags = {};
 
@@ -118,10 +118,10 @@ export function connect({ manifest = {}, ...handlers } = {}) {
     if (Object.hasOwn(flag, "default")) defaults[flag.name] = flag.default;
   }
 
-  // ---- our own requests to e ------------------------------------------
+  // ---- our own requests to ulo ------------------------------------------
   let nextId = 0;
   const pending = new Map();
-  /** Ask e; resolves with the result, rejects with e's error text. */
+  /** Ask ulo; resolves with the result, rejects with ulo's error text. */
   function ask(method, params = {}) {
     const id = `s${++nextId}`;
     return new Promise((resolve, reject) => {
@@ -280,7 +280,7 @@ export function connect({ manifest = {}, ...handlers } = {}) {
   return api;
 }
 // ---- direct-run no-op -----------------------------------------------------
-// When executed (rather than imported), serve a minimal manifest so e sees
+// When executed (rather than imported), serve a minimal manifest so ulo sees
 // a quiet, well-behaved extension instead of a startup failure.
 
 import { realpathSync } from "node:fs";

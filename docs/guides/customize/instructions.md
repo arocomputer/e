@@ -6,18 +6,18 @@ order: 3
 
 # Instructions
 
-`AGENTS.md` files hold instructions that e adds to the system prompt. e wraps
+`AGENTS.md` files hold instructions that ulo adds to the system prompt. ulo wraps
 each one as project instructions, with the file's path.
 
-## Where e looks
+## Where ulo looks
 
 | File | Scope | When it loads |
 | --- | --- | --- |
-| `~/.e/AGENTS.md` | Yours, for every project. | Always. |
+| `~/.ulo/AGENTS.md` | Yours, for every project. | Always. |
 | `<workspace>/AGENTS.md` | The project's. | Once the directory is trusted. |
 | `<workspace>/<dir>/…/AGENTS.md` | Nested, for one directory. | The first time a tool touches a path under that directory. |
 
-Trust a workspace with `/trust`, or with `e trust [dir]` when there is no
+Trust a workspace with `/trust`, or with `ulo trust [dir]` when there is no
 terminal. A run refuses an untrusted workspace outright, because an untrusted
 repository could otherwise steer the agent.
 
@@ -38,19 +38,19 @@ asking.
 
 ## Trust is the precondition
 
-e runs only in a directory whose own instructions you have accepted. A
+ulo runs only in a directory whose own instructions you have accepted. A
 session that started untrusted would work in a repository with no say in what
 the model was told.
 
-- On your first visit, e asks with the terminal's trust panel.
+- On your first visit, ulo asks with the terminal's trust panel.
 - Declining exits and records nothing, so the next launch asks again.
-- `e trust [dir]` records the answer for a session with no terminal.
-- `e untrust [dir]` refuses that directory deliberately.
+- `ulo trust [dir]` records the answer for a session with no terminal.
+- `ulo untrust [dir]` refuses that directory deliberately.
 
-Trust extends to everything inside a trusted ancestor. For that reason e never
+Trust extends to everything inside a trusted ancestor. For that reason ulo never
 records your home directory as trusted.
 
 ## Related guides
 
 Reasoning, skills, and prompt templates have their own guides:
-`e docs skills` and `e docs prompt-templates`.
+`ulo docs skills` and `ulo docs prompt-templates`.

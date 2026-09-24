@@ -1,7 +1,7 @@
 //! Context assembly: the system prompt, following the reference's
 //! layered structure.
 //!
-//! The base prompt is e's identity, an explicit tools list, and the
+//! The base prompt is ulo's identity, an explicit tools list, and the
 //! guidelines. A user's `settings.json` `system_prompt` replaces that base
 //! wholesale (the custom-prompt path). Either way, the layered context is
 //! appended in the reference's order: project instructions (AGENTS.md), then
@@ -14,14 +14,14 @@ use crate::config::home;
 
 // The reference design's own guideline set. It keeps the always-on pair and
 // omits the bash-only file-exploration line, which the reference adds only when
-// no grep/find/ls tool exists — e ships grep, so it never applied here.
+// no grep/find/ls tool exists — ulo ships grep, so it never applied here.
 const GUIDELINES: &[&str] = &[
     "Be concise in your responses",
     "Show file paths clearly when working with files",
 ];
 
 /// The default base: identity, tools, guidelines (the reference's shape,
-/// e's name).
+/// ulo's name).
 fn default_base() -> String {
     // The tool list comes from the same table that registers the tools —
     // the prompt can't advertise a tool that doesn't exist or miss one that
@@ -36,19 +36,19 @@ fn default_base() -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "You are an expert coding assistant operating inside e, a coding agent \
+        "You are an expert coding assistant operating inside ulo, a coding agent \
 harness. You help users by reading files, executing commands, editing code, \
 and writing new files.\n\n\
 Available tools:\n{tools}\n\n\
 In addition to the tools above, you may have access to other custom tools \
 depending on the project.\n\n\
 Guidelines:\n{guidelines}\n\n\
-e documentation (read only when the user asks about e itself — its \
+ulo documentation (read only when the user asks about ulo itself — its \
 extensions, themes, skills, prompt templates, keybindings, or models):\n\
-- Run `e docs` to list the built-in guides, `e docs <topic>` to print one\n\
+- Run `ulo docs` to list the built-in guides, `ulo docs <topic>` to print one\n\
 - Topics: extensions (the protocol and a worked example), themes, models, \
 prompt-templates, skills, keybindings\n\
-- When working on an e topic, print and follow the guide before implementing \
+- When working on an ulo topic, print and follow the guide before implementing \
 — the formats are exact"
     )
 }
@@ -70,13 +70,13 @@ fn settings() -> Settings {
         .unwrap_or_default()
 }
 
-/// A user override from `~/.e/settings.json`, if a non-empty one is set.
+/// A user override from `~/.ulo/settings.json`, if a non-empty one is set.
 fn custom_prompt() -> Option<String> {
     settings().system_prompt.filter(|p| !p.trim().is_empty())
 }
 
 /// The suffix appended to the system prompt when no tools are available —
-/// a `~/.e/settings.json` `no_tools_notice` overrides it.
+/// a `~/.ulo/settings.json` `no_tools_notice` overrides it.
 pub fn no_tools_notice() -> String {
     settings()
         .no_tools_notice

@@ -1,0 +1,41 @@
+---
+/**
+ * ulo's policy documents in the legal reading layout: a last-updated section,
+ * numbered anchors per heading, and a questions section that emails
+ * `contactEmail` or links to the contact page. Section paragraphs are trusted
+ * HTML strings written in the page source, so a paragraph can carry a link.
+ */
+import LegalArticle from "./LegalArticle.astro";
+
+export type LegalSection = { heading: string; body: string[] };
+
+interface Props {
+  title: string;
+  updated: string;
+  intro: string;
+  sections: LegalSection[];
+  contactEmail?: string;
+}
+
+const { title, updated, intro, sections, contactEmail } = Astro.props;
+---
+
+<LegalArticle
+  title={title}
+  lead={intro}
+  sections={[
+    { id: "updated", title: "Last updated", html: `<p>${updated}</p>` },
+    ...sections.map((section, i) => ({
+      id: `section-${i + 1}`,
+      title: section.heading,
+      html: section.body.map((paragraph) => `<p>${paragraph}</p>`).join(""),
+    })),
+    {
+      id: "questions",
+      title: "Questions",
+      html: contactEmail
+        ? `<p><a href="mailto:${contactEmail}">${contactEmail}</a></p>`
+        : `<p><a href="/ulo/contact">Contact us</a></p>`,
+    },
+  ]}
+/>

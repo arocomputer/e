@@ -2,9 +2,9 @@
 #![cfg(unix)]
 mod common;
 
-use e::core::providers::{ChatMessage, ToolCall};
-use e::core::session::SessionLog;
 use std::process::Command;
+use ulo::core::providers::{ChatMessage, ToolCall};
+use ulo::core::session::SessionLog;
 
 #[test]
 fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
@@ -43,7 +43,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
     log.append(&ChatMessage::tool_result_with_meta(
         "probe",
         "READER_OUTPUT_END",
-        e::core::tools::ToolOutcome::Completed,
+        ulo::core::tools::ToolOutcome::Completed,
         "1 line",
     ))
     .unwrap();
@@ -57,7 +57,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
         ))
         .arg(&capture)
         .args(["100", "30", "1.5", "8"])
-        .arg(env!("CARGO_BIN_EXE_e"))
+        .arg(env!("CARGO_BIN_EXE_ulo"))
         .args([
             "--continue",
             "--no-save",
@@ -67,7 +67,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
             "mock/test",
         ])
         .current_dir(workspace)
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .env("CAP_PROMPT", "\u{f}")
         .env("CAP_WAIT_FOR", "Review · ←/→ switch")
         .env("CAP_EXIT", "\u{f}")

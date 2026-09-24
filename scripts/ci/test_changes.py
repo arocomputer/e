@@ -11,6 +11,10 @@ from changes import changed_paths, classify, main
 
 
 class ChangesTests(unittest.TestCase):
+    def test_website_changes_do_not_publish_native_packages(self):
+        gates = classify(['crates/www/src/worker.ts', '.github/workflows/www.yml'])
+        self.assertFalse(any(gates.values()))
+
     def test_readme_artwork_does_not_build_or_publish(self):
         gates = classify(['README.md', 'assets/readme.png', 'assets/readme-window.html'])
         self.assertTrue(gates['docs'])
@@ -55,7 +59,7 @@ class ChangesTests(unittest.TestCase):
 
     def test_rename_out_of_runtime_still_checks_old_path(self):
         pages = [[{'filename': 'assets/old.json', 'previous_filename': 'crates/core/themes/old.json'}]]
-        with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='arocomputer/e'), \
+        with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='arocomputer/ulo'), \
                 patch('changes.subprocess.check_output', return_value=json.dumps(pages)):
             self.assertTrue(classify(changed_paths())['build'])
 

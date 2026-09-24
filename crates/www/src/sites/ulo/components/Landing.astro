@@ -1,0 +1,78 @@
+---
+/**
+ * ulo's landing page body: introduction with the installer, the recorded demo,
+ * capabilities, and the FAQ. Detailed setup and reference live in the guides.
+ */
+import SiteFrame from "./SiteFrame.astro";
+import { Installer } from "./installer";
+import { TerminalDemo } from "./demo/player";
+
+const capabilities = [
+  {
+    title: "Make changes in your repository",
+    text: "Ask ulo to trace a bug, change an implementation, or add a test. It reads the relevant files, edits code, and runs shell commands. You review the diff and results in your existing workflow.",
+  },
+  {
+    title: "Return to work without starting over",
+    text: "Reopen a saved conversation or return to an earlier message to try another approach. The original branch stays in the history. Long sessions compact older context as you work.",
+  },
+  {
+    title: "Use your models and tools",
+    text: "Connect a provider account or a local model. Add project rules in AGENTS.md, save prompts you repeat, and extend ulo with tools written in your language. The core ships as one Rust binary.",
+  },
+];
+const questions = [
+  [
+    "What do I need to run ulo?",
+    "A terminal on macOS or Linux and access to a model. The installer supports ARM64 and x86-64. You do not need Rust unless you want to compile ulo from source.",
+  ],
+  [
+    "Is ulo free?",
+    "Yes. ulo is open source under the MIT license. You supply your own provider account, API key, or local model. Provider usage and subscription costs are separate.",
+  ],
+  [
+    "Where does my data go?",
+    "Saved sessions stay under ~/.ulo/sessions/. Model requests go to your selected provider and may include code and tool output. That provider's data policies apply.",
+  ],
+  [
+    "Can ulo change files and run commands?",
+    "Yes. Tools run with your user permissions, without a permission prompt by default. Directory trust controls loaded context, not execution. Use a container, VM, or OS sandbox when the task needs isolation.",
+  ],
+];
+---
+
+<SiteFrame>
+  <section class="ulo-intro" aria-labelledby="intro">
+    <h1 id="intro">The coding agent you can put anywhere.</h1>
+    <p>
+      Work on your code with a hosted or local model. One Rust binary, with
+      extensions in any language.
+    </p>
+    <div id="install">
+      <Installer client:load />
+    </div>
+  </section>
+  <TerminalDemo client:load />
+  <section class="ulo-capabilities" aria-labelledby="working">
+    <h2 id="working">What you can do with ulo</h2>
+    <div class="ulo-capability-list">
+      {capabilities.map(({ title, text }) => (
+        <section class="ulo-capability">
+          <h3>{title}</h3>
+          <p>{text}</p>
+        </section>
+      ))}
+    </div>
+  </section>
+  <section class="ulo-questions" aria-labelledby="faq">
+    <h2 id="faq">FAQ</h2>
+    <div class="ulo-faq">
+      {questions.map(([question, answer]) => (
+        <details>
+          <summary>{question}</summary>
+          <p>{answer}</p>
+        </details>
+      ))}
+    </div>
+  </section>
+</SiteFrame>

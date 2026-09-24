@@ -96,7 +96,7 @@ static PROCESS_GROUPS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
 fn track_group(pid: u32) {
     PROCESS_GROUPS
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .get_or_insert_with(HashSet::new)
         .insert(pid);
 }
@@ -104,16 +104,16 @@ fn track_group(pid: u32) {
 fn untrack_group(pid: u32) {
     if let Some(groups) = PROCESS_GROUPS
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .as_mut()
     {
         groups.remove(&pid);
     }
 }
 
-/// Kill every live shell process group before the owning e process exits.
+/// Kill every live shell process group before the owning ulo process exits.
 pub fn kill_tracked_processes() {
-    let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|ulo| ulo.into_inner());
     for pid in groups.take().unwrap_or_default() {
         kill_group(pid);
     }
@@ -154,7 +154,7 @@ fn register_background(
     id: String,
     process: Arc<BackgroundProcess>,
 ) -> bool {
-    let mut guard = registry.jobs.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = registry.jobs.lock().unwrap_or_else(|ulo| ulo.into_inner());
     let map = &mut *guard;
     prune_background(map);
     if map.len() >= BACKGROUND_PROCESS_LIMIT {
@@ -168,7 +168,7 @@ fn find_background(registry: &BackgroundRegistry, id: &str) -> Option<Arc<Backgr
     registry
         .jobs
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .get(id)
         .cloned()
 }
@@ -246,7 +246,7 @@ fn drain_into_background<R: std::io::Read>(mut pipe: R, process: Arc<BackgroundP
         match pipe.read(&mut buf) {
             Ok(0) => break,
             Ok(count) => {
-                let mut output = process.output.lock().unwrap_or_else(|e| e.into_inner());
+                let mut output = process.output.lock().unwrap_or_else(|ulo| ulo.into_inner());
                 output.extend_from_slice(&buf[..count]);
                 if output.len() > BACKGROUND_RETAIN_LIMIT {
                     let excess = output.len() - BACKGROUND_RETAIN_LIMIT;
@@ -261,7 +261,7 @@ fn drain_into_background<R: std::io::Read>(mut pipe: R, process: Arc<BackgroundP
                 *process
                     .total_bytes
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner()) += count;
+                    .unwrap_or_else(|ulo| ulo.into_inner()) += count;
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
@@ -285,8 +285,8 @@ fn reap_background(
         let _ = t.join();
     }
     let (status, mut exit) = loop {
-        let exit = process.exit.lock().unwrap_or_else(|e| e.into_inner());
-        let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+        let exit = process.exit.lock().unwrap_or_else(|ulo| ulo.into_inner());
+        let mut groups = PROCESS_GROUPS.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let status = match child.try_wait() {
             Ok(None) => {
                 drop(groups);
@@ -326,7 +326,7 @@ fn reap_background(
         Ordering::Relaxed,
     );
     if let Some(registry) = registry.upgrade() {
-        prune_background(&mut registry.jobs.lock().unwrap_or_else(|e| e.into_inner()));
+        prune_background(&mut registry.jobs.lock().unwrap_or_else(|ulo| ulo.into_inner()));
     }
 }
 
@@ -338,7 +338,7 @@ fn query_background(registry: &BackgroundRegistry, id: &str, kill: bool) -> Tool
     // Hold the exit lock through signaling so the reaper cannot release and
     // reuse the PID between the liveness check and kill.
     let signalled = {
-        let exit = process.exit.lock().unwrap_or_else(|e| e.into_inner());
+        let exit = process.exit.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if kill && exit.is_none() {
             kill_group(process.pid);
             true
@@ -352,7 +352,7 @@ fn query_background(registry: &BackgroundRegistry, id: &str, kill: bool) -> Tool
         while process
             .exit
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .is_none()
             && Instant::now() < deadline
         {
@@ -362,13 +362,13 @@ fn query_background(registry: &BackgroundRegistry, id: &str, kill: bool) -> Tool
     let retained = process
         .output
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .clone();
     let total_bytes = *process
         .total_bytes
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let exit = *process.exit.lock().unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(|ulo| ulo.into_inner());
+    let exit = *process.exit.lock().unwrap_or_else(|ulo| ulo.into_inner());
     let mut combined =
         super::resolve_carriage_returns(&super::strip_ansi(&String::from_utf8_lossy(&retained)))
             .trim_end()
@@ -828,13 +828,13 @@ fn drain_complete_utf8(carry: &mut Vec<u8>) -> String {
                 carry.clear();
                 return out;
             }
-            Err(e) => {
-                let valid = e.valid_up_to();
+            Err(ulo) => {
+                let valid = ulo.valid_up_to();
                 // valid_up_to() proves the prefix decodes; lossy is byte-
                 // identical there and degrades instead of panicking if a
                 // future refactor breaks that proof.
                 out.push_str(&String::from_utf8_lossy(&carry[..valid]));
-                match e.error_len() {
+                match ulo.error_len() {
                     Some(bad) => {
                         out.push('\u{FFFD}');
                         carry.drain(..valid + bad);

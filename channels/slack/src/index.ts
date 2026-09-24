@@ -1,5 +1,5 @@
 /**
- * e for Slack: each thread owns an e rpc process and session. Questions
+ * ulo for Slack: each thread owns an ulo rpc process and session. Questions
  * and replies stay with that thread even while other threads run turns.
  * Copy this and change what your team wants posted.
  */
@@ -20,7 +20,7 @@ const env = (name: string) => {
   return v;
 };
 
-const cwd = resolve(env("E_CWD"));
+const cwd = resolve(env("ULO_CWD"));
 const app = new App({
   token: env("SLACK_BOT_TOKEN"),
   signingSecret: env("SLACK_SIGNING_SECRET"),
@@ -29,9 +29,9 @@ const app = new App({
 });
 
 const threads = new Threads(
-  process.env.E_SLACK_STATE ?? "./e-slack-state.json",
-  () => new Rpc(process.env.E_BIN ?? "e", [], cwd),
-  { cwd, ...(process.env.E_MODEL ? { model: process.env.E_MODEL } : {}) },
+  process.env.ULO_SLACK_STATE ?? "./ulo-slack-state.json",
+  () => new Rpc(process.env.ULO_BIN ?? "ulo", [], cwd),
+  { cwd, ...(process.env.ULO_MODEL ? { model: process.env.ULO_MODEL } : {}) },
   (key, rpc, ask) => relayAsk(key, rpc, ask),
 );
 
@@ -232,4 +232,4 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 await app.start();
-console.log("e for Slack is listening");
+console.log("ulo for Slack is listening");

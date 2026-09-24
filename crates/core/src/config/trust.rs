@@ -1,11 +1,11 @@
-//! Per-directory trust: whether e may load a workspace's own instructions.
+//! Per-directory trust: whether ulo may load a workspace's own instructions.
 //!
 //! Working in a directory means running model-directed tools in it (yolo), and
 //! its AGENTS.md feeds the system prompt — an untrusted repo could steer the
-//! agent through it. So the answer is a precondition, not a filter: e runs in a
+//! agent through it. So the answer is a precondition, not a filter: ulo runs in a
 //! trusted workspace, or it refuses and says how to trust one. The first visit
-//! asks once; the answer is remembered in `~/.e/trust.json` (merge-written,
-//! unknown keys survive). Sessions with no terminal record it with `e trust`.
+//! asks once; the answer is remembered in `~/.ulo/trust.json` (merge-written,
+//! unknown keys survive). Sessions with no terminal record it with `ulo trust`.
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -52,7 +52,7 @@ fn decision(object: &serde_json::Map<String, serde_json::Value>, cwd: &Path) -> 
 
 /// Some(true) trusted, Some(false) declined, None never asked. A trusted
 /// ancestor extends to everything inside it — trusting `~/code` covers
-/// `~/code/clones/e-1` — while a *declined* ancestor answers only for
+/// `~/code/clones/ulo-1` — while a *declined* ancestor answers only for
 /// itself, so its other children still get their own first-visit question.
 /// This directory's own recorded answer always wins over an ancestor's.
 pub fn status(cwd: &Path) -> Option<bool> {
@@ -69,7 +69,7 @@ pub fn status(cwd: &Path) -> Option<bool> {
 
 /// The broader ancestor the trust panel offers as its middle choice: the
 /// top-most directory under $HOME that contains `cwd` (for
-/// `~/code/clones/e-1` that is `~/code`), or the immediate parent when the
+/// `~/code/clones/ulo-1` that is `~/code`), or the immediate parent when the
 /// workspace lives outside home. None when nothing broader is sensible —
 /// the workspace sits directly under home, or its parent is the root.
 pub fn parent_option(cwd: &Path) -> Option<PathBuf> {
@@ -91,19 +91,19 @@ pub fn trusted(cwd: &Path) -> bool {
     status(cwd) == Some(true)
 }
 
-/// Why e will not run in this directory, or `None` when trust was accepted.
+/// Why ulo will not run in this directory, or `None` when trust was accepted.
 ///
 /// Every frontend says the same thing with this, so the rule and its remedy
-/// cannot drift between the terminal, `-p`, and `e rpc`.
+/// cannot drift between the terminal, `-p`, and `ulo rpc`.
 pub fn refusal(cwd: &Path) -> Option<String> {
     let dir = cwd.display();
     match status(cwd) {
         Some(true) => None,
         Some(false) => Some(format!(
-            "{dir} must be trusted to run e — it was declined, so run `e trust {dir}` to allow it"
+            "{dir} must be trusted to run ulo — it was declined, so run `ulo trust {dir}` to allow it"
         )),
         None => Some(format!(
-            "{dir} must be trusted to run e — run `e trust {dir}`, or run `e` in that directory to answer the trust dialog"
+            "{dir} must be trusted to run ulo — run `ulo trust {dir}`, or run `ulo` in that directory to answer the trust dialog"
         )),
     }
 }

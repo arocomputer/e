@@ -1,5 +1,16 @@
 # Releases and testing
 
+## Development-only distribution
+
+Public releases are withdrawn while ulo is in development. Run `./x dev`
+locally or request a PR preview. Preview artifacts are not npm or Homebrew
+releases, but this public repository does not make them private team packages.
+
+The GitHub `publish` workflow is disabled, and the repository variable
+`RELEASE_PUBLISHING_ENABLED` is `false`. Its resolve job also requires that
+variable to be `true`, so enabling the workflow alone does not publish.
+Website deployment and ordinary checks remain independent.
+
 ## Run changes locally
 
 Use Rust for local builds and Python 3.11 or newer for scenario and release tooling.
@@ -15,8 +26,8 @@ PR preview commands also require an authenticated GitHub CLI.
 ```
 
 `./x dev` builds the current checkout and runs it in the selected project.
-Arguments after the project path go to e. Local builds use `~/.e-dev` and never
-self-update. Set `E_HOME` to use another dedicated state directory.
+Arguments after the project path go to ulo. Local builds use `~/.ulo-dev` and never
+self-update. Set `ULO_HOME` to use another dedicated state directory.
 
 Scenarios run the real terminal against the existing loopback fixture provider.
 They use temporary settings, dummy credentials, and a disposable project; no
@@ -28,21 +39,21 @@ when the scenario command finishes.
 
 ## Release channels
 
-Production releases live in `arocomputer/e`. PR previews build unsigned
+Production releases live in `arocomputer/ulo`. PR previews build unsigned
 artifacts on request and never publish. There are no dev or beta channels: a
 release either ships from a version tag, or it is a pinned preview.
 
 | Channel | Trigger | Executable | Default state |
 | --- | --- | --- | --- |
-| production | `vX.Y.Z` tag on a commit reachable from main | `e` | `~/.e` |
-| PR | `preview` workflow, explicitly requested PR | `e-pr-NUMBER` | `~/.e-pr/COMMIT` |
+| production | `vX.Y.Z` tag on a commit reachable from main | `ulo` | `~/.ulo` |
+| PR | `preview` workflow, explicitly requested PR | `ulo-pr-NUMBER` | `~/.ulo-pr/COMMIT` |
 
 The root `Cargo.toml` owns the production version, under `[workspace.package]`. `scripts/release/identity.py` derives channel,
 package tag, executable name, and preview version. `crates/core/build.rs` embeds the workflow's
 version, channel, and full source commit. Production identities use `X.Y.Z`;
 PR previews use `0.0.0-pr-BUILD`, where BUILD is the `preview` workflow run
-number, so a preview never claims a release version it is not. `e --version
---json` and `e doctor` report the build identity.
+number, so a preview never claims a release version it is not. `ulo --version
+--json` and `ulo doctor` report the build identity.
 
 Curl installations follow production; package installations update through their
 package manager. PR and local builds never self-update.
@@ -52,11 +63,14 @@ disposable project or worktree when trying unfinished features.
 
 ## Install production
 
+These commands are for after the first public ulo release. They are not
+available during development.
+
 ```sh
-curl -fsSL https://e.aro.computer/install.sh | sh
-npm install -g @arocomputer/e
-bun add -g @arocomputer/e
-brew install arocomputer/tap/e
+curl -fsSL https://ulo.sh/install.sh | sh
+npm install -g @arocomputer/ulo
+bun add -g @arocomputer/ulo
+brew install arocomputer/tap/ulo
 ```
 
 To reinstall an older version with curl, pass `--version X.Y.Z`. npm and
@@ -73,15 +87,26 @@ unless auto-update is disabled in its settings.
 ```
 
 Requires `gh` authentication with access to Actions. The request returns
-immediately; find the run with `gh run list --repo arocomputer/e --workflow preview.yml`.
+immediately; find the run with `gh run list --repo arocomputer/ulo --workflow preview.yml`.
 The installer verifies the artifact checksum and prints its source commit.
-It installs `e-pr-123` under `~/.local/bin`, or `E_INSTALL_DIR`.
+It installs `ulo-pr-123` under `~/.local/bin`, or `ULO_INSTALL_DIR`.
 Artifacts expire after 14 days. The selected run stays pinned even if the PR
 changes later; request a new run to test new commits. PR code is unreviewed and
 can execute arbitrary code when built or run. Its workflow uses read-only
 permissions, no publishing credentials, and no persisted checkout token.
 
 ## Ship production
+
+Only when ready to publish, configure the credentials below and enable
+publication. These commands allow subsequent version tags to publish publicly:
+
+```sh
+gh variable set RELEASE_PUBLISHING_ENABLED --repo arocomputer/ulo --body true
+gh workflow enable release.yml --repo arocomputer/ulo
+```
+
+Use a fresh version. Deleting a GitHub release does not remove its tag, and
+npm will not let a previously published name/version be reused after unpublishing.
 
 1. Prepare the next base version in `Cargo.toml` and `Cargo.lock` on main.
 2. Review the release notes, move Unreleased into `## X.Y.Z`, and add its date,
@@ -127,11 +152,11 @@ binary links against the glibc of the image that built it, so that image is the
 floor every release inherits — Debian 11+, Ubuntu 22.04+, RHEL 9+ — and the
 script refuses to publish a binary that requires anything newer, which the
 `glibc` job proves on the pull request. Change the image and the
-ceiling (`E_GLIBC_CEILING`, and the refusal in `install.sh`) move together.
+ceiling (`ULO_GLIBC_CEILING`, and the refusal in `install.sh`) move together.
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
-gh attestation verify e-x86_64-unknown-linux-gnu.tar.gz --repo arocomputer/e
+gh attestation verify ulo-x86_64-unknown-linux-gnu.tar.gz --repo arocomputer/ulo
 ```
 
 On macOS use `shasum -a 256`.
@@ -169,20 +194,41 @@ Homebrew uses `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to Contents
 read/write on `arocomputer/homebrew-tap`. Deploy keys are disabled by repository
 policy. Renew the token before its expiry.
 npm uses trusted publishing (OIDC); no npm token is stored. Each of the six
-packages (`e` and its four platform packages, plus `e-slack`) trusts the GitHub
-organization `arocomputer`, repository `e`, workflow `release.yml`, with direct
+packages (`ulo` and its four platform packages, plus `ulo-slack`) trusts the GitHub
+organization `arocomputer`, repository `ulo`, workflow `release.yml`, with direct
 publishing allowed. Use Node 24 with npm 11.5.1 or newer.
 
 Trusted publishing can only be attached to a package that already exists, so the
 first publication under a new scope needs another auth method — an interactive
 `npm login` with 2FA, or a temporary publishing token. After that first publish,
 configure the trust relationships with an interactive npm login (2FA enabled,
-npm 11.15.0 or newer):
+npm 11.15.0 or newer).
+
+For the first release, let the workflow build and publish its verified GitHub
+archives. The npm job may fail until the package names exist. In a checkout
+of that release tag, download those exact archives and prepare the packages:
 
 ```sh
-for package in e e-darwin-arm64 e-darwin-x64 e-linux-arm64 e-linux-x64 e-slack; do
+TAG=vX.Y.Z
+mkdir -p target/npm-release-assets
+gh release download "$TAG" --repo arocomputer/ulo \
+  --pattern 'ulo-*.tar.gz' --pattern checksums.txt \
+  --dir target/npm-release-assets
+python3 scripts/packaging/prepare.py "$TAG" target/npm-release-assets target/npm-release
+npm login
+for package in darwin-arm64 darwin-x64 linux-arm64 linux-x64 ulo slack; do
+  npm publish "./target/npm-release/$package" --access public --tag latest --ignore-scripts
+done
+```
+
+Run these in your own terminal so npm can complete browser authentication and
+2FA. This publishes publicly; do not bootstrap the names during the development
+pause. Then configure trusted publishing:
+
+```sh
+for package in ulo ulo-darwin-arm64 ulo-darwin-x64 ulo-linux-arm64 ulo-linux-x64 ulo-slack; do
   npm trust github "@arocomputer/$package" \
-    --repository arocomputer/e --file release.yml --allow-publish --yes
+    --repository arocomputer/ulo --file release.yml --allow-publish --yes
   sleep 2
 done
 ```
@@ -192,28 +238,45 @@ Complete npm's browser authentication when prompted. An API token that bypasses
 list @arocomputer/<package>`. From then on the release workflow authenticates
 with OIDC and no token is needed.
 
-The website renders this repository's `docs/guides/`, so
-`.github/workflows/docs.yml` starts arocomputer/web's Deploy workflow whenever a
-guide reaches `main`. It uses `WEB_DEPLOY_TOKEN`, a fine-grained token limited
-to arocomputer/web with Actions: write. Set the secret once; without it the job
-fails loudly rather than going stale silently. If the job reports the token
-was rejected, its PAT expired or was revoked: mint a new one with the same
-scope and replace the secret.
+The website lives in `crates/www/`. `.github/workflows/www.yml` builds the
+website, guides, and installer from the same checkout and deploys on `main`.
+Its `Production` environment needs `CLOUDFLARE_API_TOKEN` and the
+`CLOUDFLARE_ACCOUNT_ID` variable. No cross-repository deploy token is needed.
+
+In Cloudflare, create an API token using the **Edit Cloudflare Workers**
+template. Scope it to the Aro account and `ulo.sh` zone. Keep the Worker,
+Workers KV, and zone permissions needed by Wrangler and custom domains.
+In `arocomputer/ulo` on GitHub, open **Settings → Environments → Production**.
+Add `CLOUDFLARE_API_TOKEN` as an environment secret and
+`CLOUDFLARE_ACCOUNT_ID` as an environment variable with value
+`15a2d3f1e6ab03432b2037945113c421`.
+
+The CLI equivalent prompts for the secret without placing it in shell history:
+
+```sh
+gh variable set CLOUDFLARE_ACCOUNT_ID --repo arocomputer/ulo --env Production \
+  --body 15a2d3f1e6ab03432b2037945113c421
+gh secret set CLOUDFLARE_API_TOKEN --repo arocomputer/ulo --env Production
+```
+
+GitHub cannot reveal the existing secret from `arocomputer/web`; use your
+saved token if its scope includes the new zone, or create a new scoped token.
+The website credentials do not enable package publication.
 
 The application does not publish to crates.io. Its installers are the shell
 script, Homebrew, and the npm packages. The one crate that publishes is the
-embedded SDK (`aro-e-sdk`), which versions itself and is the only way to embed e
+embedded SDK (`ulo-sdk`), which versions itself and is the only way to embed ulo
 in a Rust program. Publishing it uses `CARGO_REGISTRY_TOKEN`, a token scoped to
-`aro-e-sdk` and `aro-e-core` (the SDK depends on it) and no others. Create the
+`ulo-sdk` and `ulo-core` (the SDK depends on it) and no others. Create the
 token at https://crates.io/settings/tokens and set the first publication up
 interactively with `cargo login` if it is rotated.
 
-The five `aro-e*` crates were published once at `0.0.1` and yanked when the
-application left crates.io; only `aro-e-sdk` publishes going forward.
+The renamed crates require their own publishing setup before SDK publication.
+See [the migration checklist](migration.md) for the first renamed release.
 
-The website installer at `https://e.aro.computer/install.sh` serves the maintained
-script from main with a five-minute cache. No separate deployment is required
-for each binary release. The production homepage installation stays unchanged.
+The website installer at `https://ulo.sh/install.sh` serves the maintained
+script from the website's checkout with a five-minute cache. A change to the
+script redeploys the website. Binary releases do not require a website deploy.
 
 ## Deployment history
 

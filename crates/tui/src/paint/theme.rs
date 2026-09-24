@@ -56,7 +56,7 @@ impl Theme {
     }
 
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let file: ThemeFile = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let file: ThemeFile = serde_json::from_str(json).map_err(|ulo| ulo.to_string())?;
         let mut vars = HashMap::new();
         for (name, value) in &file.vars {
             if let Some(n) = value.as_i64() {
@@ -135,10 +135,10 @@ impl Theme {
 }
 
 /// The two palettes are compiled into the binary from the core's `themes/` — no
-/// runtime files, no themes directory. `e docs theme-dark` serves the same
+/// runtime files, no themes directory. `ulo docs theme-dark` serves the same
 /// files, and the raw JSON is exposed so tests can assert on it.
-pub const LIGHT_JSON: &str = e_core::themes::LIGHT;
-pub const DARK_JSON: &str = e_core::themes::DARK;
+pub const LIGHT_JSON: &str = ulo_core::themes::LIGHT;
+pub const DARK_JSON: &str = ulo_core::themes::DARK;
 
 pub fn bundled_json(light: bool) -> &'static str {
     if light {
@@ -153,15 +153,15 @@ pub fn load_bundled(light: bool) -> Result<Theme, String> {
     Theme::from_json(bundled_json(light))
 }
 
-/// A user theme, `<name>.json` in `~/.e/themes/` or, failing that, in an
+/// A user theme, `<name>.json` in `~/.ulo/themes/` or, failing that, in an
 /// installed package's `themes/` (settings order), if present and valid.
 pub fn load_user(name: &str) -> Option<Theme> {
     let file = format!("{name}.json");
     let mut dirs = vec![(
-        e_core::config::home::themes_dir(),
-        e_core::resources::packages::Filter::default(),
+        ulo_core::config::home::themes_dir(),
+        ulo_core::resources::packages::Filter::default(),
     )];
-    dirs.extend(e_core::resources::packages::dirs("themes"));
+    dirs.extend(ulo_core::resources::packages::dirs("themes"));
     dirs.into_iter().find_map(|(dir, filter)| {
         if !filter.allows("themes", &file) {
             return None;
@@ -172,7 +172,7 @@ pub fn load_user(name: &str) -> Option<Theme> {
 }
 
 /// Resolve the effective theme for a selection and a detected background.
-/// `~/.e/themes/<name>.json` wins over a package's, which wins over the
+/// `~/.ulo/themes/<name>.json` wins over a package's, which wins over the
 /// built-ins for any name — so even `light`/`dark` are overridable —
 /// falling back to the embedded pair.
 pub fn resolve(selection: &str, detected_light: bool) -> Theme {

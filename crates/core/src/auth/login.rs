@@ -24,7 +24,7 @@ const CALLBACK_ADDR: &str = "127.0.0.1:1455";
 /// is present and can abort them.
 const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Serialize single-use refresh tokens per e home and provider. Waiters re-read
+/// Serialize single-use refresh tokens per ulo home and provider. Waiters re-read
 /// credentials after acquiring; unrelated accounts never share a network wait.
 fn refresh_lock(provider: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     type Locks = std::collections::HashMap<
@@ -33,7 +33,7 @@ fn refresh_lock(provider: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     >;
     static LOCKS: std::sync::LazyLock<std::sync::Mutex<Locks>> =
         std::sync::LazyLock::new(|| std::sync::Mutex::new(Locks::new()));
-    let mut locks = LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut locks = LOCKS.lock().unwrap_or_else(|ulo| ulo.into_inner());
     locks.retain(|_, lock| lock.strong_count() > 0);
     let key = (crate::config::home::home(), provider.to_owned());
     if let Some(lock) = locks.get(&key).and_then(std::sync::Weak::upgrade) {
@@ -114,7 +114,7 @@ async fn launch_browser(url: &str, notify: &tokio::sync::mpsc::Sender<String>) {
 pub fn auth_status() {
     let file = auth::load();
     if file.is_empty() {
-        println!("no credentials — start e and run `/login <provider>`");
+        println!("no credentials — start ulo and run `/login <provider>`");
         return;
     }
     for (provider, credential) in &file {
@@ -144,7 +144,7 @@ pub fn save_api_key(provider: &str, key: &str) -> Result<(), String> {
             key: key.to_string(),
         },
     )
-    .map_err(|e| e.to_string())
+    .map_err(|ulo| ulo.to_string())
 }
 
 /// The browser PKCE flow, reporting progress through `notify` so the TUI can
@@ -170,13 +170,13 @@ pub async fn codex_login(
 ) {
     let (message, outcome) = match codex_login_inner(&provider, &notify, &cancellation).await {
         Ok(()) => (
-            format!("signed in to {provider} — saved to ~/.e/auth.json"),
+            format!("signed in to {provider} — saved to ~/.ulo/auth.json"),
             Outcome::SignedIn {
                 provider,
                 flow_id: Some(flow_id),
             },
         ),
-        Err(e) => (format!("login failed: {e}"), Outcome::Failed { flow_id }),
+        Err(ulo) => (format!("login failed: {ulo}"), Outcome::Failed { flow_id }),
     };
     let _ = notify.send(message).await;
     let _ = outcomes.send(outcome).await;
@@ -198,14 +198,14 @@ async fn codex_login_inner(
     let authorize = format!(
         "{AUTH_BASE}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
          &redirect_uri={}&scope={}&code_challenge={challenge}&code_challenge_method=S256\
-         &state={state}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=e",
+         &state={state}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=ulo",
         urlencode(REDIRECT_URI),
         urlencode("openid profile email offline_access"),
     );
 
     // Listener first, so the redirect can never race us.
-    let listener = TcpListener::bind(CALLBACK_ADDR).map_err(|e| {
-        format!("cannot listen on localhost:1455 ({e}) — is another login running?")
+    let listener = TcpListener::bind(CALLBACK_ADDR).map_err(|ulo| {
+        format!("cannot listen on localhost:1455 ({ulo}) — is another login running?")
     })?;
 
     launch_browser(&authorize, notify).await;
@@ -218,7 +218,7 @@ async fn codex_login_inner(
             .map_err(|error| error.to_string())??;
 
     let response = crate::providers::http()
-        .map_err(|e| e.message)?
+        .map_err(|ulo| ulo.message)?
         .post(format!("{AUTH_BASE}/oauth/token"))
         .form(&[
             ("grant_type", "authorization_code"),
@@ -229,7 +229,7 @@ async fn codex_login_inner(
         ])
         .send()
         .await
-        .map_err(|e| format!("token exchange failed: {e}"))?;
+        .map_err(|ulo| format!("token exchange failed: {ulo}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -238,7 +238,7 @@ async fn codex_login_inner(
             body.chars().take(200).collect::<String>()
         ));
     }
-    let tokens: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let tokens: serde_json::Value = response.json().await.map_err(|ulo| ulo.to_string())?;
     let (Some(access), Some(refresh), Some(expires_in)) = (
         tokens["access_token"].as_str(),
         tokens["refresh_token"].as_str(),
@@ -257,7 +257,7 @@ async fn codex_login_inner(
             account_id,
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|ulo| ulo.to_string())?;
     Ok(())
 }
 
@@ -321,18 +321,20 @@ fn wait_for_code(
     expected_state: &str,
     cancellation: &LoginCancellation,
 ) -> Result<String, String> {
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|ulo| ulo.to_string())?;
     loop {
         if cancellation.is_cancelled() {
             return Err("login cancelled".into());
         }
         let (mut stream, _) = match listener.accept() {
             Ok(pair) => pair,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(ulo) if ulo.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(std::time::Duration::from_millis(20));
                 continue;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(ulo) => return Err(ulo.to_string()),
         };
         let Some(path) = callback_path(&mut stream, cancellation) else {
             continue;
@@ -375,8 +377,8 @@ fn wait_for_code(
     }
 }
 
-/// The one e surface a browser renders: the three-bar mark, a title, a dim
-/// line — e.aro.computer in page form. The palette (warm paper and ink, the
+/// The one ulo surface a browser renders: the three-bar mark, a title, a dim
+/// line — ulo.sh in page form. The palette (warm paper and ink, the
 /// green and red status inks), the mono type, and the heading's weight and
 /// tracking are the website's values; keep them aligned with its `site.css`
 /// and `logo.tsx`. The page is self-contained — no font or asset is fetched,
@@ -390,7 +392,7 @@ fn respond(stream: &mut std::net::TcpStream, status: u16, title: &str, detail: &
     let (tone, script) = match status {
         200 => (
             "var(--success)",
-            "<script>setTimeout(function(){try{window.close()}catch(e){}},2000)</script>",
+            "<script>setTimeout(function(){try{window.close()}catch(ulo){}},2000)</script>",
         ),
         404 => ("var(--ink)", ""),
         _ => ("var(--error)", ""),
@@ -400,7 +402,7 @@ fn respond(stream: &mut std::net::TcpStream, status: u16, title: &str, detail: &
             "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
             "<meta name=\"robots\" content=\"noindex\">",
-            "<title>e · {title}</title><style>",
+            "<title>ulo · {title}</title><style>",
             ":root{{color-scheme:light dark;--paper:rgb(247 247 244);--ink:rgb(38 37 30);",
             "--muted:rgb(38 37 30 / 60%);--success:rgb(34 128 68);--error:rgb(154 52 40)}}",
             "@media(prefers-color-scheme:dark){{:root{{--paper:rgb(16 15 12);--ink:rgb(237 236 236);",
@@ -474,13 +476,13 @@ pub async fn xai_login(
 ) {
     let (message, outcome) = match xai_login_inner(&notify, &cancellation).await {
         Ok(()) => (
-            "signed in to xAI — saved to ~/.e/auth.json".to_string(),
+            "signed in to xAI — saved to ~/.ulo/auth.json".to_string(),
             Outcome::SignedIn {
                 provider: "xai".into(),
                 flow_id: Some(flow_id),
             },
         ),
-        Err(e) => (format!("login failed: {e}"), Outcome::Failed { flow_id }),
+        Err(ulo) => (format!("login failed: {ulo}"), Outcome::Failed { flow_id }),
     };
     let _ = notify.send(message).await;
     let _ = outcomes.send(outcome).await;
@@ -491,19 +493,19 @@ async fn xai_login_inner(
     cancellation: &LoginCancellation,
 ) -> Result<(), String> {
     let device: serde_json::Value = crate::providers::http()
-        .map_err(|e| e.message)?
+        .map_err(|ulo| ulo.message)?
         .post(XAI_DEVICE_CODE_URL)
         .form(&[
             ("client_id", XAI_CLIENT_ID),
             ("scope", XAI_SCOPE),
-            ("referrer", "e"),
+            ("referrer", "ulo"),
         ])
         .send()
         .await
-        .map_err(|e| format!("device authorization failed: {e}"))?
+        .map_err(|ulo| format!("device authorization failed: {ulo}"))?
         .json()
         .await
-        .map_err(|e| format!("device authorization returned invalid JSON: {e}"))?;
+        .map_err(|ulo| format!("device authorization returned invalid JSON: {ulo}"))?;
 
     let device_code = required(&device, "device_code")?;
     let user_code = required(&device, "user_code")?;
@@ -544,7 +546,7 @@ async fn xai_login_inner(
             return Err("xAI device code expired".into());
         }
         let response = crate::providers::http()
-            .map_err(|e| e.message)?
+            .map_err(|ulo| ulo.message)?
             .post(XAI_TOKEN_URL)
             .form(&[
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
@@ -553,15 +555,15 @@ async fn xai_login_inner(
             ])
             .send()
             .await
-            .map_err(|e| format!("token polling failed: {e}"))?;
+            .map_err(|ulo| format!("token polling failed: {ulo}"))?;
         let ok = response.status().is_success();
         let body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| format!("token polling returned invalid JSON: {e}"))?;
+            .map_err(|ulo| format!("token polling returned invalid JSON: {ulo}"))?;
         if ok {
             let credential = xai_credential(&body, None)?;
-            return crate::auth::set("xai", credential).map_err(|e| e.to_string());
+            return crate::auth::set("xai", credential).map_err(|ulo| ulo.to_string());
         }
         match body.get("error").and_then(|v| v.as_str()) {
             Some("authorization_pending") => {}
@@ -583,7 +585,7 @@ async fn xai_login_inner(
 /// Exchange the refresh token; xAI may omit `refresh_token` when unrotated.
 pub async fn xai_refresh(refresh: &str) -> Result<crate::auth::Credential, String> {
     let response = crate::providers::http()
-        .map_err(|e| e.message)?
+        .map_err(|ulo| ulo.message)?
         .post(XAI_TOKEN_URL)
         .form(&[
             ("grant_type", "refresh_token"),
@@ -595,7 +597,7 @@ pub async fn xai_refresh(refresh: &str) -> Result<crate::auth::Credential, Strin
         .timeout(REFRESH_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("xAI token refresh failed: {e}"))?;
+        .map_err(|ulo| format!("xAI token refresh failed: {ulo}"))?;
     if !response.status().is_success() {
         return Err(format!(
             "xAI token refresh rejected ({}) — run /login xai again",
@@ -605,7 +607,7 @@ pub async fn xai_refresh(refresh: &str) -> Result<crate::auth::Credential, Strin
     let body: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| format!("xAI token refresh returned invalid JSON: {e}"))?;
+        .map_err(|ulo| format!("xAI token refresh returned invalid JSON: {ulo}"))?;
     xai_credential(&body, Some(refresh))
 }
 
@@ -636,7 +638,7 @@ pub async fn codex_access(provider: &str) -> Result<(String, String), String> {
     }) = auth::load().get(provider).cloned()
     else {
         return Err(format!(
-            "no OAuth credentials for {provider} — start e and run `/login {provider}`"
+            "no OAuth credentials for {provider} — start ulo and run `/login {provider}`"
         ));
     };
     let account = account_id
@@ -648,7 +650,7 @@ pub async fn codex_access(provider: &str) -> Result<(String, String), String> {
     }
 
     let response = crate::providers::http()
-        .map_err(|e| e.message)?
+        .map_err(|ulo| ulo.message)?
         .post(format!("{AUTH_BASE}/oauth/token"))
         .form(&[
             ("grant_type", "refresh_token"),
@@ -660,14 +662,14 @@ pub async fn codex_access(provider: &str) -> Result<(String, String), String> {
         .timeout(REFRESH_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("token refresh failed: {e}"))?;
+        .map_err(|ulo| format!("token refresh failed: {ulo}"))?;
     if !response.status().is_success() {
         let status = response.status();
         return Err(format!(
-            "token refresh rejected ({status}) — start e and run `/login {provider}` again"
+            "token refresh rejected ({status}) — start ulo and run `/login {provider}` again"
         ));
     }
-    let tokens: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let tokens: serde_json::Value = response.json().await.map_err(|ulo| ulo.to_string())?;
     let (Some(access), Some(refresh), Some(expires_in)) = (
         tokens["access_token"].as_str(),
         tokens["refresh_token"].as_str(),
@@ -685,7 +687,7 @@ pub async fn codex_access(provider: &str) -> Result<(String, String), String> {
             account_id: Some(account.clone()),
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|ulo| ulo.to_string())?;
     Ok((access.to_string(), account))
 }
 
@@ -814,7 +816,7 @@ mod tests {
     /// Token lookups bypass refresh waits; different providers have separate locks.
     #[tokio::test]
     async fn fresh_codex_credentials_do_not_wait_for_refresh() {
-        let home = std::env::temp_dir().join(format!("e-refresh-lock-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!("ulo-refresh-lock-{}", uuid::Uuid::new_v4()));
         crate::config::home::scope(home.clone(), async {
             crate::auth::set(
                 "mock",

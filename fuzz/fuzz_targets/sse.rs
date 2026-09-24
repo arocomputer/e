@@ -1,7 +1,7 @@
 #![no_main]
 
-use e::core::providers::SseSplitter;
 use libfuzzer_sys::fuzz_target;
+use ulo::core::providers::SseSplitter;
 
 fuzz_target!(|data: &[u8]| {
     let mut whole = SseSplitter::new();

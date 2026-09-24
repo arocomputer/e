@@ -1,4 +1,4 @@
-# Working on e
+# Working on ulo
 
 Instructions for an agent editing this repo.
 
@@ -24,7 +24,7 @@ Every Rust crate is a folder under `crates/`. tui, rpc, and sdk depend on core
 and never on each other; cli puts the frontends behind one binary.
 
 ```
-crates/core/ the harness, terminal-free (`e_core`)
+crates/core/ the harness, terminal-free (`ulo_core`)
   build.rs        stamps release identity and embeds the guides (`guides` is
                   a link to docs/guides) · themes/ (the built-in palettes)
   agent/          mod.rs owns run lifecycle and session state;
@@ -41,17 +41,17 @@ crates/core/ the harness, terminal-free (`e_core`)
                   availability, scope; remote.rs = the live /models sync;
                   modelsdev.rs = model facts from models.dev)
   auth/           credentials (mod.rs) · login.rs (OAuth, device-code, API keys)
-  config/         the ~/.e surface: home.rs (paths) · store.rs (merge-write)
+  config/         the ~/.ulo surface: home.rs (paths) · store.rs (merge-write)
                   · settings.rs · trust.rs (per-directory trust) ·
                   chord.rs (the chord grammar keybindings, layout focus,
                   and extension shortcuts share). Terminal-free: core
                   depends on no frontend crate and no terminal library —
                   guard.sh pins the manifests
   resources/      skills.rs · prompts.rs (/name templates) · packages.rs
-                  with packages/source.rs (source parsing); `e install` manages
+                  with packages/source.rs (source parsing); `ulo install` manages
                   npm, git, local, and release bundles that every
                   loader reads after the active home's own dirs · docs.rs (the
-                  embedded guides behind `e docs`)
+                  embedded guides behind `ulo docs`)
   extensions/     the extension host: host.rs owns process lifecycle and routing;
                   host/discovery.rs finds entry points, host/hooks.rs handles
                   hooks and events, host/transport.rs owns bounded JSONL I/O.
@@ -69,11 +69,11 @@ crates/core/ the harness, terminal-free (`e_core`)
                   line: id/parent per message, `/tree` branches in place,
                   `create_with` seeds a `/fork`; `responses_in` feeds usage.rs
                   (the /usage fold) · export.rs (a branch as one HTML page)
-crates/tui/  the terminal frontend (`e_tui`; short paths re-export from the groups)
+crates/tui/  the terminal frontend (`ulo_tui`; short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
   content/        markdown · transcript · composer · keybindings (the
-                  ~/.e/keybindings.json keymap) · statusline · history
-                  (prompts across sessions, ~/.e/history.jsonl)
+                  ~/.ulo/keybindings.json keymap) · statusline · history
+                  (prompts across sessions, ~/.ulo/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state and shared actions) · runtime.rs (startup
                   and frame loop) · frame.rs (painting) · input.rs (composer
@@ -81,27 +81,29 @@ crates/tui/  the terminal frontend (`e_tui`; short paths re-export from the grou
                   (session-event handling) · menus.rs (footer menus) ·
                   login.rs (sign-in flows) · extui.rs (answering
                   extensions: modals, panels, status slots, session control)
-crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server over
+crates/rpc/  the headless frontend (`ulo_rpc`): `ulo rpc`, a JSONL session server over
              stdin/stdout (docs/guides/usage/automation.md) — lib.rs (sessions, methods,
              the serve loop, extension questions relayed as `ask`) ·
              params.rs (typed method inputs) · result.rs (the turn result
              `-p --json` and rpc both report)
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
-             `e docs` embeds them, and the website (arocomputer/web) renders
-             them at e.aro.computer/docs. contributing/ is the
+             `ulo docs` embeds them, and the website (`crates/www/`) renders
+             them at ulo.sh/docs. contributing/ is the
              repository's own documentation, never published.
-crates/cli/  the `e` binary, published as aro-e: src/main.rs (flags,
-             rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `e`
+crates/cli/  the `ulo` binary, published as ulo: src/main.rs (flags,
+             rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `ulo`
              library, re-exporting core, tui, and rpc for the binary, tests,
              and fuzz targets) · tests/ (the integration suites, fixtures,
              and the ui/ PTY scenarios)
-crates/sdk/  e-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
+crates/sdk/  ulo-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a frontend over core alone, with its own release boundary
-channels/    reference clients of `e rpc` (docs/guides/usage/channels.md): slack/ (a Bolt
+crates/www/  the Astro website at ulo.sh, deployed as a Cloudflare Worker;
+             reads docs/guides/ and install.sh from this checkout
+channels/    reference clients of `ulo rpc` (docs/guides/usage/channels.md): slack/ (a Bolt
              bot, TypeScript) · github/ (an Actions workflow). Not compiled
-             into e; a channel is a program that spawns it, never a module
+             into ulo; a channel is a program that spawns it, never a module
 ```
 
 ## Running one thing, not everything
@@ -113,13 +115,13 @@ cargo test --test stream            # agent turn loop against a mock provider
 cargo test --test providers         # the four wire dialects' request/stream shapes
 cargo test --test parity            # byte-pinned rendering (run after any look change)
 cargo test --test file_tools        # read/write/edit/grep behavior
-cargo test -p aro-e-sdk        # embedded SDK consumer
+cargo test -p ulo-sdk        # embedded SDK consumer
 cargo test --test toolloop          # end-to-end tool execution
 cargo test name_of_one_test         # any single test, by name substring
 ```
 
 New integration tests use `crates/cli/tests/common/` (`mod common;`) — `Home` for an
-isolated `E_HOME` that restores the prior value on drop, `env_lock()` around anything env-global, `serve_sse` +
+isolated `ULO_HOME` that restores the prior value on drop, `env_lock()` around anything env-global, `serve_sse` +
 `test_model` for a mock provider. Don't hand-roll a second mock harness.
 Use explicit `AgentOptions` home/cwd paths for concurrent embedded sessions;
 process environment belongs only in serialized fixtures. Keep specialized
@@ -156,7 +158,7 @@ surface? Route it through `panel.rs` so it can't diverge.
 - One event stream. The frontend subscribes once; text, tools, usage, errors all
   arrive on it in order (`SessionEvent`). Compaction and continuation belong
   to the core. Frontends never reset running state or resubmit stranded prompts.
-- Hit every consumer. The core has three frontends — the TUI, `e rpc`
+- Hit every consumer. The core has three frontends — the TUI, `ulo rpc`
   (`crates/rpc/`), and `crates/sdk/` — and four provider dialects. A change to the turn loop, events, or
   tools needs a decision per frontend, and a provider-shaped change a decision
   per dialect, even when the decision is "no change here". Persisted and
@@ -166,20 +168,20 @@ surface? Route it through `panel.rs` so it can't diverge.
   explains the incompatibility and migration in the PR description.
 - Keep the harness small. Prefer a spawned process over a daemon and a gate
   over a pipeline. Add complexity only when the feature requires it.
-- Resolve the active home through `crates/core/src/config/home.rs`: production uses `~/.e/`,
-  previews use their channel home, and `E_HOME` overrides either. Never read
+- Resolve the active home through `crates/core/src/config/home.rs`: production uses `~/.ulo/`,
+  previews use their channel home, and `ULO_HOME` overrides either. Never read
   another tool's directory.
-- A package is a directory shaped like `~/.e/` (`extensions/ skills/ prompts/
+- A package is a directory shaped like `~/.ulo/` (`extensions/ skills/ prompts/
   themes/`), no manifest. New resource kinds join that list; package
   discovery stays convention, not configuration.
 - **Don't hardcode what a user might change.** Looks, wordings, and behaviours a
-  person could sensibly prefer are read from `~/.e/` with a built-in default —
-  themes from `~/.e/themes/`, and skills, prompts, instructions, the system
+  person could sensibly prefer are read from `~/.ulo/` with a built-in default —
+  themes from `~/.ulo/themes/`, and skills, prompts, instructions, the system
   prompt the same way. When you add something user-facing, make it a file-backed
   override, not a constant. When data isn't enough there is the extension API
   (`crates/core/src/extensions/`, docs/guides/extend/extensions.md) — grow its protocol by need, never by
   symmetry, and keep hooks fail-open. What crosses the line is data, never code
-  or terminal bytes: an extension describes (`show`, `panel`, a `label`), e
+  or terminal bytes: an extension describes (`show`, `panel`, a `label`), ulo
   paints through the theme. A new rendering need is a new `format` or token, not
   a way for extensions to emit escape sequences.
 - Verify UI changes with a real frame, not by reasoning about bytes. `./x ui`

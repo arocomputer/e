@@ -29,7 +29,7 @@ fn extract(tag: &str, changelog: &str) -> Output {
 fn release_body_keeps_summary_and_groups_without_neighboring_versions() {
     let body = "\nSeptember 9, 2026\n\n### A release title\n\nA short introduction.\n\n### New features\n\n- A feature.\n\n### Improvements\n\n- An improvement.\n\n### Fixes\n\n- A fix.\n\n";
     let changelog = format!(
-        "# e\n\n## Unreleased\n\n- Not shipped.\n\n## 1.2.30\n\n- Not this version.\n\n## 1.2.3\n{body}## 1.2.2\n\n- Older.\n"
+        "# ulo\n\n## Unreleased\n\n- Not shipped.\n\n## 1.2.30\n\n- Not this version.\n\n## 1.2.3\n{body}## 1.2.2\n\n- Older.\n"
     );
     let output = extract("v1.2.3", &changelog);
     assert!(output.status.success());

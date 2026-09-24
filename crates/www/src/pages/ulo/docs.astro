@@ -1,0 +1,16 @@
+---
+/**
+ * The docs root shows ulo's `getting-started` guide, so the first page a reader
+ * lands on is the repository's own text rather than a copy of it. The guide's
+ * slug is not a second URL for the same page.
+ */
+import Guide from "@/sites/ulo/components/docs/Guide.astro";
+import { home } from "@/sites/ulo/components/docs/data";
+import { Installer } from "@/sites/ulo/components/installer";
+---
+
+<Guide entry={home()} installSection="install">
+  {/* The guide's Install section shows the curl command; on the website the
+      widget takes its place, offering curl and every package manager. */}
+  <Installer client:load slot="before" />
+</Guide>

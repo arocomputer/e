@@ -2,9 +2,9 @@
 //! display columns, overlong tokens wrap instead of vanishing, and the
 //! composer draws exactly one cursor.
 
-use e::tui::markdown::{clip_styled, visible_width, wrap_styled};
-use e::tui::theme;
-use e::tui::transcript::{Block, Kind};
+use ulo::tui::markdown::{clip_styled, visible_width, wrap_styled};
+use ulo::tui::theme;
+use ulo::tui::transcript::{Block, Kind};
 
 fn dark() -> theme::Theme {
     theme::load_bundled(false).unwrap()
@@ -109,14 +109,14 @@ fn wrap_styled_never_splits_a_hyperlink_sequence() {
 /// sequence and the URI never leaks as visible text.
 #[test]
 fn link_destination_whitespace_is_percent_encoded() {
-    use e::tui::markdown::render_markdown;
+    use ulo::tui::markdown::render_markdown;
     let theme = dark();
     let rows = render_markdown(
         &theme,
         "see the [design doc](<docs/My Design.md>) now\n",
         12,
     );
-    let open = "\x1b]8;id=e-1;docs/My%20Design.md\x1b\\";
+    let open = "\x1b]8;id=ulo-1;docs/My%20Design.md\x1b\\";
     assert!(rows.iter().any(|r| r.contains(open)), "{rows:?}");
     for row in &rows {
         assert_eq!(
@@ -133,7 +133,7 @@ fn link_destination_whitespace_is_percent_encoded() {
 /// unterminated sequence that would swallow the box into the URI.
 #[test]
 fn vertical_table_keeps_hyperlink_sequences_whole() {
-    use e::tui::markdown::render_markdown;
+    use ulo::tui::markdown::render_markdown;
     let theme = dark();
     let md = "| name | url |\n|---|---|\n| docs | https://example.com/a/very/long/path/that/does/not/fit |\n";
     let rows = render_markdown(&theme, md, 30);
@@ -151,7 +151,7 @@ fn vertical_table_keeps_hyperlink_sequences_whole() {
 /// renders in exactly one row.
 #[test]
 fn composer_uses_display_width_and_one_cursor() {
-    use e::tui::composer::Editor;
+    use ulo::tui::composer::Editor;
     let theme = dark();
 
     // Inner width is 8; eight CJK chars are 16 columns → at least two rows.
@@ -181,7 +181,7 @@ fn composer_uses_display_width_and_one_cursor() {
 /// paste inserts literally.
 #[test]
 fn paste_placeholders_retire_on_submit() {
-    use e::tui::composer::{Editor, EditorResult, Key};
+    use ulo::tui::composer::{Editor, EditorResult, Key};
     let mut editor = Editor::new();
     editor.insert_paste("line one\nline two\nline three");
     assert!(

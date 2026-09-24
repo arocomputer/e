@@ -98,18 +98,18 @@ pub const SUBCOMMANDS: &[&str] = &[
 /// actionable instead of at generic help.
 pub fn subcommand_usage(sub: &str) -> Option<&'static str> {
     match sub {
-        "rpc" => Some("usage: e rpc"),
-        "docs" => Some("usage: e docs [topic]"),
-        "update" => Some("usage: e update"),
-        "install" => Some("usage: e install [source]"),
-        "remove" => Some("usage: e remove <source>"),
-        "packages" => Some("usage: e packages [init <dir>]"),
-        "trust" => Some("usage: e trust [dir]"),
-        "untrust" => Some("usage: e untrust [dir]"),
-        "auth" => Some("usage: e auth"),
-        "doctor" => Some("usage: e doctor [--no-network]"),
-        "providers" => Some("usage: e providers"),
-        "help" => Some("usage: e help"),
+        "rpc" => Some("usage: ulo rpc"),
+        "docs" => Some("usage: ulo docs [topic]"),
+        "update" => Some("usage: ulo update"),
+        "install" => Some("usage: ulo install [source]"),
+        "remove" => Some("usage: ulo remove <source>"),
+        "packages" => Some("usage: ulo packages [init <dir>]"),
+        "trust" => Some("usage: ulo trust [dir]"),
+        "untrust" => Some("usage: ulo untrust [dir]"),
+        "auth" => Some("usage: ulo auth"),
+        "doctor" => Some("usage: ulo doctor [--no-network]"),
+        "providers" => Some("usage: ulo providers"),
+        "help" => Some("usage: ulo help"),
         _ => None,
     }
 }
@@ -325,7 +325,7 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
                 }
                 return Err(match did_you_mean(name, &candidates) {
                     Some(near) => format!("unknown option {name} — did you mean {near}?"),
-                    None => format!("unknown option {name} (run `e --help` for the options)"),
+                    None => format!("unknown option {name} (run `ulo --help` for the options)"),
                 });
             }
             _ => out.positional.push(arg.clone()),
@@ -347,7 +347,7 @@ use crate::providers::catalog;
 
 /// The model a run uses: the requested query, or the configured default;
 /// with an explicit effort checked against what that model declares.
-/// Shared by the terminal, `e -p`, and `e rpc` so one message describes an
+/// Shared by the terminal, `ulo -p`, and `ulo rpc` so one message describes an
 /// unavailable model everywhere.
 pub fn resolve_model(options: &Options) -> Result<catalog::Model, String> {
     let selected = match options.model.as_deref() {
@@ -484,7 +484,7 @@ mod tests {
         assert!(error.contains("did you mean --model?"));
         assert_eq!(
             parse(args(&["-x"]), &[]).unwrap_err(),
-            "unknown option -x (run `e --help` for the options)"
+            "unknown option -x (run `ulo --help` for the options)"
         );
         // Anywhere in argv, not just in the leading position.
         assert!(parse(args(&["hello", "--junk"]), &[]).is_err());

@@ -1,6 +1,6 @@
-//! `e -p`: one headless turn. Plain mode streams the reply to stdout and
+//! `ulo -p`: one headless turn. Plain mode streams the reply to stdout and
 //! exits 0; `--json` streams every event as a line and ends with the same
-//! result object `e rpc` returns; the prompt may come from stdin; a missing
+//! result object `ulo rpc` returns; the prompt may come from stdin; a missing
 //! prompt is a usage error; a failed turn exits 1.
 
 mod common;
@@ -31,11 +31,11 @@ fn run(home: &Home, args: &[&str], stdin: Option<&str>) -> std::process::Output 
     // launch directory is trusted here the way a developer's checkout is in
     // their own home. `cli::print_mode_refuses_an_untrusted_workspace` covers
     // the refusal.
-    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    ulo::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "--no-save"])
         .args(args)
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -139,9 +139,9 @@ fn print_mode_tells_extensions_there_is_no_ui() {
     let _lock = env_lock();
     let (port, _server) = serve_sse(&[OK_STREAM]);
     let home = mock_home("print-headless", port);
-    // This test spawns e itself rather than through `run`, and trust is a
+    // This test spawns ulo itself rather than through `run`, and trust is a
     // precondition for the turn it is about.
-    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
+    ulo::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
     let ext = home.dir.join("extensions");
     std::fs::create_dir_all(&ext).unwrap();
     let path = ext.join("asker.sh");
@@ -149,7 +149,7 @@ fn print_mode_tells_extensions_there_is_no_ui() {
     std::fs::write(
         &path,
         r#"#!/bin/sh
-log="$E_HOME/ext.log"
+log="$ULO_HOME/ext.log"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\),"method".*/\1/p')
   case "$line" in
@@ -176,9 +176,9 @@ done
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let child = Command::new(env!("CARGO_BIN_EXE_e"))
+    let child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-save", "-p", "hi"])
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

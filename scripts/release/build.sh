@@ -5,16 +5,16 @@
 #
 # The macOS legs and the Linux legs share this script; the Linux legs run it in
 # a container whose glibc *is* the floor, so the floor is a decision instead of
-# whatever the runner image happens to have. Set E_GLIBC_CEILING to that
+# whatever the runner image happens to have. Set ULO_GLIBC_CEILING to that
 # version: the script refuses an image that does not match it, and refuses a
 # binary that needs anything newer than it.
 #
-# Env: TARGETS (required), E_GLIBC_CEILING, and — when cutting a release — TAG,
-# COMMAND, E_BUILD_VERSION. Without TAG it builds and checks only.
+# Env: TARGETS (required), ULO_GLIBC_CEILING, and — when cutting a release — TAG,
+# COMMAND, ULO_BUILD_VERSION. Without TAG it builds and checks only.
 set -eu
 
 targets=${TARGETS:?TARGETS is required}
-ceiling=${E_GLIBC_CEILING:-}
+ceiling=${ULO_GLIBC_CEILING:-}
 tag=${TAG:-}
 
 if [ -n "$ceiling" ]; then
@@ -30,12 +30,12 @@ fi
 for target in $targets; do
   rustup target add "$target"
   cargo build --release --locked --target "$target"
-  tar czf "e-$target.tar.gz" -C "target/$target/release" e
+  tar czf "ulo-$target.tar.gz" -C "target/$target/release" ulo
 
   if [ -n "$ceiling" ]; then
     # Every versioned GLIBC_ symbol the dynamic linker must resolve.
     required=$(
-      objdump -T "target/$target/release/e" |
+      objdump -T "target/$target/release/ulo" |
         grep -o 'GLIBC_[0-9.]*' |
         sed 's/GLIBC_//' |
         sort -Vu |
@@ -63,10 +63,10 @@ esac
 
 # The release runs its own archive end to end: the binary reports the tag, the
 # checksum is written, and the installer puts it in place.
-"target/$host/release/e" --version | grep -Fx "e ${tag#v}"
-sha256sum "e-$host.tar.gz" > checksums.txt 2>/dev/null ||
-  shasum -a 256 "e-$host.tar.gz" > checksums.txt
+"target/$host/release/ulo" --version | grep -Fx "ulo ${tag#v}"
+sha256sum "ulo-$host.tar.gz" > checksums.txt 2>/dev/null ||
+  shasum -a 256 "ulo-$host.tar.gz" > checksums.txt
 install_dir=$(mktemp -d)
-E_RELEASE_BASE="file://$PWD" E_INSTALL_DIR="$install_dir" ./install.sh \
-  --version "$E_BUILD_VERSION"
-"$install_dir/$COMMAND" --version | grep -Fx "e ${tag#v}"
+ULO_RELEASE_BASE="file://$PWD" ULO_INSTALL_DIR="$install_dir" ./install.sh \
+  --version "$ULO_BUILD_VERSION"
+"$install_dir/$COMMAND" --version | grep -Fx "ulo ${tag#v}"

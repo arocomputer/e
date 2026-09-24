@@ -218,7 +218,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "e"
+name = "ulo"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -240,10 +240,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "e-fuzz"
+name = "ulo-fuzz"
 version = "0.0.0"
 dependencies = [
- "e",
+ "ulo",
  "libfuzzer-sys",
 ]
 

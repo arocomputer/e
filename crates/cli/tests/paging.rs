@@ -5,9 +5,9 @@
 
 use std::sync::atomic::AtomicBool;
 
-use e::core::tools::{ToolOutcome, ToolRuntime};
+use ulo::core::tools::{ToolOutcome, ToolRuntime};
 
-fn run(runtime: &ToolRuntime, name: &str, args: &str) -> e::core::tools::ToolOutput {
+fn run(runtime: &ToolRuntime, name: &str, args: &str) -> ulo::core::tools::ToolOutput {
     let cancel = AtomicBool::new(false);
     runtime.run_streaming(name, args, std::path::Path::new("."), &cancel, |_, _| {})
 }
@@ -136,16 +136,16 @@ fn read_result_survives_every_tool_narrowing() {
             .filter_map(|s| s["function"]["name"].as_str().map(str::to_string))
             .collect()
     };
-    let narrowed = names(e::core::tools::restrict_to(
-        e::core::tools::schemas(),
+    let narrowed = names(ulo::core::tools::restrict_to(
+        ulo::core::tools::schemas(),
         Some(&["read".to_string()]),
     ));
     assert_eq!(
         narrowed,
         vec!["read".to_string(), "read_result".to_string()]
     );
-    assert!(e::core::tools::always_available("read_result"));
-    assert!(!e::core::tools::always_available("bash"));
+    assert!(ulo::core::tools::always_available("read_result"));
+    assert!(!ulo::core::tools::always_available("bash"));
 }
 
 /// `read_result` reads its window the way `read` does: a numeric string or

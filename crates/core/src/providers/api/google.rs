@@ -179,7 +179,7 @@ pub async fn run(
         // Gemini streams a failure after the headers as a `google.rpc.Status`
         // frame `{"error":{"code":500,"status":"INTERNAL",…}}`; the body
         // then ends without a finishReason, which would read as a stall.
-        if let Some(error) = value.get("error").filter(|e| e.is_object()) {
+        if let Some(error) = value.get("error").filter(|ulo| ulo.is_object()) {
             return Err(ProviderError::from_error_frame(error).with_response(sse.response.clone()));
         }
         if let Some(meta) = value.get("usageMetadata").filter(|u| u.is_object()) {

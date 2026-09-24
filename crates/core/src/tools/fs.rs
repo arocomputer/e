@@ -61,7 +61,7 @@ pub fn read(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput 
         let before = super::file_stamp(&full);
         let window = match read_window(&full, offset, limit) {
             Ok(w) => w,
-            Err(e) => return err(format!("read {path}: {e}"), "read", path),
+            Err(ulo) => return err(format!("read {path}: {ulo}"), "read", path),
         };
         let after = super::file_stamp(&full);
         if let (Some(before), Some(after)) = (before, after) {
@@ -354,7 +354,7 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
                 display: Some(super::truncate(detail)),
             }
         }
-        Err(e) => err(format!("write {path}: {e}"), "write", path),
+        Err(ulo) => err(format!("write {path}: {ulo}"), "write", path),
     }
 }
 
@@ -442,14 +442,14 @@ pub fn grep(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput 
     };
     let re = match regex::Regex::new(pattern) {
         Ok(r) => r,
-        Err(e) => return err(format!("grep: bad pattern: {e}"), "grep", ""),
+        Err(ulo) => return err(format!("grep: bad pattern: {ulo}"), "grep", ""),
     };
     // A glob with no slash matches the bare file name anywhere in the tree;
     // one with a slash addresses the workspace-relative path itself.
     let glob = match args["glob"].as_str() {
         Some(g) => match glob_regex(g) {
             Ok(r) => Some((r, !g.contains('/'))),
-            Err(e) => return err(format!("grep: bad glob: {e}"), "grep", ""),
+            Err(ulo) => return err(format!("grep: bad glob: {ulo}"), "grep", ""),
         },
         None => None,
     };
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn write_rejects_missing_content_without_overwriting() {
-        let dir = std::env::temp_dir().join(format!("e-fs-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-fs-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("kept.txt");
         std::fs::write(&file, "keep me").unwrap();
@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn write_refuses_non_utf8_existing_file() {
-        let dir = std::env::temp_dir().join(format!("e-fs-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-fs-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("binary");
         std::fs::write(&file, [0xff, 0x00]).unwrap();

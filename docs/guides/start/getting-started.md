@@ -1,44 +1,44 @@
 ---
 title: Getting started
-description: Install e, connect a model, and run your first task.
+description: Install ulo, connect a model, and run your first task.
 order: 1
 ---
 
 # Getting started
 
-e is the coding agent you can put anywhere. It runs on macOS and glibc Linux,
+ulo is the coding agent you can put anywhere. It runs on macOS and glibc Linux,
 on ARM64 and x86-64, and works in any directory you trust.
 
 ## Install
 
 ```sh
-curl -fsSL https://e.aro.computer/install.sh | sh
+curl -fsSL https://ulo.sh/install.sh | sh
 ```
 
 The installer verifies the release for your platform and writes the binary to
-`~/.local/bin`. Run `e --version` to print the build you have.
+`~/.local/bin`. Run `ulo --version` to print the build you have.
 [Install](install.md) covers package managers, preview channels, and builds
 from source.
 
 ## Open a project
 
-Start e in the directory you want it to work in:
+Start ulo in the directory you want it to work in:
 
 ```sh
 cd your-project
-e
+ulo
 ```
 
-On the first visit, e asks whether you trust the directory. Trust lets e load
+On the first visit, ulo asks whether you trust the directory. Trust lets ulo load
 the repository's own instructions and resources. Trust is not a sandbox.
 
 > [!WARNING]
-> Tools run with your user's permissions, and by default e shows no permission
+> Tools run with your user's permissions, and by default ulo shows no permission
 > prompt. Use a container, VM, or OS sandbox when the work needs containment.
 > [Sandboxing](../usage/sandboxing.md) covers the options.
 
 A session with no terminal cannot answer the trust panel. Record the decision
-first with `e trust [dir]`. [Instructions](../customize/instructions.md)
+first with `ulo trust [dir]`. [Instructions](../customize/instructions.md)
 explains what trust loads.
 
 ## Connect a model
@@ -51,11 +51,11 @@ Run `/login` and follow the provider's sign-in or API-key flow. Then open
   `ANTHROPIC_API_KEY`.
 
 [Models & providers](../customize/models.md) covers local servers,
-`~/.e/models.json`, context windows, and pricing.
+`~/.ulo/models.json`, context windows, and pricing.
 
 ## Run your first task
 
-Type a question or describe a change, then press enter. e reads files, edits
+Type a question or describe a change, then press enter. ulo reads files, edits
 code, and runs shell commands to answer:
 
 ```
@@ -75,7 +75,7 @@ the diff and the test output before you commit.
 ## Where to go next
 
 - [Sessions](../usage/sessions.md): resume, branch, compact, and export a conversation.
-- [Settings](../customize/settings.md): `~/.e`, and every preference in it.
+- [Settings](../customize/settings.md): `~/.ulo`, and every preference in it.
 - [Command line](../usage/commands.md): run options, and the commands inside a session.
 - [Extensions](../extend/extensions.md): add tools, commands, and hooks in any language.
 
@@ -83,7 +83,7 @@ the diff and the test output before you commit.
 
 | Symptom | What to check |
 | --- | --- |
-| `e: command not found` | Add `~/.local/bin` to `PATH` and open a new terminal. Package managers install into a directory `PATH` already has. |
+| `ulo: command not found` | Add `~/.local/bin` to `PATH` and open a new terminal. Package managers install into a directory `PATH` already has. |
 | `/models` lists nothing | Run `/login` to connect a provider. For a local model, start its server before you open the picker. |
-| The trust panel keeps returning | The directory is untrusted. Answer the panel, or record the decision with `e trust [dir]`. |
-| You need the full reference | `e docs` lists every topic, and `e docs <topic>` prints one. |
+| The trust panel keeps returning | The directory is untrusted. Answer the panel, or record the decision with `ulo trust [dir]`. |
+| You need the full reference | `ulo docs` lists every topic, and `ulo docs <topic>` prints one. |

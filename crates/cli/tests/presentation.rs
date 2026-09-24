@@ -1,9 +1,9 @@
 //! Wrapping and shell-gutter contracts for the connected tool presentation.
 
-use e::core::tools::{strip_ansi, ToolOutcome};
-use e::tui::composer::{Editor, EditorResult, Key};
-use e::tui::theme::load_bundled;
-use e::tui::transcript::{Block, ToolChild, ToolDetail};
+use ulo::core::tools::{strip_ansi, ToolOutcome};
+use ulo::tui::composer::{Editor, EditorResult, Key};
+use ulo::tui::theme::load_bundled;
+use ulo::tui::transcript::{Block, ToolChild, ToolDetail};
 
 /// Make one command without involving execution or a provider.
 fn command(id: u64, target: &str) -> ToolChild {
@@ -128,7 +128,7 @@ fn concurrent_commands_keep_order_and_preview_the_wrapped_tail() {
     assert_eq!(plain.iter().filter(|s| s.starts_with('└')).count(), 1);
     assert!(rows
         .iter()
-        .all(|row| e::tui::markdown::visible_width(row) <= 12));
+        .all(|row| ulo::tui::markdown::visible_width(row) <= 12));
     let review = group.review_lines(&theme, 12);
     assert!(review
         .iter()
@@ -190,7 +190,11 @@ fn shell_prefix_space_has_its_own_cursor_and_selection_cell() {
 #[test]
 fn tool_labels_reflow_from_source_with_a_display_row_budget() {
     let theme = load_bundled(false).unwrap();
-    let target = format!("{} {} TAIL_MARKER", "界".repeat(24), "e\u{301}".repeat(12));
+    let target = format!(
+        "{} {} TAIL_MARKER",
+        "界".repeat(24),
+        "ulo\u{301}".repeat(12)
+    );
     let mut group = Block::tool_group(vec![command(1, &target)]);
     group.start_tool(1);
     group.finish_tool(1, ToolOutcome::Completed, "done".into(), "");
@@ -200,7 +204,7 @@ fn tool_labels_reflow_from_source_with_a_display_row_budget() {
         assert!(plain.len() <= 4, "{plain:?}");
         assert!(rows
             .iter()
-            .all(|row| e::tui::markdown::visible_width(row) <= width));
+            .all(|row| ulo::tui::markdown::visible_width(row) <= width));
         assert_eq!(plain.last().unwrap(), "└ ctrl+o to view");
         if width == 20 {
             assert!(plain[2].ends_with('…'), "{plain:?}");
@@ -236,7 +240,8 @@ fn heredoc_bodies_stay_in_review_not_in_the_transcript() {
         ("echo word#suffix; cat <<EOF\nBODY_MARKER\nEOF", true),
         ("echo \\<\\<EOF\necho BODY_MARKER", false),
     ] {
-        let presentation = e::core::tools::present("bash", &serde_json::json!({"command": source}));
+        let presentation =
+            ulo::core::tools::present("bash", &serde_json::json!({"command": source}));
         assert_eq!(presentation.target, source);
         let mut group = Block::tool_group(vec![command(1, &presentation.target)]);
         group.start_tool(1);
@@ -269,5 +274,5 @@ fn tool_label_budget_preserves_edit_counts() {
     let rows = group.lines_for_test(&theme, 24);
     assert!(strip_ansi(&rows[2]).ends_with('…'));
     assert_eq!(strip_ansi(&rows[3]), "│ +2 / -1");
-    assert!(rows[3].contains(&theme.fg(e::tui::theme::Theme::diff_marker_token(true), "+2")));
+    assert!(rows[3].contains(&theme.fg(ulo::tui::theme::Theme::diff_marker_token(true), "+2")));
 }

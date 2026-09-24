@@ -2,7 +2,7 @@
 mod common;
 
 use common::{env_lock, Home};
-use e::tui::composer::{Editor, EditorResult, Key};
+use ulo::tui::composer::{Editor, EditorResult, Key};
 
 /// Submit through the same editor action used by the TUI.
 fn submit(editor: &mut Editor) -> String {
@@ -20,7 +20,7 @@ fn labels_count_unicode_characters_and_normalize_newlines() {
     let html = format!("<div>{}</div>", "界".repeat(1200));
     editor.insert_paste(&html);
     assert_eq!(editor.text(), "[Pasted text #1, 1211 chars]");
-    editor.render(&e::tui::theme::resolve("dark", false), 20, 10);
+    editor.render(&ulo::tui::theme::resolve("dark", false), 20, 10);
     assert_eq!(editor.text(), "[Pasted text #1, 1211 chars]");
     assert_eq!(submit(&mut editor), html);
 
@@ -37,7 +37,7 @@ fn labels_count_unicode_characters_and_normalize_newlines() {
 fn paste_labels_use_image_attachment_grey_without_tinting_the_prompt() {
     let _lock = env_lock();
     let _home = Home::new("paste-colour");
-    let theme = e::tui::theme::resolve("dark", false);
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut editor = Editor::new();
     editor.insert_paste(&"x".repeat(1200));
     let label = editor.text();

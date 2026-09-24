@@ -10,7 +10,7 @@ async fn authenticated_http_never_follows_redirects() {
             "HTTP/1.1 {status} Redirect\r\nLocation: http://{}/sink\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             destination.local_addr().unwrap()
         )]);
-        let response = e::core::providers::http()
+        let response = ulo::core::providers::http()
             .unwrap()
             .post(format!("http://127.0.0.1:{port}/request"))
             .header("x-api-key", "dummy")
@@ -22,7 +22,9 @@ async fn authenticated_http_never_follows_redirects() {
             .await
             .unwrap();
         assert_eq!(response.status().as_u16(), status);
-        assert!(e::core::providers::require_success(response).await.is_err());
+        assert!(ulo::core::providers::require_success(response)
+            .await
+            .is_err());
         assert_eq!(
             destination.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
@@ -45,7 +47,7 @@ fn session_permissions_cover_new_and_legacy_state() {
     std::fs::write(&legacy, legacy_data).unwrap();
     std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-    let log = e::core::session::SessionLog::create(&home.dir, "dummy/model").unwrap();
+    let log = ulo::core::session::SessionLog::create(&home.dir, "dummy/model").unwrap();
     for dir in [
         &home.dir,
         &home.dir.join("sessions"),
@@ -60,7 +62,7 @@ fn session_permissions_cover_new_and_legacy_state() {
         std::fs::metadata(log.path()).unwrap().permissions().mode() & 0o077,
         0
     );
-    let reopened = e::core::session::SessionLog::reopen(&legacy).unwrap();
+    let reopened = ulo::core::session::SessionLog::reopen(&legacy).unwrap();
     assert_eq!(
         std::fs::metadata(reopened.path())
             .unwrap()
@@ -74,12 +76,12 @@ fn session_permissions_cover_new_and_legacy_state() {
 
 #[test]
 fn tool_labels_never_emit_terminal_controls() {
-    use e::tui::transcript::{ToolChild, ToolState, Transcript};
+    use ulo::tui::transcript::{ToolChild, ToolState, Transcript};
     let payload = "\x1b]52;c;RFVNTVk=\x07\x1b[2J";
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     for (tool, key) in [("read", "path"), ("bash", "command"), ("grep", "pattern")] {
         let shown =
-            e::core::tools::present(tool, &serde_json::json!({key: format!("file{payload}")}));
+            ulo::core::tools::present(tool, &serde_json::json!({key: format!("file{payload}")}));
         assert!(!shown.target.contains('\x1b'));
     }
     let mut child = ToolChild::pending(

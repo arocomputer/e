@@ -17,7 +17,7 @@
 use crate::markdown::visible_width;
 use crate::render::{self, bold};
 use crate::theme::Theme;
-use e_core::auth::{self};
+use ulo_core::auth::{self};
 
 pub enum AuthStage {
     /// The method choice; `selected` indexes the two options. The root:
@@ -112,8 +112,8 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 theme,
                 *selected == 1,
                 "Sign in with an API key",
-                if e_core::CHANNEL == "production" {
-                    "stored in ~/.e/auth.json"
+                if ulo_core::CHANNEL == "production" {
+                    "stored in ~/.ulo/auth.json"
                 } else {
                     "stored in this channel's auth.json"
                 },
@@ -129,7 +129,7 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 String::new(),
             ];
             let auth = auth::load();
-            for (i, provider) in e_core::providers::registry::oauth_providers()
+            for (i, provider) in ulo_core::providers::registry::oauth_providers()
                 .iter()
                 .enumerate()
             {
@@ -161,7 +161,7 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 String::new(),
             ];
             let auth = auth::load();
-            for (i, provider) in e_core::providers::registry::key_providers()
+            for (i, provider) in ulo_core::providers::registry::key_providers()
                 .iter()
                 .enumerate()
             {
@@ -206,7 +206,7 @@ pub fn render(stage: &AuthStage, theme: &Theme, width: usize, mask_count: usize)
                 String::new(),
                 dim(&format!(
                     "   Paste your {} API key",
-                    e_core::providers::catalog::display_name(provider)
+                    ulo_core::providers::catalog::display_name(provider)
                 )),
                 entry,
                 dim(&format!(

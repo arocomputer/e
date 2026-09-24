@@ -136,7 +136,7 @@ pub fn html(title: &str, model: &str, messages: &[ChatMessage]) -> String {
         }
     }
     format!(
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>{STYLE}</style></head>\n<body><main><header><h1>{title}</h1>{model} · exported by e</header>\n{body}</main></body></html>\n",
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>{STYLE}</style></head>\n<body><main><header><h1>{title}</h1>{model} · exported by ulo</header>\n{body}</main></body></html>\n",
         title = escape(title),
         model = escape(model),
     )

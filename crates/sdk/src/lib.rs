@@ -1,4 +1,4 @@
-//! e-sdk — e's coding agent as a library.
+//! ulo-sdk — ulo's coding agent as a library.
 //!
 //! A [`Session`] is one conversation against one working directory, run by
 //! the same core the terminal frontend drives: the built-in tools (read,
@@ -8,9 +8,9 @@
 //! in a [`Reply`].
 //!
 //! ```no_run
-//! use e_sdk::{Event, Session};
+//! use ulo_sdk::{Event, Session};
 //!
-//! # async fn demo() -> Result<(), e_sdk::Error> {
+//! # async fn demo() -> Result<(), ulo_sdk::Error> {
 //! let mut session = Session::builder().cwd("/path/to/project").build().await?;
 //! let mut turn = session.prompt("What does this repository do?");
 //! while let Some(event) = turn.next().await {
@@ -35,7 +35,7 @@
 //!   its partial [`Reply`] inside the [`TurnError`].
 //! - **Dropping a running turn interrupts it**, exactly like Esc in the
 //!   terminal. The session stays usable.
-//! - **Nothing touches `~/.e` unless asked.** Conversations are memory-only
+//! - **Nothing touches `~/.ulo` unless asked.** Conversations are memory-only
 //!   unless [`SessionBuilder::persist`] is set, extensions start only with
 //!   [`SessionBuilder::extensions`], and the SDK never edits settings.
 //!
@@ -63,23 +63,23 @@ pub use error::{Error, TurnError};
 pub use session::{Prompt, Session, SessionBuilder, Tools};
 pub use turn::{Event, Reply, Stop, ToolStats, Turn};
 
-/// One conversation record, as e persists it. The tagged `kind` separates
+/// One conversation record, as ulo persists it. The tagged `kind` separates
 /// user, assistant, tool, and reasoning entries; this is the session file's
 /// own message shape, so a saved history round-trips unchanged.
-pub use e_core::providers::ChatMessage as Message;
+pub use ulo_core::providers::ChatMessage as Message;
 /// An image attachment: a media type plus base64 data. `Image::from_path`
 /// reads and validates a PNG, JPEG, GIF, or WebP file.
-pub use e_core::providers::ImageInput as Image;
+pub use ulo_core::providers::ImageInput as Image;
 /// Token counts with disjoint categories: `input` excludes cache reads and
 /// writes; `prompt_tokens()` is their sum.
-pub use e_core::providers::Usage;
+pub use ulo_core::providers::Usage;
 /// A session file on disk, as listed by [`SessionBuilder::saved`].
-pub use e_core::session::SessionInfo as SavedSession;
-pub use e_core::tools::{OutputStream, ToolOutcome};
+pub use ulo_core::session::SessionInfo as SavedSession;
+pub use ulo_core::tools::{OutputStream, ToolOutcome};
 
 /// Read a saved session's active conversation without taking ownership of
 /// the file: the messages a `resume` of `path` would load. Pass them to
 /// [`SessionBuilder::history`] to continue a transcript in memory only.
 pub fn transcript(path: impl AsRef<std::path::Path>) -> Result<Vec<Message>, Error> {
-    Ok(e_core::session::SessionLog::load(path.as_ref())?)
+    Ok(ulo_core::session::SessionLog::load(path.as_ref())?)
 }

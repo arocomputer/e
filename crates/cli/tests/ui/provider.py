@@ -55,9 +55,9 @@ class Provider(http.server.BaseHTTPRequestHandler):
                     if prompt == 'single-tool':
                         commands = ["printf 'SINGLE_OUTPUT\\n'; sleep 1 # a single command with arguments long enough to wrap"]
                     if prompt == 'heredoc-tool':
-                        commands = ["cat <<'E_LABEL_SCRIPT' >/dev/null\n" +
+                        commands = ["cat <<'ULO_LABEL_SCRIPT' >/dev/null\n" +
                                     'HEREDOC_BODY_ONLY ctrl+o to view\n' * 3 +
-                                    "E_LABEL_SCRIPT\nprintf 'REVIEW_LINE_ONE\\nREVIEW_LINE_TWO\\nREVIEW_LINE_THREE\\nREVIEW_LINE_FOUR\\n'"]
+                                    "ULO_LABEL_SCRIPT\nprintf 'REVIEW_LINE_ONE\\nREVIEW_LINE_TWO\\nREVIEW_LINE_THREE\\nREVIEW_LINE_FOUR\\n'"]
                     calls = [{'index': i, 'id': f'tool-{i}', 'type': 'function',
                               'function': {'name': 'bash', 'arguments': json.dumps({'command': command})}}
                              for i, command in enumerate(commands)]

@@ -1,0 +1,140 @@
+---
+/**
+ * One documentation article. Each heading renders once, and the in-page
+ * navigation (mobile disclosure and the page index) derives from the same
+ * sections. Bodies are HTML already rendered at build time (`markdown.ts`);
+ * `lead` is a plain paragraph, `leadHtml` a rendered introduction. The
+ * `before` slot sits between the introduction and the first section, or
+ * right under the heading of the section named by `slotSection`.
+ */
+import { OnThisPage } from "./on-this-page";
+
+type Subsection = { id: string; title: string; html: string };
+type Section = Subsection & { subsections?: Subsection[] };
+type Link = { href: string; title: string };
+
+interface Props {
+  title: string;
+  lead?: string;
+  leadHtml?: string;
+  sections: Section[];
+  next?: Link;
+  previous?: Link;
+  slotSection?: string;
+}
+
+const { title, lead, leadHtml, sections, next, previous, slotSection } =
+  Astro.props;
+const headings = sections.flatMap(({ id, title, subsections }) => [
+  { id, title, depth: 2 },
+  ...(subsections ?? []).map(({ id, title }) => ({ id, title, depth: 3 })),
+]);
+---
+
+<main id="main" class="ulo-doc-article" data-pagefind-body="true">
+  <header class="ulo-doc-title">
+    <h1>{title}</h1>
+    {leadHtml === undefined ? (
+      <p>{lead}</p>
+    ) : (
+      <div class="ulo-doc-lead" set:html={leadHtml} />
+    )}
+  </header>
+  <div class="ulo-mobile-toc" data-pagefind-ignore="true">
+    <details>
+      <summary>On this page</summary>
+      <nav aria-label="Page sections">
+        {headings.map(({ id, title, depth }) => (
+          <a href={"#" + id} data-depth={depth}>
+            {title}
+          </a>
+        ))}
+      </nav>
+    </details>
+  </div>
+  {!slotSection && <slot name="before" />}
+  {sections.map(({ id, title, html, subsections }) => (
+    <section class="ulo-doc-section" aria-labelledby={id}>
+      <h2 id={id}>{title}</h2>
+      {id === slotSection && <slot name="before" />}
+      <Fragment set:html={html} />
+      {subsections?.map(({ id, title, html }) => (
+        <section class="ulo-doc-subsection" aria-labelledby={id}>
+          <h3 id={id}>{title}</h3>
+          <Fragment set:html={html} />
+        </section>
+      ))}
+    </section>
+  ))}
+  {(next || previous) && (
+    <nav
+      class="ulo-doc-next"
+      aria-label="Page navigation"
+      data-pagefind-ignore="true"
+    >
+      {previous && (
+        <a
+          rel="prev"
+          aria-label={`Previous: ${previous.title}`}
+          href={`${previous.href}#top`}
+        >
+          Previous
+        </a>
+      )}
+      {next && (
+        <a
+          rel="next"
+          aria-label={`Next: ${next.title}`}
+          href={`${next.href}#top`}
+        >
+          Next
+        </a>
+      )}
+    </nav>
+  )}
+</main>
+<OnThisPage client:load sections={headings} />
+
+<script>
+  // Copy buttons in rendered code blocks: the clipboard gets the block's exact
+  // text, and the status stays three seconds without changing the block's height.
+  const COPY =
+    '<rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>';
+  const COPIED = '<path d="m5 12 4 4L19 6"></path>';
+  const resets = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+
+  function show(block: Element, status: string) {
+    const button = block.querySelector<HTMLButtonElement>(".ulo-copy");
+    const label = button?.getAttribute("aria-label") ?? "";
+    const copied = status === "Copied";
+    if (button) {
+      button.title = status || label;
+      button.dataset.copied = String(copied);
+      const icon = button.querySelector("svg");
+      if (icon) icon.innerHTML = copied ? COPIED : COPY;
+    }
+    const live = block.querySelector(":scope > .ulo-visually-hidden");
+    if (live) live.textContent = status;
+  }
+
+  document.addEventListener("click", async (event) => {
+    const button =
+      event.target instanceof Element
+        ? event.target.closest(".ulo-doc-code .ulo-copy")
+        : null;
+    const block = button?.closest(".ulo-doc-code");
+    const code = block?.querySelector(".ulo-doc-code-text");
+    if (!block || !code) return;
+    clearTimeout(resets.get(block));
+    try {
+      await navigator.clipboard.writeText(code.textContent ?? "");
+      show(block, "Copied");
+      resets.set(
+        block,
+        setTimeout(() => show(block, ""), 3000),
+      );
+    } catch {
+      show(block, "Select the code to copy it");
+    }
+  });
+</script>

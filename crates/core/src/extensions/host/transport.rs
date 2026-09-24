@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Extensions under `~/.e/extensions/`, then each installed package's
+/// Extensions under `~/.ulo/extensions/`, then each installed package's
 /// `extensions/` in settings order. A top-level executable is one extension.
 /// A subdirectory can bundle an entry point with helper files. Entry-point
 /// selection checks the first `index.*` executable in path order, a file
@@ -87,7 +87,7 @@ pub(super) async fn spawn(
         // orphan queue instead.
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("failed to start: {e}"))?;
+        .map_err(|ulo| format!("failed to start: {ulo}"))?;
 
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
@@ -144,7 +144,7 @@ pub(super) async fn spawn(
     if let Some(registry) = startup_registry {
         registry
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .push(link.clone());
     }
 
@@ -220,7 +220,7 @@ pub(super) async fn spawn(
                     if let Some(tx) = link_reader
                         .pending
                         .lock()
-                        .unwrap_or_else(|e| e.into_inner())
+                        .unwrap_or_else(|ulo| ulo.into_inner())
                         .remove(&id)
                     {
                         let _ = tx.send(result);
@@ -248,7 +248,7 @@ pub(super) async fn spawn(
                     let target = link_reader
                         .progress
                         .lock()
-                        .unwrap_or_else(|e| e.into_inner())
+                        .unwrap_or_else(|ulo| ulo.into_inner())
                         .get(&id)
                         .cloned();
                     if let Some(tx) = target {
@@ -280,11 +280,11 @@ pub(super) async fn spawn(
     let init = json!({
         "protocol": protocol::PROTOCOL_VERSION,
         "capabilities": protocol::CAPABILITIES,
-        // Whether `ui.*` requests can reach someone; false under `e -p`.
+        // Whether `ui.*` requests can reach someone; false under `ulo -p`.
         "ui": ui,
-        "e_version": crate::VERSION,
+        "ulo_version": crate::VERSION,
         "cwd": cwd.display().to_string(),
-        // Namespaced extension config from ~/.e/settings.json:
+        // Namespaced extension config from ~/.ulo/settings.json:
         // {"extensions":{"<name>":{…}}} — each extension reads its own key.
         "extensions_config": crate::config::settings::extensions_config(),
     });
@@ -292,9 +292,9 @@ pub(super) async fn spawn(
         let value = host_shim
             .request(&ext, "initialize", init, INIT_TIMEOUT)
             .await
-            .map_err(|e| format!("initialize {e}"))?;
+            .map_err(|ulo| format!("initialize {ulo}"))?;
         let manifest: Manifest =
-            serde_json::from_value(value).map_err(|e| format!("bad manifest: {e}"))?;
+            serde_json::from_value(value).map_err(|ulo| format!("bad manifest: {ulo}"))?;
         if manifest.name.is_empty() {
             return Err("manifest has no name".into());
         }

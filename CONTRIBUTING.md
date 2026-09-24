@@ -1,6 +1,6 @@
 # Contributing
 
-e is the coding agent you can put anywhere: one Rust binary, no daemon,
+ulo is the coding agent you can put anywhere: one Rust binary, no daemon,
 no plugin runtime beyond executable JSONL extensions. That smallness is the
 point, and it shapes what a good contribution looks like. The best ones solve
 one clear problem, add the least code that solves it, and leave the repository
@@ -10,8 +10,8 @@ new protocol message to land, say why in the PR; if it doesn't, don't add one.
 ## Getting set up
 
 ```sh
-git clone https://github.com/arocomputer/e
-cd e
+git clone https://github.com/arocomputer/ulo
+cd ulo
 ./x hooks
 cargo build
 ./x test
@@ -41,13 +41,13 @@ not bypass merge checks.
 ## Reporting issues
 
 Use the bug or feature issue form. Bug reports need a reproducible case and
-the version (`e --version`, or the commit if you built from source). Feature
+the version (`ulo --version`, or the commit if you built from source). Feature
 requests should explain the need before the design; an implementation sketch
 is welcome but optional. A feature that could be an extension is usually
 better as one — the extension API in [docs/guides/extend/extensions.md](docs/guides/extend/extensions.md)
 exists precisely so most additions never have to touch the binary, and
 [docs/guides/extend/packages.md](docs/guides/extend/packages.md) is how an extension, skill, prompt, or
-theme reaches other users without a release of e.
+theme reaches other users without a release of ulo.
 
 ## Finding your way around
 
@@ -82,7 +82,7 @@ The dev publication workflow listens for a successful `Tests` run on main.
 ./x guard         # the trust boundary and the repository's tooling tests
 ./x ui            # terminal frames and interaction scenarios
 ./x packages      # installers and package launchers
-./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
+./x sbom /tmp/ulo-sbom.cdx.json  # application dependency inventory
 ```
 
 The full suite includes the docs contract. Prose-only changes run that contract

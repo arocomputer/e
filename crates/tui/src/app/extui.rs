@@ -3,7 +3,7 @@
 //! user's behalf, plus the lifecycle events the frontend alone can emit
 //! (session start and shutdown, model and effort changes).
 //!
-//! Everything an extension shows is data painted by e through the theme:
+//! Everything an extension shows is data painted by ulo through the theme:
 //! a `show` becomes a transcript block, a `select` the ordinary picker, a
 //! `panel` a footer surface framed like every other one, a `pane` a side
 //! pane beside the conversation (`tui/surfaces/pane.rs`), a `widget` rows
@@ -23,7 +23,7 @@ use super::*;
 use crate::menu::{Menu, MenuItem, MenuKind, HINT_USE};
 pub(crate) use crate::pane::Span;
 use crate::pane::{spans_of, Action, Pane};
-use e_core::extensions::{CommandResult, HostRequest, Show};
+use ulo_core::extensions::{CommandResult, HostRequest, Show};
 
 /// Widest a `ui.status` slot paints; longer text ends in an ellipsis.
 const STATUS_COLUMNS: usize = 40;
@@ -103,7 +103,7 @@ impl UiPrompt {
 /// interactive panel can see them. None for keys without a name.
 pub(crate) fn chord_of(event: &KeyEvent) -> Option<String> {
     use crate::keybindings::base_name;
-    use e_core::config::chord::chord_string;
+    use ulo_core::config::chord::chord_string;
     let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let mut shift = event.modifiers.contains(KeyModifiers::SHIFT);
@@ -132,7 +132,7 @@ fn text_of(value: &Value, key: &str) -> String {
     value
         .get(key)
         .and_then(Value::as_str)
-        .map(e_core::tools::sanitize_display)
+        .map(ulo_core::tools::sanitize_display)
         .unwrap_or_default()
 }
 
@@ -149,7 +149,7 @@ fn one_line(text: &str, max: usize) -> String {
 /// A span's text on one row: control sequences stripped, newlines folded to
 /// spaces, every other space kept — alignment is the extension's to draw.
 fn flat(text: &str) -> String {
-    e_core::tools::sanitize_display(text).replace('\n', " ")
+    ulo_core::tools::sanitize_display(text).replace('\n', " ")
 }
 
 /// Panel lines from JSON: a string paints plain, an array of
@@ -172,7 +172,7 @@ impl App {
     /// Emit a lifecycle event to subscribed extensions without waiting.
     pub(super) fn emit(&self, name: &'static str, params: Value) {
         let host = self.host.clone();
-        e_core::config::home::spawn(async move { host.event(name, params).await });
+        ulo_core::config::home::spawn(async move { host.event(name, params).await });
     }
 
     /// Whether the composer is currently an extension's answer field.
@@ -230,7 +230,7 @@ impl App {
                                 Value::String(raw) => {
                                     // The answer is the offered string; only
                                     // the row's label is clipped.
-                                    let value = e_core::tools::sanitize_display(raw);
+                                    let value = ulo_core::tools::sanitize_display(raw);
                                     let label = one_line(&value, TITLE_COLUMNS);
                                     Some(MenuItem::new(&label, "", &value))
                                 }
@@ -488,7 +488,7 @@ impl App {
 
     /// One request from an extension, answered now or parked until the
     /// user can see it. Unknown methods are answered with an error so a
-    /// newer extension on an older e learns what is missing.
+    /// newer extension on an older ulo learns what is missing.
     pub(super) fn on_host_request(&mut self, request: HostRequest) {
         let params = request.params.clone();
         let method = request.method.clone();
@@ -531,7 +531,7 @@ impl App {
                     Some(Value::String(text)) if !text.trim().is_empty() => {
                         self.ext_status.insert(
                             slot,
-                            one_line(&e_core::tools::sanitize_display(text), STATUS_COLUMNS),
+                            one_line(&ulo_core::tools::sanitize_display(text), STATUS_COLUMNS),
                         );
                     }
                     _ => {
@@ -553,7 +553,7 @@ impl App {
                     Some(Value::String(text)) if !text.trim().is_empty() => {
                         self.ext_activity.insert(
                             slot,
-                            one_line(&e_core::tools::sanitize_display(text), STATUS_COLUMNS),
+                            one_line(&ulo_core::tools::sanitize_display(text), STATUS_COLUMNS),
                         );
                     }
                     _ => {
@@ -708,7 +708,7 @@ impl App {
                     // Hidden from the transcript, seen by the model, and it
                     // starts the turn; mid-turn it steers like any prompt.
                     self.close_queue_review();
-                    let mut message = e_core::providers::ChatMessage::user(content);
+                    let mut message = ulo_core::providers::ChatMessage::user(content);
                     message.mark_internal();
                     self.agent.submit_message(message, system_prompt());
                 } else if internal {
@@ -815,7 +815,7 @@ pub(super) fn shutdown_then_start(app: &App, reason: &'static str) {
         "path": app.agent.session_path().map(|p| p.display().to_string()),
     });
     // One task, two awaits: separate spawns could deliver them reordered.
-    e_core::config::home::spawn(async move {
+    ulo_core::config::home::spawn(async move {
         host.event("session_shutdown", json!({"reason": reason}))
             .await;
         host.event("session_start", start).await;

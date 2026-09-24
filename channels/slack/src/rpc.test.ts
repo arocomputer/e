@@ -12,7 +12,7 @@ test("shutdown kills an unresponsive process and rejects pending requests", { ti
 
 
 test("a failed spawn can be closed without waiting for an exit event", { timeout: 5000 }, async () => {
-  const rpc = new Rpc("/does-not-exist/e", []);
+  const rpc = new Rpc("/does-not-exist/ulo", []);
   await assert.rejects(rpc.call("hello"), /ENOENT|EPIPE/);
   await rpc.close(50);
 });

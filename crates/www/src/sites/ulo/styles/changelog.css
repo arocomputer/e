@@ -1,0 +1,82 @@
+/* Product history uses the same rails and reading measure as the homepage. */
+.ulo-changelog p {
+  margin: 0 0 20px;
+}
+.ulo-changelog section {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 32px;
+  padding: 40px 80px 48px;
+}
+.ulo-changelog section + section {
+  border-top: 1px solid var(--rule);
+}
+.ulo-changelog-meta {
+  position: sticky;
+  top: 104px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 5px;
+  font-size: 12px;
+}
+.ulo-changelog h1,
+.ulo-changelog h2,
+.ulo-changelog h3 {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 20px;
+  line-height: 1.5;
+  scroll-margin-top: 120px;
+}
+.ulo-changelog-meta a {
+  color: var(--ink);
+  font-size: 15px;
+}
+.ulo-changelog h2,
+.ulo-changelog h3 {
+  font-size: 17px;
+  margin-top: 32px;
+  margin-bottom: 14px;
+}
+.ulo-changelog .ulo-release-title {
+  font-size: 22px;
+  margin: 0 0 20px;
+}
+.ulo-changelog ul {
+  list-style: disc;
+  padding-left: 20px;
+  margin: 0 0 24px;
+}
+.ulo-changelog li {
+  padding-left: 4px;
+  margin-bottom: 12px;
+}
+.ulo-changelog code {
+  color: var(--ink);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.ulo-changelog p a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+@media (max-width: 1000px) {
+  .ulo-changelog section {
+    padding-inline: 48px;
+    grid-template-columns: 130px minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .ulo-changelog section {
+    padding: 28px 20px 32px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .ulo-changelog-meta {
+    position: static;
+  }
+}

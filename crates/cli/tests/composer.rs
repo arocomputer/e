@@ -3,9 +3,9 @@
 //! row), the rail heads every visual row, and the cursor stays visible on the
 //! row it logically occupies.
 
-use e::tui::composer::{Editor, Key};
-use e::tui::markdown::visible_width;
-use e::tui::theme;
+use ulo::tui::composer::{Editor, Key};
+use ulo::tui::markdown::visible_width;
+use ulo::tui::theme;
 
 fn rows(text: &str, width: usize) -> Vec<String> {
     let mut editor = Editor::new();

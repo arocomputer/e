@@ -63,7 +63,7 @@ impl ToolRuntime {
     }
 
     pub(crate) fn keep_change(&self, change: Change) {
-        let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut changes = self.changes.lock().unwrap_or_else(|ulo| ulo.into_inner());
         changes.push(change);
         let excess = changes.len().saturating_sub(UNDO_DEPTH);
         changes.drain(..excess);
@@ -75,7 +75,7 @@ impl ToolRuntime {
     /// second attempt is possible.
     pub fn undo_last(&self) -> Result<Option<String>, String> {
         let change = {
-            let mut changes = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+            let mut changes = self.changes.lock().unwrap_or_else(|ulo| ulo.into_inner());
             match changes.pop() {
                 Some(change) => change,
                 None => return Ok(None),
@@ -97,7 +97,7 @@ impl ToolRuntime {
                 let label = change.label.clone();
                 self.changes
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .push(change);
                 Err(format!("could not undo {label}: {error}"))
             }
@@ -106,7 +106,10 @@ impl ToolRuntime {
 
     /// How many changes `/undo` can still revert.
     pub fn undo_depth(&self) -> usize {
-        self.changes.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.changes
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner())
+            .len()
     }
 }
 
@@ -126,7 +129,7 @@ const STORE_MAX_BYTES: usize = 16 * 1024 * 1024;
 impl ToolRuntime {
     /// Keep a full result and return the id a truncation notice names.
     pub fn retain_result(&self, full: String) -> u64 {
-        let mut store = self.results.lock().unwrap_or_else(|e| e.into_inner());
+        let mut store = self.results.lock().unwrap_or_else(|ulo| ulo.into_inner());
         store.next_id += 1;
         let id = store.next_id;
         store.bytes += full.len();
@@ -144,7 +147,7 @@ impl ToolRuntime {
     pub fn result(&self, id: u64) -> Option<String> {
         self.results
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .entries
             .iter()
             .find(|(kept, _)| *kept == id)
@@ -268,12 +271,12 @@ pub fn schemas() -> Vec<Value> {
     SPECS.iter().map(|s| (s.schema)()).collect()
 }
 
-/// Whether `name` identifies one of e's built-in tools.
+/// Whether `name` identifies one of ulo's built-in tools.
 pub fn is_builtin(name: &str) -> bool {
     SPECS.iter().any(|spec| spec.name == name)
 }
 
-/// Kill every shell process group still owned by this e process.
+/// Kill every shell process group still owned by this ulo process.
 pub fn kill_tracked_processes() {
     bash::kill_tracked_processes();
 }
@@ -549,9 +552,9 @@ impl ToolRuntime {
         let args: Value = match serde_json::from_str(arguments) {
             Ok(v) => v,
             Err(_) if arguments.trim().is_empty() => Value::Null,
-            Err(e) => {
+            Err(ulo) => {
                 return ToolOutput {
-                    content: format!("tool arguments were not valid JSON: {e}"),
+                    content: format!("tool arguments were not valid JSON: {ulo}"),
                     outcome: ToolOutcome::Failed,
                     summary: "bad arguments".into(),
                     display: None,
@@ -653,7 +656,7 @@ fn staged_replace(
         options.mode(if metadata.is_some() { 0o600 } else { 0o666 });
     }
     let stage = |dir: &Path| {
-        let temporary = dir.join(format!(".e-write-{}", uuid::Uuid::new_v4()));
+        let temporary = dir.join(format!(".ulo-write-{}", uuid::Uuid::new_v4()));
         options.open(&temporary).map(|file| (temporary, file))
     };
     let (temporary, mut file) = match stage(parent) {
@@ -839,7 +842,7 @@ pub(crate) fn stable_path_key(path: &Path) -> PathBuf {
     }
 }
 
-/// Record the file's current on-disk state as the one e has seen.
+/// Record the file's current on-disk state as the one ulo has seen.
 fn note_seen(state: &ToolRuntime, path: &Path) {
     let Some(stamp) = file_stamp(path) else {
         return;
@@ -852,7 +855,7 @@ fn note_seen_stamp(state: &ToolRuntime, path: &Path, stamp: (std::time::SystemTi
     seen.insert(freshness_key(path), stamp);
 }
 
-/// Fail when a recorded file changed on disk since e last saw it. A file
+/// Fail when a recorded file changed on disk since ulo last saw it. A file
 /// that has since been removed passes: there is nothing left to clobber, and
 /// demanding a re-read of a missing file would wedge the path for the rest
 /// of the session. Other metadata failures remain stale, never confirmed deletions.
@@ -899,7 +902,7 @@ fn check_fresh(
 fn walk_files(root: &Path, visit: &mut dyn FnMut(&Path) -> bool) -> bool {
     const SKIP: &[&str] = &[".git", "target", "node_modules", "dist", ".cache"];
     let entries = match std::fs::read_dir(root) {
-        Ok(e) => e.flatten().map(|e| e.path()).collect::<Vec<_>>(),
+        Ok(ulo) => ulo.flatten().map(|ulo| ulo.path()).collect::<Vec<_>>(),
         Err(_) => return true,
     };
     for path in entries {
@@ -1024,7 +1027,7 @@ mod tests {
     /// A copy failure must not publish an empty or partially copied target.
     #[test]
     fn failed_link_free_copy_removes_its_target() {
-        let dir = std::env::temp_dir().join(format!("e-copy-failure-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-copy-failure-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let mut staged = std::fs::File::create(dir.join("stage")).unwrap();
         let target = dir.join("target");
@@ -1038,7 +1041,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn freshness_fails_closed_when_metadata_cannot_be_read() {
-        let dir = std::env::temp_dir().join(format!("e-stat-failure-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-stat-failure-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("file");
         std::fs::write(&path, "seen").unwrap();
@@ -1100,7 +1103,7 @@ mod tests {
     #[test]
     fn new_file_aliases_have_one_lock_key() {
         let root = std::env::temp_dir().join(format!(
-            "e-path-key-{}-{}",
+            "ulo-path-key-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));
@@ -1122,7 +1125,7 @@ mod tests {
     #[test]
     fn partial_staging_failure_preserves_the_original() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("e-atomic-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-atomic-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("file");
         std::fs::write(&path, "original").unwrap();
@@ -1140,7 +1143,7 @@ mod tests {
     #[test]
     fn staged_write_rejects_a_target_replaced_during_staging() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("e-write-replaced-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-write-replaced-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("file");
         let alias = dir.join("original");
@@ -1167,7 +1170,7 @@ mod tests {
     fn staged_write_preserves_links_created_during_staging() {
         use std::io::Write;
         use std::os::unix::fs::MetadataExt;
-        let dir = std::env::temp_dir().join(format!("e-write-links-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-write-links-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("file");
         let alias = dir.join("alias");
@@ -1188,17 +1191,17 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn staged_write_preserves_extended_attributes() {
-        let path = std::env::temp_dir().join(format!("e-write-xattr-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("ulo-write-xattr-{}", uuid::Uuid::new_v4()));
         std::fs::write(&path, "old").unwrap();
         assert!(std::process::Command::new("xattr")
-            .args(["-w", "user.e-test", "metadata"])
+            .args(["-w", "user.ulo-test", "metadata"])
             .arg(&path)
             .status()
             .unwrap()
             .success());
         super::staged_write(&path, b"new").unwrap();
         let result = std::process::Command::new("xattr")
-            .args(["-p", "user.e-test"])
+            .args(["-p", "user.ulo-test"])
             .arg(&path)
             .output()
             .unwrap();
@@ -1210,7 +1213,7 @@ mod tests {
     #[test]
     fn staged_creation_does_not_overwrite_a_concurrently_created_file() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("e-write-create-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-write-create-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("file");
         let result = super::staged_replace(&path, |file| {
@@ -1232,7 +1235,7 @@ mod tests {
     #[test]
     fn staged_write_updates_a_writable_file_in_a_read_only_directory() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("e-write-rodir-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-write-rodir-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("file");
         std::fs::write(&path, "old").unwrap();
@@ -1255,7 +1258,7 @@ mod tests {
     #[test]
     fn link_free_publish_creates_exclusively_from_the_staged_bytes() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("e-write-nolink-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-write-nolink-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let staged_path = dir.join("staged");
         let mut staged = std::fs::OpenOptions::new()
@@ -1281,7 +1284,7 @@ mod tests {
     #[test]
     fn staged_replacement_preserves_symlink_and_target_mode() {
         use std::os::unix::fs::{symlink, PermissionsExt};
-        let dir = std::env::temp_dir().join(format!("e-atomic-link-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ulo-atomic-link-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("target");
         let alias = dir.join("alias");

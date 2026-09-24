@@ -1,11 +1,11 @@
-//! The conformance suite: e's terminal rendering, pinned byte-for-byte so
+//! The conformance suite: ulo's terminal rendering, pinned byte-for-byte so
 //! the look cannot drift. Each assertion encodes a deliberate choice of the
 //! design (heading emphasis per level, divider tone, selection rules); an
 //! intentional rendering change updates the pinned literal and says why.
 
-use e::core::output::{compact_model_label, format_duration, format_tokens};
-use e::tui::render::heading_style;
-use e::tui::theme::Theme;
+use ulo::core::output::{compact_model_label, format_duration, format_tokens};
+use ulo::tui::render::heading_style;
+use ulo::tui::theme::Theme;
 
 #[test]
 fn heading_styles_match_the_level_table() {
@@ -57,7 +57,7 @@ fn model_labels_shorten_the_reference_way() {
 }
 
 fn read_theme(name: &str) -> (Theme, serde_json::Value) {
-    let json = e::tui::theme::bundled_json(name == "light");
+    let json = ulo::tui::theme::bundled_json(name == "light");
     (
         Theme::from_json(json).expect("parse"),
         serde_json::from_str(json).unwrap(),
@@ -110,7 +110,7 @@ fn the_palette_carries_the_reference_values() {
     }
 }
 
-use e::tui::markdown::{code_panel, render_markdown};
+use ulo::tui::markdown::{code_panel, render_markdown};
 
 fn dark() -> Theme {
     read_theme("dark").0
@@ -252,7 +252,7 @@ fn tables_render_the_reference_boxed_ladder() {
 
 #[test]
 fn wrapping_reopens_styles_and_avoids_orphans() {
-    use e::tui::markdown::wrap_styled;
+    use ulo::tui::markdown::wrap_styled;
     // A bold span crossing a seam closes at the row end and reopens on the
     // next row — a repainted row never leans on the row above it.
     let rows = wrap_styled("\x1b[1mbold words that wrap\x1b[22m tail", 12);
@@ -322,7 +322,7 @@ fn inline_spans_match_the_reference() {
     // Links: underline only, OSC 8 wrapped with a document-scoped id (so a
     // wrapped link stays one link), no printed URL.
     assert!(
-        out.contains("\x1b]8;id=e-1;https://x.dev\x1b\\\x1b[4mlink\x1b[24m\x1b]8;;\x1b\\"),
+        out.contains("\x1b]8;id=ulo-1;https://x.dev\x1b\\\x1b[4mlink\x1b[24m\x1b]8;;\x1b\\"),
         "{out:?}"
     );
     assert!(!out.contains("(https://x.dev)"));
@@ -337,21 +337,21 @@ fn image_inside_link_restores_the_outer_hyperlink() {
         120,
     )
     .join("\n");
-    let outer = "\x1b]8;id=e-1;https://outer.test\x1b\\";
+    let outer = "\x1b]8;id=ulo-1;https://outer.test\x1b\\";
     let image_close = format!("\x1b[24m\x1b]8;;\x1b\\{outer}\x1b[4m https://label.test");
 
     assert_eq!(out.matches(outer).count(), 2, "{out:?}");
     assert!(out.contains(&image_close), "{out:?}");
     assert!(
-        !out.contains("id=e-3"),
+        !out.contains("id=ulo-3"),
         "outer label was autolinked: {out:?}"
     );
 }
 
 #[test]
 fn tool_rows_carry_no_done_suffix() {
-    use e::tui::transcript::{Block, Kind};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind};
+    let theme = ulo::tui::theme::resolve("dark", false);
 
     // Success: the row is the row — the reference shape, no "(done)".
     let mut block = Block::new(Kind::Tool, "Ran");
@@ -377,8 +377,8 @@ fn tool_rows_carry_no_done_suffix() {
 
 #[test]
 fn finished_tool_runs_collapse_to_the_reference_group() {
-    use e::tui::transcript::{Block, Kind, Transcript};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind, Transcript};
+    let theme = ulo::tui::theme::resolve("dark", false);
 
     let mut transcript = Transcript::default();
     transcript.push(Block::new(Kind::User, "go"));
@@ -398,7 +398,7 @@ fn finished_tool_runs_collapse_to_the_reference_group() {
     transcript.push(ran);
     transcript.collapse_tools();
 
-    // The reference's own literal shape, e's verbs: header with tallies
+    // The reference's own literal shape, ulo's verbs: header with tallies
     // ("1 read · 1 edit · 1 command · 1 failed"), ├ children, └ review hint.
     assert_eq!(transcript.blocks.len(), 2);
     let group = &transcript.blocks[1];
@@ -411,8 +411,8 @@ fn finished_tool_runs_collapse_to_the_reference_group() {
             let mut chars = r.chars();
             while let Some(c) = chars.next() {
                 if c == '\x1b' {
-                    for e in chars.by_ref() {
-                        if e.is_ascii_alphabetic() {
+                    for ulo in chars.by_ref() {
+                        if ulo.is_ascii_alphabetic() {
                             break;
                         }
                     }
@@ -455,8 +455,8 @@ fn finished_tool_runs_collapse_to_the_reference_group() {
 
 #[test]
 fn command_rows_preview_their_output() {
-    use e::tui::transcript::{Block, Kind};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut block = Block::new(Kind::Tool, "Ran");
     block.detail = Some("printf lines".into());
     block.done = true;
@@ -480,8 +480,8 @@ fn command_rows_preview_their_output() {
 
 #[test]
 fn live_tool_group_replaces_running_state_and_streams_output() {
-    use e::tui::transcript::{Block, ToolChild};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, ToolChild};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut group = Block::tool_group(vec![
         ToolChild::pending(
             1,
@@ -504,12 +504,15 @@ fn live_tool_group_replaces_running_state_and_streams_output() {
     // A started call stays in its tree; pending siblings have no row yet.
     let running = group.lines_for_test(&theme, 80);
     assert_eq!(running.len(), 3);
-    assert_eq!(e::core::tools::strip_ansi(&running[2]), "└ ctrl+o to view");
+    assert_eq!(
+        ulo::core::tools::strip_ansi(&running[2]),
+        "└ ctrl+o to view"
+    );
     assert!(running[1].contains("Reading src/core/mod.rs"));
     assert!(!running.iter().any(|line| line.contains("cargo test")));
     let narrow = group.lines_for_test(&theme, 20);
     assert_eq!(narrow.len(), 4);
-    assert_eq!(e::core::tools::strip_ansi(&narrow[3]), "└ ctrl+o to view");
+    assert_eq!(ulo::core::tools::strip_ansi(&narrow[3]), "└ ctrl+o to view");
     assert!(narrow[1].contains("Reading"));
     assert!(narrow[2].contains("src/core/mod.rs"));
     assert!(narrow[2].contains('│'));
@@ -517,7 +520,7 @@ fn live_tool_group_replaces_running_state_and_streams_output() {
 
     group.finish_tool(
         1,
-        e::core::tools::ToolOutcome::Completed,
+        ulo::core::tools::ToolOutcome::Completed,
         "12 lines".into(),
         "content",
     );
@@ -531,17 +534,17 @@ fn live_tool_group_replaces_running_state_and_streams_output() {
     assert!(!streaming.iter().any(|line| line.contains("one")));
     assert!(streaming.iter().any(|line| line.contains("six")));
     assert_eq!(
-        e::core::tools::strip_ansi(&streaming[streaming.len() - 2]),
+        ulo::core::tools::strip_ansi(&streaming[streaming.len() - 2]),
         "│ 1 more row"
     );
     assert_eq!(
-        e::core::tools::strip_ansi(streaming.last().unwrap()),
+        ulo::core::tools::strip_ansi(streaming.last().unwrap()),
         "└ ctrl+o to view"
     );
 
     group.finish_tool(
         2,
-        e::core::tools::ToolOutcome::Failed,
+        ulo::core::tools::ToolOutcome::Failed,
         "exit 7".into(),
         "one\ntwo\nthree\nfour\nfive\nsix\n",
     );
@@ -556,8 +559,8 @@ fn live_tool_group_replaces_running_state_and_streams_output() {
 
 #[test]
 fn failed_turns_end_in_error_color() {
-    use e::tui::transcript::{Block, Kind};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let block = Block::new(Kind::Error, "error: boom");
     let rows = block.lines_for_test(&theme, 80);
     // The reference notice grammar: `● Error:` in the error tone, the body
@@ -574,8 +577,8 @@ fn failed_turns_end_in_error_color() {
 
 #[test]
 fn running_write_and_edit_rows_stay_lean() {
-    use e::tui::transcript::{Block, ToolChild};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, ToolChild};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut group = Block::tool_group(vec![ToolChild::pending(
         1,
         "write".into(),
@@ -590,13 +593,13 @@ fn running_write_and_edit_rows_stay_lean() {
     assert_eq!(rows.len(), 3);
     assert!(rows[1].contains("Writing src/lib.rs"));
     assert!(rows[1].contains('├'));
-    assert_eq!(e::core::tools::strip_ansi(&rows[2]), "└ ctrl+o to view");
+    assert_eq!(ulo::core::tools::strip_ansi(&rows[2]), "└ ctrl+o to view");
     assert!(!rows.iter().any(|line| line.contains('│')));
 
     // Edits are the same; the completion summary rides the row itself.
     group.finish_tool(
         1,
-        e::core::tools::ToolOutcome::Completed,
+        ulo::core::tools::ToolOutcome::Completed,
         "+2 -0".into(),
         "hello\nworld\n",
     );
@@ -610,8 +613,8 @@ fn running_write_and_edit_rows_stay_lean() {
 
 #[test]
 fn silent_batches_continue_one_tree_and_long_trees_keep_rows() {
-    use e::tui::transcript::{Block, Kind, ToolChild, Transcript};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind, ToolChild, Transcript};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let read = |id: u64, target: &str| {
         ToolChild::pending(
             id,
@@ -652,7 +655,7 @@ fn silent_batches_continue_one_tree_and_long_trees_keep_rows() {
     assert!(rows[1].contains("Reading c.rs"));
     assert!(rows[13].contains("Reading 11.rs"));
     assert_eq!(
-        e::core::tools::strip_ansi(rows.last().unwrap()),
+        ulo::core::tools::strip_ansi(rows.last().unwrap()),
         "└ ctrl+o to view"
     );
     assert!(!rows.iter().any(|line| line.contains("earlier tool calls")));
@@ -660,8 +663,8 @@ fn silent_batches_continue_one_tree_and_long_trees_keep_rows() {
 
 #[test]
 fn picker_band_shrinks_with_its_rows() {
-    use e::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let items: Vec<MenuItem> = (0..17)
         .map(|i| MenuItem::new(&format!("/cmd{i}"), "description", &format!("/cmd{i}")))
         .collect();
@@ -697,8 +700,8 @@ fn picker_band_shrinks_with_its_rows() {
         let mut chars = row.chars();
         while let Some(c) = chars.next() {
             if c == '\x1b' {
-                for e in chars.by_ref() {
-                    if e.is_ascii_alphabetic() {
+                for ulo in chars.by_ref() {
+                    if ulo.is_ascii_alphabetic() {
                         break;
                     }
                 }
@@ -723,8 +726,8 @@ fn picker_band_shrinks_with_its_rows() {
 
 #[test]
 fn command_rows_carry_a_right_aligned_category() {
-    use e::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::menu::{Menu, MenuItem, MenuKind, HINT_USE};
+    let theme = ulo::tui::theme::resolve("dark", false);
     // The `/` picker's category column: a built-in's functional group, a
     // prompt template's `Prompt` — each right-aligned in the row, and the
     // selected row's category brightens with it (copying the reference).
@@ -741,8 +744,8 @@ fn command_rows_carry_a_right_aligned_category() {
         let mut chars = row.chars();
         while let Some(c) = chars.next() {
             if c == '\x1b' {
-                for e in chars.by_ref() {
-                    if e.is_ascii_alphabetic() {
+                for ulo in chars.by_ref() {
+                    if ulo.is_ascii_alphabetic() {
                         break;
                     }
                 }
@@ -771,14 +774,14 @@ fn command_rows_carry_a_right_aligned_category() {
 
 #[test]
 fn trust_panel_offers_the_broader_ancestor_between_its_rows() {
-    use e::tui::trustpanel::{render, TrustStage};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::trustpanel::{render, TrustStage};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut stage = TrustStage {
         selected: 0,
         scroll: Some(0),
         parent: Some(std::path::PathBuf::from("/home/u/code")),
     };
-    let rows = render(&stage, &theme, 100, "/home/u/code/clones/e-1");
+    let rows = render(&stage, &theme, 100, "/home/u/code/clones/ulo-1");
     // Three choices: this directory, the ancestor, decline — descriptions
     // three spaces past the longest label, not flung across the frame.
     assert!(
@@ -811,7 +814,7 @@ fn trust_panel_offers_the_broader_ancestor_between_its_rows() {
 
 #[test]
 fn footnote_syntax_stays_inert() {
-    let theme = e::tui::theme::resolve("dark", false);
+    let theme = ulo::tui::theme::resolve("dark", false);
     // A retired reference behavior, deliberately not ported back: no
     // footnote grammar. The reference mark renders as the literal text the
     // author wrote, and a definition is an ordinary paragraph — nothing is
@@ -829,7 +832,7 @@ fn footnote_syntax_stays_inert() {
 
 #[test]
 fn file_rows_segment_paths_the_reference_way() {
-    use e::tui::menu::project_path;
+    use ulo::tui::menu::project_path;
     let plain = |width: usize, label: &str| -> String {
         project_path(label, width).iter().map(|(c, _)| c).collect()
     };
@@ -850,8 +853,8 @@ fn file_rows_segment_paths_the_reference_way() {
 
 #[test]
 fn picker_tabs_follow_the_reference_grammar() {
-    use e::tui::menu::{degrade_hint, Menu, MenuItem, MenuKind, HINT_MODELS, HINT_SKILLS};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::menu::{degrade_hint, Menu, MenuItem, MenuKind, HINT_MODELS, HINT_SKILLS};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut items = vec![
         MenuItem::new("alpha", "Global", "alpha"),
         MenuItem::new("beta", "Workspace", "beta"),
@@ -925,8 +928,8 @@ fn picker_tabs_follow_the_reference_grammar() {
 
 #[test]
 fn review_projection_shows_every_child_with_its_detail_link() {
-    use e::tui::transcript::{Block, ToolChild};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, ToolChild};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut group = Block::tool_group(vec![
         ToolChild::pending(
             1,
@@ -944,7 +947,12 @@ fn review_projection_shows_every_child_with_its_detail_link() {
         ),
     ]);
     group.start_tool(1);
-    group.finish_tool(1, e::core::tools::ToolOutcome::Completed, "done".into(), "");
+    group.finish_tool(
+        1,
+        ulo::core::tools::ToolOutcome::Completed,
+        "done".into(),
+        "",
+    );
     group.tool_children[0].detail = Some(41);
     group.start_tool(2);
 
@@ -952,7 +960,10 @@ fn review_projection_shows_every_child_with_its_detail_link() {
     let rows = group.review_lines(&theme, 80);
     assert_eq!(rows.len(), 3);
     assert!(rows[1].0.contains("Read a.rs"));
-    assert_eq!(rows[1].1, Some(e::tui::transcript::ToolDetail::Stored(41)));
+    assert_eq!(
+        rows[1].1,
+        Some(ulo::tui::transcript::ToolDetail::Stored(41))
+    );
     assert!(rows[2].0.contains("Reading b.rs"), "{:?}", rows[2].0);
     assert!(rows[2].0.contains('├'));
     assert_eq!(rows[2].1, None);
@@ -960,8 +971,8 @@ fn review_projection_shows_every_child_with_its_detail_link() {
 
 #[test]
 fn sealed_groups_report_missing_results_instead_of_hiding_them() {
-    use e::tui::transcript::{Block, ToolChild};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, ToolChild};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut group = Block::tool_group(vec![
         ToolChild::pending(
             1,
@@ -979,11 +990,16 @@ fn sealed_groups_report_missing_results_instead_of_hiding_them() {
         ),
     ]);
     group.start_tool(1);
-    group.finish_tool(1, e::core::tools::ToolOutcome::Completed, "done".into(), "");
+    group.finish_tool(
+        1,
+        ulo::core::tools::ToolOutcome::Completed,
+        "done".into(),
+        "",
+    );
     // Live: the second call is pending — no row, no unreported tally.
     let live = group.lines_for_test(&theme, 80);
     assert_eq!(live.len(), 3);
-    assert_eq!(e::core::tools::strip_ansi(&live[2]), "└ ctrl+o to view");
+    assert_eq!(ulo::core::tools::strip_ansi(&live[2]), "└ ctrl+o to view");
     assert!(!group.text.contains("unreported"));
 
     // Sealed (a restored session): the recorded call whose result never
@@ -994,13 +1010,13 @@ fn sealed_groups_report_missing_results_instead_of_hiding_them() {
     let sealed = group.lines_for_test(&theme, 80);
     assert_eq!(sealed.len(), 4);
     assert!(sealed[2].contains("Tool completion was not reported"));
-    assert_eq!(e::core::tools::strip_ansi(&sealed[3]), "└ ctrl+o to view");
+    assert_eq!(ulo::core::tools::strip_ansi(&sealed[3]), "└ ctrl+o to view");
 }
 
 #[test]
 fn interrupted_tools_wear_the_cancelled_glyph() {
-    use e::tui::transcript::{Block, Kind, Transcript};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::tui::transcript::{Block, Kind, Transcript};
+    let theme = ulo::tui::theme::resolve("dark", false);
     let mut block = Block::new(Kind::Tool, "Ran");
     block.detail = Some("sleep 100".into());
     block.cancelled = true;
@@ -1024,7 +1040,7 @@ fn interrupted_tools_wear_the_cancelled_glyph() {
 
 #[test]
 fn a_malformed_user_theme_falls_back_instead_of_panicking() {
-    use e::tui::theme::Theme;
+    use ulo::tui::theme::Theme;
     // Every shape that used to slice out of bounds, plus a non-ASCII value
     // whose byte length lies about its char count.
     for broken in [
@@ -1045,9 +1061,9 @@ fn a_malformed_user_theme_falls_back_instead_of_panicking() {
 
 #[test]
 fn sleep_events_speak_in_the_system_grammar() {
-    use e::core::output::format_elapsed;
-    use e::tui::transcript::{Block, Kind};
-    let theme = e::tui::theme::resolve("dark", false);
+    use ulo::core::output::format_elapsed;
+    use ulo::tui::transcript::{Block, Kind};
+    let theme = ulo::tui::theme::resolve("dark", false);
 
     // Woke inside the window: the record of the gap, then the turn goes on.
     let resumed = Block::new(
@@ -1102,8 +1118,8 @@ fn sleep_events_speak_in_the_system_grammar() {
 
 #[test]
 fn extension_show_blocks_paint_text_markdown_and_diff_through_the_theme() {
-    use e::core::extensions::{Format, Show};
-    use e::tui::transcript::Block;
+    use ulo::core::extensions::{Format, Show};
+    use ulo::tui::transcript::Block;
     let theme = dark();
 
     // Text: a bold customMessageLabel title row, body rows indented two
@@ -1142,8 +1158,8 @@ fn extension_show_blocks_paint_text_markdown_and_diff_through_the_theme() {
         format!("  {}", theme.fg("customMessageText", "f.txt"))
     );
     assert_eq!(rows[1], format!("  {}", theme.fg("dim", "    1   a")));
-    let removed = e::tui::theme::Theme::diff_marker_token(false);
-    let added = e::tui::theme::Theme::diff_marker_token(true);
+    let removed = ulo::tui::theme::Theme::diff_marker_token(false);
+    let added = ulo::tui::theme::Theme::diff_marker_token(true);
     assert_eq!(rows[2], format!("  {} b", theme.fg(removed, "    2 -")));
     assert_eq!(rows[3], format!("  {} B", theme.fg(added, "    2 +")));
 

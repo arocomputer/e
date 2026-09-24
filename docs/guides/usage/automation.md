@@ -1,25 +1,25 @@
 ---
 title: Automation
-description: Run e from scripts with e -p or the e rpc session server.
+description: Run ulo from scripts with ulo -p or the ulo rpc session server.
 order: 2
 ---
 
 # Automation
 
-e runs without a terminal in two ways. `e -p` runs one turn and exits.
-`e rpc` serves many sessions over stdin and stdout.
+ulo runs without a terminal in two ways. `ulo -p` runs one turn and exits.
+`ulo rpc` serves many sessions over stdin and stdout.
 
-## One turn with `e -p`
+## One turn with `ulo -p`
 
-Use `e -p` to run a single turn from a script or a pipe. It prints the reply
+Use `ulo -p` to run a single turn from a script or a pipe. It prints the reply
 as it streams.
 
 ```sh
-e -p "what does this repo do"
-git diff | e -p "review this diff"
+ulo -p "what does this repo do"
+git diff | ulo -p "review this diff"
 ```
 
-The prompt is the argument. When there is no argument, e reads the prompt
+The prompt is the argument. When there is no argument, ulo reads the prompt
 from piped stdin. Warnings and the error, if any, go to stderr.
 
 The exit status tells you how the turn ended:
@@ -36,8 +36,8 @@ applies: `--model`, `--effort`, `--no-tools`, `--image`, and
 
 ### JSON output
 
-`e -p --json` streams every session event as one JSON line. The last line is
-`{"type":"result", …}`, with the same fields as an `e rpc` response:
+`ulo -p --json` streams every session event as one JSON line. The last line is
+`{"type":"result", …}`, with the same fields as an `ulo rpc` response:
 
 ```json
 {"type":"turn_start"}
@@ -60,15 +60,15 @@ The event types are:
 New event types are additive. Your consumer should ignore types it does not
 know.
 
-## Many turns with `e rpc`
+## Many turns with `ulo rpc`
 
-`e rpc` is the headless session server. A client spawns it, keeps the pipes
+`ulo rpc` is the headless session server. A client spawns it, keeps the pipes
 open, and drives sessions from any language. This is what a Slack bot, a
 Linear integration, or a CI job builds on. See [Channels](channels.md).
 
 It speaks JSONL over stdin and stdout, the same framing extensions use.
 There is no port, no token, and no daemon. The process lives as long as its
-client, and shutting the client down shuts e down.
+client, and shutting the client down shuts ulo down.
 
 Every input line is one request:
 
@@ -102,14 +102,14 @@ Each event carries the `session` and the `request` it serves:
 {"type":"tool_batch","calls":[…],"session":"01a0…","request":"p1"}
 {"type":"usage","input_tokens":1200,"output_tokens":80,…,"session":"01a0…","request":"p1"}
 {"type":"turn_end","aborted":false,"session":"01a0…","request":"p1"}
-{"id":"p1","result":{"output":"…","final_output":"…","model":"…","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{…},"cost_usd":null,"tools":{"calls":1,"failures":0},"session":"01a0…","path":"/home/u/.e/sessions/…/….jsonl"}}
+{"id":"p1","result":{"output":"…","final_output":"…","model":"…","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{…},"cost_usd":null,"tools":{"calls":1,"failures":0},"session":"01a0…","path":"/home/u/.ulo/sessions/…/….jsonl"}}
 ```
 
-The events are the same ones `e -p --json` prints. A turn stays active
+The events are the same ones `ulo -p --json` prints. A turn stays active
 through automatic compaction and continuation, and the result describes the
 completed run.
 
-e refuses a second `session.prompt` while a turn runs. Steer or interrupt
+ulo refuses a second `session.prompt` while a turn runs. Steer or interrupt
 the running turn instead.
 
 ### Methods
@@ -126,7 +126,7 @@ session.steer      {session, text}               → {held:true}       a message
 session.interrupt  {session}                     → {}
 session.compact    {session, focus?}             → compacting, compacted, then a result
 session.set        {session, model?, effort?}    → {model, effort}  between turns; history carries over
-session.messages   {session}                     → {messages:[…]}   the conversation in e's persisted shape
+session.messages   {session}                     → {messages:[…]}   the conversation in ulo's persisted shape
 session.fork       {session}                     → {session, path}  a new session carrying the history
 session.export     {session, path?}              → {path, title}    the conversation as one HTML page
 session.close      {session}                     → {}
@@ -134,7 +134,7 @@ ask.reply          {ask, result?}                → {}               answer an 
 shutdown           {}                            → {}               then the process exits 0
 ```
 
-e checks the type of every optional parameter before it applies a default.
+ulo checks the type of every optional parameter before it applies a default.
 `tool_mode: false` and `save: "yes"` return errors. Omit a parameter, or send
 `null`, to use its default. Unknown fields are still accepted.
 
@@ -154,12 +154,12 @@ Each session can use a different `cwd`, for example one Slack channel per
 repository. Trust for that directory's `AGENTS.md` works as it does in the
 terminal. See [Instructions](../customize/instructions.md). A session
 refuses an untrusted directory, so a caller with no terminal records the
-decision first with `e trust <dir>`.
+decision first with `ulo trust <dir>`.
 
 `tools` and `tool_mode` can narrow what the process allows, such as
 `--no-tools`. They never widen it.
 
-With `save` set to `true`, e writes the session log as the terminal does.
+With `save` set to `true`, ulo writes the session log as the terminal does.
 The result's `path` names the log, and `session.list` finds it later.
 `--no-save` on the process wins over `save`.
 
@@ -168,7 +168,7 @@ happens depends on `save`:
 
 - With `save` true, the conversation continues in that file. The file is
   locked for this process while the session is open.
-- With `save` false, e loads the history without opening a writer, repairing
+- With `save` false, ulo loads the history without opening a writer, repairing
   the file, or taking a session lock.
 - `--no-save` also keeps resume read-only.
 
@@ -180,7 +180,7 @@ files, 20 MiB each, and 40 MiB total. The model must declare image input.
 #### `session.set` and `session.fork`
 
 `session.set` changes the model or effort for the following turns. It does
-not touch the user's saved settings. e validates the model and effort
+not touch the user's saved settings. ulo validates the model and effort
 together, so a rejected update changes neither.
 
 `session.fork` copies the branch into a session of its own. When the
@@ -210,10 +210,10 @@ owner from the most recent prompt. A client that relays questions to
 separate conversations must dedicate one RPC process to each, as the Slack
 channel does.
 
-Without `hello`, or with `ask` false, e refuses questions at once with
-`no ui`, as `e -p` does.
+Without `hello`, or with `ask` false, ulo refuses questions at once with
+`no ui`, as `ulo -p` does.
 
-After `hello`, e handles the other extension requests this way:
+After `hello`, ulo handles the other extension requests this way:
 
 - `ui.notify` and `ui.show` become `notice` lines.
 - The remaining `ui.*` and `session.*` requests are refused, because they
@@ -235,7 +235,7 @@ result object, with no events.
 {"id":"one","output":"...","final_output":"...","model":"provider/model","effort":"high","aborted":false,"error":null,"error_details":null,"warnings":[],"usage":{…},"cost_usd":null,"tools":{"calls":2,"failures":0},"session":null}
 ```
 
-`prompt` is required and must not be empty. With `save` true, e persists the
+`prompt` is required and must not be empty. With `save` true, ulo persists the
 turn and `session` is its JSONL path. Every other field works as it does for
 `session.create`.
 
@@ -248,7 +248,7 @@ Add `--no-tools` (`--nt`) for a no-tool policy. Add `--no-extensions`
 (`--ne`) when startup must be hermetic.
 
 Tool batches run in bounded waves. Set the wave size with `tool_concurrency`
-in `~/.e/settings.json`. The default is 8, and the range is 1 to 64. Calls
+in `~/.ulo/settings.json`. The default is 8, and the range is 1 to 64. Calls
 that name the same file run in provider order.
 
 A request line is at most 10 MiB. A malformed line produces one
@@ -263,7 +263,7 @@ and cache writes. Compaction requests are included.
 
 A terminal provider failure adds `error_details` beside the compatible
 `error` string. The details hold the stage, provider metadata, the retry
-decision, and bounded diagnostic text. With a saved session, e also appends
+decision, and bounded diagnostic text. With a saved session, ulo also appends
 the same details to a private `.errors.jsonl` sidecar. Nothing is uploaded.
 
 ### Shutdown
@@ -272,5 +272,5 @@ EOF on stdin, or `shutdown`, stops every session, shuts extensions down, and
 exits 0.
 
 On Unix, SIGTERM and SIGHUP first kill every built-in bash process group,
-including detached children of the shell. Then e shuts extensions down and
+including detached children of the shell. Then ulo shuts extensions down and
 exits with status 143 or 129.

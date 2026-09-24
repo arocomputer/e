@@ -1,21 +1,21 @@
 ---
 title: Settings
-description: Your preferences, and every file e keeps under ~/.e.
+description: Your preferences, and every file ulo keeps under ~/.ulo.
 order: 2
 ---
 
 # Settings
 
-`~/.e/settings.json` holds your preferences. `/settings` edits the same file
+`~/.ulo/settings.json` holds your preferences. `/settings` edits the same file
 from inside a session. After you edit the file by hand, run `/reload` to apply
-it without restarting e.
+it without restarting ulo.
 
 ## Settings
 
 | Key | Values | Default | What it changes |
 | --- | --- | --- | --- |
 | `theme` | `auto`, or a theme name | `auto` | The palette. `auto` follows the system. |
-| `tui_mode` | `inline`, `fullscreen` | `inline` | `inline` keeps the conversation in the terminal's scrollback. `fullscreen` pins the composer and e scrolls the conversation itself. |
+| `tui_mode` | `inline`, `fullscreen` | `inline` | `inline` keeps the conversation in the terminal's scrollback. `fullscreen` pins the composer and ulo scrolls the conversation itself. |
 | `show_thinking` | `on`, `off` | `off` | Expand reasoning, or retain it behind a one-line hint. Ctrl+O reveals thinking received during this session. |
 | `auto_update` | `on`, `off` | `on` | The launch-time update check. |
 | `effort` | the model's levels | `high` | The reasoning effort a session starts at. |
@@ -40,24 +40,24 @@ bottom, or submitting a prompt resumes following. Inline mode keeps native
 terminal history at the tail and temporarily uses the alternate screen while
 reading earlier rows. Fullscreen uses the alternate screen throughout.
 Hold your terminal's selection modifier, commonly Shift, for native mouse
-selection while e captures mouse events.
+selection while ulo captures mouse events.
 
 Existing `show_thinking: "off"` settings now collapse reasoning instead of
 discarding it from the live display. Changing it to `on` reveals thinking
 already received in the current session. Settings files need no migration.
 
-## Keys e maintains
+## Keys ulo maintains
 
 Two keys are records, not preferences. A command owns each one, so change them
 through that command:
 
 - `packages` lists the package sources you installed and where each came from.
-  `e install` and `e remove` write it. See [packages](../extend/packages.md).
+  `ulo install` and `ulo remove` write it. See [packages](../extend/packages.md).
 - `scoped_models` lists the models ctrl+p cycles. `/scoped-models` writes it.
 
 ## The home directory
 
-Everything e remembers lives under `~/.e`:
+Everything ulo remembers lives under `~/.ulo`:
 
 | Path | What it holds |
 | --- | --- |
@@ -67,7 +67,7 @@ Everything e remembers lives under `~/.e`:
 | `models-dev.json` | Cached model facts read from models.dev. |
 | `sessions/` | One JSONL file per conversation. See [sessions](../usage/sessions.md). |
 | `history.jsonl` | The prompts Up recalls on an empty composer. |
-| `extensions/` | Programs e starts at launch. See [extensions](../extend/extensions.md). |
+| `extensions/` | Programs ulo starts at launch. See [extensions](../extend/extensions.md). |
 | `skills/` | `SKILL.md` folders. See [skills](skills.md). |
 | `prompts/` | `/name` templates. See [prompt templates](prompt-templates.md). |
 | `themes/` | Palettes. See [themes](themes.md). |
@@ -77,9 +77,9 @@ Everything e remembers lives under `~/.e`:
 | `AGENTS.md` | Instructions that apply in every workspace. |
 | `trust.json` | Which directories you trusted. |
 
-### Move the home with `E_HOME`
+### Move the home with `ULO_HOME`
 
-`E_HOME` moves the whole directory. This keeps a PR preview and a local
-`./x dev` build out of each other's way. Production uses `~/.e`, a PR preview
-uses `~/.e-pr`, and a local build uses `~/.e-dev`. See
+`ULO_HOME` moves the whole directory. This keeps a PR preview and a local
+`./x dev` build out of each other's way. Production uses `~/.ulo`, a PR preview
+uses `~/.ulo-pr`, and a local build uses `~/.ulo-dev`. See
 [install](../start/install.md).

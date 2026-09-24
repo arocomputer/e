@@ -6,13 +6,13 @@ order: 1
 
 # Extensions
 
-An extension is a program that adds tools, commands, hooks, and UI to e. It
-is an executable in `~/.e/extensions/`, or in the `extensions/`
+An extension is a program that adds tools, commands, hooks, and UI to ulo. It
+is an executable in `~/.ulo/extensions/`, or in the `extensions/`
 directory of an installed [package](packages.md). It can be a top-level file
 such as `foo.mjs`. It can also be the entry point of a directory such as
 `foo/` that holds helper files too.
 
-e picks a directory's entry point by checking, in order:
+ulo picks a directory's entry point by checking, in order:
 
 1. `index.*`
 2. a file matching the directory name
@@ -20,7 +20,7 @@ e picks a directory's entry point by checking, in order:
 
 When two files match the same rule, path order breaks the tie.
 
-You can write an extension in any language. e starts each process at launch
+You can write an extension in any language. ulo starts each process at launch
 and keeps it running for the session. The two sides exchange one JSON object
 per line over stdin and stdout.
 
@@ -45,8 +45,8 @@ per line over stdin and stdout.
 - Handle startup arguments and request a relaunch of the same binary in
   another directory.
 
-Everything an extension shows is data, and e paints it through the user's
-theme. An extension never emits terminal bytes and never runs inside e. e
+Everything an extension shows is data, and ulo paints it through the user's
+theme. An extension never emits terminal bytes and never runs inside ulo. ulo
 reports a crashed or hostile extension as a notice, and the extension never
 gets control of the terminal.
 
@@ -55,12 +55,12 @@ gets control of the terminal.
 The protocol is version 1, extended by capabilities. Messages flow in both
 directions, one JSON object per line.
 
-### Requests from e
+### Requests from ulo
 
 Each request carries an `id`. Your extension answers with that `id`.
 
 ```
-{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts","pane","widget","render"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
+{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts","pane","widget","render"],"ui":true,"ulo_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
 {"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--project","../app"],"flags":{"project":"../app"}}}
 {"id":3,"method":"tool_call","params":{"name":"greet","arguments":{...}}}
 {"id":4,"method":"command","params":{"name":"ping","args":"rest of the line"}}
@@ -73,7 +73,7 @@ Each request carries an `id`. Your extension answers with that `id`.
 {"id":10,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 ```
 
-### Notifications from e
+### Notifications from ulo
 
 Notifications have no `id` and take no reply.
 
@@ -84,7 +84,7 @@ Notifications have no `id` and take no reply.
 {"method":"ui.panel_closed","params":{}}             the user closed it
 {"method":"pane.select","params":{"pane":"diff","section":"files","id":"a.rs"}}   the side pane's cursor moved
 {"method":"pane.activate","params":{"pane":"diff","section":"files","id":"a.rs"}} Enter on a pane item
-{"method":"pane.key","params":{"pane":"diff","key":"x"}}                          a pane chord e did not use
+{"method":"pane.key","params":{"pane":"diff","key":"x"}}                          a pane chord ulo did not use
 {"method":"pane.closed","params":{"pane":"diff"}}                                 the user closed the pane
 {"method":"shutdown"}
 ```
@@ -96,30 +96,30 @@ Notifications have no `id` and take no reply.
 {"id":2,"error":"what went wrong"}             or fail it
 {"method":"notify","params":{"message":"hi"}}  a transcript notice, any time
 {"method":"tool.update","params":{"id":3,"stream":"stdout","chunk":"working\n"}}
-{"id":"q1","method":"ui.select","params":{…}}  ask e something (see below)
+{"id":"q1","method":"ui.select","params":{…}}  ask ulo something (see below)
 ```
 
 A request from your extension carries its own `id`, which can be any JSON
-value. e answers with the same id: `{"id":"q1","result":{…}}` or
+value. ulo answers with the same id: `{"id":"q1","result":{…}}` or
 `{"id":"q1","error":"…"}`. The two id spaces never meet, because direction
 tells them apart.
 
 ### Capabilities and `ui`
 
-In the `initialize` params, `capabilities` lists the families this e speaks.
+In the `initialize` params, `capabilities` lists the families this ulo speaks.
 `ui` says whether someone can answer `ui.*` requests:
 
-- Under `e -p`, `ui` is false. e answers every `ui.*` request with
+- Under `ulo -p`, `ui` is false. ulo answers every `ui.*` request with
   `{"error":"no ui"}` at once.
-- Under `e rpc`, `ui` is true, and the client may relay questions to a
-  person. See [automation](../usage/automation.md). e still refuses the
+- Under `ulo rpc`, `ui` is true, and the client may relay questions to a
+  person. See [automation](../usage/automation.md). ulo still refuses the
   display-only requests there.
 
 Handle the error in both cases.
 
 ## Results by method
 
-Each request from e expects a result of a specific shape.
+Each request from ulo expects a result of a specific shape.
 
 ### `initialize`
 
@@ -151,7 +151,7 @@ optional. `parameters` is a JSON Schema object.
 ```
 
 The `initialize` params carry your configuration in `extensions_config`. It
-holds every entry under `"extensions"` in `~/.e/settings.json`, namespaced by
+holds every entry under `"extensions"` in `~/.ulo/settings.json`, namespaced by
 extension name. Your extension gets its own config without claiming a
 top-level settings key.
 
@@ -160,7 +160,7 @@ row reads `Greeting bob` while running and `Greeted bob` after.
 
 | Field | Meaning |
 | --- | --- |
-| `category` | The noun used when e tallies a batch of tool calls. |
+| `category` | The noun used when ulo tallies a batch of tool calls. |
 | `running`, `completed` | Verbs, shown as given. |
 | `target` | The argument whose value the row shows. |
 
@@ -168,12 +168,12 @@ Without a label, the row reads `Running greet` and then `Ran greet`.
 
 ### Flags
 
-Declare `flags` so they are discoverable and so e can parse them for you. A
-flag's `type` is `"boolean"`, the default, or `"string"`. e recognizes both
+Declare `flags` so they are discoverable and so ulo can parse them for you. A
+flag's `type` is `"boolean"`, the default, or `"string"`. ulo recognizes both
 types in startup argv:
 
 - A boolean matches `--name`, `--name=true`, `--name=false`, and `--no-name`.
-- A string matches `--name=value` or `--name value`. e never consumes a
+- A string matches `--name=value` or `--name value`. ulo never consumes a
   following `-` token as the value.
 - A bare string flag at the end of argv parses as `null`. The flag is
   present but has no value.
@@ -181,14 +181,14 @@ types in startup argv:
 - `--` stops parsing.
 
 A name that isn't a clean `--name` token, such as `"-x, --example"`, appears
-in `e --help`, but e never parses it. Those flags still need the startup
+in `ulo --help`, but ulo never parses it. Those flags still need the startup
 hook's raw argv.
 
-After every startup hook has seen the raw argv, e removes typed flags and
-their separated string values. Only then does e parse its own subcommands and
+After every startup hook has seen the raw argv, ulo removes typed flags and
+their separated string values. Only then does ulo parse its own subcommands and
 build the initial prompt.
 
-Right after launch, e sends the parsed flags as a `flags` notification to
+Right after launch, ulo sends the parsed flags as a `flags` notification to
 every extension that declares typed flags. No reply is needed. A tool-only
 extension can read them from any handler, not just during startup. The raw
 protocol message is `{"method":"flags","params":{"flags":{…}}}`.
@@ -198,7 +198,7 @@ absent flag stays absent, so a handler can tell "passed false" from "not
 passed".
 
 A declaration can set an optional `"default"`, the value to use when the flag
-is absent. e retains the default but never adds it to the notification. Your
+is absent. ulo retains the default but never adds it to the notification. Your
 extension applies it itself. The scaffold helper does this for you:
 
 - `flag(name)` returns the passed value, else the declared default, else
@@ -222,7 +222,7 @@ Your answer to `tool_call` is the tool's result:
 | `display` | What the ctrl+o viewer shows instead of `content`. A built-in edit does the same with its full diff. |
 | `format` | `text`, the default, `markdown`, or `diff`. |
 
-With `diff`, e takes a unified diff, the output of `git diff`, and converts
+With `diff`, ulo takes a unified diff, the output of `git diff`, and converts
 it to the viewer's row grammar with real line numbers and coloured markers.
 
 Before the final response, your extension may emit any number of
@@ -230,7 +230,7 @@ Before the final response, your extension may emit any number of
 
 - `id` must be the active tool-call request id.
 - `stream` is `stdout` or `stderr`.
-- e displays `chunk` through the same ordered tool-output stream as built-in
+- ulo displays `chunk` through the same ordered tool-output stream as built-in
   commands.
 
 Version-1 extensions remain compatible. They simply never emit an update. The
@@ -267,7 +267,7 @@ three seconds. A slow or empty answer shows nothing.
 
 ### `shortcut`
 
-Answer a shortcut with the same result shape as a command. e sends it to the
+Answer a shortcut with the same result shape as a command. ulo sends it to the
 extension that declared the chord. See [Shortcuts](#shortcuts).
 
 ### Pane notifications
@@ -277,22 +277,22 @@ notifications from the side pane. See [The side pane](#the-side-pane).
 
 ### `hook.before_turn`
 
-Use this hook to add context to a turn. e runs it once per turn, before the
+Use this hook to add context to a turn. ulo runs it once per turn, before the
 first request, with the prompt that started the turn. Answer:
 
 ```json
 {"system_suffix":"a paragraph appended to the system prompt for this turn","message":{"content":"…","internal":true}}
 ```
 
-e appends `system_suffix` to the system prompt and never replaces the prompt.
+ulo appends `system_suffix` to the system prompt and never replaces the prompt.
 The system prompt is the user's file-backed contract with the model.
 
-e adds `message` to the conversation before the request. `internal` is the
+ulo adds `message` to the conversation before the request. `internal` is the
 default and keeps the message out of the transcript.
 
 ### `hook.tool_result`
 
-Use this hook to redact or trim tool output. e runs it after every tool,
+Use this hook to redact or trim tool output. ulo runs it after every tool,
 before the result is shown, stored, or sent. Answer
 `{"content":"what the model should read instead"}`, or `{}` to keep the
 result.
@@ -303,7 +303,7 @@ let through.
 
 ### `hook.render`
 
-Use this hook to supply the content for an entry that e renders. Declare
+Use this hook to supply the content for an entry that ulo renders. Declare
 `renders` in the manifest to be asked:
 
 - `"tool:bash"`, or `"tool:*"`, asks for a tool's finished result. Your body
@@ -313,7 +313,7 @@ Use this hook to supply the content for an entry that e renders. Declare
 
 The params are `{kind: "tool"|"assistant", name, content}`. Answer
 `{"body":"…","format":"text"|"markdown"|"diff"}`, or `{}` to leave the entry
-as e paints it.
+as ulo paints it.
 
 Extensions see each other's answers in declaration order. A slow answer
 changes nothing.
@@ -330,7 +330,7 @@ reason as an error result. Answer `{"block":false}` to allow the call.
 
 ### `hook.input`
 
-This hook decides what happens to a submitted line. e runs input hooks in
+This hook decides what happens to a submitted line. ulo runs input hooks in
 order, and the first extension to consume or replace the line wins:
 
 ```json
@@ -344,7 +344,7 @@ line through and posts the notice. The transcript shows notices from every
 extension that allowed the line, alongside the notice from whichever
 extension consumed or replaced it.
 
-e handles a pasted API key before the hook, so the key never reaches it.
+ulo handles a pasted API key before the hook, so the key never reaches it.
 
 ### `hook.startup`
 
@@ -358,19 +358,19 @@ flag declaration. Answer:
  "relaunch":{"cwd":"/path/to/project","env":{"BOOTSTRAPPED":"1"}}}
 ```
 
-Startup hooks run in extension filename order, before e parses subcommands,
+Startup hooks run in extension filename order, before ulo parses subcommands,
 `-c`, `-r`, or the initial prompt.
 
 - `argv` feeds the next hook.
 - `env` changes the current process.
-- `relaunch` replaces the current process with the same e binary in `cwd`.
+- `relaunch` replaces the current process with the same ulo binary in `cwd`.
   Extensions cannot choose another executable. The first relaunch ends the
   chain.
 
 ## Events
 
 Events tell your extension what happens in a session. List the events you
-want in the manifest's `events`. e sends only those, as notifications:
+want in the manifest's `events`. ulo sends only those, as notifications:
 `{"method":"event","params":{"name":"…","extra":{…}}}`.
 
 ```
@@ -392,19 +392,19 @@ A manifest without an `events` field is a version-1 extension and receives
 There are no per-token events. A pipe per delta is a cost with no consumer.
 `tool_end` carries the finished text.
 
-## Requests to e
+## Requests to ulo
 
-Your extension can ask e to show things, ask the user questions, and control
+Your extension can ask ulo to show things, ask the user questions, and control
 the session. Send `{"id":<yours>,"method":"…","params":{…}}` and read the
 answer with the same id.
 
 Every request is bounded:
 
-- An extension can have at most 32 unanswered requests. e answers any more
+- An extension can have at most 32 unanswered requests. ulo answers any more
   with an error.
 - One modal shows at a time across all extensions.
-- e sanitizes text before painting it.
-- e clips oversized content rather than refusing it. A long diff still
+- ulo sanitizes text before painting it.
+- ulo clips oversized content rather than refusing it. A long diff still
   shows, it just ends early.
 
 ### UI requests
@@ -435,19 +435,19 @@ and the text never reaches input hooks or the model. `editor` is the same
 field for several lines. Shift+enter breaks a line, ctrl+g hands the draft to
 the user's external editor, and Enter answers.
 
-**Panels.** `panel` lines are strings, or arrays of `{text, token}` spans. e
+**Panels.** `panel` lines are strings, or arrays of `{text, token}` spans. ulo
 paints each span with the theme's colour for `token`, such as `dim`,
 `accent`, `success`, `warning`, `error`, or `userMessageText`. Unknown tokens
 paint plain. A panel holds at most 200 lines.
 
 Only one panel shows at a time. Another extension's panel replaces yours, and
-e tells you with `ui.panel_closed`.
+ulo tells you with `ui.panel_closed`.
 
 An `interactive` panel receives the keyboard. Every key arrives as
 `{"method":"ui.key","params":{"key":"down"}}`, including chords like `ctrl+x`
 and `shift+tab`. `escape` never arrives, because Esc closes the panel. ctrl+c
-stays e's. To redraw, send `ui.panel` again. Your extension handles state and
-key events, and e renders the frame.
+stays ulo's. To redraw, send `ui.panel` again. Your extension handles state and
+key events, and ulo renders the frame.
 
 **Activity.** `activity` is the row that reads `Thinking (3s) (↑1k ↓20)`
 during a turn. Your text joins it through the `{activity}` token of the
@@ -465,7 +465,7 @@ template joins them with `{status}`, or picks one extension's with
 ### The side pane
 
 `ui.pane` opens a pane beside the conversation for a diff review, a plan, a
-test runner, or a log. You send content. e owns the split, focus, scrolling,
+test runner, or a log. You send content. ulo owns the split, focus, scrolling,
 the cursor, selection, and the mouse, so every pane navigates alike and none
 can paint outside its column.
 
@@ -482,13 +482,13 @@ A pane holds these section kinds:
 | Kind | Content |
 | --- | --- |
 | `list` | Selectable rows: `{id, label, detail?, token?}`, or plain strings. |
-| `diff` | A unified diff, painted in e's row grammar. |
+| `diff` | A unified diff, painted in ulo's row grammar. |
 | `text` | Plain text. |
 | `markdown` | Markdown. |
 | `rows` | The panel's span lines. |
 
 Lists show eight rows and scroll. The other kinds share the remaining height.
-The whole pane holds 256 KiB. Past that, e drops the rest and the last row
+The whole pane holds 256 KiB. Past that, ulo drops the rest and the last row
 says so.
 
 To refresh, send `ui.pane` again with the same `id`. The user keeps their
@@ -499,11 +499,11 @@ What the user does comes back as notifications:
 ```
 {"method":"pane.select",  "params":{"pane":"diff","section":"files","id":"src/main.rs"}}  the cursor moved to an item
 {"method":"pane.activate","params":{"pane":"diff","section":"files","id":"src/main.rs"}}  Enter on an item
-{"method":"pane.key",     "params":{"pane":"diff","key":"x"}}                               a chord e did not use
+{"method":"pane.key",     "params":{"pane":"diff","key":"x"}}                               a chord ulo did not use
 {"method":"pane.closed",  "params":{"pane":"diff"}}                                         the user closed it
 ```
 
-e uses these keys while the pane has focus:
+ulo uses these keys while the pane has focus:
 
 - `↑`/`↓` and `j`/`k`, `PageUp`, `PageDown`, `Home`, and `End` navigate.
 - `←`/`→` scroll a wide diff.
@@ -517,7 +517,7 @@ The layout's focus chord, `ctrl+t` by default, moves between the conversation
 and the pane. On a terminal too narrow to split, the focused one fills the
 screen, and the status row says how to reach the other.
 
-`side` is a proposal. The user's `~/.e/layout.json` decides where every pane
+`side` is a proposal. The user's `~/.ulo/layout.json` decides where every pane
 goes and how wide it is.
 
 ### Session requests
@@ -543,10 +543,10 @@ session.compact   {focus?}                    → {}
 
 `session.tools` is how a plan mode works. Send `["read","grep"]`, and the
 model can neither see nor call anything else until you send `null`. It covers
-built-in and extension tools alike. e enforces it at execution, not only in
+built-in and extension tools alike. ulo enforces it at execution, not only in
 what the request advertises. It resets on `/new` and resume.
 
-### What e does not offer
+### What ulo does not offer
 
 These are left out on purpose:
 
@@ -560,14 +560,14 @@ These are left out on purpose:
 ## Shortcuts
 
 A shortcut binds a key chord to your extension. Declare `shortcuts` in the
-manifest. When the user presses a chord, e sends
+manifest. When the user presses a chord, ulo sends
 `{"id":…,"method":"shortcut","params":{"key":"ctrl+alt+g"}}`, and you answer
 it like a command.
 
-A chord needs `ctrl` or `alt`. e refuses bare keys and shift-only chords at
+A chord needs `ctrl` or `alt`. ulo refuses bare keys and shift-only chords at
 the manifest, because those are how text gets typed.
 
-e keeps these chords for itself: `ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`,
+ulo keeps these chords for itself: `ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`,
 `ctrl+j`, `ctrl+l`, `ctrl+m`, `ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+s`,
 `ctrl+v`, `ctrl+shift+v`, `ctrl+x`, and `ctrl+z`.
 
@@ -576,12 +576,12 @@ A chord the composer binds, such as `ctrl+k`, stays the composer's. See
 would otherwise do nothing. A user frees a chord for your extension by
 unbinding it in `keybindings.json`.
 
-When two extensions declare the same chord, the first declaration wins and e
+When two extensions declare the same chord, the first declaration wins and ulo
 shows a notice.
 
 ## Timeouts and failures
 
-- The initialize answer must arrive within 5 s, or e skips the extension.
+- The initialize answer must arrive within 5 s, or ulo skips the extension.
 - Runtime hooks have 5 s and **fail open**. A slow or broken tool gate never
   blocks the agent. A silent `before_turn` adds nothing, and a silent
   `tool_result` changes nothing. Return `{"block":true}` to deny a tool call.
@@ -592,10 +592,10 @@ shows a notice.
   answers them. A reload, a session switch, or shutdown answers every open
   request with an error, so you are never left waiting.
 - Tool calls have 300 s. Commands have 60 s.
-- On quit, e sends `shutdown`, waits a beat, then kills the process.
-- e reports a crashed or missing extension in the transcript and skips it. A
-  broken extension is never a reason e can't run.
-- If an extension exits right after a valid initialize response, e still
+- On quit, ulo sends `shutdown`, waits a beat, then kills the process.
+- ulo reports a crashed or missing extension in the transcript and skips it. A
+  broken extension is never a reason ulo can't run.
+- If an extension exits right after a valid initialize response, ulo still
   emits one notice. The notice includes which runtime hooks now fail open.
 
 ## Examples
@@ -604,11 +604,11 @@ These examples live in `docs/guides/extend/examples/`:
 
 ```
 docs/guides/extend/examples/
-  subagent.mjs   bounded delegated e turns as a tool, over e rpc (self-contained)
+  subagent.mjs   bounded delegated ulo turns as a tool, over ulo rpc (self-contained)
   hello.mjs      every surface at once, on the optional scaffold helper
   gate.mjs       the tool_call hook as a fail-open guard
   protected.mjs  the tool_call hook denying credential-shaped paths
-  project.mjs    a startup-hook directory router (e --project <path>)
+  project.mjs    a startup-hook directory router (ulo --project <path>)
   mcp.mjs        one MCP stdio server's tools as extension tools
   scaffold.mjs   an optional wire-protocol helper (not required, never installed)
   plan.mjs       a plan mode on the new surface: session.tools, a shortcut, a pane,
@@ -617,13 +617,13 @@ docs/guides/extend/examples/
 
 An extension speaks the protocol directly. `subagent.mjs` and the shell
 `ping.sh` below are single self-contained files. Each reads a JSON request
-per line and writes a response per line. e installs nothing beside an
+per line and writes a response per line. ulo installs nothing beside an
 extension.
 
 - **`hello.mjs`.** Every surface at once, on the optional scaffold: a
   command, a tool, config, an input hook, and session naming, in about 50
   lines of handlers.
-- **`gate.mjs`.** The `tool_call` hook as a guard, in e's fail-open shape.
+- **`gate.mjs`.** The `tool_call` hook as a guard, in ulo's fail-open shape.
   Only an explicit block stops a call. A slow or crashed extension never
   blocks the agent.
 - **`protected.mjs`.** The `tool_call` hook denies any call to `read`,
@@ -632,18 +632,18 @@ extension.
   tool's `path` argument and bash commands that mention one. `gate.mjs` denies
   destructive commands. This one is about what gets read into context or
   written to disk, not just what bash runs. See
-  [sandboxing](../usage/sandboxing.md) for e's trust model and where a hook
+  [sandboxing](../usage/sandboxing.md) for ulo's trust model and where a hook
   like this fits.
 - **`project.mjs`.** This startup-hook launcher uses the scaffold.
-  `e --project <path>` relaunches e in an existing project directory.
-- **`subagent.mjs`.** Its `delegate` tool drives a single-shot `e rpc
+  `ulo --project <path>` relaunches ulo in an existing project directory.
+- **`subagent.mjs`.** Its `delegate` tool drives a single-shot `ulo rpc
   --no-extensions` child with one JSON request line in and one result out. The
   delegated turn is extension-free, so it cannot delegate again. It defines
   `Explore`, `Plan`, and `Build` in the extension and sends each agent's
   `tools` and optional `model` in the RPC request. Core stays generic and does
   not have an agent type.
 - **`mcp.mjs`.** A dependency-free bridge from one configured MCP stdio
-  server's `tools/list` and `tools/call` surface into e extension tools. It
+  server's `tools/list` and `tools/call` surface into ulo extension tools. It
   forwards MCP progress through the additive `tool.update` capability.
 
 ### The scaffold helper
@@ -654,20 +654,20 @@ stdout framing and the id routing, and it provides a
 read loop.
 
 To use it, drop it into your extension's own bundle directory and
-`import { connect } from "./scaffold.mjs"`. e never installs it for you, and
+`import { connect } from "./scaffold.mjs"`. ulo never installs it for you, and
 you don't need to think about it otherwise.
 
 ### Use or share an example
 
-To use an example, put it in `~/.e/extensions/`, make it executable, and
-restart e. It can be a top-level executable file, or a subdirectory bundling
+To use an example, put it in `~/.ulo/extensions/`, make it executable, and
+restart ulo. It can be a top-level executable file, or a subdirectory bundling
 it and its helpers.
 
 An example that uses the scaffold helper needs `scaffold.mjs` beside it in its
 bundle. The self-contained ones, `subagent.mjs` and `ping.sh`, need nothing.
 
 To share an extension, put it in a repository's `extensions/` directory.
-Others install it with `e install git:<host>/<user>/<repo>`. See
+Others install it with `ulo install git:<host>/<user>/<repo>`. See
 [packages.md](packages.md).
 
 ## Compiled extensions
@@ -677,16 +677,16 @@ protocol qualifies, including a compiled binary.
 
 A compiled extension lives in its own repository, like every package. It
 reaches users as a release package with
-`e install release:<owner>/<repo>/<name>`. See [packages.md](packages.md). The
-e repository ships no extensions of its own.
+`ulo install release:<owner>/<repo>/<name>`. See [packages.md](packages.md). The
+ulo repository ships no extensions of its own.
 
-What an extension sends still crosses the line as data. e sanitizes notices
+What an extension sends still crosses the line as data. ulo sanitizes notices
 before painting them. An extension that wants colour returns a `show` with a
 `format` rather than styled bytes.
 
 ## A complete extension in shell
 
-Save this as `~/.e/extensions/ping.sh` and make it executable with
+Save this as `~/.ulo/extensions/ping.sh` and make it executable with
 `chmod +x`:
 
 ```sh
@@ -703,13 +703,13 @@ while IFS= read -r line; do
 done
 ```
 
-Restart e, type `/ping`, and you get `pong`.
+Restart ulo, type `/ping`, and you get `pong`.
 
 ## MCP tools
 
-`mcp.mjs` exposes one MCP stdio server's tools as e tools. Put it in
-`~/.e/extensions/` and make it executable. Then configure the stdio server
-that e should own in `~/.e/settings.json`:
+`mcp.mjs` exposes one MCP stdio server's tools as ulo tools. Put it in
+`~/.ulo/extensions/` and make it executable. Then configure the stdio server
+that ulo should own in `~/.ulo/settings.json`:
 
 ```json
 {
@@ -724,12 +724,12 @@ that e should own in `~/.e/settings.json`:
 
 > [!TIP]
 > `npx -y` downloads the server on first use. That routinely takes longer
-> than the 5 s initialize budget, so e skips the bridge with
+> than the 5 s initialize budget, so ulo skips the bridge with
 > `initialize timed out` until the package is cached. Run the `npx` line once
 > by hand first, or point `command` at an installed binary.
 
 The bridge intentionally maps only MCP tools. Prompts, resources, sampling,
-elicitation, and authorization stay out of e's core and out of this example.
+elicitation, and authorization stay out of ulo's core and out of this example.
 
 The bridge uses:
 
@@ -747,16 +747,16 @@ specifications.
 ## Delegated turns
 
 `subagent.mjs` gives the model a `delegate` tool that runs a task in a child
-e. Put it in `~/.e/extensions/` and restart. It is a single self-contained
+ulo. Put it in `~/.ulo/extensions/` and restart. It is a single self-contained
 file with nothing beside it.
 
-Each delegation is a single-shot `e rpc` child in the same working directory.
+Each delegation is a single-shot `ulo rpc` child in the same working directory.
 The extension writes one JSON request line, reads one result object, and
 closes stdin. The child loads no extensions, so it cannot delegate again. Set
-`E_BIN` when the child should use an e binary other than the one on `PATH`.
+`ULO_BIN` when the child should use an ulo binary other than the one on `PATH`.
 
 `timeout_seconds` defaults to 240 seconds. At the deadline the extension
-sends SIGTERM, and `e rpc` kills every active built-in bash process group
+sends SIGTERM, and `ulo rpc` kills every active built-in bash process group
 before it exits. A later SIGKILL remains as a watchdog if graceful shutdown
 stalls.
 
@@ -768,7 +768,7 @@ the final answer omits a useful tool call or result.
 
 A delegation can name an `agent` defined in `subagent.mjs`. Each agent
 chooses a built-in tool allowlist and an optional model. The child receives
-the task as its user message. It uses e's normal system prompt with a generic
+the task as its user message. It uses ulo's normal system prompt with a generic
 tool-policy suffix. Core does not have an agent type.
 
 The extension defines these agents:
@@ -779,7 +779,7 @@ The extension defines these agents:
 
 Each agent object has `name`, `description`, optional `tools`, and optional
 `model`. The shipped `"{provider/model}"` values are placeholders. Until you
-replace one, that child uses the model `e rpc` normally resolves from
+replace one, that child uses the model `ulo rpc` normally resolves from
 configuration. A call can also pass `model` to override the selected agent.
 
 The core validates `tools` as built-in names and advertises only those
@@ -790,4 +790,4 @@ schemas. It enforces the same list when a provider emits a tool call.
 A startup extension sees raw argv and can relaunch the same binary in a new
 cwd. That lets it implement project-directory routing with `--project <path>`,
 project profiles, or scratch-directory routing. Any language that speaks the
-line protocol can add these behaviors without hardcoding them in e.
+line protocol can add these behaviors without hardcoding them in ulo.

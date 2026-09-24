@@ -12,7 +12,7 @@ fn unversioned_configuration_fixtures_remain_json_objects() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/config")
             .join(name);
-        let object = e::core::config::store::read_object(&path)
+        let object = ulo::core::config::store::read_object(&path)
             .unwrap_or_else(|error| panic!("compatibility fixture {name} failed: {error}"));
         assert!(!object.is_empty(), "compatibility fixture {name} was empty");
         assert!(!object.contains_key("format_version"));
@@ -24,14 +24,14 @@ fn settings_write_preserves_unknown_keys() {
     let _g = env_lock();
     let fixture = Home::new("settings");
     let h = fixture.dir.clone();
-    // A user hand-added a key e knows nothing about.
+    // A user hand-added a key ulo knows nothing about.
     std::fs::write(
         h.join("settings.json"),
         r#"{"theme":"dark","my_custom":{"deep":42}}"#,
     )
     .unwrap();
 
-    e::core::config::settings::set_string("effort", "low").unwrap();
+    ulo::core::config::settings::set_string("effort", "low").unwrap();
 
     let after: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(h.join("settings.json")).unwrap()).unwrap();
@@ -46,7 +46,7 @@ fn auth_write_preserves_an_unparseable_entry() {
     let _g = env_lock();
     let fixture = Home::new("auth");
     let h = fixture.dir.clone();
-    // One good entry, one in a shape e can't interpret.
+    // One good entry, one in a shape ulo can't interpret.
     std::fs::write(
         h.join("auth.json"),
         r#"{"opencode-go":{"key":"k"},"future-provider":{"scheme":"totally-new"}}"#,
@@ -54,11 +54,15 @@ fn auth_write_preserves_an_unparseable_entry() {
     .unwrap();
 
     // load() surfaces only what it understands…
-    assert!(e::core::auth::load().contains_key("opencode-go"));
-    assert!(!e::core::auth::load().contains_key("future-provider"));
+    assert!(ulo::core::auth::load().contains_key("opencode-go"));
+    assert!(!ulo::core::auth::load().contains_key("future-provider"));
 
     // …and a write to a different provider must not wipe the one it couldn't parse.
-    e::core::auth::set("xai", e::core::auth::Credential::ApiKey { key: "z".into() }).unwrap();
+    ulo::core::auth::set(
+        "xai",
+        ulo::core::auth::Credential::ApiKey { key: "z".into() },
+    )
+    .unwrap();
 
     let after: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(h.join("auth.json")).unwrap()).unwrap();
@@ -77,7 +81,7 @@ fn trust_write_versions_the_file_and_preserves_unknown_keys() {
     let workspace = h.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    e::core::config::trust::set(&workspace, true).unwrap();
+    ulo::core::config::trust::set(&workspace, true).unwrap();
 
     let after: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(h.join("trust.json")).unwrap()).unwrap();
@@ -94,15 +98,17 @@ fn future_configuration_formats_are_never_downgraded() {
 
     let settings_path = h.join("settings.json");
     std::fs::write(&settings_path, future).unwrap();
-    let settings_error = e::core::config::settings::set_string("theme", "light").unwrap_err();
+    let settings_error = ulo::core::config::settings::set_string("theme", "light").unwrap_err();
     assert_eq!(settings_error.kind(), std::io::ErrorKind::InvalidData);
     assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), future);
 
     let auth_path = h.join("auth.json");
     std::fs::write(&auth_path, future).unwrap();
-    let auth_error =
-        e::core::auth::set("xai", e::core::auth::Credential::ApiKey { key: "z".into() })
-            .unwrap_err();
+    let auth_error = ulo::core::auth::set(
+        "xai",
+        ulo::core::auth::Credential::ApiKey { key: "z".into() },
+    )
+    .unwrap_err();
     assert_eq!(auth_error.kind(), std::io::ErrorKind::InvalidData);
     assert_eq!(std::fs::read_to_string(&auth_path).unwrap(), future);
 
@@ -110,7 +116,7 @@ fn future_configuration_formats_are_never_downgraded() {
     std::fs::write(&trust_path, future).unwrap();
     let workspace = h.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
-    let trust_error = e::core::config::trust::set(&workspace, true).unwrap_err();
+    let trust_error = ulo::core::config::trust::set(&workspace, true).unwrap_err();
     assert_eq!(trust_error.kind(), std::io::ErrorKind::InvalidData);
     assert_eq!(std::fs::read_to_string(&trust_path).unwrap(), future);
 }
@@ -118,12 +124,12 @@ fn future_configuration_formats_are_never_downgraded() {
 #[test]
 fn a_corrupt_file_is_quarantined_not_reset() {
     let _g = env_lock();
-    let _ = e::core::config::store::take_warnings();
+    let _ = ulo::core::config::store::take_warnings();
     let fixture = Home::new("corrupt");
     let h = fixture.dir.clone();
     std::fs::write(h.join("settings.json"), "{ this is not json").unwrap();
 
-    e::core::config::settings::set_string("theme", "light").unwrap();
+    ulo::core::config::settings::set_string("theme", "light").unwrap();
 
     // The write succeeded on a fresh object…
     let after: serde_json::Value =
@@ -133,10 +139,10 @@ fn a_corrupt_file_is_quarantined_not_reset() {
     let quarantined = std::fs::read_dir(&h)
         .unwrap()
         .flatten()
-        .find(|e| e.file_name().to_string_lossy().contains("corrupt-"))
+        .find(|ulo| ulo.file_name().to_string_lossy().contains("corrupt-"))
         .map(|entry| entry.path())
         .expect("corrupt file was not quarantined");
-    let warnings = e::core::config::store::take_warnings();
+    let warnings = ulo::core::config::store::take_warnings();
     assert!(
         warnings
             .iter()
@@ -159,8 +165,10 @@ fn an_unreadable_file_aborts_the_write_instead_of_being_wiped() {
 
         // We may not be root (then the read fails as intended) or we may be
         // (then the read succeeds and the update must still preserve).
-        let result =
-            e::core::auth::set("new", e::core::auth::Credential::ApiKey { key: "z".into() });
+        let result = ulo::core::auth::set(
+            "new",
+            ulo::core::auth::Credential::ApiKey { key: "z".into() },
+        );
 
         if let Err(err) = &result {
             assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
@@ -191,7 +199,7 @@ fn quarantine_failure_preserves_the_corrupt_source() {
     // aside cannot succeed, so the write must abort rather than proceed.
     std::fs::create_dir_all(h.join("settings.json")).unwrap();
 
-    e::core::config::settings::set_string("theme", "light").unwrap_err();
+    ulo::core::config::settings::set_string("theme", "light").unwrap_err();
 
     // The corrupt "file" (our directory) was never replaced by a real file,
     // and no fresh settings.json appeared beside it.
@@ -212,7 +220,7 @@ fn concurrent_updates_preserve_every_key_and_keep_the_temp_unique() {
         .map(|i| {
             let path = path.clone();
             std::thread::spawn(move || {
-                e::core::config::store::update(&path.join("settings.json"), 0o644, |obj| {
+                ulo::core::config::store::update(&path.join("settings.json"), 0o644, |obj| {
                     obj.insert(format!("key{i}"), serde_json::json!(true));
                 })
             })
@@ -234,23 +242,23 @@ fn concurrent_updates_preserve_every_key_and_keep_the_temp_unique() {
     let strays = std::fs::read_dir(&h)
         .unwrap()
         .flatten()
-        .any(|e| e.file_name().to_string_lossy().contains(".tmp"));
+        .any(|ulo| ulo.file_name().to_string_lossy().contains(".tmp"));
     assert!(!strays, "a temp file was left behind");
 }
 
 #[test]
 fn subprocess_store_writer() {
-    let Ok(path) = std::env::var("E_STORE_CHILD_PATH") else {
+    let Ok(path) = std::env::var("ULO_STORE_CHILD_PATH") else {
         return;
     };
-    let key = std::env::var("E_STORE_CHILD_KEY").unwrap();
-    let marker = std::env::var("E_STORE_CHILD_MARKER").ok();
-    let delay_ms = std::env::var("E_STORE_CHILD_DELAY_MS")
+    let key = std::env::var("ULO_STORE_CHILD_KEY").unwrap();
+    let marker = std::env::var("ULO_STORE_CHILD_MARKER").ok();
+    let delay_ms = std::env::var("ULO_STORE_CHILD_DELAY_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
 
-    e::core::config::store::update(std::path::Path::new(&path), 0o644, |object| {
+    ulo::core::config::store::update(std::path::Path::new(&path), 0o644, |object| {
         if let Some(marker) = marker {
             std::fs::write(marker, b"read").unwrap();
         }
@@ -272,11 +280,11 @@ fn concurrent_process_updates_preserve_both_snapshots() {
 
     let mut first = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "subprocess_store_writer", "--nocapture"])
-        .env("E_HOME", &h)
-        .env("E_STORE_CHILD_PATH", &path)
-        .env("E_STORE_CHILD_KEY", "alpha")
-        .env("E_STORE_CHILD_MARKER", &marker)
-        .env("E_STORE_CHILD_DELAY_MS", "300")
+        .env("ULO_HOME", &h)
+        .env("ULO_STORE_CHILD_PATH", &path)
+        .env("ULO_STORE_CHILD_KEY", "alpha")
+        .env("ULO_STORE_CHILD_MARKER", &marker)
+        .env("ULO_STORE_CHILD_DELAY_MS", "300")
         .spawn()
         .unwrap();
 
@@ -291,9 +299,9 @@ fn concurrent_process_updates_preserve_both_snapshots() {
 
     let second = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "subprocess_store_writer", "--nocapture"])
-        .env("E_HOME", &h)
-        .env("E_STORE_CHILD_PATH", &path)
-        .env("E_STORE_CHILD_KEY", "beta")
+        .env("ULO_HOME", &h)
+        .env("ULO_STORE_CHILD_PATH", &path)
+        .env("ULO_STORE_CHILD_KEY", "beta")
         .status()
         .unwrap();
     assert!(second.success(), "second config writer failed");
@@ -308,19 +316,19 @@ fn concurrent_process_updates_preserve_both_snapshots() {
     assert_eq!(after["beta"], true);
 }
 
-/// An empty `E_HOME` is unset, not "the current directory": settings, auth,
-/// and sessions must never land in whatever directory e was launched from.
+/// An empty `ULO_HOME` is unset, not "the current directory": settings, auth,
+/// and sessions must never land in whatever directory ulo was launched from.
 #[test]
 fn an_empty_e_home_does_not_point_at_the_current_directory() {
     let _guard = env_lock();
-    std::env::set_var("E_HOME", "");
-    let home = e::core::config::home::home();
-    std::env::remove_var("E_HOME");
+    std::env::set_var("ULO_HOME", "");
+    let home = ulo::core::config::home::home();
+    std::env::remove_var("ULO_HOME");
     assert!(home.is_absolute(), "{}", home.display());
     assert_ne!(home, PathBuf::from(""));
     assert!(
         home.file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with(".e")),
+            .is_some_and(|n| n.to_string_lossy().starts_with(".ulo")),
         "{}",
         home.display()
     );

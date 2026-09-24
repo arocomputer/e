@@ -1,0 +1,148 @@
+/* Contact uses the product frame, with a direct email column beside the note. */
+.ulo-contact {
+  padding: 60px 80px;
+}
+.ulo-contact h1 {
+  color: var(--ink);
+  font-size: 36px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.4;
+}
+.ulo-contact header p {
+  margin-top: 16px;
+}
+.ulo-contact-grid {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 48px;
+  margin-top: 44px;
+  padding-top: 36px;
+  border-top: 1px solid var(--rule);
+}
+.ulo-site .ulo-contact-details h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.ulo-contact-details a,
+.ulo-contact-policy a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.ulo-contact-details > p {
+  margin-top: 24px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+.ulo-contact-form {
+  min-width: 0;
+}
+.ulo-contact-form label {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+}
+.ulo-contact-form label > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.ulo-contact-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.ulo-contact-form fieldset > label {
+  margin-top: 20px;
+}
+.ulo-contact-form input:not([type="checkbox"]),
+.ulo-contact-form textarea {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+}
+/* Contact text fields keep their resting appearance; focus is shown by the caret. */
+.ulo-contact-form :is(input:not([type="checkbox"]), textarea):focus {
+  outline: none;
+}
+.ulo-contact-form textarea {
+  resize: vertical;
+  min-height: 180px;
+}
+.ulo-contact-form .ulo-contact-consent {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+}
+.ulo-contact-consent input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--ink);
+}
+.ulo-contact-policy {
+  font-size: 12px;
+  margin: 12px 0 24px;
+}
+.ulo-contact-error {
+  font-size: 13px;
+  margin-top: 16px;
+  color: var(--error);
+}
+.ulo-contact-error:empty {
+  margin: 0;
+}
+.ulo-contact-form fieldset:disabled {
+  opacity: 0.65;
+}
+.ulo-contact-honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.ulo-contact-sent p {
+  margin-top: 16px;
+}
+@media (max-width: 1000px) {
+  .ulo-contact {
+    padding: 48px 40px;
+  }
+  .ulo-contact-grid {
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+@media (max-width: 760px) {
+  .ulo-contact-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .ulo-contact-details > p {
+    max-width: 52ch;
+  }
+}
+@media (max-width: 640px) {
+  .ulo-contact {
+    padding: 36px 20px;
+  }
+  .ulo-contact h1 {
+    font-size: 28px;
+  }
+  .ulo-contact-pair {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .ulo-contact-grid {
+    margin-top: 28px;
+    padding-top: 28px;
+  }
+}

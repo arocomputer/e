@@ -1,10 +1,10 @@
 //! The first-visit trust panel — three-space prose and a `› ` caret on the
-//! selected choice, asking whether e may load this directory's own
-//! instructions. Shown once per directory, because it is the answer e needs
+//! selected choice, asking whether ulo may load this directory's own
+//! instructions. Shown once per directory, because it is the answer ulo needs
 //! before it will run there; accepting persists in the active home's trust.json.
 //! When a broader ancestor makes sense (the top-most
 //! directory under home that contains the workspace — `~/code` for
-//! `~/code/clones/e-1`), a middle choice trusts it wholesale, covering
+//! `~/code/clones/ulo-1`), a middle choice trusts it wholesale, covering
 //! every workspace inside. Unlike the auth panel's wide value column, the
 //! descriptions here sit right beside the choices — the question reads as
 //! one block, not a table spanning the frame.
@@ -28,18 +28,18 @@ impl TrustStage {
         TrustStage {
             selected: 0,
             scroll: Some(0),
-            parent: e_core::config::trust::parent_option(cwd),
+            parent: ulo_core::config::trust::parent_option(cwd),
         }
     }
 
     /// The selector rows, top to bottom: this directory, the broader
     /// ancestor (when offered), decline. Declining leaves the workspace
-    /// untrusted, and e does not run there.
+    /// untrusted, and ulo does not run there.
     pub fn choices(&self) -> Vec<(String, String)> {
         let mut rows = vec![(
             "Trust this directory".to_string(),
-            if e_core::CHANNEL == "production" {
-                "remembered in ~/.e/trust.json"
+            if ulo_core::CHANNEL == "production" {
+                "remembered in ~/.ulo/trust.json"
             } else {
                 "remembered in this channel's trust.json"
             }
@@ -53,7 +53,7 @@ impl TrustStage {
         }
         rows.push((
             "No, exit".to_string(),
-            "e runs only in a trusted workspace".to_string(),
+            "ulo runs only in a trusted workspace".to_string(),
         ));
         rows
     }
@@ -96,7 +96,7 @@ impl TrustStage {
 /// `~`-relative display for a path under home, the workspace label's rule.
 fn home_relative(path: &std::path::Path) -> String {
     let shown = path.to_string_lossy().into_owned();
-    match e_core::config::home::user_home() {
+    match ulo_core::config::home::user_home() {
         Some(home) => {
             let home = home.to_string_lossy().into_owned();
             if shown.starts_with(&home) {
@@ -111,7 +111,7 @@ fn home_relative(path: &std::path::Path) -> String {
 
 /// Paths are untrusted even before the user answers the trust question.
 fn safe_label(text: &str) -> String {
-    e_core::tools::sanitize_display(text).replace('\n', " ")
+    ulo_core::tools::sanitize_display(text).replace('\n', " ")
 }
 
 /// Wrap prose with the reference indent, leaving enough room for wide glyphs.
@@ -143,7 +143,7 @@ fn body(
             .iter()
             .map(|row| dim(row)),
     );
-    rows.extend(prose("e reads the directory's AGENTS.md and .e/ skills+prompts into context, and runs tools here.", width).iter().map(|row| dim(row)));
+    rows.extend(prose("ulo reads the directory's AGENTS.md and .ulo/ skills+prompts into context, and runs tools here.", width).iter().map(|row| dim(row)));
     rows.push(String::new());
     let mut selected_range = 0..0;
     for (index, (label, description)) in choices.iter().enumerate() {
@@ -176,7 +176,7 @@ fn body(
 
 /// The scrolling hint is file-backed like other user-facing preferences.
 fn scroll_hint(width: usize) -> Vec<String> {
-    let hint = e_core::config::settings::get_string("trust_scroll_hint")
+    let hint = ulo_core::config::settings::get_string("trust_scroll_hint")
         .unwrap_or_else(|| "↑↓ Choose · Enter Continue · PgUp/PgDn Scroll".into());
     prose(&safe_label(&hint), width)
 }

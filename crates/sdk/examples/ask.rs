@@ -1,8 +1,8 @@
-//! Ask e one question about the current directory and stream the answer.
+//! Ask ulo one question about the current directory and stream the answer.
 //!
 //! ```sh
-//! cargo run -p aro-e-sdk --example ask -- "what does this repository do"
-//! E_MODEL=anthropic/claude-opus-5 cargo run -p aro-e-sdk --example ask -- "..."
+//! cargo run -p ulo-sdk --example ask -- "what does this repository do"
+//! ULO_MODEL=anthropic/claude-opus-5 cargo run -p ulo-sdk --example ask -- "..."
 //! ```
 //!
 //! Text goes to stdout as it streams; tool activity and the final usage
@@ -10,7 +10,7 @@
 
 use std::io::Write;
 
-use e_sdk::{Event, Session};
+use ulo_sdk::{Event, Session};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(2);
     }
     let mut builder = Session::builder();
-    if let Ok(model) = std::env::var("E_MODEL") {
+    if let Ok(model) = std::env::var("ULO_MODEL") {
         builder = builder.model(model);
     }
     let mut session = builder.build().await?;

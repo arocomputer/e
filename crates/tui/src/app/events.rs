@@ -216,7 +216,7 @@ impl App {
                 if !content.trim().is_empty() {
                     let detail = self.remember_output(
                         title.unwrap_or_else(|| "tool output".into()),
-                        e_core::tools::sanitize_display(&content),
+                        ulo_core::tools::sanitize_display(&content),
                     );
                     // An extension that renders this tool's results gets
                     // the stored output to rewrite.
@@ -318,7 +318,7 @@ impl App {
                     Kind::System,
                     format!(
                         "the device was asleep for {} — continuing",
-                        e_core::output::format_elapsed(duration_secs)
+                        ulo_core::output::format_elapsed(duration_secs)
                     ),
                 ));
             }
@@ -332,7 +332,7 @@ impl App {
                     Kind::System,
                     format!(
                         "run stopped — the device was asleep for {}",
-                        e_core::output::format_elapsed(duration_secs)
+                        ulo_core::output::format_elapsed(duration_secs)
                     ),
                 ));
             }
@@ -377,7 +377,7 @@ impl App {
                     let cost = s
                         .cost_usd
                         .filter(|cost| *cost > 0.0)
-                        .map(|cost| format!(" {}", e_core::output::format_cost(cost)))
+                        .map(|cost| format!(" {}", ulo_core::output::format_cost(cost)))
                         .unwrap_or_default();
                     self.transcript.push(Block::new(
                         Kind::Summary,

@@ -10,6 +10,9 @@ def classify(paths):
     """Return independent gates; artwork/prose cannot trigger a native build or release."""
     gates = dict.fromkeys(('build', 'packages', 'channels', 'docs', 'lock', 'bench', 'publish'), False)
     for path in paths:
+        # The website workflow checks and deploys this independent frontend.
+        if path.startswith('crates/www/') or path == '.github/workflows/www.yml':
+            continue
         workflow = path.startswith('.github/workflows/')
         if path.startswith(('channels/', 'crates/cli/tests/fixtures/channels/')) or workflow:
             gates['channels'] = True

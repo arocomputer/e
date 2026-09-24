@@ -5,8 +5,8 @@
 mod common;
 
 use common::{env_lock, serve_sse, test_model, Home};
-use e::core::agent::{Agent, SessionEvent};
-use e::core::providers::catalog::Api;
+use ulo::core::agent::{Agent, SessionEvent};
+use ulo::core::providers::catalog::Api;
 
 const READ_SUB: &str = concat!(
     "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
@@ -20,7 +20,7 @@ const REPLY: &str = concat!(
 );
 
 fn workspace(label: &str) -> std::path::PathBuf {
-    let ws = std::env::temp_dir().join(format!("e-nested-{label}-{}", std::process::id()));
+    let ws = std::env::temp_dir().join(format!("ulo-nested-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&ws);
     std::fs::create_dir_all(ws.join("sub/deep")).unwrap();
     std::fs::write(ws.join("sub/deep/file.txt"), "hello\n").unwrap();
@@ -54,7 +54,7 @@ async fn a_trusted_workspace_loads_nested_instructions_once_nearest_last() {
     home.auth(r#"{"mock":{"key":"k"}}"#);
     let ws = workspace("trusted");
     std::env::set_current_dir(&ws).unwrap();
-    e::core::config::trust::set(&ws, true).unwrap();
+    ulo::core::config::trust::set(&ws, true).unwrap();
 
     let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
     agent.submit("read the file".into(), "sys".into());
@@ -111,7 +111,7 @@ async fn linked_and_irregular_instruction_files_are_not_loaded() {
     home.auth(r#"{"mock":{"key":"k"}}"#);
     let ws = workspace("links");
     // An outside directory with instructions, reachable through a link.
-    let outside = std::env::temp_dir().join(format!("e-nested-outside-{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("ulo-nested-outside-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&outside);
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::write(outside.join("AGENTS.md"), "OUTSIDE RULES\n").unwrap();
@@ -126,7 +126,7 @@ async fn linked_and_irregular_instruction_files_are_not_loaded() {
         .unwrap();
     assert!(status.success());
     std::env::set_current_dir(&ws).unwrap();
-    e::core::config::trust::set(&ws, true).unwrap();
+    ulo::core::config::trust::set(&ws, true).unwrap();
 
     let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
     agent.submit("read both".into(), "sys".into());
@@ -154,7 +154,7 @@ async fn a_resumed_history_does_not_repeat_its_instructions() {
     home.auth(r#"{"mock":{"key":"k"}}"#);
     let ws = workspace("resume");
     std::env::set_current_dir(&ws).unwrap();
-    e::core::config::trust::set(&ws, true).unwrap();
+    ulo::core::config::trust::set(&ws, true).unwrap();
 
     let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
     agent.submit("read the file".into(), "sys".into());
@@ -240,7 +240,7 @@ async fn a_grep_of_a_directory_loads_that_directorys_instructions() {
     home.auth(r#"{"mock":{"key":"k"}}"#);
     let ws = workspace("grep");
     std::env::set_current_dir(&ws).unwrap();
-    e::core::config::trust::set(&ws, true).unwrap();
+    ulo::core::config::trust::set(&ws, true).unwrap();
 
     let (mut agent, mut rx) = Agent::new(test_model("mock", port, Api::Completions));
     agent.submit("search deep".into(), "sys".into());

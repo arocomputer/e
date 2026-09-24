@@ -55,10 +55,10 @@ impl App {
             .into_iter()
             .zip(pane_rows)
             .map(|(conversation, pane)| match side {
-                e_core::config::layout::Side::Right => {
+                ulo_core::config::layout::Side::Right => {
                     format!("{}{divider}{pane}", pad(&conversation, conversation_width))
                 }
-                e_core::config::layout::Side::Left => {
+                ulo_core::config::layout::Side::Left => {
                     format!("{}{divider}{conversation}", pad(&pane, pane_width))
                 }
             })
@@ -328,7 +328,7 @@ impl App {
                 "model" => data
                     .model
                     .as_deref()
-                    .map(e_core::output::compact_model_label)
+                    .map(ulo_core::output::compact_model_label)
                     .unwrap_or_default(),
                 "effort" => data.effort.clone().unwrap_or_default(),
                 "context" => match data.context_total.filter(|t| *t > 0) {
@@ -373,7 +373,7 @@ impl App {
         let expand = |templates: &[String]| -> Vec<String> {
             templates
                 .iter()
-                .filter_map(|t| e_core::config::layout::expand(t, &lookup))
+                .filter_map(|t| ulo_core::config::layout::expand(t, &lookup))
                 .collect()
         };
         let left = expand(&self.layout.status_left);
@@ -395,10 +395,10 @@ impl App {
         match pane.split(width, &self.layout) {
             Some((conversation_width, pane_width)) => {
                 let (start, end) = match pane.side(&self.layout) {
-                    e_core::config::layout::Side::Right => {
+                    ulo_core::config::layout::Side::Right => {
                         (conversation_width + 3, conversation_width + 3 + pane_width)
                     }
-                    e_core::config::layout::Side::Left => (0, pane_width),
+                    ulo_core::config::layout::Side::Left => (0, pane_width),
                 };
                 if column < start || column >= end {
                     if matches!(event.kind, crossterm::event::MouseEventKind::Down(_)) {

@@ -14,7 +14,7 @@ class AuthorizationTests(unittest.TestCase):
 
     def authorize(self, permission, event_kind):
         """Run the actual shell step without contacting GitHub."""
-        workflow = Path(__file__).with_name("e.yml").read_text()
+        workflow = Path(__file__).with_name("ulo.yml").read_text()
         script = ""
         if "- name: Authorize commenter\n" in workflow:
             step = workflow.split("- name: Authorize commenter\n", 1)[1].split("\n      - ", 1)[0]

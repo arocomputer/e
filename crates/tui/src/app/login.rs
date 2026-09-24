@@ -28,8 +28,8 @@ impl App {
     pub(super) fn start_codex_login(&mut self, provider: String) {
         self.cancel_login();
         let flow_id = self.next_login_flow();
-        let cancellation = e_core::auth::login::LoginCancellation::default();
-        let task = e_core::config::home::spawn(e_core::auth::login::codex_login(
+        let cancellation = ulo_core::auth::login::LoginCancellation::default();
+        let task = ulo_core::config::home::spawn(ulo_core::auth::login::codex_login(
             provider,
             self.jobs.clone(),
             self.logins.clone(),
@@ -47,8 +47,8 @@ impl App {
     pub(super) fn start_xai_login(&mut self) {
         self.cancel_login();
         let flow_id = self.next_login_flow();
-        let cancellation = e_core::auth::login::LoginCancellation::default();
-        let task = e_core::config::home::spawn(e_core::auth::login::xai_login(
+        let cancellation = ulo_core::auth::login::LoginCancellation::default();
+        let task = ulo_core::config::home::spawn(ulo_core::auth::login::xai_login(
             self.jobs.clone(),
             self.logins.clone(),
             cancellation.clone(),
@@ -83,7 +83,7 @@ impl App {
     /// A subscription picked on the account panel — the registry names the
     /// flow; this just dispatches it.
     pub(super) fn auth_account(&mut self, selected: usize) {
-        let providers = e_core::providers::registry::oauth_providers();
+        let providers = ulo_core::providers::registry::oauth_providers();
         let Some(provider) = providers.get(selected) else {
             return;
         };
@@ -99,7 +99,7 @@ impl App {
 
     /// A provider picked on the API-key panel.
     pub(super) fn auth_key(&mut self, selected: usize) {
-        let providers = e_core::providers::registry::key_providers();
+        let providers = ulo_core::providers::registry::key_providers();
         let Some(provider) = providers.get(selected) else {
             return;
         };
@@ -120,12 +120,12 @@ impl App {
             return;
         };
         self.editor.mask = false;
-        let selected = e_core::providers::registry::key_providers()
+        let selected = ulo_core::providers::registry::key_providers()
             .iter()
             .position(|p| p.name == secret_for)
             .unwrap_or(0);
         let back = authpanel::BackTarget::Key(selected);
-        match e_core::auth::login::save_api_key(&secret_for, key) {
+        match ulo_core::auth::login::save_api_key(&secret_for, key) {
             Ok(()) => {
                 self.auth = Some(AuthStage::Done {
                     ok: true,
@@ -137,15 +137,15 @@ impl App {
                 // re-pick happens here too, not only for browser logins.
                 let _ = self
                     .logins
-                    .try_send(e_core::auth::login::Outcome::SignedIn {
+                    .try_send(ulo_core::auth::login::Outcome::SignedIn {
                         provider: secret_for,
                         flow_id: None,
                     });
             }
-            Err(e) => {
+            Err(ulo) => {
                 self.auth = Some(AuthStage::Done {
                     ok: false,
-                    message: format!("the {secret_for} key was not saved — {e}"),
+                    message: format!("the {secret_for} key was not saved — {ulo}"),
                     back,
                 });
             }
@@ -161,7 +161,8 @@ impl App {
             self.open_login_menu();
             return;
         }
-        let flow = e_core::providers::registry::find(&provider).and_then(|p| p.auth.oauth.clone());
+        let flow =
+            ulo_core::providers::registry::find(&provider).and_then(|p| p.auth.oauth.clone());
         if flow.as_deref() == Some("codex") {
             self.auth = Some(AuthStage::Waiting { back: None });
             self.start_codex_login(provider);

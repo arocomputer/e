@@ -1,5 +1,6 @@
 """Publishing a formula is repeatable and cannot roll an existing tap backward."""
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -25,6 +26,9 @@ class BrewPublishing(unittest.TestCase):
             run("git", "init", "--bare", "--initial-branch=main", str(remote))
             run("git", "clone", str(remote), str(tap))
             (tap / "README.md").write_text("tap\n")
+            (tap / "Formula").mkdir()
+            (tap / "Formula/e.rb").write_text('class E < Formula\n  version "1.2.0"\nend\n')
+            (tap / "formula_renames.json").write_text('{"another-old-name":"another-formula"}\n')
             run("git", "-C", str(tap), "add", ".")
             run(
                 "git",
@@ -39,10 +43,10 @@ class BrewPublishing(unittest.TestCase):
                 "init",
             )
             run("git", "-C", str(tap), "push", "origin", "main")
-            formula = root / "e.rb"
+            formula = root / "ulo.rb"
 
             def publish(version):
-                formula.write_text(f'class E < Formula\n  version "{version}"\nend\n')
+                formula.write_text(f'class Ulo < Formula\n  version "{version}"\nend\n')
                 run(
                     "sh",
                     str(ROOT / "scripts/packaging/publish-brew.sh"),
@@ -52,8 +56,12 @@ class BrewPublishing(unittest.TestCase):
                 )
 
             publish("1.2.3")
+            self.assertFalse((tap / "Formula/e.rb").exists())
+            self.assertEqual(json.loads((tap / "formula_renames.json").read_text()), {
+                "e": "ulo", "another-old-name": "another-formula",
+            })
             head = run("git", "-C", str(tap), "rev-parse", "HEAD")
             publish("1.2.3")
             publish("1.2.2")
             self.assertEqual(head, run("git", "-C", str(tap), "rev-parse", "HEAD"))
-            self.assertIn("1.2.3", (tap / "Formula/e.rb").read_text())
+            self.assertIn("1.2.3", (tap / "Formula/ulo.rb").read_text())

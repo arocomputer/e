@@ -2,10 +2,10 @@
 mod common;
 
 use common::{env_lock, serve_sse, test_model, Home};
-use e::core::agent::{Agent, AgentOptions, SessionEvent};
-use e::core::providers::catalog::Api;
-use e::core::tools::{ToolOutcome, ToolRuntime};
 use std::sync::atomic::AtomicBool;
+use ulo::core::agent::{Agent, AgentOptions, SessionEvent};
+use ulo::core::providers::catalog::Api;
+use ulo::core::tools::{ToolOutcome, ToolRuntime};
 
 /// Consume one complete run without mutating the agent's lifecycle state.
 async fn finish(events: &mut tokio::sync::mpsc::Receiver<SessionEvent>) -> String {

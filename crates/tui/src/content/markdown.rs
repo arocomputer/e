@@ -45,7 +45,7 @@ fn osc8_id(id: u64, url: &str) -> String {
             }
         })
         .collect();
-    format!("\x1b]8;id=e-{id};{url}\x1b\\")
+    format!("\x1b]8;id=ulo-{id};{url}\x1b\\")
 }
 const OSC8_CLOSE: &str = "\x1b]8;;\x1b\\";
 
@@ -126,9 +126,9 @@ pub fn clip_styled(styled: &str, max: usize) -> String {
                 }
             } else {
                 // CSI and friends: runs to the alphabetic final byte.
-                for e in chars.by_ref() {
-                    out.push(e);
-                    if e.is_ascii_alphabetic() || e == '\\' {
+                for ulo in chars.by_ref() {
+                    out.push(ulo);
+                    if ulo.is_ascii_alphabetic() || ulo == '\\' {
                         break;
                     }
                 }

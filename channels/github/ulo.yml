@@ -1,16 +1,16 @@
-# e on GitHub: answer `/e <prompt>` on issues and pull requests.
+# ulo on GitHub: answer `/ulo <prompt>` on issues and pull requests.
 #
-# Copy this file to .github/workflows/e.yml in your repository, add a
+# Copy this file to .github/workflows/ulo.yml in your repository, add a
 # provider key as a repository secret (ANTHROPIC_API_KEY here; any provider
-# e knows works the same way — see `e docs models`), and comment `/e what
+# ulo knows works the same way — see `ulo docs models`), and comment `/ulo what
 # does this change do?` on a PR. One comment, one headless turn, one reply.
 #
-# The checkout is e's working directory, so `AGENTS.md` and the repo's
+# The checkout is ulo's working directory, so `AGENTS.md` and the repo's
 # files are in play like they are in the terminal. Tools run as the runner
 # user inside the job. Only repository writers may start a run. Nothing is
 # written back unless the prompt asks and
 # a later step pushes it.
-name: e
+name: ulo
 
 on:
   issue_comment:
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   answer:
-    if: startsWith(github.event.comment.body, '/e ')
+    if: startsWith(github.event.comment.body, '/ulo ')
     runs-on: ubuntu-latest
     steps:
       - name: Authorize commenter
@@ -38,9 +38,9 @@ jobs:
           permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$caller/permission" --jq '.permission')
           case "$permission" in
             admin|maintain|write) ;;
-            *) echo "Repository write permission is required to run e." >&2; exit 1 ;;
+            *) echo "Repository write permission is required to run ulo." >&2; exit 1 ;;
           esac
-          number=$(python3 -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); print((e.get("issue") or e["pull_request"])["number"])')
+          number=$(python3 -c 'import json,os; ulo=json.load(open(os.environ["GITHUB_EVENT_PATH"])); print((ulo.get("issue") or ulo["pull_request"])["number"])')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,8 +49,8 @@ jobs:
           ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
-      - name: Install e
-        run: curl -fsSL https://e.aro.computer/install.sh | sh
+      - name: Install ulo
+        run: curl -fsSL https://ulo.sh/install.sh | sh
 
       - name: Run one turn
         id: turn
@@ -58,11 +58,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           COMMENT: ${{ github.event.comment.body }}
         run: |
-          prompt="${COMMENT#/e }"
+          prompt="${COMMENT#/ulo }"
           # --json gives every event and a final result line; the reply is
           # final_output. Save the whole stream as a job artifact if you want
           # the tool trace; the comment gets the reply and the cost.
-          ~/.local/bin/e -p --json --no-save "$prompt" > events.jsonl || true
+          ~/.local/bin/ulo -p --json --no-save "$prompt" > events.jsonl || true
           tail -n 1 events.jsonl > result.json
           {
             echo 'reply<<EOF'

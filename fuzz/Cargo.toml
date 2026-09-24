@@ -1,5 +1,5 @@
 [package]
-name = "e-fuzz"
+name = "ulo-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -9,8 +9,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-# The application package renamed for crates.io; the library is still `e`.
-e = { package = "aro-e", path = "../crates/cli" }
+# The application package renamed for crates.io; the library is still `ulo`.
+ulo = { package = "ulo", path = "../crates/cli" }
 
 [[bin]]
 name = "sse"

@@ -5,14 +5,14 @@ use super::*;
 /// A parsed package source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
-    /// An npm package, installed under `~/.e/packages/npm/node_modules/<name>`.
+    /// An npm package, installed under `~/.ulo/packages/npm/node_modules/<name>`.
     Npm {
         /// The package name, `@scope/name` included.
         name: String,
         /// A version, range, or dist-tag to pin; `None` follows `latest`.
         version: Option<String>,
     },
-    /// A git remote, cloned under `~/.e/packages/<host>/<path>`.
+    /// A git remote, cloned under `~/.ulo/packages/<host>/<path>`.
     Git {
         /// The URL handed to `git clone`, ref stripped.
         url: String,
@@ -36,7 +36,7 @@ pub enum Source {
 }
 
 impl Source {
-    /// Parse a source string, the grammar `e install` accepts:
+    /// Parse a source string, the grammar `ulo install` accepts:
     ///
     /// - `npm:name[@version]`, `npm:@scope/name[@version]` — from the
     ///   user's npm registry

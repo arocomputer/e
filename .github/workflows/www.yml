@@ -1,0 +1,68 @@
+name: Website
+
+on:
+  pull_request:
+    paths: ["crates/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
+  push:
+    branches: [main]
+    paths: ["crates/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: crates/www
+
+jobs:
+  check:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: crates/www/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:recording
+      - run: npm audit --audit-level=high
+      - run: npm run build
+      - name: Worker routing and installer
+        run: |
+          node scripts/preview.mjs --port 8787 > "$RUNNER_TEMP/ulo-worker.log" 2>&1 &
+          preview=$!
+          trap 'kill "$preview" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://localhost:8787/ > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:routes
+  deploy:
+    name: Deploy website
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

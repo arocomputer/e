@@ -6,7 +6,7 @@ use super::*;
 /// Attachments belong to one draft; generation rejects late clipboard reads.
 #[derive(Default)]
 pub(super) struct Attachments {
-    pub(super) images: Vec<e_core::providers::ImageInput>,
+    pub(super) images: Vec<ulo_core::providers::ImageInput>,
     pub(super) generation: u64,
     pub(super) reading: bool,
     pub(super) submit_pending: bool,
@@ -74,9 +74,9 @@ impl App {
                 let generation = self.attachments.generation;
                 let results = self.results.clone();
                 let fallback = Some(text.clone());
-                e_core::config::home::spawn(async move {
+                ulo_core::config::home::spawn(async move {
                     let images = tokio::task::spawn_blocking(move || {
-                        e_core::providers::ImageInput::from_paths(&paths)
+                        ulo_core::providers::ImageInput::from_paths(&paths)
                     })
                     .await
                     .unwrap_or_else(|_| Err("image attachment reader panicked".into()));
@@ -131,7 +131,7 @@ impl App {
         self.attachments.reading = true;
         let generation = self.attachments.generation;
         let results = self.results.clone();
-        e_core::config::home::spawn(async move {
+        ulo_core::config::home::spawn(async move {
             let paste = tokio::task::spawn_blocking(clipboard::read)
                 .await
                 .unwrap_or_else(|_| Err("clipboard reader panicked".into()));
@@ -176,7 +176,7 @@ impl App {
             Ok(clipboard::Paste::Images(images)) if !images.is_empty() => {
                 let mut batch = self.attachments.images.clone();
                 batch.extend(images.iter().cloned());
-                if let Err(error) = e_core::providers::ImageInput::validate_batch(&batch) {
+                if let Err(error) = ulo_core::providers::ImageInput::validate_batch(&batch) {
                     self.notice(error);
                     self.restore_fallback(fallback);
                 } else if self.agent.model.image_input {
@@ -257,7 +257,7 @@ impl App {
     pub(super) fn submit_images(
         &mut self,
         text: String,
-        images: Vec<e_core::providers::ImageInput>,
+        images: Vec<ulo_core::providers::ImageInput>,
     ) {
         let trimmed = text.trim();
         let prompt = if trimmed.is_empty() {
@@ -271,7 +271,7 @@ impl App {
             let host = self.host.clone();
             let results = self.results.clone();
             let sequence = self.input_verdicts.reserve();
-            e_core::config::home::spawn(async move {
+            ulo_core::config::home::spawn(async move {
                 let verdict = host.hook_input(&prompt).await;
                 let _ = results
                     .send(AppJob::InputVerdict {
@@ -313,7 +313,7 @@ impl App {
             let host = self.host.clone();
             let results = self.results.clone();
             let sequence = self.input_verdicts.reserve();
-            e_core::config::home::spawn(async move {
+            ulo_core::config::home::spawn(async move {
                 let verdict = host.hook_input(&trimmed).await;
                 let _ = results
                     .send(AppJob::InputVerdict {
@@ -332,8 +332,8 @@ impl App {
     pub(super) fn apply_input_verdict(
         &mut self,
         text: String,
-        images: Option<Vec<e_core::providers::ImageInput>>,
-        verdict: e_core::extensions::InputVerdict,
+        images: Option<Vec<ulo_core::providers::ImageInput>>,
+        verdict: ulo_core::extensions::InputVerdict,
     ) {
         if let Some(notice) = verdict.notice.filter(|n| !n.trim().is_empty()) {
             self.notice(notice);
@@ -390,7 +390,7 @@ impl App {
                 }
                 return;
             }
-            match e_core::providers::ImageInput::from_path(std::path::Path::new(path)) {
+            match ulo_core::providers::ImageInput::from_path(std::path::Path::new(path)) {
                 Ok(image) => {
                     let prompt = if prompt.is_empty() {
                         "Describe this image.".to_string()
@@ -483,7 +483,7 @@ impl App {
         }
         match trimmed.as_str() {
             "/quit" | "/exit" => self.should_quit = true,
-            "/version" => self.notice(format!("e {}", e_core::VERSION)),
+            "/version" => self.notice(format!("ulo {}", ulo_core::VERSION)),
             "/help" => {
                 // The reference help surface is the commands picker itself —
                 // browse, filter, Enter to use — not a wall of text. The
@@ -531,7 +531,7 @@ impl App {
                 self.viewer_cache = None;
                 if self.layout.banner {
                     self.transcript
-                        .push(Block::new(Kind::Banner, e_core::VERSION));
+                        .push(Block::new(Kind::Banner, ulo_core::VERSION));
                 }
                 set_tab_title(&tab_title(&title_path(), None));
                 extui::shutdown_then_start(self, "new");
@@ -558,33 +558,35 @@ impl App {
                 self.compact_now(Some(trimmed["/compact ".len()..].trim().to_string()))
             }
             "/reload" => self.reload(),
-            "/trust" => match e_core::config::trust::set(&self.agent.cwd(), true) {
+            "/trust" => match ulo_core::config::trust::set(&self.agent.cwd(), true) {
                 Ok(()) => {
                     self.notice(
-                        "directory trusted — its AGENTS.md and .e skills/prompts now load".into(),
+                        "directory trusted — its AGENTS.md and .ulo skills/prompts now load".into(),
                     );
                     self.install_project_packages();
                 }
-                Err(e) => self.notice(format!("trust: {e}")),
+                Err(ulo) => self.notice(format!("trust: {ulo}")),
             },
             _ if trimmed.starts_with('/') => {
                 let (name, args) = trimmed[1..].split_once(' ').unwrap_or((&trimmed[1..], ""));
-                if let Some(template) = e_core::resources::prompts::find(name, &self.agent.cwd()) {
-                    let expanded = e_core::resources::prompts::substitute(&template.content, args);
+                if let Some(template) = ulo_core::resources::prompts::find(name, &self.agent.cwd())
+                {
+                    let expanded =
+                        ulo_core::resources::prompts::substitute(&template.content, args);
                     self.prompt(expanded);
                 } else if self.host.has_command(name) {
                     let host = self.host.clone();
                     let results = self.results.clone();
                     let (name, args) = (name.to_string(), args.to_string());
                     let epoch = self.session_epoch;
-                    e_core::config::home::spawn(async move {
+                    ulo_core::config::home::spawn(async move {
                         let result = host.run_command(&name, &args).await;
                         let _ = results.send(AppJob::Command { result, epoch }).await;
                     });
                 } else if is_literal_slash_prompt(&trimmed) {
                     // Absolute paths and a literal leading slash are prompt
                     // text, not misspelled commands. This is how screenshot
-                    // clipboard tools hand e `/var/.../capture.png question`.
+                    // clipboard tools hand ulo `/var/.../capture.png question`.
                     self.prompt(trimmed);
                 } else {
                     self.notice(format!("unknown command {trimmed}"));
@@ -623,7 +625,7 @@ impl App {
             let results = self.results.clone();
             let sequence = self.input_verdicts.reserve();
             let images = std::mem::take(&mut self.pending_initial_images);
-            e_core::config::home::spawn(async move {
+            ulo_core::config::home::spawn(async move {
                 let verdict = host.hook_input(&text).await;
                 let _ = results
                     .send(AppJob::InputVerdict {
@@ -643,12 +645,12 @@ impl App {
     pub(super) fn submit_with_images(
         &mut self,
         text: String,
-        images: Vec<e_core::providers::ImageInput>,
+        images: Vec<ulo_core::providers::ImageInput>,
     ) {
         self.remember_prompt(text.clone());
         let count = images.len();
         let held = self.agent.submit_message(
-            e_core::providers::ChatMessage::user_with_images(text.clone(), images),
+            ulo_core::providers::ChatMessage::user_with_images(text.clone(), images),
             system_prompt(),
         );
         if !held {

@@ -10,7 +10,7 @@ use std::net::TcpListener;
 
 #[test]
 fn version_comparison() {
-    use e::core::update::{is_newer, is_release_version};
+    use ulo::core::update::{is_newer, is_release_version};
     assert!(is_newer("v0.4.1", "0.4.0"));
     assert!(is_newer("1.0.0", "0.9.9"));
     assert!(!is_newer("v0.4.0", "0.4.0"));
@@ -30,11 +30,11 @@ fn version_comparison() {
 
 /// A platform the release matrix does not ship for has no target at all —
 /// it must never fall back to the x86_64 glibc tarball, which is how a
-/// cargo-installed e on musl or armv7 got overwritten with a binary its
+/// cargo-installed ulo on musl or armv7 got overwritten with a binary its
 /// host could not execute.
 #[test]
 fn off_matrix_platforms_have_no_release_target() {
-    use e::core::update::release_target;
+    use ulo::core::update::release_target;
     assert_eq!(
         release_target("linux", "x86_64", true),
         Some("x86_64-unknown-linux-gnu")
@@ -88,22 +88,22 @@ fn serve_files(
 }
 
 fn fake_release(binary_contents: &str, poison_checksum: bool) -> (Vec<(String, Vec<u8>)>, String) {
-    let target = e::core::update::target().expect("tests run on a release target");
+    let target = ulo::core::update::target().expect("tests run on a release target");
     let dir = std::env::temp_dir().join(format!(
-        "e-update-fixture-{}-{}",
+        "ulo-update-fixture-{}-{}",
         std::process::id(),
         poison_checksum
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("e"), binary_contents).unwrap();
-    let tar = dir.join("e.tar.gz");
+    std::fs::write(dir.join("ulo"), binary_contents).unwrap();
+    let tar = dir.join("ulo.tar.gz");
     assert!(std::process::Command::new("tar")
         .arg("czf")
         .arg(&tar)
         .arg("-C")
         .arg(&dir)
-        .arg("e")
+        .arg("ulo")
         .status()
         .unwrap()
         .success());
@@ -119,7 +119,7 @@ fn fake_release(binary_contents: &str, poison_checksum: bool) -> (Vec<(String, V
             .collect::<String>()
     };
     let sum = if poison_checksum { "0".repeat(64) } else { sum };
-    let name = format!("e-{target}.tar.gz");
+    let name = format!("ulo-{target}.tar.gz");
     let files = vec![
         (name.clone(), tarball),
         (
@@ -133,21 +133,21 @@ fn fake_release(binary_contents: &str, poison_checksum: bool) -> (Vec<(String, V
 
 #[tokio::test(flavor = "multi_thread")]
 async fn install_follows_asset_redirects_and_swaps_the_binary_atomically() {
-    let (files, contents) = fake_release("#!/bin/sh\necho new-e\n", false);
+    let (files, contents) = fake_release("#!/bin/sh\necho new-ulo\n", false);
     let (base, server) = serve_release(files);
-    let target = e::core::update::target().expect("tests run on a release target");
-    let responses = [format!("e-{target}.tar.gz"), "checksums.txt".into()]
+    let target = ulo::core::update::target().expect("tests run on a release target");
+    let responses = [format!("ulo-{target}.tar.gz"), "checksums.txt".into()]
         .into_iter()
         .map(|name| format!("HTTP/1.1 302 Found\r\nLocation: {base}/{name}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
         .collect();
     let (port, redirector) = common::serve_raw(responses);
     let base = format!("http://127.0.0.1:{port}");
-    let dest_dir = std::env::temp_dir().join(format!("e-update-dest-{}", std::process::id()));
+    let dest_dir = std::env::temp_dir().join(format!("ulo-update-dest-{}", std::process::id()));
     std::fs::create_dir_all(&dest_dir).unwrap();
-    let dest = dest_dir.join("e");
+    let dest = dest_dir.join("ulo");
     std::fs::write(&dest, "old-binary").unwrap();
 
-    let version = e::core::update::install_from(&base, "v9.9.9", &dest)
+    let version = ulo::core::update::install_from(&base, "v9.9.9", &dest)
         .await
         .unwrap();
     assert_eq!(version, "9.9.9");
@@ -161,12 +161,12 @@ async fn install_follows_asset_redirects_and_swaps_the_binary_atomically() {
 async fn poisoned_checksum_refuses_to_install() {
     let (files, _) = fake_release("evil\n", true);
     let (base, server) = serve_release(files);
-    let dest_dir = std::env::temp_dir().join(format!("e-update-poison-{}", std::process::id()));
+    let dest_dir = std::env::temp_dir().join(format!("ulo-update-poison-{}", std::process::id()));
     std::fs::create_dir_all(&dest_dir).unwrap();
-    let dest = dest_dir.join("e");
+    let dest = dest_dir.join("ulo");
     std::fs::write(&dest, "old-binary").unwrap();
 
-    let err = e::core::update::install_from(&base, "v9.9.9", &dest)
+    let err = ulo::core::update::install_from(&base, "v9.9.9", &dest)
         .await
         .unwrap_err();
     assert!(err.contains("checksum mismatch"));
@@ -183,7 +183,10 @@ async fn no_published_release_is_already_current_not_an_error() {
     // One dummy entry so the server accepts the single request; no name
     // matches, so the body stays empty under the 404 status.
     let (base, server) = serve_files(vec![("none".to_string(), vec![])], "404 Not Found");
-    assert_eq!(e::core::update::latest_tag_from(&base).await.unwrap(), None);
+    assert_eq!(
+        ulo::core::update::latest_tag_from(&base).await.unwrap(),
+        None
+    );
     server.join().unwrap();
 }
 
@@ -197,24 +200,24 @@ async fn latest_tag_reads_the_published_tag() {
         )],
         "200 OK",
     );
-    let tag = e::core::update::latest_tag_from(&base).await.unwrap();
+    let tag = ulo::core::update::latest_tag_from(&base).await.unwrap();
     assert_eq!(tag.as_deref(), Some("v9.9.9"));
     server.join().unwrap();
 }
 
 #[test]
 fn package_ownership_survives_binary_symlinks() {
-    use e::core::update::package_update_hint;
+    use ulo::core::update::package_update_hint;
     let _lock = common::env_lock();
     let home = common::Home::new("package-ownership");
-    let binary = home.dir.join("e");
+    let binary = home.dir.join("ulo");
     std::fs::write(&binary, b"binary").unwrap();
     assert_eq!(package_update_hint(&binary), None);
-    let marker = home.dir.join(".e-install-method");
+    let marker = home.dir.join(".ulo-install-method");
     std::fs::write(&marker, "homebrew\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()
-        .contains("brew upgrade arocomputer/tap/e"));
+        .contains("brew upgrade arocomputer/tap/ulo"));
     #[cfg(unix)]
     {
         let alias = home.dir.join("alias");
@@ -224,7 +227,7 @@ fn package_ownership_survives_binary_symlinks() {
     std::fs::write(&marker, "npm\n").unwrap();
     assert!(package_update_hint(&binary)
         .unwrap()
-        .contains("bun add -g @arocomputer/e"));
+        .contains("bun add -g @arocomputer/ulo"));
     std::fs::write(&marker, "unknown\n").unwrap();
     assert!(package_update_hint(&binary).is_some());
 }
@@ -232,7 +235,7 @@ fn package_ownership_survives_binary_symlinks() {
 /// PR previews are pinned; they never roll themselves forward.
 #[test]
 fn preview_identities_stay_pinned() {
-    use e::core::update::{is_newer, is_release_version};
+    use ulo::core::update::{is_newer, is_release_version};
     assert!(!is_newer("v0.0.0-pr-12", "0.0.0-pr-9"));
     assert!(!is_newer("v0.0.0-pr-12", "0.0.2"));
     assert!(!is_release_version("0.0.0-pr-9"));

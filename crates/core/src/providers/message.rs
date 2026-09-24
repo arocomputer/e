@@ -234,7 +234,7 @@ impl ResponseMeta {
     }
 }
 
-/// Why e made a provider request; non-chat work still belongs in usage totals.
+/// Why ulo made a provider request; non-chat work still belongs in usage totals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponsePurpose {

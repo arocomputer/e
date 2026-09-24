@@ -2,11 +2,11 @@
 mod common;
 
 use common::{env_lock, serve_sse, test_model, Home};
-use e::core::agent::{Agent, AgentOptions, SessionEvent};
-use e::core::providers::catalog::Api;
-use e::core::providers::ChatMessage;
-use e::core::session::SessionLog;
 use serde_json::json;
+use ulo::core::agent::{Agent, AgentOptions, SessionEvent};
+use ulo::core::providers::catalog::Api;
+use ulo::core::providers::ChatMessage;
+use ulo::core::session::SessionLog;
 
 /// Encode a batch using the provider's ordinary streaming wire format.
 fn batch(calls: Vec<serde_json::Value>) -> String {
@@ -265,7 +265,7 @@ async fn background_configuration_tasks_inherit_the_selected_home() {
     selected.write("settings.json", r#"{"theme":"light"}"#);
     let global = Home::new("review-global-home");
     global.write("settings.json", r#"{"theme":"dark"}"#);
-    use e::core::config::{home, settings};
+    use ulo::core::config::{home, settings};
     home::scope(selected.dir.clone(), async {
         home::spawn(async {
             assert_eq!(settings::get_string("theme").as_deref(), Some("light"));

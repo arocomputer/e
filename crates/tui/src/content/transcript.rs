@@ -7,7 +7,7 @@
 use crate::markdown::{render_markdown, wrap_styled};
 use crate::render::{bold, dim};
 use crate::theme::Theme;
-use e_core::tools::ToolOutcome;
+use ulo_core::tools::ToolOutcome;
 use unicode_width::UnicodeWidthChar;
 
 /// Color generated attachment labels with the palette's existing light gray,
@@ -74,10 +74,10 @@ impl ToolChild {
     ) -> Self {
         Self {
             id,
-            category: e_core::tools::sanitize_display(&category),
-            running: e_core::tools::sanitize_display(&running),
-            completed: e_core::tools::sanitize_display(&completed),
-            target: e_core::tools::sanitize_display(&target),
+            category: ulo_core::tools::sanitize_display(&category),
+            running: ulo_core::tools::sanitize_display(&running),
+            completed: ulo_core::tools::sanitize_display(&completed),
+            target: ulo_core::tools::sanitize_display(&target),
             state: ToolState::Pending,
             result: None,
             output: String::new(),
@@ -193,7 +193,7 @@ pub struct Block {
     image_count: usize,
     cache: Option<RenderCache>,
     /// How a `Show` body paints; Text for every other kind.
-    show_format: e_core::extensions::Format,
+    show_format: ulo_core::extensions::Format,
     /// True while provider deltas are appending to this text block.
     streaming: bool,
     /// Bumped on every touch — the review screen's cache key folds these
@@ -209,7 +209,7 @@ impl Block {
             // Block text is source text, not markup: model output, extension
             // notices, and pasted content must render inert, never smuggle
             // terminal control sequences into the paint stream.
-            text: e_core::tools::sanitize_display(&text.into()),
+            text: ulo_core::tools::sanitize_display(&text.into()),
             done: false,
             is_error: false,
             detail: None,
@@ -227,7 +227,7 @@ impl Block {
             collapsed: None,
             image_count: 0,
             cache: None,
-            show_format: e_core::extensions::Format::default(),
+            show_format: ulo_core::extensions::Format::default(),
             streaming: false,
             generation: 0,
         }
@@ -237,9 +237,9 @@ impl Block {
     /// the reference row grammar here, once; a body that turns out not to
     /// be a diff paints as text. Bodies past `MAX_SHOW_BYTES` are clipped
     /// with a note — a long diff still shows, it just ends early.
-    pub fn show(show: e_core::extensions::Show) -> Self {
-        use e_core::extensions::{Format, MAX_SHOW_BYTES};
-        let mut body = e_core::tools::sanitize_display(&show.body);
+    pub fn show(show: ulo_core::extensions::Show) -> Self {
+        use ulo_core::extensions::{Format, MAX_SHOW_BYTES};
+        let mut body = ulo_core::tools::sanitize_display(&show.body);
         if body.len() > MAX_SHOW_BYTES {
             let mut cut = MAX_SHOW_BYTES;
             while !body.is_char_boundary(cut) {
@@ -250,7 +250,7 @@ impl Block {
         }
         let (body, format) = match show.format {
             Format::Diff => {
-                let rows = e_core::tools::diffview::from_unified(&body);
+                let rows = ulo_core::tools::diffview::from_unified(&body);
                 if rows.is_empty() {
                     (body, Format::Text)
                 } else {
@@ -279,7 +279,8 @@ impl Block {
     /// Append one untrusted provider delta without copying the accumulated
     /// response. Rendering is paced separately from event ingestion.
     pub fn append_streaming(&mut self, delta: &str) {
-        self.text.push_str(&e_core::tools::sanitize_display(delta));
+        self.text
+            .push_str(&ulo_core::tools::sanitize_display(delta));
         self.generation = self.generation.wrapping_add(1);
         self.streaming = true;
     }
@@ -311,7 +312,7 @@ impl Block {
     pub fn append_tool_output(&mut self, id: u64, chunk: &str) {
         const DISPLAY_CAP: usize = 64 * 1024;
         if let Some(child) = self.tool_children.iter_mut().find(|child| child.id == id) {
-            let chunk = e_core::tools::sanitize_display(chunk);
+            let chunk = ulo_core::tools::sanitize_display(chunk);
             child.output.push_str(&chunk);
             if child.output.len() > DISPLAY_CAP {
                 let mut remove = child.output.len() - DISPLAY_CAP;
@@ -339,11 +340,11 @@ impl Block {
                 ToolOutcome::Blocked => ToolState::Blocked,
                 ToolOutcome::Cancelled => ToolState::Cancelled,
             };
-            child.result = Some(e_core::tools::sanitize_display(&summary));
+            child.result = Some(ulo_core::tools::sanitize_display(&summary));
             // Streaming chunks may be dropped under backpressure. The final
             // retained result is authoritative once the command finishes.
             if child.category == "command" {
-                child.output = e_core::tools::sanitize_display(content);
+                child.output = ulo_core::tools::sanitize_display(content);
             }
         }
         self.refresh_tool_header();
@@ -547,12 +548,12 @@ impl Block {
 
     fn render(&self, theme: &Theme, width: usize, _blink_on: bool) -> Vec<String> {
         match self.kind {
-            // `𝑒 {VERSION} · Run /help for commands` — name bold ink, the rest
+            // `ulo {VERSION} · Run /help for commands` — name bold ink, the rest
             // in the reference's dim (247 on light, one step lighter than the
             // statusline gray).
             Kind::Banner => vec![format!(
                 "{}{}",
-                bold(&theme.fg("userMessageText", "𝑒")),
+                bold(&theme.fg("userMessageText", "ulo")),
                 theme.fg("dim", &format!(" {} · Run /help for commands", self.text))
             )],
             Kind::User => {
@@ -585,7 +586,7 @@ impl Block {
                     if self.text.trim().is_empty() {
                         return Vec::new();
                     }
-                    let hint = e_core::tools::sanitize_display(hint).replace('\n', " ");
+                    let hint = ulo_core::tools::sanitize_display(hint).replace('\n', " ");
                     return vec![theme.fg(
                         "thinkingText",
                         &format!("  {}", clip_plain(&hint, width.saturating_sub(2))),
@@ -616,7 +617,7 @@ impl Block {
                         _ => self.text.clone(),
                     };
                     format!(
-                        "{marker} {} · What can e do differently?",
+                        "{marker} {} · What can ulo do differently?",
                         theme.fg("userMessageText", &plain)
                     )
                 } else {
@@ -675,7 +676,7 @@ impl Block {
                     .count()
                     .saturating_sub(self.tool_history_limit);
                 if hidden > 0 {
-                    let hint = e_core::tools::sanitize_display(&self.tool_history_hint)
+                    let hint = ulo_core::tools::sanitize_display(&self.tool_history_hint)
                         .replace("{count}", &hidden.to_string())
                         .replace('\n', " ");
                     rows.extend(tree_rows(theme, width, "├", &theme.fg("muted", &hint)));
@@ -770,7 +771,7 @@ impl Block {
                 width,
             ),
             Kind::Show => {
-                use e_core::extensions::Format;
+                use ulo_core::extensions::Format;
                 let mut rows = Vec::new();
                 if !self.text.trim().is_empty() {
                     rows.push(bold(
@@ -1501,7 +1502,7 @@ mod tests {
         for body in ["First character stays.", "界 first character stays."] {
             let rows = super::notice_rows(&theme, "dim", false, "Notice", body, 80);
             assert_eq!(
-                e_core::tools::strip_ansi(&rows.join("\n")),
+                ulo_core::tools::strip_ansi(&rows.join("\n")),
                 format!("● Notice: {body}")
             );
         }
@@ -1608,7 +1609,7 @@ mod tests {
     #[test]
     fn tool_tree_keeps_labels_neutral_and_colors_diff_counts() {
         let theme = Theme::from_json(
-            r#"{"vars":{"m":240,"a":250,"e":196,"d":34},"colors":{"muted":"m","dim":"m","accent":"a","error":"e","toolDiffAddedMarker":"d","toolDiffRemovedMarker":"e","toolDiffAddedMarkerFallback":"d","toolDiffRemovedMarkerFallback":"e"}}"#,
+            r#"{"vars":{"m":240,"a":250,"ulo":196,"d":34},"colors":{"muted":"m","dim":"m","accent":"a","error":"ulo","toolDiffAddedMarker":"d","toolDiffRemovedMarker":"ulo","toolDiffAddedMarkerFallback":"d","toolDiffRemovedMarkerFallback":"ulo"}}"#,
         )
         .unwrap();
         let mut block = Block::tool_group(vec![

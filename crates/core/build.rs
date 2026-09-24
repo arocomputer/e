@@ -7,12 +7,12 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    for key in ["E_BUILD_VERSION", "E_BUILD_COMMIT", "E_BUILD_CHANNEL"] {
+    for key in ["ULO_BUILD_VERSION", "ULO_BUILD_COMMIT", "ULO_BUILD_CHANNEL"] {
         println!("cargo:rerun-if-env-changed={key}");
     }
     let version =
-        std::env::var("E_BUILD_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
-    let channel = std::env::var("E_BUILD_CHANNEL").unwrap_or_else(|_| "local".into());
+        std::env::var("ULO_BUILD_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
+    let channel = std::env::var("ULO_BUILD_CHANNEL").unwrap_or_else(|_| "local".into());
     assert!(["local", "production", "pr"].contains(&channel.as_str()));
     if channel == "production" {
         assert_eq!(
@@ -26,16 +26,16 @@ fn main() {
             "preview identity must be 0.0.0-<channel>-<build>"
         );
     }
-    let commit = std::env::var("E_BUILD_COMMIT").unwrap_or_else(|_| "local".into());
+    let commit = std::env::var("ULO_BUILD_COMMIT").unwrap_or_else(|_| "local".into());
     assert!(version
         .bytes()
         .all(|c| c.is_ascii_alphanumeric() || b".-".contains(&c)));
     assert!(
         commit == "local" || (commit.len() == 40 && commit.bytes().all(|c| c.is_ascii_hexdigit()))
     );
-    println!("cargo:rustc-env=E_VERSION={version}");
-    println!("cargo:rustc-env=E_CHANNEL={channel}");
-    println!("cargo:rustc-env=E_COMMIT={commit}");
+    println!("cargo:rustc-env=ULO_VERSION={version}");
+    println!("cargo:rustc-env=ULO_CHANNEL={channel}");
+    println!("cargo:rustc-env=ULO_COMMIT={commit}");
 
     generate_docs();
 }
@@ -49,7 +49,7 @@ struct Guide {
     path: PathBuf,
 }
 
-/// Generate `TOPICS` and `body()` for `e docs` by reading `docs/guides/`: the
+/// Generate `TOPICS` and `body()` for `ulo docs` by reading `docs/guides/`: the
 /// folder is the nav group, the file stem is the topic, and front matter
 /// carries `title`, `description`, and `order`. The website reads the same
 /// files, so there is no second list of topics to keep in step.

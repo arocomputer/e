@@ -1,17 +1,17 @@
-/** JSONL requests, responses, and extension questions for one e process. */
+/** JSONL requests, responses, and extension questions for one ulo process. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 
 export type Json = Record<string, unknown>;
 
-/** A spawned `e rpc` and the pipes to it. */
+/** A spawned `ulo rpc` and the pipes to it. */
 export class Rpc {
   private child: ChildProcess;
   private next = 1;
   private stopped = false;
   private exited: Promise<void>;
   private failure?: Error;
-  private pending = new Map<string, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
+  private pending = new Map<string, { resolve: (v: Json) => void; reject: (ulo: Error) => void }>();
   /** Event lines by session id; a turn's owner registers here. */
   readonly listeners = new Map<string, (event: Json) => void>();
   /** `ask` lines: an extension's question for a person. */
@@ -24,7 +24,7 @@ export class Rpc {
       this.child.once("error", (error) => { this.stopped = true; this.fail(error); resolve(); });
       this.child.once("exit", (code) => {
         this.stopped = true;
-        this.fail(new Error(`e rpc exited (${code})`));
+        this.fail(new Error(`ulo rpc exited (${code})`));
         resolve();
       });
     });

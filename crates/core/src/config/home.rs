@@ -1,7 +1,7 @@
-//! Resolve the active channel's private state, with an explicit E_HOME override.
+//! Resolve the active channel's private state, with an explicit ULO_HOME override.
 //!
 //! Its formats are open conventions other tools can read: AGENTS.md, SKILL.md
-//! directories, and JSONL sessions. e does not read another tool's
+//! directories, and JSONL sessions. ulo does not read another tool's
 //! configuration or state at runtime.
 
 use std::path::PathBuf;
@@ -34,22 +34,42 @@ pub fn home() -> PathBuf {
     if let Ok(path) = SCOPED_HOME.try_with(Clone::clone) {
         return path;
     }
-    // An empty `E_HOME` is unset, not "the current directory": the same
+    // An empty `ULO_HOME` is unset, not "the current directory": the same
     // rule `user_home` applies to `HOME`.
-    if let Some(custom) = std::env::var("E_HOME").ok().filter(|h| !h.is_empty()) {
+    if let Some(custom) = std::env::var("ULO_HOME").ok().filter(|h| !h.is_empty()) {
         return PathBuf::from(custom);
     }
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let directory = PathBuf::from(base).join(match crate::CHANNEL {
-        "local" => ".e-dev",
-        "pr" => ".e-pr",
-        _ => ".e",
-    });
+    let directory = compatible_directory(
+        &PathBuf::from(base),
+        match crate::CHANNEL {
+            "local" => ".ulo-dev",
+            "pr" => ".ulo-pr",
+            _ => ".ulo",
+        },
+    );
     if crate::CHANNEL == "pr" {
         directory.join(crate::COMMIT)
     } else {
         directory
     }
+}
+
+/// Prefer ulo's directory, retaining existing state until the user moves it.
+/// Legacy names are recognized only here so every frontend follows one rule.
+fn compatible_directory(base: &std::path::Path, name: &str) -> PathBuf {
+    let current = base.join(name);
+    let legacy = base.join(name.replacen(".ulo", ".e", 1));
+    if !current.exists() && legacy.is_dir() {
+        legacy
+    } else {
+        current
+    }
+}
+
+/// Trusted workspace loaders use the same directory precedence as global state.
+pub fn workspace_directory(cwd: &std::path::Path) -> PathBuf {
+    compatible_directory(cwd, ".ulo")
 }
 
 /// The user's home directory, when the platform declares one — the single
@@ -87,7 +107,7 @@ pub fn prompts_dir() -> PathBuf {
 pub fn themes_dir() -> PathBuf {
     home().join("themes")
 }
-/// Where `e install` clones packages: `packages/<host>/<path>` per source.
+/// Where `ulo install` clones packages: `packages/<host>/<path>` per source.
 pub fn packages_dir() -> PathBuf {
     home().join("packages")
 }
@@ -98,7 +118,7 @@ pub fn layout_path() -> PathBuf {
     home().join("layout.json")
 }
 
-/// Create or tighten a directory owned by e, without changing its ancestors
+/// Create or tighten a directory owned by ulo, without changing its ancestors
 /// or restoring owner permissions deliberately removed by the user. Existing
 /// state becomes private too, including older logs below this path.
 pub(crate) fn private_dir(path: &std::path::Path) -> std::io::Result<()> {
@@ -124,7 +144,7 @@ pub(crate) fn private_dir(path: &std::path::Path) -> std::io::Result<()> {
 /// themes or skills has no command that creates it. It stays empty: anything
 /// readable in it becomes system-prompt instructions (see context.rs), so
 /// there is no template to ship. Everything else appears when first written,
-/// so every other entry in `~/.e` is something the user (or a session) caused.
+/// so every other entry in `~/.ulo` is something the user (or a session) caused.
 pub fn ensure() -> std::io::Result<()> {
     private_dir(&home())?;
     let agents = agents_md_path();

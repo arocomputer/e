@@ -1,5 +1,5 @@
 //! Self-update: fetch the latest release binary for this platform, verify
-//! its checksum, and swap it in place — `e update` runs it by hand, and the
+//! its checksum, and swap it in place — `ulo update` runs it by hand, and the
 //! TUI runs it in the background at launch (opt out with the Auto-update
 //! setting). The swap is an atomic rename next to the running binary; the
 //! new version takes effect on the next start, which the notice says.
@@ -13,8 +13,8 @@
 
 use std::path::Path;
 
-const RELEASES: &str = "https://github.com/arocomputer/e/releases";
-const API_LATEST: &str = "https://api.github.com/repos/arocomputer/e/releases/latest";
+const RELEASES: &str = "https://github.com/arocomputer/ulo/releases";
+const API_LATEST: &str = "https://api.github.com/repos/arocomputer/ulo/releases/latest";
 
 /// Release assets redirect to GitHub's download hosts. This client carries
 /// no provider credentials and must not be reused for authenticated requests.
@@ -24,7 +24,7 @@ fn download_client() -> Result<&'static reqwest::Client, String> {
     CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
-                .user_agent(format!("e/{}", crate::VERSION))
+                .user_agent(format!("ulo/{}", crate::VERSION))
                 .redirect(reqwest::redirect::Policy::custom(|attempt| {
                     let downgrade = attempt.previous().last().is_some_and(|previous| {
                         previous.scheme() == "https" && attempt.url().scheme() != "https"
@@ -80,11 +80,11 @@ pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
     let executable = executable
         .canonicalize()
         .unwrap_or_else(|_| executable.to_owned());
-    let marker = executable.parent()?.join(".e-install-method");
+    let marker = executable.parent()?.join(".ulo-install-method");
     match std::fs::read_to_string(marker) {
         Ok(method) => Some(match method.trim() {
-            "homebrew" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/e",
-            "npm" => "Installed with npm or bun. Update with: npm install -g @arocomputer/e or bun add -g @arocomputer/e",
+            "homebrew" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/ulo",
+            "npm" => "Installed with npm or bun. Update with: npm install -g @arocomputer/ulo or bun add -g @arocomputer/ulo",
             _ => "This installation is package-managed. Update it with its package manager.",
         }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -146,20 +146,20 @@ pub async fn latest_tag() -> Result<Option<String>, String> {
 /// `latest_tag` against an explicit API URL, so tests can serve the API.
 pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
     let response = crate::providers::http()
-        .map_err(|e| e.message)?
+        .map_err(|ulo| ulo.message)?
         .get(url)
         .header("accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| format!("update check failed: {e}"))?;
+        .map_err(|ulo| format!("update check failed: {ulo}"))?;
     if !response.status().is_success() {
         if response.status() == 404 {
             return Ok(None);
         }
         return Err(format!("update check failed: {}", response.status()));
     }
-    let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = response.json().await.map_err(|ulo| ulo.to_string())?;
     body["tag_name"]
         .as_str()
         .map(|tag| Some(tag.to_string()))
@@ -171,32 +171,32 @@ pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
 /// parameter so tests can serve a fake release.
 pub async fn install_from(base: &str, tag: &str, dest: &Path) -> Result<String, String> {
     let target = target().ok_or(NO_RELEASE)?;
-    let tarball = fetch_verified(base, tag, &format!("e-{target}.tar.gz")).await?;
+    let tarball = fetch_verified(base, tag, &format!("ulo-{target}.tar.gz")).await?;
 
     // Unpack next to the destination so the final rename stays on one
     // filesystem; the system tar does the extraction (no archive deps).
     let dir = dest.parent().ok_or("binary has no parent directory")?;
-    let staging = dir.join(format!(".e-update-{tag}"));
-    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let archive = staging.join("e.tar.gz");
-    std::fs::write(&archive, &tarball).map_err(|e| e.to_string())?;
+    let staging = dir.join(format!(".ulo-update-{tag}"));
+    std::fs::create_dir_all(&staging).map_err(|ulo| ulo.to_string())?;
+    let archive = staging.join("ulo.tar.gz");
+    std::fs::write(&archive, &tarball).map_err(|ulo| ulo.to_string())?;
     let unpacked = std::process::Command::new("tar")
         .arg("xzf")
         .arg(&archive)
         .current_dir(&staging)
         .status()
-        .map_err(|e| format!("tar failed: {e}"))?;
+        .map_err(|ulo| format!("tar failed: {ulo}"))?;
     if !unpacked.success() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err("tar failed to unpack the update".into());
     }
-    let new_binary = staging.join("e");
+    let new_binary = staging.join("ulo");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&new_binary, std::fs::Permissions::from_mode(0o755));
     }
-    std::fs::rename(&new_binary, dest).map_err(|e| format!("install failed: {e}"))?;
+    std::fs::rename(&new_binary, dest).map_err(|ulo| format!("install failed: {ulo}"))?;
     let _ = std::fs::remove_dir_all(&staging);
     Ok(tag.trim_start_matches('v').to_string())
 }
@@ -206,7 +206,7 @@ pub async fn install_from(base: &str, tag: &str, dest: &Path) -> Result<String, 
 async fn fetch_verified(base: &str, tag: &str, asset: &str) -> Result<Vec<u8>, String> {
     let tarball = fetch(&format!("{base}/download/{tag}/{asset}")).await?;
     let sums = String::from_utf8(fetch(&format!("{base}/download/{tag}/checksums.txt")).await?)
-        .map_err(|e| e.to_string())?;
+        .map_err(|ulo| ulo.to_string())?;
     let expected = sums
         .lines()
         .find(|l| l.ends_with(&format!(" {asset}")))
@@ -236,7 +236,7 @@ pub fn github_release_urls(owner: &str, repo: &str) -> (String, String) {
     )
 }
 
-/// Install a release package (`e install release:<owner>/<repo>/<name>`):
+/// Install a release package (`ulo install release:<owner>/<repo>/<name>`):
 /// fetch `<name>-<target>.tar.gz` for this platform from `base` at `tag`,
 /// verify it, and place the `<name>` executable at
 /// `<root>/extensions/<name>`, where the extension host finds it. `<root>/.tag`
@@ -253,12 +253,12 @@ pub async fn install_release_package(
     }
     let tarball = fetch_verified(base, tag, &format!("{name}-{target}.tar.gz")).await?;
     let extensions = root.join("extensions");
-    std::fs::create_dir_all(&extensions).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&extensions).map_err(|ulo| ulo.to_string())?;
     let staging = root.join(format!(".staging-{tag}"));
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&staging).map_err(|ulo| ulo.to_string())?;
     let archive = staging.join("asset.tar.gz");
-    std::fs::write(&archive, &tarball).map_err(|e| e.to_string())?;
+    std::fs::write(&archive, &tarball).map_err(|ulo| ulo.to_string())?;
     // `xf`, not `xzf`: the system tar detects gzip itself, and a plain tar
     // published under the same name still installs.
     let unpacked = std::process::Command::new("tar")
@@ -266,7 +266,7 @@ pub async fn install_release_package(
         .arg(&archive)
         .current_dir(&staging)
         .status()
-        .map_err(|e| format!("tar failed: {e}"))?;
+        .map_err(|ulo| format!("tar failed: {ulo}"))?;
     if !unpacked.success() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err("tar failed to unpack the release asset".into());
@@ -281,9 +281,10 @@ pub async fn install_release_package(
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755));
     }
-    std::fs::rename(&binary, extensions.join(name)).map_err(|e| format!("install failed: {e}"))?;
+    std::fs::rename(&binary, extensions.join(name))
+        .map_err(|ulo| format!("install failed: {ulo}"))?;
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::write(root.join(".tag"), tag).map_err(|e| e.to_string())?;
+    std::fs::write(root.join(".tag"), tag).map_err(|ulo| ulo.to_string())?;
     Ok(())
 }
 
@@ -301,7 +302,7 @@ async fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
-        .map_err(|e| format!("download failed: {e}"))?;
+        .map_err(|ulo| format!("download failed: {ulo}"))?;
     if !response.status().is_success() {
         return Err(format!("download failed: {}", response.status()));
     }
@@ -309,17 +310,17 @@ async fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|e| e.to_string())
+        .map_err(|ulo| ulo.to_string())
 }
 
-/// Why an off-matrix platform cannot self-update; `e update` prints it.
+/// Why an off-matrix platform cannot self-update; `ulo update` prints it.
 pub const NO_RELEASE: &str =
-    "no release is published for this platform — update from source, not e update";
+    "no release is published for this platform — update from source, not ulo update";
 
 /// The whole flow for the running binary: check, install if newer. Ok(None)
 /// means already current (or not applicable).
 pub async fn self_update() -> Result<Option<String>, String> {
-    let dest = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dest = std::env::current_exe().map_err(|ulo| ulo.to_string())?;
     if let Some(hint) = package_update_hint(&dest) {
         return Err(hint.into());
     }

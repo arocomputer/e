@@ -37,7 +37,7 @@ def prepare(tag, assets, output):
             raise ValueError("Invalid or duplicate checksum")
         checksums[filename] = digest
     for target in PLATFORMS.values():
-        filename = f"e-{target}.tar.gz"
+        filename = f"ulo-{target}.tar.gz"
         actual = hashlib.sha256((assets / filename).read_bytes()).hexdigest()
         if actual != checksums.get(filename):
             raise ValueError(f"Checksum mismatch: {filename}")
@@ -45,29 +45,29 @@ def prepare(tag, assets, output):
     common = {
         "version": version,
         "license": "MIT",
-        "homepage": "https://e.aro.computer",
-        "repository": {"type": "git", "url": "git+https://github.com/arocomputer/e.git"},
+        "homepage": "https://ulo.sh",
+        "repository": {"type": "git", "url": "git+https://github.com/arocomputer/ulo.git"},
         "publishConfig": {"access": "public", "tag": release["npm_tag"]},
     }
     for platform, target in PLATFORMS.items():
         folder = output / platform
         (folder / "bin").mkdir(parents=True)
-        with tarfile.open(assets / f"e-{target}.tar.gz") as archive:
-            member = archive.getmember("e")
+        with tarfile.open(assets / f"ulo-{target}.tar.gz") as archive:
+            member = archive.getmember("ulo")
             if not member.isfile():
                 raise ValueError("Release executable must be a regular file")
             with (
                 archive.extractfile(member) as source,
-                (folder / "bin/e").open("wb") as dest,
+                (folder / "bin/ulo").open("wb") as dest,
             ):
                 shutil.copyfileobj(source, dest)
-        (folder / "bin/e").chmod(0o755)
-        (folder / "bin/.e-install-method").write_text("npm\n")
+        (folder / "bin/ulo").chmod(0o755)
+        (folder / "bin/.ulo-install-method").write_text("npm\n")
         os_name, cpu = platform.split("-")
         manifest = dict(
             common,
-            name=f"@arocomputer/e-{platform}",
-            description=f"e binary for {platform}",
+            name=f"@arocomputer/ulo-{platform}",
+            description=f"ulo binary for {platform}",
             os=[os_name],
             cpu=[cpu],
             files=["bin"],
@@ -76,25 +76,25 @@ def prepare(tag, assets, output):
             manifest["libc"] = ["glibc"]
         (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
-    folder = output / "e"
+    folder = output / "ulo"
     (folder / "bin").mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/packaging/npm-launcher", folder / "bin/e")
+    shutil.copy2(ROOT / "scripts/packaging/npm-launcher", folder / "bin/ulo")
     manifest = dict(
         common,
-        name="@arocomputer/e",
+        name="@arocomputer/ulo",
         description="A small, extensible coding agent for your terminal",
-        bin={command: "bin/e"},
+        bin={command: "bin/ulo"},
         files=["bin"],
         optionalDependencies={
-            f"@arocomputer/e-{platform}": version for platform in PLATFORMS
+            f"@arocomputer/ulo-{platform}": version for platform in PLATFORMS
         },
     )
     (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copyfile(ROOT / "LICENSE", folder / "LICENSE")
     (folder / "README.md").write_text(
-        f"# e\n\nInstall with `npm install -g @arocomputer/e@{release['npm_tag']}` or "
-        f"`bun add -g @arocomputer/e@{release['npm_tag']}`.\n\nRun `{command}` to start. "
-        "See https://e.aro.computer/docs for setup.\n\n"
+        f"# ulo\n\nInstall with `npm install -g @arocomputer/ulo@{release['npm_tag']}` or "
+        f"`bun add -g @arocomputer/ulo@{release['npm_tag']}`.\n\nRun `{command}` to start. "
+        "See https://ulo.sh/docs for setup.\n\n"
         "Includes native binaries for macOS and glibc Linux on ARM64 and x86-64.\n"
         "No install scripts or JavaScript runtime are needed to run the binary.\n"
     )
@@ -119,9 +119,9 @@ def prepare(tag, assets, output):
     manifest.pop("scripts", None)
     (folder / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     formula = [
-        "class E < Formula",
+        "class Ulo < Formula",
         '  desc "Small, extensible coding agent for your terminal"',
-        '  homepage "https://e.aro.computer"',
+        '  homepage "https://ulo.sh"',
         f'  version "{version}"',
         '  license "MIT"',
         "",
@@ -130,7 +130,7 @@ def prepare(tag, assets, output):
         formula.append(f"  on_{ruby_os} do")
         for cpu, ruby_cpu in [("arm64", "arm"), ("x64", "intel")]:
             target = PLATFORMS[f"{os_name}-{cpu}"]
-            filename = f"e-{target}.tar.gz"
+            filename = f"ulo-{target}.tar.gz"
             formula.extend(
                 [
                     f"    on_{ruby_cpu} do",
@@ -143,13 +143,13 @@ def prepare(tag, assets, output):
     formula.extend(
         [
             "  def install",
-            '    libexec.install "e"',
-            f'    (libexec/".e-install-method").write "homebrew\\n"',
-            f'    bin.install_symlink libexec/"e" => "{command}"',
+            '    libexec.install "ulo"',
+            f'    (libexec/".ulo-install-method").write "homebrew\\n"',
+            f'    bin.install_symlink libexec/"ulo" => "{command}"',
             "  end",
             "",
             "  test do",
-            f'    assert_equal "e #{{version}}", shell_output("#{{bin}}/{command} --version").strip',
+            f'    assert_equal "ulo #{{version}}", shell_output("#{{bin}}/{command} --version").strip',
             "  end",
             "end",
             "",

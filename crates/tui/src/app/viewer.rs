@@ -6,7 +6,7 @@ use super::*;
 use crate::markdown::clip_styled;
 
 /// The reference's navigation wording per depth; `transcript_hint` in
-/// `~/.e/settings.json` replaces it outright when set.
+/// `~/.ulo/settings.json` replaces it outright when set.
 const REVIEW_HINT: &str = "Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close";
 const FULL_HINT: &str = "Full detail · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close";
 
@@ -25,7 +25,7 @@ impl Viewer {
             full: false,
             scroll: 0,
             follow_tail: true,
-            hint: e_core::config::settings::get_string("transcript_hint").unwrap_or_default(),
+            hint: ulo_core::config::settings::get_string("transcript_hint").unwrap_or_default(),
         }
     }
 
@@ -255,7 +255,7 @@ impl App {
 
 /// The reference footer ellipsizes its hint instead of wrapping into the status row.
 fn navigation_row(theme: &Theme, hint: &str, width: usize) -> String {
-    let hint = e_core::tools::sanitize_display(hint).replace('\n', " ");
+    let hint = ulo_core::tools::sanitize_display(hint).replace('\n', " ");
     let available = width.saturating_sub(2);
     let hint = crate::transcript::clip_plain(&hint, available);
     clip_styled(

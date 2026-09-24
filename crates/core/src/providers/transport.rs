@@ -28,7 +28,7 @@ pub(super) fn build_client() -> Result<reqwest::Client, String> {
         // Credentials in custom headers and request bodies must never be
         // forwarded to a redirect target. Downloads use their own client.
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent(format!("e/{}", crate::VERSION))
+        .user_agent(format!("ulo/{}", crate::VERSION))
         .connect_timeout(std::time::Duration::from_secs(30))
         // After a system sleep, pooled connections are dead but look
         // alive locally — a request that reuses one would sit out the
@@ -37,7 +37,7 @@ pub(super) fn build_client() -> Result<reqwest::Client, String> {
         .tcp_keepalive(std::time::Duration::from_secs(15))
         .pool_idle_timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| e.to_string())
+        .map_err(|ulo| ulo.to_string())
 }
 
 /// One cached build outcome, mapped to the error callers see. `build` runs
@@ -75,13 +75,13 @@ pub async fn send_request_within(
 ) -> Result<reqwest::Response, ProviderError> {
     match tokio::time::timeout(wait, builder.send()).await {
         Ok(Ok(response)) => Ok(response),
-        Ok(Err(e)) => {
-            let message = format!("request failed: {}", transport_error_chain(&e));
-            if e.is_builder() {
+        Ok(Err(ulo)) => {
+            let message = format!("request failed: {}", transport_error_chain(&ulo));
+            if ulo.is_builder() {
                 // The request could not be built (a malformed base URL, an
                 // invalid header) — no retry ladder changes that.
                 Err(ProviderError::rejected(message))
-            } else if e.is_connect() {
+            } else if ulo.is_connect() {
                 Err(ProviderError::network(message))
             } else {
                 // A loss while sending or awaiting headers does not prove
@@ -128,9 +128,9 @@ where
         Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
         // A broken body transport (reset, truncated chunking) is retryable
         // by cause; the agent still refuses to retry once content streamed.
-        Ok(Some(Err(e))) => Err(ProviderError::stalled(format!(
+        Ok(Some(Err(ulo))) => Err(ProviderError::stalled(format!(
             "provider response interrupted: {}",
-            transport_error_chain(&e)
+            transport_error_chain(&ulo)
         ))),
         Err(_) => Err(ProviderError::stalled(
             "stream stalled before completing an SSE event",
@@ -146,7 +146,10 @@ fn transport_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
     for _ in 0..5 {
         let Some(error) = next else { break };
         let mut message = error.to_string();
-        if let Some(url) = error.downcast_ref::<reqwest::Error>().and_then(|e| e.url()) {
+        if let Some(url) = error
+            .downcast_ref::<reqwest::Error>()
+            .and_then(|ulo| ulo.url())
+        {
             message = message.replace(url.as_str(), "<provider URL>");
         }
         if parts.last() != Some(&message) {

@@ -13,13 +13,13 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use e_core::agent::{Agent, AgentOptions, SessionEvent};
-use e_core::cli::ToolMode;
-use e_core::config::home;
-use e_core::extensions::ExtensionHost;
-use e_core::providers::catalog::{self, Model};
-use e_core::providers::{ChatMessage, ImageInput};
-use e_core::session::{self as log, SessionLog};
+use ulo_core::agent::{Agent, AgentOptions, SessionEvent};
+use ulo_core::cli::ToolMode;
+use ulo_core::config::home;
+use ulo_core::extensions::ExtensionHost;
+use ulo_core::providers::catalog::{self, Model};
+use ulo_core::providers::{ChatMessage, ImageInput};
+use ulo_core::session::{self as log, SessionLog};
 
 use crate::turn::{Start, Turn};
 use crate::{Error, Message, SavedSession};
@@ -57,7 +57,7 @@ impl Prompt {
         self
     }
 
-    /// Attach an image file (PNG, JPEG, GIF, or WebP; e's size limits apply).
+    /// Attach an image file (PNG, JPEG, GIF, or WebP; ulo's size limits apply).
     pub fn image_file(self, path: impl AsRef<Path>) -> Result<Self, Error> {
         let image = ImageInput::from_path(path.as_ref()).map_err(Error::Image)?;
         Ok(self.image(image))
@@ -83,7 +83,7 @@ impl From<&String> for Prompt {
 }
 
 /// Configures a [`Session`]. Defaults: the process's working directory,
-/// the user's e home (`E_HOME`, else `~/.e`), their configured default
+/// the user's ulo home (`ULO_HOME`, else `~/.ulo`), their configured default
 /// model, every built-in tool, memory-only, no extensions.
 #[derive(Clone, Debug, Default)]
 pub struct SessionBuilder {
@@ -134,7 +134,7 @@ impl SessionBuilder {
     }
 
     /// Write the conversation to a JSONL session log under the home's
-    /// `sessions/`, the same files `e -r` resumes. Off by default: an
+    /// `sessions/`, the same files `ulo -r` resumes. Off by default: an
     /// embedding must opt into leaving files in the user's home.
     pub fn persist(mut self, persist: bool) -> Self {
         // A resumed session must keep appending to the file it came from:
@@ -148,14 +148,14 @@ impl SessionBuilder {
     /// default: extensions are user-installed executables, and starting
     /// them is a decision for the host. They run in the session's `cwd` and
     /// see it at `initialize`. Startup hooks do not run, and no command-line
-    /// flags are parsed for them: the host process's argv is not e's.
+    /// flags are parsed for them: the host process's argv is not ulo's.
     pub fn extensions(mut self, enabled: bool) -> Self {
         self.extensions = enabled;
         self
     }
 
-    /// Host instructions appended to e's own system prompt, after the
-    /// skills catalog and project context. The base prompt stays e's so the
+    /// Host instructions appended to ulo's own system prompt, after the
+    /// skills catalog and project context. The base prompt stays ulo's so the
     /// agent keeps its tool discipline; replace it wholesale only through
     /// the home's `settings.json` `system_prompt`, as the terminal does.
     pub fn instructions(mut self, text: impl Into<String>) -> Self {
@@ -166,7 +166,7 @@ impl SessionBuilder {
     /// Continue a saved session file in place: its active branch becomes
     /// the history and new messages append to the same file. Implies
     /// `persist(true)` and takes the file's lock, so a build fails while
-    /// another e has it open.
+    /// another ulo has it open.
     pub fn resume(mut self, path: impl Into<PathBuf>) -> Self {
         self.resume = Some(path.into());
         self.persist = true;
@@ -238,7 +238,8 @@ impl SessionBuilder {
             Tools::All => (ToolMode::All, None),
             Tools::None => (ToolMode::None, None),
             Tools::Only(names) => {
-                if let Some(unknown) = names.iter().find(|name| !e_core::tools::is_builtin(name)) {
+                if let Some(unknown) = names.iter().find(|name| !ulo_core::tools::is_builtin(name))
+                {
                     return Err(Error::UnknownTool(unknown.clone()));
                 }
                 (ToolMode::All, Some(names))
@@ -256,7 +257,7 @@ impl SessionBuilder {
         let cwd = agent.cwd();
 
         if let Some(path) = &self.resume {
-            // Ownership first: a file another e is appending to must not be
+            // Ownership first: a file another ulo is appending to must not be
             // replayed into a second, diverging history. The read and parse
             // run on the blocking pool: a large session must not stall the
             // executor (and every other future on a current-thread runtime).
@@ -438,7 +439,7 @@ impl Session {
         self.agent.effort()
     }
 
-    /// The conversation so far, in e's persisted message shape. Empty once
+    /// The conversation so far, in ulo's persisted message shape. Empty once
     /// `clear` has been called, even before a dropped turn's commits stop.
     pub fn history(&self) -> Vec<Message> {
         if self.pending_clear {
@@ -481,7 +482,7 @@ impl Session {
         self.agent.cwd()
     }
 
-    /// e's assembled prompt for this workspace and home, plus the host's
+    /// ulo's assembled prompt for this workspace and home, plus the host's
     /// instructions. Recomputed per turn so edits to AGENTS.md land.
     pub(crate) fn system_prompt(&self) -> String {
         let base = self.agent.system_prompt();
@@ -542,7 +543,7 @@ mod tests {
     fn home_with_broken_extension() -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let home = std::env::temp_dir().join(format!(
-            "e-sdk-unit-broken-{}-{}",
+            "ulo-sdk-unit-broken-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));

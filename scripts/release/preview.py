@@ -22,31 +22,31 @@ def main():
     if args.pr <= 0:
         parser.error('PR must be positive')
     if not args.run:
-        gh('workflow', 'run', 'preview.yml', '--repo', 'arocomputer/e', '-f', f'pr={args.pr}')
-        print('Requested preview. Find its run with: gh run list --repo arocomputer/e --workflow preview.yml')
+        gh('workflow', 'run', 'preview.yml', '--repo', 'arocomputer/ulo', '-f', f'pr={args.pr}')
+        print('Requested preview. Find its run with: gh run list --repo arocomputer/ulo --workflow preview.yml')
         print(f'After it succeeds: ./x preview {args.pr} --run RUN_ID')
         return
     if not args.run.isdigit():
         parser.error('run must be numeric')
-    run = json.loads(gh('api', f'repos/arocomputer/e/actions/runs/{args.run}'))
+    run = json.loads(gh('api', f'repos/arocomputer/ulo/actions/runs/{args.run}'))
     assert run['path'] == '.github/workflows/preview.yml' and run['conclusion'] == 'success', 'Not a successful Preview run'
     os_name = {'Darwin': 'apple-darwin', 'Linux': 'unknown-linux-gnu'}[platform.system()]
     arch = {'arm64': 'aarch64', 'aarch64': 'aarch64', 'x86_64': 'x86_64'}[platform.machine()]
     with tempfile.TemporaryDirectory() as tmp:
-        gh('run', 'download', args.run, '--repo', 'arocomputer/e', '--name', f'e-pr-{args.pr}-{arch}-{os_name}', '--dir', tmp)
+        gh('run', 'download', args.run, '--repo', 'arocomputer/ulo', '--name', f'ulo-pr-{args.pr}-{arch}-{os_name}', '--dir', tmp)
         root = Path(tmp)
         info = json.loads((root / 'preview.json').read_text())
         assert info['channel'] == 'pr'
-        digest = hashlib.sha256((root / 'e').read_bytes()).hexdigest()
-        assert (root / 'checksums.txt').read_text().split() == [digest, 'e'], 'Checksum mismatch'
+        digest = hashlib.sha256((root / 'ulo').read_bytes()).hexdigest()
+        assert (root / 'checksums.txt').read_text().split() == [digest, 'ulo'], 'Checksum mismatch'
         # Pin the requested artifact, even if the PR has received newer commits since the run.
-        dest = Path(os.environ.get('E_INSTALL_DIR', Path.home() / '.local/bin'))
+        dest = Path(os.environ.get('ULO_INSTALL_DIR', Path.home() / '.local/bin'))
         dest.mkdir(parents=True, exist_ok=True)
-        target = dest / f'e-pr-{args.pr}'
-        if target.is_symlink() or (dest / '.e-install-method').exists():
-            raise SystemExit('Destination is package-managed; set E_INSTALL_DIR elsewhere')
-        staged = dest / f'.e-pr-{args.pr}.next'
-        staged.write_bytes((root / 'e').read_bytes())
+        target = dest / f'ulo-pr-{args.pr}'
+        if target.is_symlink() or (dest / '.ulo-install-method').exists():
+            raise SystemExit('Destination is package-managed; set ULO_INSTALL_DIR elsewhere')
+        staged = dest / f'.ulo-pr-{args.pr}.next'
+        staged.write_bytes((root / 'ulo').read_bytes())
         staged.chmod(0o755)
         staged.replace(target)
         print(f'Installed {target} from {info["commit"]}. PR code is unreviewed; use a disposable project.')

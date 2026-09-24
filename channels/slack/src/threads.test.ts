@@ -20,7 +20,7 @@ class FakeRpc implements Connection {
 }
 
 test("restart resumes the saved path and never reuses a persisted session ID", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "e-slack-restart-"));
+  const dir = mkdtempSync(join(tmpdir(), "ulo-slack-restart-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "state.json");
   const saved = JSON.parse(readFileSync(new URL("../../../crates/cli/tests/fixtures/channels/slack-state-v1.json", import.meta.url), "utf8"));
@@ -38,7 +38,7 @@ test("restart resumes the saved path and never reuses a persisted session ID", a
 });
 
 test("concurrent threads route colliding ask IDs to their own connection", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "e-slack-asks-"));
+  const dir = mkdtempSync(join(tmpdir(), "ulo-slack-asks-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const received: { key: string; rpc: Connection; ask: Json }[] = [];
   const threads = new Threads(join(dir, "state.json"), () => new FakeRpc(), {},
@@ -55,7 +55,7 @@ test("concurrent threads route colliding ask IDs to their own connection", async
 });
 
 test("damaged saved state is reported and preserved", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "e-slack-corrupt-"));
+  const dir = mkdtempSync(join(tmpdir(), "ulo-slack-corrupt-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "state.json");
   for (const contents of ["{broken", "null", '{"thread":{"path":false}}']) {
@@ -66,7 +66,7 @@ test("damaged saved state is reported and preserved", (t) => {
 });
 
 test("a failed save does not update the in-memory thread map", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "e-slack-write-"));
+  const dir = mkdtempSync(join(tmpdir(), "ulo-slack-write-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const threads = new Threads(join(dir, "missing", "state.json"), () => new FakeRpc(), {}, () => {});
   assert.throws(() => threads.save("new", "/saved/new.jsonl"));
@@ -75,7 +75,7 @@ test("a failed save does not update the in-memory thread map", (t) => {
 
 
 test("shutdown closes connections still waiting for their first response", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "e-slack-opening-"));
+  const dir = mkdtempSync(join(tmpdir(), "ulo-slack-opening-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   let reject: (error: Error) => void = () => {};
   const waiting = new Promise<Json>((_, fail) => { reject = fail; });

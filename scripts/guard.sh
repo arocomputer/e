@@ -1,6 +1,6 @@
 #!/bin/sh
 # The security-surface audit. Run locally before pushing; CI runs it on every
-# PR. Each check pins a promise e makes to its users — a PR that moves one of
+# PR. Each check pins a promise ulo makes to its users — a PR that moves one of
 # these boundaries must change this script in the same diff, where the review
 # can see it.
 set -eu
@@ -25,13 +25,13 @@ prod_rs() {
   done
 }
 
-# 1. Network surface. e talks to its sign-in and model providers, and to
+# 1. Network surface. ulo talks to its sign-in and model providers, and to
 #    models.dev for model facts (decision 0008, an unauthenticated GET that
 #    carries no user data), and nothing else — in the shipped binary (crates/*/src)
 #    or its dev tooling (scripts/). A new host means a new place user data
 #    can go — add it here deliberately or the build fails.
 # Numeric loopback is used by crates/cli/tests/ui/run.py's synthetic streaming server.
-allowed_hosts="localhost 127.0.0.1 models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com www.npmjs.com github.com registry.npmjs.org e.aro.computer ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
+allowed_hosts="localhost 127.0.0.1 models.dev auth.openai.com api.openai.com chatgpt.com opencode.ai auth.x.ai api.x.ai api.anthropic.com api.github.com www.npmjs.com github.com registry.npmjs.org ulo.sh ai-gateway.vercel.sh generativelanguage.googleapis.com api.groq.com api.mistral.ai api.deepseek.com api.cerebras.ai openrouter.ai api.together.xyz api.fireworks.ai"
 found_hosts=$(
   { prod_rs $(find crates/*/src -name '*.rs' 2>/dev/null); find scripts crates/cli/tests/ui -type f ! -path '*/__pycache__/*' -exec cat -- {} + 2>/dev/null; } |
     grep -ohE 'https?://[A-Za-z0-9.-]+' | sed -E 's#https?://##' | sort -u
@@ -43,27 +43,27 @@ for host in $found_hosts; do
   esac
 done
 
-# 2. Sovereign home. e reads only ~/.e — never another tool's store.
+# 2. Sovereign home. ulo reads only ~/.ulo — never another tool's store.
 if out=$(grep -rnE '[~/"]\.(claude|codex|cursor|gemini|opencode|aws|ssh)\b' crates/*/src --include='*.rs' 2>/dev/null); then
   bad "reference to another tool's home directory:"
   say "$out"
 fi
 
-# 3. Home resolution happens in one place. HOME/E_HOME lookups outside these
+# 3. Home resolution happens in one place. HOME/ULO_HOME lookups outside these
 #    files are a second door into the filesystem — `var_os` included, so the
 #    OsString form cannot slip past the pattern.
-if out=$(grep -rn 'env::var("HOME")\|env::var("E_HOME")\|env::var_os("HOME")\|env::var_os("E_HOME")' crates/*/src --include='*.rs' |
+if out=$(grep -rn 'env::var("HOME")\|env::var("ULO_HOME")\|env::var_os("HOME")\|env::var_os("ULO_HOME")' crates/*/src --include='*.rs' |
     grep -v '^crates/core/src/config/home.rs:' | grep -v '^crates/tui/src/app/mod.rs:' |
     grep -v '^crates/tui/src/app/frame.rs:'); then
-  bad "HOME/E_HOME read outside core/config/home.rs (or tui/app's title display):"
+  bad "HOME/ULO_HOME read outside core/config/home.rs (or tui/app's title display):"
   say "$out"
 fi
 
 # 4. Config and credential writes go through core/store.rs — the merge-write
 #    path that never wipes unknown keys and chmods auth to 0600. Direct write
 #    APIs in core are limited to the files that own a format: packages.rs
-#    owns ~/.e/packages/ (the npm project file there) and the files
-#    `e packages init` scaffolds into a directory the user names; its
+#    owns ~/.ulo/packages/ (the npm project file there) and the files
+#    `ulo packages init` scaffolds into a directory the user names; its
 #    settings entries still go through the store.
 if out=$(prod_rs $(find crates/core/src -name '*.rs' 2>/dev/null) | grep -E 'fs::write|File::create|OpenOptions' |
     grep -v '^crates/core/src/config/store.rs:' | grep -v '^crates/core/src/session.rs:' |
@@ -109,17 +109,17 @@ done
 #    embeds carries no terminal with it; tui, rpc, and sdk depend on core and
 #    never on each other. Cargo enforces the imports; this pins the manifests.
 
-if out=$(grep -nE '^(e-tui|e-rpc|e-sdk|crossterm|unicode-width)\b|aro-e-(tui|rpc|sdk)' crates/core/Cargo.toml); then
+if out=$(grep -nE '^(ulo-tui|ulo-rpc|ulo-sdk|crossterm|unicode-width)\b|ulo-(tui|rpc|sdk)' crates/core/Cargo.toml); then
   bad "crates/core depends on a frontend or a terminal library:"
   say "$out"
 fi
 for frontend in tui rpc; do
-  if out=$(grep -nE '^e-(tui|rpc)\b' "crates/$frontend/Cargo.toml"); then
+  if out=$(grep -nE '^ulo-(tui|rpc)\b' "crates/$frontend/Cargo.toml"); then
     bad "crates/$frontend depends on another frontend:"
     say "$out"
   fi
 done
-if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'aro-e"|aro-e-(tui|rpc)'); then
+if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE 'ulo"|ulo-(tui|rpc)'); then
   bad "crates/sdk depends on a frontend:"
   say "$out"
 fi

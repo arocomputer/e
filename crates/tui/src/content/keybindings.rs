@@ -1,9 +1,9 @@
 //! The composer's line-editing keymap: which key chord performs which
 //! `Key` action (`composer.rs`). File-backed like themes and skills —
-//! `~/.e/keybindings.json` overrides individual chords, everything left
-//! unset keeps e's built-in emacs-ish bindings.
+//! `~/.ulo/keybindings.json` overrides individual chords, everything left
+//! unset keeps ulo's built-in emacs-ish bindings.
 //!
-//! This covers editing only, not e's application-level shortcuts (ctrl+c,
+//! This covers editing only, not ulo's application-level shortcuts (ctrl+c,
 //! ctrl+p, ctrl+v for clipboard images, tab, menu arrows, …): those are
 //! claimed earlier in the key dispatch (`tui/app/mod.rs`), so a chord already
 //! spoken for there never reaches this keymap regardless of what a user binds
@@ -22,10 +22,10 @@ use std::collections::HashMap;
 use crossterm::event::KeyCode;
 
 use crate::content::composer::Key;
-use e_core::config::chord::normalize_chord;
+use ulo_core::config::chord::normalize_chord;
 
 /// A loaded set of chord overrides. Not present in the map at all means
-/// "use e's built-in behavior for this chord"; present with `None` means
+/// "use ulo's built-in behavior for this chord"; present with `None` means
 /// "swallow this chord, do nothing" — the two are different, so the map
 /// holds `Option<Key>`, not just `Key`.
 #[derive(Default)]
@@ -44,11 +44,11 @@ impl Keymap {
     }
 }
 
-/// Load `~/.e/keybindings.json`. Missing file or malformed JSON both fail
+/// Load `~/.ulo/keybindings.json`. Missing file or malformed JSON both fail
 /// open to an empty map — a keybindings typo must never make the composer
 /// unusable.
 pub fn load() -> Keymap {
-    let Ok(json) = std::fs::read_to_string(e_core::config::home::keybindings_path()) else {
+    let Ok(json) = std::fs::read_to_string(ulo_core::config::home::keybindings_path()) else {
         return Keymap::empty();
     };
     let Ok(raw) = serde_json::from_str::<HashMap<String, String>>(&json) else {

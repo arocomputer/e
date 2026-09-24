@@ -1,6 +1,6 @@
 # Terminal UI checks
 
-These tests run the real e binary in a PTY against a loopback provider. They
+These tests run the real ulo binary in a PTY against a loopback provider. They
 replay completed synchronized frames with `pyte`, checking cell positions and
 foreground colors. Raw captures, resize offsets, text snapshots, and synthetic
 provider requests remain available after a pass or failure.
@@ -21,7 +21,7 @@ Rust rendering and PTY tests remain part of `./x test` without Python packages.
 Choose one scenario or a fresh output directory:
 
 ```sh
-./x ui --out /tmp/e-ui-review diff-counts
+./x ui --out /tmp/ulo-ui-review diff-counts
 ```
 
 | Scenario | Contract |
@@ -51,7 +51,7 @@ a success marker occurred somewhere in the raw output.
 Open a generated `.txt` snapshot or replay a `.raw` capture:
 
 ```sh
-target/ui-env/bin/python scripts/term.py /tmp/e-ui-review/diff-counts/session.raw 100 30
+target/ui-env/bin/python scripts/term.py /tmp/ulo-ui-review/diff-counts/session.raw 100 30
 ```
 
 Do not print raw captures directly into your terminal. Exploratory scenarios
@@ -64,7 +64,7 @@ repros. They do not claim a test pass:
 ./x ui --record-only narrow-trust paste-control
 ```
 
-Each scenario gets fresh `HOME`, `E_HOME`, and workspace directories. Fixtures
+Each scenario gets fresh `HOME`, `ULO_HOME`, and workspace directories. Fixtures
 use dummy credentials, disable extensions and auto-update, and send requests only
 to the local mock provider. Only `tool-tree`, `single-tool`, `heredoc-tool`, and `diff-counts` enable tools.
 They run generated `printf`/`sleep`/`cat` commands or edit a generated file. No real

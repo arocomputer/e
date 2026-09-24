@@ -6,7 +6,7 @@ order: 1
 
 # Models & providers
 
-`~/.e/models.json` adds models and corrects the built-in ones.
+`~/.ulo/models.json` adds models and corrects the built-in ones.
 
 ```json
 {
@@ -46,18 +46,18 @@ cycle.
 
 ## Endpoint and dialect
 
-These keys tell e where to send requests and how to shape them.
+These keys tell ulo where to send requests and how to shape them.
 
 - `base_url` is the provider's endpoint. A new provider requires it. An entry
   for a built-in provider may omit it and inherit that provider's endpoint.
-  e never guesses another provider's host.
+  ulo never guesses another provider's host.
 - `api` is the wire dialect: `openai-completions`, `openai-responses`,
   `codex-responses`, `anthropic-messages`, or `google-generative-ai`. The
-  default is `openai-completions`. e also accepts the short aliases
+  default is `openai-completions`. ulo also accepts the short aliases
   `completions`, `responses`, `anthropic`, and `google`. Any other name is a
   load error.
 - `responses_mount` selects the Responses path explicitly. It affects only a
-  Responses dialect. e never infers it from whether the stored credential is
+  Responses dialect. ulo never infers it from whether the stored credential is
   a key or OAuth.
 
 | `responses_mount` | Request path | Notes |
@@ -71,12 +71,12 @@ These keys tell e where to send requests and how to shape them.
 The separation matters for gateways that accept one inference dialect but
 expose another provider's catalog shape.
 
-| `catalog` | How e reads the model list |
+| `catalog` | How ulo reads the model list |
 | --- | --- |
 | `openai` | Default. `GET /models`, reading `data[].id`. |
 | `anthropic` | `GET /v1/models`, with `x-api-key`. |
 | `google` | `models[].name`, with `x-goog-api-key`. |
-| `chatgpt` | The ChatGPT backend's picker. e reads `models[].slug` and strips the `-wm` suffix. It keeps work-mode entries only and uses `max_tokens` as the context window. |
+| `chatgpt` | The ChatGPT backend's picker. ulo reads `models[].slug` and strips the `-wm` suffix. It keeps work-mode entries only and uses `max_tokens` as the context window. |
 | `none` | No live discovery. |
 
 ## Limits
@@ -105,7 +105,7 @@ has them:
 
 If none of these has levels, the model has no reasoning knob.
 
-e sends each level as the exact string in `reasoning_effort`, or the
+ulo sends each level as the exact string in `reasoning_effort`, or the
 dialect's equivalent. The levels must match what the backend accepts. For
 example, opencode-go's `glm-5.3-flash` takes `["low", "high", "max"]`, with no
 `medium`. The gateway's own list does not advertise that set.
@@ -120,7 +120,7 @@ model level.
 | `supports_tools` | `true` |
 | `image_input` | `false` |
 
-e sends no tool schemas to a model declared without tool support. That model
+ulo sends no tool schemas to a model declared without tool support. That model
 cannot execute a tool even if it emits one.
 
 A live-discovered id takes what models.dev states for it, else the
@@ -131,7 +131,7 @@ over feed facts for discovered ids too.
 ## Pricing
 
 `pricing` declares USD rates per million uncached input and output tokens.
-e shows a turn estimate and includes `cost_usd` in the `e rpc` response.
+ulo shows a turn estimate and includes `cost_usd` in the `ulo rpc` response.
 
 The cache-read, five-minute cache-write, and one-hour cache-write rates are
 optional. They price prompt caching separately. An omitted cache rate falls
@@ -143,7 +143,7 @@ protocol. Use the provider's current published rates.
 ## Credentials
 
 `/login <provider>` stores an API key for any provider name, in
-`~/.e/auth.json`.
+`~/.ulo/auth.json`.
 
 A provider with no stored credential falls back to its conventional
 environment variable. This is what CI and scripts want. `auth.json` wins when
@@ -170,14 +170,14 @@ in, and their models appear as soon as the local server answers `/models`.
 
 ## The catalog is live
 
-e asks each signed-in provider for its model list with `GET {base}/models`.
+ulo asks each signed-in provider for its model list with `GET {base}/models`.
 It does this in the background at launch, after a sign-in, and when `/models`
-opens. A model a gateway ships today appears today, with no e release
+opens. A model a gateway ships today appears today, with no ulo release
 involved.
 
 Most of those lists carry nothing but ids. The facts come from
-[models.dev](https://models.dev), a community catalog. e fetches it in the same refresh, trims
-it to e's providers, and caches it in `~/.e/models-dev.json`.
+[models.dev](https://models.dev), a community catalog. ulo fetches it in the same refresh, trims
+it to ulo's providers, and caches it in `~/.ulo/models-dev.json`.
 
 For every model models.dev knows, built-in seed or freshly discovered id, it
 sets:
@@ -202,8 +202,8 @@ From lowest to highest:
 4. `models.json`
 
 A seed is only the offline fallback. A wrong fact is fixed upstream, not
-pinned in e.
+pinned in ulo.
 
 An explicit `models.json` value is final. It survives every refresh and every
-e update. A partial entry inherits the facts for what it leaves unsaid, even
+ulo update. A partial entry inherits the facts for what it leaves unsaid, even
 when the model has no built-in seed.

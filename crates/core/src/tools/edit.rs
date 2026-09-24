@@ -44,7 +44,7 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
     }
     let text = match std::fs::read_to_string(&full) {
         Ok(t) => t,
-        Err(e) => return err(format!("edit {path}: {e}"), path),
+        Err(ulo) => return err(format!("edit {path}: {ulo}"), path),
     };
     // Match the raw bytes first. A CRLF file is shown to the model with plain
     // newlines (read strips the `\r`), so a multi-line old_string built from
@@ -113,7 +113,7 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
                 display: Some(super::truncate(detail.trim_end().to_string())),
             }
         }
-        Err(e) => err(format!("edit {path}: {e}"), path),
+        Err(ulo) => err(format!("edit {path}: {ulo}"), path),
     }
 }
 

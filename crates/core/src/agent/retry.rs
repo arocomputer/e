@@ -1,10 +1,10 @@
 //! Retry policy for a mid-turn provider failure: how long to wait before
 //! trying again, and how many attempts one failure campaign gets before the
 //! turn gives up. The ladder shape (250ms, 1s, then doubling to a 30s
-//! ceiling) and the ten-attempt budget are e's own defaults.
+//! ceiling) and the ten-attempt budget are ulo's own defaults.
 //! The wait carries downward jitter so many agents failing together don't
 //! all knock on the provider on the same tick, and the attempt budget is
-//! file-backed (`retry_max_attempts` in `~/.e/settings.json`) — quota
+//! file-backed (`retry_max_attempts` in `~/.ulo/settings.json`) — quota
 //! errors skip all of this, never being retried at all.
 
 use std::time::Duration;
@@ -35,7 +35,7 @@ pub fn backoff(attempt: u32) -> Duration {
     }
 }
 
-/// The attempt budget for one failure campaign, from `~/.e/settings.json`
+/// The attempt budget for one failure campaign, from `~/.ulo/settings.json`
 /// (`retry_max_attempts`), defaulting to `MAX_ATTEMPTS`.
 pub fn max_attempts() -> u32 {
     crate::config::settings::get_u64("retry_max_attempts")

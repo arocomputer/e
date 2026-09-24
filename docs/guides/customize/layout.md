@@ -6,7 +6,7 @@ order: 8
 
 # Layout
 
-`~/.e/layout.json` sets where the regions of e's frame go and what the status
+`~/.ulo/layout.json` sets where the regions of ulo's frame go and what the status
 row reads. It follows the same file-backed pattern as themes and keybindings.
 
 ```json
@@ -30,7 +30,7 @@ Every key is optional. The values above are the defaults, except the `diff`
 entry, which is an example.
 
 Apply changes with `/reload`, or after you close `/settings`. A missing or
-malformed file falls back to e's built-in layout untouched.
+malformed file falls back to ulo's built-in layout untouched.
 
 ## Panes
 
@@ -50,7 +50,7 @@ side. The focused one fills the screen, and the status row says how to reach
 the other.
 
 `focus` is the chord that moves focus between the conversation and the pane.
-Any ctrl or alt chord that e does not already use works. The grammar is the
+Any ctrl or alt chord that ulo does not already use works. The grammar is the
 one keybindings use. See `docs/guides/customize/keybindings.md`.
 
 ## The status row
@@ -68,7 +68,7 @@ segment expand.
 | `{status}` | every extension's `ui.status` slot, joined with ` · ` |
 | `{status:<name>}` | one extension's slots |
 
-e drops a segment whose tokens all came up empty. It also drops a ` / ` part
+ulo drops a segment whose tokens all came up empty. It also drops a ` / ` part
 around an empty token. So `"{model} / {effort}"` reads just the model for a
 model without an effort knob.
 
@@ -97,5 +97,5 @@ there is any.
 
 ## The banner
 
-`"banner": false` leaves out the `𝑒 <version> · Run /help for commands` line
+`"banner": false` leaves out the `ulo <version> · Run /help for commands` line
 at the top of a session.

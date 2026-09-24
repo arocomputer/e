@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use super::catalog::Api;
 
-/// How much of a provider deployment e itself continuously verifies. This
+/// How much of a provider deployment ulo itself continuously verifies. This
 /// is intentionally separate from the API dialect: many gateways speak
 /// Completions, but that does not make every gateway a native integration.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -100,10 +100,10 @@ pub struct Provider {
     pub responses_mount: ResponsesMount,
     #[serde(default)]
     pub auth: Auth,
-    /// Opt-in gateway attribution headers. A provider that sets these asks e
-    /// to identify its requests: `client_header` carries e's client name
+    /// Opt-in gateway attribution headers. A provider that sets these asks ulo
+    /// to identify its requests: `client_header` carries ulo's client name
     /// (`crate::CLIENT`) so the gateway recognizes the caller, and
-    /// `session_header` carries e's stable per-conversation id so the gateway
+    /// `session_header` carries ulo's stable per-conversation id so the gateway
     /// can pin a conversation to one upstream for cache hits. Only OpenCode's
     /// gateways (`x-opencode-client` / `x-opencode-session`) set them today;
     /// a provider that leaves them unset receives neither header, so the id is

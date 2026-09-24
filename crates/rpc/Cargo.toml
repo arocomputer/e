@@ -1,24 +1,24 @@
 [package]
-# The headless frontend: `e rpc`, a JSONL session server over stdin and stdout,
-# and the turn result that `e -p --json` reports too.
-name = "aro-e-rpc"
+# The headless frontend: `ulo rpc`, a JSONL session server over stdin and stdout,
+# and the turn result that `ulo -p --json` reports too.
+name = "ulo-rpc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "The JSONL session server behind `e rpc`"
-documentation = "https://e.aro.computer/docs"
+description = "The JSONL session server behind `ulo rpc`"
+documentation = "https://ulo.sh/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "jsonl", "rpc"]
 categories = ["development-tools"]
 
 [lib]
-name = "e_rpc"
+name = "ulo_rpc"
 
 [dependencies]
-e-core.workspace = true
+ulo-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

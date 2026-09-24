@@ -131,7 +131,7 @@ jobs:
 
       - name: Frames
         if: needs.changes.outputs.build == 'true'
-        run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
+        run: ./x ui --out "$RUNNER_TEMP/ulo-ui-frames"
 
       - name: Retain frames
         if: failure()
@@ -139,7 +139,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ui-frames-${{ runner.os }}
-          path: ${{ runner.temp }}/e-ui-frames
+          path: ${{ runner.temp }}/ulo-ui-frames
           if-no-files-found: ignore
           retention-days: 7
 
@@ -215,7 +215,7 @@ jobs:
         run: ./x crates
       - name: Release SBOM
         if: matrix.name == 'linux' && (needs.changes.outputs.build == 'true' || needs.changes.outputs.packages == 'true')
-        run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
+        run: ./x sbom "$RUNNER_TEMP/ulo-sbom.cdx.json"
 
   channels:
     name: Channels
@@ -263,7 +263,7 @@ jobs:
       - name: Build for the oldest glibc the release promises
         env:
           TARGETS: x86_64-unknown-linux-gnu
-          E_GLIBC_CEILING: "2.31"
+          ULO_GLIBC_CEILING: "2.31"
         run: scripts/release/build.sh
 
   bench:
@@ -297,7 +297,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e-${{ runner.os }}-${{ runner.arch }}-${{ github.event.pull_request.number }}
-          path: target/release/e
+          name: ulo-${{ runner.os }}-${{ runner.arch }}-${{ github.event.pull_request.number }}
+          path: target/release/ulo
           if-no-files-found: error
           retention-days: 7

@@ -2,7 +2,7 @@
 //!
 //! Fixed v1 key set: insert/delete, arrows (line movement in wrapped or
 //! multi-line drafts, history at the edges), home/end, word-left/right,
-//! ctrl+a/e/k/u/w, shift+enter (or alt+enter) newline. Anything else waits
+//! ctrl+a/ulo/k/u/w, shift+enter (or alt+enter) newline. Anything else waits
 //! until asked for.
 
 use unicode_width::UnicodeWidthChar;
@@ -151,8 +151,8 @@ impl Editor {
             draft: String::new(),
             draft_pastes: Vec::new(),
             pastes: Vec::new(),
-            paste_label: e_core::config::settings::paste_label(),
-            paste_limit: e_core::config::settings::paste_placeholder() as usize,
+            paste_label: ulo_core::config::settings::paste_label(),
+            paste_limit: ulo_core::config::settings::paste_placeholder() as usize,
             inner_width: None,
             scroll: 0,
         }

@@ -1,9 +1,6 @@
 [package]
-# The crates.io package name: bare `e` is taken there, so the application and
-# its crates share the `aro-` family prefix.
-# The binary and its library are still `e`, so `e --version` and `use e::…`
-# are unchanged.
-name = "aro-e"
+# The command and Rust library share the product name.
+name = "ulo"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,22 +8,22 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "The coding agent you can put anywhere"
-documentation = "https://e.aro.computer/docs"
+documentation = "https://ulo.sh/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "cli", "llm", "tui"]
 categories = ["command-line-utilities", "development-tools"]
 
 [lib]
-name = "e"
+name = "ulo"
 
 [[bin]]
-name = "e"
+name = "ulo"
 path = "src/main.rs"
 
 [dependencies]
-e-core.workspace = true
-e-tui.workspace = true
-e-rpc.workspace = true
+ulo-core.workspace = true
+ulo-tui.workspace = true
+ulo-rpc.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 

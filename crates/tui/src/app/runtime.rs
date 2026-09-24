@@ -9,20 +9,20 @@ pub struct RunOptions {
     pub resume_session: bool,
     pub model: Model,
     pub agent: AgentOptions,
-    pub images: Vec<e_core::providers::ImageInput>,
+    pub images: Vec<ulo_core::providers::ImageInput>,
 }
 
 /// The channel extensions' own requests travel on: created by the caller
 /// before the host starts (so `initialize` can promise a UI), consumed here.
 pub type Requests = (
-    tokio::sync::mpsc::Sender<e_core::extensions::HostRequest>,
-    tokio::sync::mpsc::Receiver<e_core::extensions::HostRequest>,
+    tokio::sync::mpsc::Sender<ulo_core::extensions::HostRequest>,
+    tokio::sync::mpsc::Receiver<ulo_core::extensions::HostRequest>,
 );
 
 /// Open the terminal session and restore terminal state when its loop ends.
 pub async fn run(
     options: RunOptions,
-    host: std::sync::Arc<e_core::extensions::ExtensionHost>,
+    host: std::sync::Arc<ulo_core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     jobs_rx: tokio::sync::mpsc::Receiver<String>,
     requests: Requests,
@@ -31,14 +31,14 @@ pub async fn run(
         .agent
         .home
         .clone()
-        .unwrap_or_else(e_core::config::home::home);
-    e_core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests)).await
+        .unwrap_or_else(ulo_core::config::home::home);
+    ulo_core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests)).await
 }
 
 /// Run the terminal and its configuration reads within the selected home.
 pub(super) async fn run_scoped(
     options: RunOptions,
-    host: std::sync::Arc<e_core::extensions::ExtensionHost>,
+    host: std::sync::Arc<ulo_core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     mut jobs_rx: tokio::sync::mpsc::Receiver<String>,
     requests: Requests,
@@ -94,18 +94,19 @@ pub(super) async fn run_scoped(
     // detect_light() probes the terminal background over OSC 11 (short
     // timeout) and falls back to COLORFGBG, then dark.
     let detected = crate::background::detect_light().unwrap_or(false);
-    let theme = crate::theme::resolve(&e_core::config::settings::theme(), detected);
+    let theme = crate::theme::resolve(&ulo_core::config::settings::theme(), detected);
     let keymap = crate::keybindings::load();
 
     let (mut cols, mut rows) = terminal::size()?;
-    // The launch anchor: the frame paints below where the user launched e,
+    // The launch anchor: the frame paints below where the user launched ulo,
     // never over what came before. A terminal that doesn't answer DSR 6n — a raw pty —
     // falls back to the screen's bottom row, the common launch spot.
     let anchor =
         crate::paint::background::query_cursor_row(rows).unwrap_or(rows.saturating_sub(1)) as usize;
     let mut painter = Painter::spawn(cols, rows, anchor);
     let (mut agent, mut session_events) = Agent::with_options(model, agent_options.clone());
-    let (logins_tx, mut logins_rx) = tokio::sync::mpsc::channel::<e_core::auth::login::Outcome>(4);
+    let (logins_tx, mut logins_rx) =
+        tokio::sync::mpsc::channel::<ulo_core::auth::login::Outcome>(4);
     let (results_tx, mut results_rx) = tokio::sync::mpsc::channel::<AppJob>(16);
     agent.set_host(host.clone());
     let mut app = App {
@@ -125,7 +126,7 @@ pub(super) async fn run_scoped(
         staged_scope: None,
         auth: None,
         settings: None,
-        show_thinking: e_core::config::settings::show_thinking(),
+        show_thinking: ulo_core::config::settings::show_thinking(),
         thinking_hint: String::new(),
         jobs: jobs_tx,
         logins: logins_tx,
@@ -172,7 +173,7 @@ pub(super) async fn run_scoped(
         pane: None,
         pane_hidden: false,
         widgets: std::collections::BTreeMap::new(),
-        layout: e_core::config::layout::load(),
+        layout: ulo_core::config::layout::load(),
         external_edit: false,
     };
     app.editor
@@ -187,7 +188,7 @@ pub(super) async fn run_scoped(
     );
     if app.layout.banner {
         app.transcript
-            .push(Block::new(Kind::Banner, e_core::VERSION));
+            .push(Block::new(Kind::Banner, ulo_core::VERSION));
     }
     for warning in model::config_warnings() {
         app.notice(format!("warning: {warning}"));
@@ -196,35 +197,35 @@ pub(super) async fn run_scoped(
         app.notice("session saving disabled for this run".into());
     }
     match agent_options.tool_mode {
-        e_core::cli::ToolMode::None => {
+        ulo_core::cli::ToolMode::None => {
             app.notice("no-tools mode — provider requests contain no tool schemas".into())
         }
-        e_core::cli::ToolMode::All => {}
+        ulo_core::cli::ToolMode::All => {}
     }
-    if e_core::config::trust::status(&app.agent.cwd()).is_none() {
+    if ulo_core::config::trust::status(&app.agent.cwd()).is_none() {
         app.trust = Some(TrustStage::new(&app.agent.cwd()));
     }
     // The trust lookup may be the first read of trust.json; drain afterward so
     // its recovery joins warnings collected while constructing the app.
-    for warning in e_core::config::store::take_warnings() {
+    for warning in ulo_core::config::store::take_warnings() {
         app.notice(format!("warning: {warning}"));
     }
     // The harness pattern: check for a newer release in the background at
     // launch, install it silently, and say so — the running session is
     // untouched until a restart. Dev builds and the opt-out are exempt.
-    if !e_core::update::is_dev_build() && e_core::config::settings::auto_update() {
+    if !ulo_core::update::is_dev_build() && ulo_core::config::settings::auto_update() {
         let results = app.results.clone();
-        e_core::config::home::spawn(async move {
-            if let Ok(Some(version)) = e_core::update::self_update().await {
+        ulo_core::config::home::spawn(async move {
+            if let Ok(Some(version)) = ulo_core::update::self_update().await {
                 let _ = results.send(AppJob::Updated(version)).await;
             }
         });
     }
     // Providers' model lists refresh in the background (the reference
     // behavior, sourced from each gateway's own /models): a model a provider
-    // ships today shows in /models today, no e release involved.
-    e_core::config::home::spawn(e_core::providers::catalog::refresh_remote());
-    if e_core::auth::load().is_empty() {
+    // ships today shows in /models today, no ulo release involved.
+    ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
+    if ulo_core::auth::load().is_empty() {
         app.notice(
             "no provider signed in — use /login to sign in with an account or API key".into(),
         );
@@ -232,7 +233,7 @@ pub(super) async fn run_scoped(
         // implied on the status bar. Yields to the trust panel above it,
         // if that's showing too — this still renders once trust is settled.
         app.open_login_menu();
-    } else if let Some(wanted) = e_core::config::settings::get_string("model") {
+    } else if let Some(wanted) = ulo_core::config::settings::get_string("model") {
         let current = app.agent.model_slug();
         if wanted != current {
             app.notice(format!(
@@ -256,7 +257,7 @@ pub(super) async fn run_scoped(
     ));
     // Terminal input is read on its own thread and can be paused: while an
     // external editor owns the terminal (ctrl+g), nothing here may read
-    // it, or the editor's keystrokes land in e instead.
+    // it, or the editor's keystrokes land in ulo instead.
     let input_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut input_rx = spawn_input_reader(input_paused.clone());
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -341,9 +342,9 @@ pub(super) async fn run_scoped(
                             && !app.ui_input_open()
                             && !(ctrl && k.code == KeyCode::Char('c'))
                         {
-                            // The pane owns the keyboard: e navigates it,
+                            // The pane owns the keyboard: ulo navigates it,
                             // and chords it does not use go to the owner.
-                            // ctrl+c stays e's.
+                            // ctrl+c stays ulo's.
                             let width = cols as usize;
                             if let Some(pane) = app.pane.as_mut() {
                                 let action = pane.key(k, width);
@@ -358,7 +359,7 @@ pub(super) async fn run_scoped(
                         {
                             // The panel owns the keyboard: Esc closes it
                             // here, every other chord goes to its owner.
-                            // ctrl+c stays e's.
+                            // ctrl+c stays ulo's.
                             if k.code == KeyCode::Esc {
                                 app.close_ext_panel(true);
                             } else {
@@ -388,16 +389,16 @@ pub(super) async fn run_scoped(
                                     let (parent, trusted) = stage.choice();
                                     let target = parent.unwrap_or_else(|| app.agent.cwd().to_path_buf());
                                     if !trusted {
-                                        // A decline is remembered nowhere: e
+                                        // A decline is remembered nowhere: ulo
                                         // runs only trusted, so the next
                                         // launch asks again.
-                                        if let Some(refusal) = e_core::config::trust::refusal(&target) {
+                                        if let Some(refusal) = ulo_core::config::trust::refusal(&target) {
                                             app.notice(refusal);
                                         }
                                         app.should_quit = true;
                                     } else {
-                                        match e_core::config::trust::set(&target, true) {
-                                            Err(e) => app.notice(format!("trust: {e}")),
+                                        match ulo_core::config::trust::set(&target, true) {
+                                            Err(ulo) => app.notice(format!("trust: {ulo}")),
                                             Ok(()) => {
                                                 app.trust = None;
                                                 app.install_project_packages();
@@ -454,15 +455,15 @@ pub(super) async fn run_scoped(
                                     app.auth_choose(choice);
                                 }
                                 (AuthStage::Account { selected }, KeyCode::Up | KeyCode::Down) => {
-                                    let n = e_core::providers::registry::oauth_providers().len();
+                                    let n = ulo_core::providers::registry::oauth_providers().len();
                                     *selected = (*selected + 1) % n.max(1);
                                 }
                                 (AuthStage::Key { selected }, KeyCode::Up) => {
-                                    let n = e_core::providers::registry::key_providers().len();
+                                    let n = ulo_core::providers::registry::key_providers().len();
                                     *selected = (*selected + n - 1) % n.max(1);
                                 }
                                 (AuthStage::Key { selected }, KeyCode::Down) => {
-                                    let n = e_core::providers::registry::key_providers().len();
+                                    let n = ulo_core::providers::registry::key_providers().len();
                                     *selected = (*selected + 1) % n.max(1);
                                 }
                                 (AuthStage::Account { selected }, KeyCode::Enter) => {
@@ -506,7 +507,7 @@ pub(super) async fn run_scoped(
                                         let provider = provider.clone();
                                         app.pending_key = None;
                                         app.editor.mask = false;
-                                        let selected = e_core::providers::registry::key_providers()
+                                        let selected = ulo_core::providers::registry::key_providers()
                                             .iter()
                                             .position(|p| p.name == provider)
                                             .unwrap_or(0);
@@ -685,7 +686,7 @@ pub(super) async fn run_scoped(
                             .filter(|_| !app.ui_input_open() && app.pending_key.is_none())
                         {
                             // A declared extension shortcut, answered like
-                            // a command. Only a chord neither e nor the
+                            // a command. Only a chord neither ulo nor the
                             // composer (built in, or the user's
                             // keybindings.json) took reaches this branch —
                             // so unbinding a chord there frees it for an
@@ -693,7 +694,7 @@ pub(super) async fn run_scoped(
                             let host = app.host.clone();
                             let results = app.results.clone();
                             let epoch = app.session_epoch;
-                            e_core::config::home::spawn(async move {
+                            ulo_core::config::home::spawn(async move {
                                 let result = host.run_shortcut(&chord).await;
                                 let _ = results.send(AppJob::Command { result, epoch }).await;
                             });
@@ -708,8 +709,8 @@ pub(super) async fn run_scoped(
                 }
                 // Apply the whole burst before building one frame — a fast
                 // stream must not cost one paint per delta.
-                for e in event_buf.drain(..) {
-                    app.on_session_event(e);
+                for ulo in event_buf.drain(..) {
+                    app.on_session_event(ulo);
                 }
             }
             request = requests_rx.recv() => {
@@ -754,7 +755,7 @@ pub(super) async fn run_scoped(
                     }
                     Some(AppJob::Updated(version)) => {
                         app.notice(format!(
-                            "e {version} installed — /reload to switch to it now"
+                            "ulo {version} installed — /reload to switch to it now"
                         ));
                         app.update_installed = Some(version);
                     }
@@ -791,7 +792,7 @@ pub(super) async fn run_scoped(
                             // Display a trimmed tail in the live block;
                             // history gets the full (tool-truncated) output.
                             let display_output =
-                                e_core::tools::sanitize_display(&output.content);
+                                ulo_core::tools::sanitize_display(&output.content);
                             let shown: String = {
                                 let lines: Vec<&str> = display_output.lines().collect();
                                 let tail = &lines[lines.len().saturating_sub(20)..];
@@ -837,7 +838,7 @@ pub(super) async fn run_scoped(
                 // Control flow hangs off the typed outcome; the human-readable
                 // notice arrives separately on `jobs`.
                 match outcome {
-                    Some(e_core::auth::login::Outcome::SignedIn { flow_id, provider })
+                    Some(ulo_core::auth::login::Outcome::SignedIn { flow_id, provider })
                         if app.login_outcome_is_current(flow_id) =>
                     {
                             app.login_task.take();
@@ -846,26 +847,26 @@ pub(super) async fn run_scoped(
                             if let Some(AuthStage::Waiting { back }) = &app.auth {
                                 let back = back.unwrap_or(0);
                                 let display =
-                                    e_core::providers::catalog::display_name(&provider);
+                                    ulo_core::providers::catalog::display_name(&provider);
                                 app.auth = Some(AuthStage::Done {
                                     ok: true,
                                     message: format!("{display} connected"),
                                     back: authpanel::BackTarget::Account(back),
                                 });
                             }
-                            e_core::config::home::spawn(e_core::providers::catalog::refresh_remote());
+                            ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
                             // A fresh credential may make new models available:
                             // if the current model's provider is still signed out,
                             // fall back to the first available model.
-                            if !e_core::auth::signed_in(&e_core::auth::load(), &app.agent.model.provider) {
-                                if let Some(m) = e_core::providers::catalog::available().into_iter().next() {
-                                    app.notice(format!("model set to {}", e_core::providers::catalog::slug(&m)));
+                            if !ulo_core::auth::signed_in(&ulo_core::auth::load(), &app.agent.model.provider) {
+                                if let Some(m) = ulo_core::providers::catalog::available().into_iter().next() {
+                                    app.notice(format!("model set to {}", ulo_core::providers::catalog::slug(&m)));
                                     app.agent.model = m;
                                 }
                             }
                             app.refresh_status_cache();
                         }
-                    Some(e_core::auth::login::Outcome::Failed { flow_id })
+                    Some(ulo_core::auth::login::Outcome::Failed { flow_id })
                         if app.login_outcome_is_current(Some(flow_id)) => {
                             app.login_task.take();
                             if let Some(AuthStage::Waiting { back }) = &app.auth {
@@ -942,7 +943,7 @@ pub(super) async fn run_scoped(
     // detached process groups, so stop them explicitly before this process
     // gives extensions their shutdown notification.
     painter.shutdown();
-    e_core::tools::kill_tracked_processes();
+    ulo_core::tools::kill_tracked_processes();
     app.host
         .event("session_shutdown", serde_json::json!({"reason": "quit"}))
         .await;
@@ -960,7 +961,7 @@ pub(super) async fn run_scoped(
             .to_string();
         let args = vec!["-c".to_string()];
         if let Err(error) = relaunch_self(&cwd, &args, &std::collections::BTreeMap::new()) {
-            eprintln!("relaunch failed: {error} — start e again by hand");
+            eprintln!("relaunch failed: {error} — start ulo again by hand");
         }
     }
     Ok(())
@@ -1013,7 +1014,7 @@ pub(super) async fn edit_externally(
     rows: u16,
     anchor: usize,
 ) {
-    let command = e_core::config::settings::external_editor();
+    let command = ulo_core::config::settings::external_editor();
     let Some(program) = command.first().cloned() else {
         app.notice("no editor: set `editor` in this channel's settings.json or $EDITOR".into());
         return;
@@ -1022,7 +1023,7 @@ pub(super) async fn edit_externally(
     // An unguessable name and create_new: a pre-placed symlink in the shared
     // temp directory is refused rather than followed.
     let path = std::env::temp_dir().join(format!(
-        "e-draft-{}-{}.md",
+        "ulo-draft-{}-{}.md",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));

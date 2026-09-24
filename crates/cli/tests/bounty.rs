@@ -2,7 +2,7 @@
 
 mod common;
 
-use e::tui::composer::{Editor, Key};
+use ulo::tui::composer::{Editor, Key};
 
 /// Pasted terminal controls must remain data, even before prompt submission.
 #[test]
@@ -12,7 +12,7 @@ fn pasted_terminal_controls_are_inert() {
     let mut editor = Editor::new();
     let payload = "hello\x1b]0;BOUNTY_INJECTED\x07world\u{9b}2J";
     editor.insert_paste(payload);
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     for key in [Key::End, Key::Home, Key::SelectEnd] {
         editor.key(key);
         let frame = editor.render(&theme, 100, 30).join("\n");
@@ -29,13 +29,13 @@ fn pasted_terminal_controls_are_inert() {
 /// Asking for trust must not execute terminal controls in the untrusted path.
 #[test]
 fn trust_question_treats_path_controls_as_data() {
-    use e::tui::trustpanel::{render, TrustStage};
+    use ulo::tui::trustpanel::{render, TrustStage};
     let stage = TrustStage {
         selected: 0,
         scroll: Some(0),
         parent: Some("/tmp/parent\x1b]0;BOUNTY_INJECTED\x07".into()),
     };
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     let frame = render(
         &stage,
         &theme,
@@ -51,7 +51,7 @@ fn trust_question_treats_path_controls_as_data() {
 fn vertical_motion_preserves_display_column() {
     let _lock = common::env_lock();
     let _home = common::Home::new("bounty-cursor");
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     let mut editor = Editor::new();
     editor.set_text("abcd\n界界");
     editor.render(&theme, 100, 30);
@@ -63,7 +63,7 @@ fn vertical_motion_preserves_display_column() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn completions_error_after_text_is_not_success() {
-    use e::core::providers::{self, catalog::Api, ChatMessage, Event, Request};
+    use ulo::core::providers::{self, catalog::Api, ChatMessage, Event, Request};
     let _lock = common::env_lock();
     let home = common::Home::new("bounty-wire-error");
     home.auth(r#"{"mock":{"key":"synthetic"}}"#);
@@ -113,11 +113,11 @@ async fn completions_error_after_text_is_not_success() {
 /// an offscreen option reveals its label without recording a decision.
 #[test]
 fn narrow_trust_text_can_be_paged_without_losing_rows() {
-    use e::tui::markdown::visible_width;
-    use e::tui::trustpanel::{render, render_view, TrustStage};
+    use ulo::tui::markdown::visible_width;
+    use ulo::tui::trustpanel::{render, render_view, TrustStage};
     let _lock = common::env_lock();
     let _home = common::Home::new("bounty-trust-scroll");
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     let mut stage = TrustStage {
         selected: 0,
         scroll: Some(0),
@@ -141,7 +141,7 @@ fn narrow_trust_text_can_be_paged_without_losing_rows() {
     }
     stage.step(1);
     let selected = render_view(&mut stage, &theme, 32, 9, dir).join("\n");
-    let selected_text = e::core::tools::strip_ansi(&selected)
+    let selected_text = ulo::core::tools::strip_ansi(&selected)
         .split_whitespace()
         .collect::<String>();
     assert!(
@@ -151,7 +151,7 @@ fn narrow_trust_text_can_be_paged_without_losing_rows() {
     assert_eq!(stage.choice(), (stage.parent.clone(), true));
     stage.page(-100, 32, 9);
     let first = render_view(&mut stage, &theme, 32, 9, dir).join("\n");
-    let first_text = e::core::tools::strip_ansi(&first)
+    let first_text = ulo::core::tools::strip_ansi(&first)
         .split_whitespace()
         .collect::<String>();
     assert!(
@@ -165,7 +165,7 @@ fn narrow_trust_text_can_be_paged_without_losing_rows() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn truncated_response_body_reports_the_underlying_transport_failure() {
-    use e::core::providers::{self, catalog::Api, ChatMessage, Event, Request};
+    use ulo::core::providers::{self, catalog::Api, ChatMessage, Event, Request};
     let _lock = common::env_lock();
     let home = common::Home::new("bounty-body-error");
     home.auth(r#"{"mock":{"key":"synthetic"}}"#);
@@ -209,14 +209,14 @@ async fn truncated_response_body_reports_the_underlying_transport_failure() {
 /// retain its first row's tail rather than losing it at the painter's clip.
 #[test]
 fn long_error_diagnostics_fit_without_losing_text() {
-    use e::tui::markdown::visible_width;
-    use e::tui::transcript::{Block, Kind};
-    let theme = e::tui::theme::load_bundled(false).unwrap();
+    use ulo::tui::markdown::visible_width;
+    use ulo::tui::transcript::{Block, Kind};
+    let theme = ulo::tui::theme::load_bundled(false).unwrap();
     let message = "provider response interrupted: error decoding response body: error reading a body from connection: end of file before message length reached";
     for width in [8, 32, 100] {
         let rows = Block::new(Kind::Error, message).lines_for_test(&theme, width);
         assert!(rows.iter().all(|row| visible_width(row) <= width));
-        let text = e::core::tools::strip_ansi(&rows.join("\n"))
+        let text = ulo::core::tools::strip_ansi(&rows.join("\n"))
             .split_whitespace()
             .collect::<String>();
         assert_eq!(

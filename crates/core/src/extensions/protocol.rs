@@ -1,8 +1,8 @@
 //! The extension wire protocol: JSON, one message per line, over the
 //! extension process's stdin/stdout.
 //!
-//! e → extension requests (each expects a response with the same `id`):
-//!   {"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update"],"e_version":"…","cwd":"…","extensions_config":{…}}}
+//! ulo → extension requests (each expects a response with the same `id`):
+//!   {"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update"],"ulo_version":"…","cwd":"…","extensions_config":{…}}}
 //!   {"id":7,"method":"tool_call","params":{"name":"…","arguments":{…}}}
 //!   {"id":9,"method":"command","params":{"name":"…","args":"…"}}
 //!   {"id":2,"method":"hook.startup","params":{"cwd":"…","argv":[…],"flags":{…}}}
@@ -13,16 +13,16 @@
 //!   {"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
 //!   {"id":3,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
 //!   {"id":11,"method":"command.complete","params":{"name":"deploy","prefix":"st"}}
-//! e → extension notifications (no response):
+//! ulo → extension notifications (no response):
 //!   {"method":"flags","params":{"flags":{…}}}              (at start, to extensions declaring typed flags)
 //!   {"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
 //!   {"method":"ui.key","params":{"key":"down"}}          (interactive panel)
 //!   {"method":"shutdown"}
-//! extension → e:
+//! extension → ulo:
 //!   {"id":1,"result":{…}} | {"id":1,"error":"message"}
 //!   {"method":"notify","params":{"message":"…"}}          (any time)
 //!   {"method":"tool.update","params":{"id":7,"stream":"stdout","chunk":"…"}}
-//!   {"id":"x1","method":"ui.select","params":{…}}        a request e answers
+//!   {"id":"x1","method":"ui.select","params":{…}}        a request ulo answers
 //!   {"id":"x2","method":"session.info","params":{}}
 //!
 //! The initialize result is the manifest:
@@ -41,7 +41,7 @@
 //! spaces never meet: direction tells them apart.
 //!
 //! `initialize` params carry the extension's own config from
-//! `~/.e/settings.json` under `"extensions":{"<name>":{…}}` — a
+//! `~/.ulo/settings.json` under `"extensions":{"<name>":{…}}` — a
 //! namespaced place to keep extension options without squatting on a
 //! top-level settings key.
 
@@ -56,7 +56,7 @@ use serde_json::Value;
 /// notification they may simply ignore.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// What this e can do beyond version 1, listed in `initialize` params. Each
+/// What this ulo can do beyond version 1, listed in `initialize` params. Each
 /// name is a family in docs/guides/extend/extensions.md; an extension that ignores them
 /// all is a valid version-1 extension.
 pub const CAPABILITIES: &[&str] = &[
@@ -73,7 +73,7 @@ pub const CAPABILITIES: &[&str] = &[
 ];
 
 /// Every lifecycle event a manifest may subscribe to. Unknown names in a
-/// manifest are ignored, so a newer extension on an older e degrades to
+/// manifest are ignored, so a newer extension on an older ulo degrades to
 /// silence rather than a startup failure.
 pub const EVENTS: &[&str] = &[
     "session_start",
@@ -116,7 +116,7 @@ pub struct Manifest {
 }
 
 /// A `render` hook result: the body to show instead, in a format, or `{}`
-/// to leave the entry as e paints it.
+/// to leave the entry as ulo paints it.
 #[derive(Debug, Default, Deserialize)]
 pub struct RenderResult {
     #[serde(default)]
@@ -153,7 +153,7 @@ pub struct ToolLabel {
     pub target: String,
 }
 
-/// A chord an extension answers, declared in the manifest. Chords e keeps
+/// A chord an extension answers, declared in the manifest. Chords ulo keeps
 /// for itself (docs/guides/customize/keybindings.md) are never offered.
 #[derive(Clone, Debug, Deserialize)]
 pub struct ShortcutDecl {
@@ -197,7 +197,7 @@ pub struct Completions {
 
 /// A command-line flag an extension understands, for `--help`/`/help` and
 /// for startup-arg parsing. A `type` of `"string"` (or the default
-/// `"boolean"`) makes e parse the flag from startup argv: booleans match
+/// `"boolean"`) makes ulo parse the flag from startup argv: booleans match
 /// `--name`, `--name=true|false`, `--no-name`; strings match
 /// `--name=value` or `--name value` (a following token that starts with
 /// `-` is not consumed as a value). Parsed values ride the startup hook's
@@ -209,11 +209,11 @@ pub struct FlagDecl {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// "boolean" (default) or "string" — whether e parses this flag.
+    /// "boolean" (default) or "string" — whether ulo parses this flag.
     #[serde(default = "default_flag_type", rename = "type")]
     pub flag_type: String,
     /// The manifest's optional `"default"` — the value to use when the
-    /// flag is absent. e keeps it so the declaration contract is honored
+    /// flag is absent. ulo keeps it so the declaration contract is honored
     /// end to end, but never fabricates it into the parsed `flags` a
     /// receiver gets: absent stays absent, so a handler can tell "passed
     /// false" from "not passed". The extension applies the default itself
@@ -276,7 +276,7 @@ pub struct Show {
     pub format: Format,
 }
 
-/// The largest `show`/`display` body e paints; longer ones are clipped
+/// The largest `show`/`display` body ulo paints; longer ones are clipped
 /// with a trailing note rather than refused, so a long diff still shows.
 pub const MAX_SHOW_BYTES: usize = 64 * 1024;
 
@@ -418,7 +418,7 @@ pub enum Incoming {
 pub fn parse_incoming(line: &str) -> Option<Incoming> {
     let value: Value = serde_json::from_str(line).ok()?;
     // A line with both an id and a method is the extension asking, not
-    // answering — checked first because e's own request ids are integers
+    // answering — checked first because ulo's own request ids are integers
     // and an extension may well use integers too.
     if let (Some(id), Some(method)) = (value.get("id"), value.get("method").and_then(Value::as_str))
     {
@@ -555,7 +555,7 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
         // An integer id with a method is still a request; without one, a
-        // response to e.
+        // response to ulo.
         assert!(matches!(
             parse_incoming(r#"{"id":4,"method":"session.info"}"#).unwrap(),
             Incoming::Request { .. }

@@ -16,12 +16,12 @@ fi
 
 case "$command" in
   dev)
-    unset E_BUILD_VERSION E_BUILD_CHANNEL E_BUILD_COMMIT
+    unset ULO_BUILD_VERSION ULO_BUILD_CHANNEL ULO_BUILD_COMMIT
     project=${1:-$PWD}
     if [ "$#" -gt 0 ]; then shift; fi
     project=$(CDPATH= cd "$project" && pwd)
     cargo build --locked
-    binary="$PWD/target/debug/e"
+    binary="$PWD/target/debug/ulo"
     cd "$project"
     exec "$binary" "$@"
     ;;
@@ -56,7 +56,7 @@ case "$command" in
     # to end in dependency order, and the SDK is compiled by an external
     # consumer from its packed crate.
     cargo publish --dry-run --locked --allow-dirty \
-      -p aro-e-core -p aro-e-tui -p aro-e-rpc -p aro-e
+      -p ulo-core -p ulo-tui -p ulo-rpc -p ulo
     python3 scripts/check-sdk.py
     ;;
   docs)
@@ -75,16 +75,16 @@ case "$command" in
     ;;
   channels)
     [ "$#" -eq 0 ] || usage
-    # The reference channels, which are consumers of `e rpc` rather than part
+    # The reference channels, which are consumers of `ulo rpc` rather than part
     # of the binary.
     (cd channels/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
     python3 -m unittest discover -s channels/github -p 'test_*.py'
     ;;
   container)
     [ "$#" -eq 0 ] || usage
-    # The check builds without a published release, so it installs a stub `e`.
+    # The check builds without a published release, so it installs a stub `ulo`.
     # The release workflow builds the real image with the release it published.
-    docker build --tag e-slack --build-arg E_RELEASE_STUB=1 channels/slack
+    docker build --tag ulo-slack --build-arg ULO_RELEASE_STUB=1 channels/slack
     ;;
   guard)
     [ "$#" -eq 0 ] || usage

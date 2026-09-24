@@ -1,5 +1,5 @@
 //! The chord grammar: one canonical spelling for a key chord, shared by
-//! everything in `~/.e` that names keys — `keybindings.json`
+//! everything in `~/.ulo` that names keys — `keybindings.json`
 //! (`tui/content/keybindings.rs`), the layout's focus chord
 //! (`config/layout.rs`), and extension shortcuts (`extensions/host.rs`).
 //! Terminal-free on purpose: it turns strings into strings, so the core can

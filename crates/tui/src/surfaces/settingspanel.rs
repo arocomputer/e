@@ -1,14 +1,14 @@
 //! The settings panel — the reference settings-screen shape, over
 //! `settings::all()`.
 //!
-//! Rows and their options come from `~/.e/`-aware settings, so a user-editable
+//! Rows and their options come from `~/.ulo/`-aware settings, so a user-editable
 //! set (theme) shows every file they've dropped in. `←→` change the selected
 //! row's value; `↑↓` move; framing and the hint come from the shared panel.
 
 use crate::markdown::visible_width;
 use crate::render::bold;
 use crate::theme::Theme;
-use e_core::config::settings::{self, Setting};
+use ulo_core::config::settings::{self, Setting};
 
 pub struct SettingsPanel {
     settings: Vec<Setting>,

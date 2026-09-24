@@ -1,4 +1,4 @@
-//! `e rpc`: the headless session server. JSONL over stdin and stdout, the
+//! `ulo rpc`: the headless session server. JSONL over stdin and stdout, the
 //! same framing the extension protocol uses — one JSON object per line,
 //! requests carry an `id` and a `method`, every request gets exactly one
 //! response line with that `id`, and events stream between responses tagged
@@ -39,12 +39,12 @@ use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::mpsc;
 
-use e_core::agent::{Agent, AgentOptions, SessionEvent};
-use e_core::cli::{self, Options, ToolMode};
-use e_core::extensions::{ExtensionHost, HostRequest};
-use e_core::providers::catalog::{self as catalog, Model, Pricing};
-use e_core::providers::{ChatMessage, ImageInput};
-use e_core::session::{self as log, SessionLog};
+use ulo_core::agent::{Agent, AgentOptions, SessionEvent};
+use ulo_core::cli::{self, Options, ToolMode};
+use ulo_core::extensions::{ExtensionHost, HostRequest};
+use ulo_core::providers::catalog::{self as catalog, Model, Pricing};
+use ulo_core::providers::{ChatMessage, ImageInput};
+use ulo_core::session::{self as log, SessionLog};
 
 mod params;
 pub mod result;
@@ -126,7 +126,7 @@ fn parse_tool_mode(name: Option<&str>) -> Result<ToolMode, String> {
 
 fn check_allowlist(tools: Option<&Vec<String>>) -> Result<(), String> {
     if let Some(unknown) =
-        tools.and_then(|names| names.iter().find(|name| !e_core::tools::is_builtin(name)))
+        tools.and_then(|names| names.iter().find(|name| !ulo_core::tools::is_builtin(name)))
     {
         return Err(format!("unknown built-in tool in allowlist: `{unknown}`"));
     }
@@ -173,7 +173,7 @@ impl Slot {
         let mut lines = Vec::new();
         let ended = matches!(event, SessionEvent::TurnEnd { .. });
         let done = {
-            let mut turn = self.turn.lock().unwrap_or_else(|e| e.into_inner());
+            let mut turn = self.turn.lock().unwrap_or_else(|ulo| ulo.into_inner());
             let streams = !matches!(turn.as_ref().map(|t| &t.reply), Some(Reply::OneShot));
             if let Some(turn) = turn.as_mut() {
                 turn.acc.observe(event);
@@ -202,7 +202,7 @@ impl Slot {
     }
 
     fn result_line(&self, turn: &Turn) -> String {
-        let agent = self.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let agent = self.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let path = agent
             .session_path()
             .map(|p| Value::from(p.display().to_string()))
@@ -227,12 +227,12 @@ impl Slot {
     }
 
     fn info(&self) -> Value {
-        let agent = self.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let agent = self.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let running = agent.is_streaming()
             || self
                 .turn
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .is_some();
         json!({
             "session": self.id,
@@ -356,11 +356,11 @@ impl Server {
                 self.ask = params.ask.unwrap_or(false);
                 Ok(json!({
                     "protocol": PROTOCOL,
-                    "version": e_core::VERSION,
-                    "channel": e_core::CHANNEL,
-                    "commit": e_core::COMMIT,
+                    "version": ulo_core::VERSION,
+                    "channel": ulo_core::CHANNEL,
+                    "commit": ulo_core::COMMIT,
                     "cwd": std::env::current_dir().unwrap_or_default().display().to_string(),
-                    "home": e_core::config::home::home().display().to_string(),
+                    "home": ulo_core::config::home::home().display().to_string(),
                     "methods": METHODS,
                     "ask": self.ask,
                 }))
@@ -373,7 +373,7 @@ impl Server {
                 let slot = self.slot(params)?;
                 let args: params::Steer = params::decode(params)?;
                 let text = args.text;
-                let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+                let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
                 if agent.steer(text) {
                     Ok(json!({"held": true}))
                 } else {
@@ -384,7 +384,7 @@ impl Server {
                 let slot = self.slot(params)?;
                 slot.agent
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .interrupt();
                 Ok(json!({}))
             }
@@ -394,7 +394,7 @@ impl Server {
                 let history = slot
                     .agent
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .history_snapshot();
                 Ok(json!({"messages": history}))
             }
@@ -408,11 +408,16 @@ impl Server {
                     .ok_or_else(|| format!("unknown session `{id}`"))?;
                 slot.agent
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .interrupt();
                 // A prompt still running gets its answer now: the forwarder
                 // will see the agent go, not a `TurnEnd`.
-                if let Some(turn) = slot.turn.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                if let Some(turn) = slot
+                    .turn
+                    .lock()
+                    .unwrap_or_else(|ulo| ulo.into_inner())
+                    .take()
+                {
                     self.also
                         .push(json!({"id": turn.request, "error": "session closed"}).to_string());
                 }
@@ -499,7 +504,7 @@ impl Server {
         let request: OneShot =
             serde_json::from_value(value).map_err(|error| format!("invalid request: {error}"))?;
         if let Some(refusal) =
-            e_core::config::trust::refusal(&std::env::current_dir().unwrap_or_default())
+            ulo_core::config::trust::refusal(&std::env::current_dir().unwrap_or_default())
         {
             return Err(refusal);
         }
@@ -513,8 +518,8 @@ impl Server {
         let mut agent_opts = cli::agent_options(&options);
         agent_opts.allowed_tools = request.tools.clone();
         let slot = self.open(model, agent_opts, true);
-        let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
-        *slot.turn.lock().unwrap_or_else(|e| e.into_inner()) = Some(Turn {
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
+        *slot.turn.lock().unwrap_or_else(|ulo| ulo.into_inner()) = Some(Turn {
             request: id,
             reply: Reply::OneShot,
             acc: TurnAccumulator::with_warnings(catalog::config_warnings()),
@@ -547,7 +552,7 @@ impl Server {
         if !cwd.is_dir() {
             return Err(format!("cwd `{}` is not a directory", cwd.display()));
         }
-        if let Some(refusal) = e_core::config::trust::refusal(&cwd) {
+        if let Some(refusal) = ulo_core::config::trust::refusal(&cwd) {
             return Err(refusal);
         }
         let mut options = self.defaults.clone();
@@ -572,9 +577,9 @@ impl Server {
                 let session = if options.no_save {
                     None
                 } else {
-                    Some(SessionLog::reopen(path).map_err(|e| format!("resume: {e}"))?)
+                    Some(SessionLog::reopen(path).map_err(|ulo| format!("resume: {ulo}"))?)
                 };
-                let messages = SessionLog::load(path).map_err(|e| format!("resume: {e}"))?;
+                let messages = SessionLog::load(path).map_err(|ulo| format!("resume: {ulo}"))?;
                 Some((session, messages, log::name_of(path)))
             }
             None => None,
@@ -583,7 +588,7 @@ impl Server {
         agent_opts.cwd = Some(cwd);
         agent_opts.allowed_tools = tools;
         let slot = self.open(model, agent_opts, false);
-        let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if let Some((session, messages, name)) = resumed {
             agent.load_history(messages);
             agent.set_session(session);
@@ -611,7 +616,7 @@ impl Server {
             return Err("prompt is empty".into());
         }
         let paths = args.images.unwrap_or_default();
-        let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if !paths.is_empty() && !agent.model.image_input {
             return Err(format!(
                 "model `{}` is not declared image-capable",
@@ -619,7 +624,7 @@ impl Server {
             ));
         }
         let images = ImageInput::from_paths(&paths)?;
-        let mut turn = slot.turn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut turn = slot.turn.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if agent.is_streaming() || turn.is_some() {
             return Err("a turn is running; use session.steer or session.interrupt".into());
         }
@@ -643,8 +648,8 @@ impl Server {
         let slot = self.slot(params)?;
         let args: params::Compact = params::decode(params)?;
         let focus = args.focus;
-        let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
-        let mut turn = slot.turn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
+        let mut turn = slot.turn.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if agent.is_streaming() || turn.is_some() {
             return Err("a turn is running; compact between turns".into());
         }
@@ -665,7 +670,7 @@ impl Server {
     /// Change the model or effort between turns. History carries over.
     fn set(&mut self, params: &Value) -> Result<Value, String> {
         let slot = self.slot(params)?;
-        let mut agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if agent.is_streaming() {
             return Err("a turn is running; change models between turns".into());
         }
@@ -701,7 +706,7 @@ impl Server {
     fn fork(&mut self, params: &Value) -> Result<Value, String> {
         let slot = self.slot(params)?;
         let (history, model, mut options, name, effort) = {
-            let agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+            let agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
             if agent.is_streaming() {
                 return Err("a turn is running; fork between turns".into());
             }
@@ -718,13 +723,13 @@ impl Server {
             let cwd = options.cwd.clone().unwrap_or_default();
             Some(
                 SessionLog::create_with(&cwd, &catalog::slug(&model), &history)
-                    .map_err(|e| format!("fork: {e}"))?,
+                    .map_err(|ulo| format!("fork: {ulo}"))?,
             )
         } else {
             None
         };
         let forked = self.open(model, options, false);
-        let mut agent = forked.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut agent = forked.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         agent.load_history(history);
         agent.set_session(log);
         agent.adopt_session_name(name);
@@ -734,21 +739,21 @@ impl Server {
         }))
     }
 
-    /// The conversation as one self-contained HTML page — e's stand-in for
+    /// The conversation as one self-contained HTML page — ulo's stand-in for
     /// a share link: the client decides where it goes.
     fn export(&mut self, params: &Value) -> Result<Value, String> {
         let slot = self.slot(params)?;
-        let agent = slot.agent.lock().unwrap_or_else(|e| e.into_inner());
+        let agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let messages = agent.history_snapshot();
         let title = agent
             .session_name()
             .or_else(|| {
                 messages
                     .iter()
-                    .find(|m| matches!(m.kind, e_core::providers::MessageKind::User { .. }))
+                    .find(|m| matches!(m.kind, ulo_core::providers::MessageKind::User { .. }))
                     .map(|m| m.content.lines().next().unwrap_or_default().to_string())
             })
-            .unwrap_or_else(|| "e session".to_string());
+            .unwrap_or_else(|| "ulo session".to_string());
         let args: params::Export = params::decode(params)?;
         let target = match args.path.as_deref() {
             Some(path) => {
@@ -761,11 +766,11 @@ impl Server {
             }
             None => {
                 let short: String = slot.id.chars().take(8).collect();
-                agent.cwd().join(format!("e-session-{short}.html"))
+                agent.cwd().join(format!("ulo-session-{short}.html"))
             }
         };
-        let page = e_core::export::html(&title, &agent.model_slug(), &messages);
-        std::fs::write(&target, page).map_err(|e| format!("export: {e}"))?;
+        let page = ulo_core::export::html(&title, &agent.model_slug(), &messages);
+        std::fs::write(&target, page).map_err(|ulo| format!("export: {ulo}"))?;
         Ok(json!({"path": target.display().to_string(), "title": title}))
     }
 
@@ -822,7 +827,7 @@ impl Server {
             .filter(|slot| {
                 slot.turn
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .is_some()
             })
             .count()
@@ -832,7 +837,7 @@ impl Server {
         for slot in self.sessions.values() {
             slot.agent
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .interrupt();
         }
     }
@@ -940,7 +945,7 @@ pub async fn serve(
     tokio::spawn(async move {
         let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
         loop {
-            let read = e_core::extensions::read_bounded_line(&mut reader, MAX_LINE_BYTES).await;
+            let read = ulo_core::extensions::read_bounded_line(&mut reader, MAX_LINE_BYTES).await;
             let done = !matches!(read, Ok(Some(_)));
             if lines_tx.send(read).await.is_err() || done {
                 return;
@@ -1066,13 +1071,13 @@ pub async fn serve(
         // Signal: stop owned shell groups before extension cleanup.
         // `process::exit` is intentional — the blocking stdin reader cannot
         // be cancelled, so returning from main could hang shutdown forever.
-        e_core::tools::kill_tracked_processes();
+        ulo_core::tools::kill_tracked_processes();
         server.interrupt_all();
         host.shutdown().await;
         std::process::exit(status);
     }
     let by_request = requested_shutdown;
-    e_core::tools::kill_tracked_processes();
+    ulo_core::tools::kill_tracked_processes();
     server.interrupt_all();
     drop(server);
     host.shutdown().await;

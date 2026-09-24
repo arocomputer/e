@@ -62,7 +62,7 @@ pub struct Report {
     pub target: String,
     pub working_directory: String,
     pub default_model: String,
-    pub e_home: String,
+    pub ulo_home: String,
     pub home_status: String,
     pub terminal: TerminalDiagnostic,
     pub configuration: ConfigurationDiagnostic,
@@ -140,7 +140,7 @@ pub fn report(host: &crate::extensions::ExtensionHost) -> Report {
             .map(|path| sanitize_line(&path.display().to_string()))
             .unwrap_or_else(|_| "<unavailable>".into()),
         default_model: super::catalog::slug(&super::catalog::default_model()),
-        e_home: sanitize_line(&home.display().to_string()),
+        ulo_home: sanitize_line(&home.display().to_string()),
         home_status: home_status(&home),
         terminal: TerminalDiagnostic {
             stdin_tty: std::io::stdin().is_terminal(),
@@ -180,13 +180,13 @@ pub fn report(host: &crate::extensions::ExtensionHost) -> Report {
 
 pub fn render(report: &Report) -> String {
     let mut lines = vec![
-        "e doctor".into(),
-        format!("version: e {}", sanitize_line(&report.version)),
+        "ulo doctor".into(),
+        format!("version: ulo {}", sanitize_line(&report.version)),
         format!("channel: {}", report.channel),
         format!("commit: {}", report.commit),
         format!("target: {}", sanitize_line(&report.target)),
         format!("working directory: {}", report.working_directory),
-        format!("home: {}", report.e_home),
+        format!("home: {}", report.ulo_home),
         format!("home status: {}", sanitize_line(&report.home_status)),
         format!(
             "terminal: stdin={} stdout={} TERM={}",

@@ -71,7 +71,7 @@ fn streaming_server() -> (u16, std::thread::JoinHandle<()>) {
 }
 
 /// Capture one session in a shared isolated home. Retain synthetic captures
-/// under E_PTY_ARTIFACTS when manually replaying frames with scripts/term.py.
+/// under ULO_PTY_ARTIFACTS when manually replaying frames with scripts/term.py.
 fn capture_session(home: &Home, port: u16, tools: bool, marker: &str, resize: &str) -> Vec<u8> {
     home.write("models.json", format!(
         r#"{{"providers":{{"mock":{{"base_url":"http://127.0.0.1:{port}","api":"openai-completions","catalog":"none","supports_tools":{tools},"models":["stream"]}}}}}}"#
@@ -95,14 +95,14 @@ fn capture_session(home: &Home, port: u16, tools: bool, marker: &str, resize: &s
         .arg(script)
         .arg(&capture)
         .args(["100", "30", "0.1", "20"])
-        .arg(env!("CARGO_BIN_EXE_e"))
+        .arg(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-save", "--no-extensions", "--model", "mock/stream"]);
     if !tools {
         command.arg("--no-tools");
     }
     let mut child = command
         .current_dir(&workspace)
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .env("CAP_PROMPT", "stream")
         .env("CAP_WAIT_FOR", marker)
         .env("CAP_RESIZE_AFTER", resize)
@@ -136,7 +136,7 @@ fn capture_session(home: &Home, port: u16, tools: bool, marker: &str, resize: &s
     );
     let raw = std::fs::read(&capture).unwrap();
     let sizes = std::fs::read(capture.with_extension("raw.sizes.json")).unwrap();
-    if let Some(dir) = std::env::var_os("E_PTY_ARTIFACTS") {
+    if let Some(dir) = std::env::var_os("ULO_PTY_ARTIFACTS") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{marker}.raw")), &raw).unwrap();
@@ -209,7 +209,7 @@ fn tool_completion_after_resize_keeps_the_final_reply() {
     );
 }
 
-/// The trust panel's last row exits: e runs only in a trusted workspace, and a
+/// The trust panel's last row exits: ulo runs only in a trusted workspace, and a
 /// decline records nothing, so the next launch asks again.
 #[test]
 fn declining_the_trust_panel_exits_without_recording_a_decision() {
@@ -230,7 +230,7 @@ fn declining_the_trust_panel_exits_without_recording_a_decision() {
         .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/ptycap.py"))
         .arg(&capture)
         .args(["100", "30", "0.2", "0.7"])
-        .arg(env!("CARGO_BIN_EXE_e"))
+        .arg(env!("CARGO_BIN_EXE_ulo"))
         .args([
             "--no-save",
             "--no-extensions",
@@ -239,7 +239,7 @@ fn declining_the_trust_panel_exits_without_recording_a_decision() {
             "mock/audit",
         ])
         .current_dir(&workspace)
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         // Down, Down: the last row, which the panel labels "No, exit".
         .env("CAP_PROMPT", "\u{1b}[B\u{1b}[B")
         .env("CAP_EXIT_WAIT", "2")
@@ -302,7 +302,7 @@ fn ctrl_c_exits_modal_panels_without_recording_trust() {
             .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/ptycap.py"))
             .arg(&capture)
             .args(["100", "30", "0.2", "0.7"])
-            .arg(env!("CARGO_BIN_EXE_e"))
+            .arg(env!("CARGO_BIN_EXE_ulo"))
             .args([
                 "--no-save",
                 "--no-extensions",
@@ -311,7 +311,7 @@ fn ctrl_c_exits_modal_panels_without_recording_trust() {
                 "mock/audit",
             ])
             .current_dir(&workspace)
-            .env("E_HOME", &home.dir)
+            .env("ULO_HOME", &home.dir)
             .env("CAP_PROMPT", prompt)
             .env("CAP_EXIT", "\u{3}\u{3}")
             .env("CAP_EXIT_WAIT", "2")

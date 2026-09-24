@@ -23,13 +23,13 @@ fn wait_for_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
 #[test]
 fn json_auth_is_rejected_like_other_unsupported_subcommands() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-json-auth-{}-{}",
+        "ulo-cli-json-auth-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "--json", "auth"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -45,13 +45,13 @@ fn json_auth_is_rejected_like_other_unsupported_subcommands() {
 #[test]
 fn rpc_stops_cleanly_on_an_oversized_request_line() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-rpc-oversized-{}-{}",
+        "ulo-cli-rpc-oversized-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -89,10 +89,10 @@ fn rpc_sigterm_exits_while_waiting_for_input() {
     let _guard = common::env_lock();
     let home = common::Home::new("cli-rpc-sigterm");
     // A version-1 line runs in the process cwd, which has to be trusted.
-    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    ulo::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -129,10 +129,10 @@ fn rpc_keeps_one_response_per_input_line_after_a_bad_request() {
     let _guard = common::env_lock();
     let home = common::Home::new("cli-rpc-lines");
     // A version-1 line runs in the process cwd, which has to be trusted.
-    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    ulo::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -171,13 +171,13 @@ fn rpc_keeps_one_response_per_input_line_after_a_bad_request() {
 #[test]
 fn typo_flags_are_rejected_with_suggestions_not_prompts() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-typo-flag-{}-{}",
+        "ulo-cli-typo-flag-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "--modle", "x"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -193,60 +193,60 @@ fn typo_flags_are_rejected_with_suggestions_not_prompts() {
 #[test]
 fn help_subcommand_prints_the_same_usage_as_the_flag() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-help-subcommand-{}-{}",
+        "ulo-cli-help-subcommand-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "help"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("usage:"), "stdout: {stdout}");
-    assert!(stdout.contains("e docs [topic]"), "stdout: {stdout}");
+    assert!(stdout.contains("ulo docs [topic]"), "stdout: {stdout}");
 
     // Anything after the word is a usage error, not a prompt.
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "help", "docs"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("usage: e help"), "stderr: {stderr}");
+    assert!(stderr.contains("usage: ulo help"), "stderr: {stderr}");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn standalone_near_miss_words_suggest_commands_not_sessions() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-help-word-{}-{}",
+        "ulo-cli-help-word-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "version"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("did you mean `e --version`?"),
+        stderr.contains("did you mean `ulo --version`?"),
         "stderr: {stderr}"
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "docss"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("did you mean `e docs`?"),
+        stderr.contains("did you mean `ulo docs`?"),
         "stderr: {stderr}"
     );
     let _ = std::fs::remove_dir_all(home);
@@ -255,16 +255,16 @@ fn standalone_near_miss_words_suggest_commands_not_sessions() {
 #[test]
 fn piped_stdin_is_refused_with_a_pointer_to_rpc() {
     let home = std::env::temp_dir().join(format!(
-        "e-cli-piped-{}-{}",
+        "ulo-cli-piped-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
     // The interactive frame loop needs a terminal it owns; piped stdin has
-    // none, and headless one-shots go through `e rpc`. Piping text in is a
+    // none, and headless one-shots go through `ulo rpc`. Piping text in is a
     // usage error that names the headless path, never a half-open TUI.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -281,7 +281,7 @@ fn piped_stdin_is_refused_with_a_pointer_to_rpc() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("interactive terminal"), "stderr: {stderr}");
-    assert!(stderr.contains("e rpc"), "stderr: {stderr}");
+    assert!(stderr.contains("ulo rpc"), "stderr: {stderr}");
 }
 
 /// An extension's boolean flag before `doctor` hides the word from the raw
@@ -294,7 +294,7 @@ fn diagnostics_behind_an_extension_flag_are_a_usage_error_not_a_prompt() {
     use std::os::unix::fs::PermissionsExt;
 
     let home = std::env::temp_dir().join(format!(
-        "e-cli-flagged-doctor-{}-{}",
+        "ulo-cli-flagged-doctor-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
@@ -316,9 +316,9 @@ done
     .unwrap();
     std::fs::set_permissions(&extension, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--plan", "doctor"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -337,34 +337,34 @@ fn trust_records_a_decision_the_workspace_loader_honours() {
     let _guard = common::env_lock();
     let home = common::Home::new("cli-trust");
     let workspace = std::env::temp_dir().join(format!(
-        "e-cli-trust-ws-{}-{}",
+        "ulo-cli-trust-ws-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&workspace).unwrap();
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_e"))
+        Command::new(env!("CARGO_BIN_EXE_ulo"))
             .args(args)
-            .env("E_HOME", &home.dir)
+            .env("ULO_HOME", &home.dir)
             .current_dir(&workspace)
             .output()
             .unwrap()
     };
-    assert!(!e::core::config::trust::trusted(&workspace));
+    assert!(!ulo::core::config::trust::trusted(&workspace));
 
-    // No argument names the current directory, the way `e packages` does.
+    // No argument names the current directory, the way `ulo packages` does.
     let trusted = run(&["trust"]);
     assert!(trusted.status.success());
     assert!(String::from_utf8_lossy(&trusted.stdout).contains("trusted"));
-    assert!(e::core::config::trust::trusted(&workspace));
+    assert!(ulo::core::config::trust::trusted(&workspace));
 
     let declined = run(&["untrust", workspace.to_str().unwrap()]);
     assert!(declined.status.success());
-    assert!(!e::core::config::trust::trusted(&workspace));
+    assert!(!ulo::core::config::trust::trusted(&workspace));
 
     let bad_flag = run(&["trust", "--nowhere"]);
     assert_eq!(bad_flag.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&bad_flag.stderr).contains("usage: e trust [dir]"));
+    assert!(String::from_utf8_lossy(&bad_flag.stderr).contains("usage: ulo trust [dir]"));
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

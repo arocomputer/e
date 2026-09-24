@@ -1,11 +1,11 @@
 # Architecture
 
-e is a Cargo workspace of five crates under `crates/`, in two directional
+ulo is a Cargo workspace of five crates under `crates/`, in two directional
 layers:
 
 ```text
 crates/tui         crates/rpc                      crates/sdk
-CLI / TUI          e rpc (JSONL session server)    Rust SDK
+CLI / TUI          ulo rpc (JSONL session server)    Rust SDK
     │ subscribes to one ordered SessionEvent stream
     ▼
 crates/core: terminal-free core
@@ -15,7 +15,7 @@ crates/core: terminal-free core
     └── stores ───────────► the captured configuration home
 ```
 
-`crates/cli` is the `e` binary. It parses the command line and starts the
+`crates/cli` is the `ulo` binary. It parses the command line and starts the
 terminal frontend or the session server.
 
 Each crate boundary is a dependency rule that Cargo enforces. core depends
@@ -42,20 +42,20 @@ extract a module, not a crate.
   tool calls; tool records require a call id. Existing JSONL formats still load.
 - `core/` is terminal-free. Terminal behavior stays in `tui/`; the headless
   server stays in `rpc/`. Both are frontends of the same core, and a
-  channel (a Slack bot, a CI job; docs/guides/usage/channels.md) is a client of `e rpc`,
-  never a module of e.
+  channel (a Slack bot, a CI job; docs/guides/usage/channels.md) is a client of `ulo rpc`,
+  never a module of ulo.
 - Provider differences terminate at the dialect seam; the agent loop consumes
   one request and event vocabulary.
 - User-controlled behavior is file-backed or supplied by the extension
-  process boundary. e does not embed a scripting runtime or daemon.
-- `core/config/home.rs` resolves the active home. Stable uses `~/.e/`, preview
-  channels use separate homes, and `E_HOME` overrides either. Agents capture that
+  process boundary. ulo does not embed a scripting runtime or daemon.
+- `core/config/home.rs` resolves the active home. Stable uses `~/.ulo/`, preview
+  channels use separate homes, and `ULO_HOME` overrides either. Agents capture that
   path at construction. Store writes merge unknown keys and replace files atomically.
 - Resource packages use the same four resource directories as the home.
   Sources can be npm, git, local directories, or verified release archives.
   `packages/source.rs` parses identities; `packages.rs` owns installation and
   settings. Startup reads disk only; npm lifecycle scripts stay disabled.
-- Trust gates whether e runs in a workspace at all, and with it the
+- Trust gates whether ulo runs in a workspace at all, and with it the
   repository-provided context. It is not an execution sandbox.
   The complete threat model is in [../SECURITY.md](../SECURITY.md).
 

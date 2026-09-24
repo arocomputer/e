@@ -121,7 +121,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         // steps. The queue review edits these entries by key
         // concurrently; whatever the loop takes here is gone to it.
         let steered: Vec<ChatMessage> = {
-            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pending = pending.lock().unwrap_or_else(|ulo| ulo.into_inner());
             pending
                 .items
                 .drain(..)
@@ -151,7 +151,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             if let Some(h) = &host {
                 let prompt = history
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .iter()
                     .rev()
                     .find(|m| {
@@ -182,11 +182,16 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         }
         let active_now: Option<Arc<Vec<String>>> = active_tools
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clone()
             .map(Arc::new);
 
-        let mut messages = { history.lock().unwrap_or_else(|e| e.into_inner()).clone() };
+        let mut messages = {
+            history
+                .lock()
+                .unwrap_or_else(|ulo| ulo.into_inner())
+                .clone()
+        };
         // Some compatible gateways omit usage entirely. Keep a local,
         // conservative fallback so the mid-turn safety guard still
         // exists there; a real Usage frame replaces it below. Sized
@@ -235,7 +240,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
         let session_id = log
             .session
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .as_ref()
             .map(|s| s.id().to_string())
             .unwrap_or_default();
@@ -693,7 +698,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             && !reasoning_streamed
             && pending
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .items
                 .is_empty()
         {
@@ -743,7 +748,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
             // the turn to pick it up rather than stranding it.
             if !pending
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .items
                 .is_empty()
             {
@@ -1005,7 +1010,7 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
 /// path performs it: an automatic one that lands first honours it rather
 /// than racing it, and the manual one then finds nothing left to do.
 fn take_focus(focus: &Arc<Mutex<Option<String>>>) -> Option<String> {
-    focus.lock().unwrap_or_else(|e| e.into_inner()).take()
+    focus.lock().unwrap_or_else(|ulo| ulo.into_inner()).take()
 }
 
 /// Largest nested `AGENTS.md` that is read in full; the rest of a longer
@@ -1126,7 +1131,7 @@ async fn load_nested_instructions(
     for dir in pending {
         let fresh = loaded
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .insert(dir.clone());
         if !fresh {
             continue;

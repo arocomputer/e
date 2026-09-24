@@ -1,4 +1,4 @@
-//! The `e` binary: CLI subcommands and handoff to the interactive frame.
+//! The `ulo` binary: CLI subcommands and handoff to the interactive frame.
 //!
 //! Session UI lives in `tui::app` — this file owns flags, one-shot commands
 //! (`auth`, `rpc`, `docs`, `update`, `help`), then opens the frame loop.
@@ -15,34 +15,34 @@
 
 use std::io::IsTerminal as _;
 
-use e::core::agent::{Agent, SessionEvent};
-use e::core::cli::{self, Options};
-use e::core::providers::catalog::{self as model};
-use e::tui::app;
+use ulo::core::agent::{Agent, SessionEvent};
+use ulo::core::cli::{self, Options};
+use ulo::core::providers::catalog::{self as model};
+use ulo::tui::app;
 
-/// Print the usage text shared by `e --help` and `e help`, including any
+/// Print the usage text shared by `ulo --help` and `ulo help`, including any
 /// flags and commands that extensions contribute.
-fn print_help(host: &e::core::extensions::ExtensionHost) {
+fn print_help(host: &ulo::core::extensions::ExtensionHost) {
     println!(
-        "e — the coding agent you can put anywhere\n\n\
-usage:\n  e [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use -p or `e rpc` headless)\n  \
-e -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
-e -c, --continue      continue this directory's most recent session\n  \
-e -r, --resume        pick a session to resume\n  \
-e rpc                 headless session server: JSONL over stdin/stdout\n                        (sessions, streaming events; `e docs automation`)\n  \
-e docs [topic]        print a built-in format guide\n  \
-e update              update e to the latest release\n  \
-e install [source]    install a package, or make every listed one current\n  \
-e remove <source>     forget a package and delete its clone\n  \
-e packages            list installed packages\n  \
-e packages init <dir> start a package to publish\n  \
-e trust [dir]         trust a workspace's AGENTS.md, skills, and prompts\n  \
-e untrust [dir]       stop loading them for that workspace\n  \
-e auth                show sign-in status\n  \
-e doctor [--no-network]\n                      print paste-safe, local-only runtime diagnostics\n  \
-e providers           list provider support and sign-in state\n  \
-e help                print this help\n  \
-e -v, --version"
+        "ulo — the coding agent you can put anywhere\n\n\
+usage:\n  ulo [message]           start a session (optionally with a first prompt;\n                        piped stdin is not read — use -p or `ulo rpc` headless)\n  \
+ulo -p, --print [msg]   run one turn headless and print the reply (the prompt\n                        is the argument, or piped stdin); with --json, stream\n                        every event as a JSON line, then a result line\n  \
+ulo -c, --continue      continue this directory's most recent session\n  \
+ulo -r, --resume        pick a session to resume\n  \
+ulo rpc                 headless session server: JSONL over stdin/stdout\n                        (sessions, streaming events; `ulo docs automation`)\n  \
+ulo docs [topic]        print a built-in format guide\n  \
+ulo update              update ulo to the latest release\n  \
+ulo install [source]    install a package, or make every listed one current\n  \
+ulo remove <source>     forget a package and delete its clone\n  \
+ulo packages            list installed packages\n  \
+ulo packages init <dir> start a package to publish\n  \
+ulo trust [dir]         trust a workspace's AGENTS.md, skills, and prompts\n  \
+ulo untrust [dir]       stop loading them for that workspace\n  \
+ulo auth                show sign-in status\n  \
+ulo doctor [--no-network]\n                      print paste-safe, local-only runtime diagnostics\n  \
+ulo providers           list provider support and sign-in state\n  \
+ulo help                print this help\n  \
+ulo -v, --version"
     );
     println!(
         "\nrun options:\n  \
@@ -60,7 +60,7 @@ e -v, --version"
     if !flags.is_empty() {
         println!("\nextension flags:");
         for (token, description) in flags {
-            println!("  e {token:<20} {description}");
+            println!("  ulo {token:<20} {description}");
         }
     }
     if !commands.is_empty() {
@@ -85,7 +85,7 @@ fn auth_status_requested(args: &[String]) -> Result<bool, &'static str> {
     if args.len() == 1 {
         Ok(true)
     } else {
-        Err("usage: e auth\nSign in interactively with `/login <provider>`.")
+        Err("usage: ulo auth\nSign in interactively with `/login <provider>`.")
     }
 }
 
@@ -108,7 +108,7 @@ fn unknown_command_hint(options: &Options) -> Option<String> {
     }
     let word = options.positional[0].as_str();
     if word == "version" {
-        return Some("version is not a command — did you mean `e --version`?".into());
+        return Some("version is not a command — did you mean `ulo --version`?".into());
     }
     if cli::SUBCOMMANDS.contains(&word) {
         return None;
@@ -121,17 +121,21 @@ fn unknown_command_hint(options: &Options) -> Option<String> {
             .collect::<Vec<_>>(),
     )?;
     Some(format!(
-        "unknown command `{word}` — did you mean `e {suggestion}`?"
+        "unknown command `{word}` — did you mean `ulo {suggestion}`?"
     ))
 }
 
 /// Report a usage error — themed on a terminal, JSON on stdout when
 /// requested — shut extensions down, and exit with the usage status code.
-async fn usage_error(host: &e::core::extensions::ExtensionHost, json: bool, message: String) -> ! {
+async fn usage_error(
+    host: &ulo::core::extensions::ExtensionHost,
+    json: bool,
+    message: String,
+) -> ! {
     if json {
         println!("{}", serde_json::json!({"error": message}));
     } else if std::io::stderr().is_terminal() {
-        let theme = e::tui::theme::resolve(&e::core::config::settings::theme(), false);
+        let theme = ulo::tui::theme::resolve(&ulo::core::config::settings::theme(), false);
         eprintln!("{} {message}", theme.fg("error", "error:"));
     } else {
         eprintln!("error: {message}");
@@ -140,11 +144,11 @@ async fn usage_error(host: &e::core::extensions::ExtensionHost, json: bool, mess
     std::process::exit(2);
 }
 
-/// `e install [source]`, `e remove <source>`, `e packages`: the package
+/// `ulo install [source]`, `ulo remove <source>`, `ulo packages`: the package
 /// commands, extension-free one-shots (a package's own broken extension must
-/// never stand between the user and `e remove`). Returns the exit status.
+/// never stand between the user and `ulo remove`). Returns the exit status.
 async fn package_command(sub: &str, rest: &[String]) -> i32 {
-    use e::core::resources::packages::{self, Status, KINDS};
+    use ulo::core::resources::packages::{self, Status, KINDS};
     let plural = |n: usize, kind: &str| {
         let noun = kind.trim_end_matches('s');
         if n == 1 {
@@ -171,7 +175,7 @@ async fn package_command(sub: &str, rest: &[String]) -> i32 {
             let results = packages::install_all().await;
             if results.is_empty() {
                 println!(
-                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                    "no packages listed — `ulo install <source>` adds one (see `ulo docs packages`)"
                 );
                 return 0;
             }
@@ -215,7 +219,7 @@ async fn package_command(sub: &str, rest: &[String]) -> i32 {
             let list = packages::list();
             if list.is_empty() {
                 println!(
-                    "no packages listed — `e install <source>` adds one (see `e docs packages`)"
+                    "no packages listed — `ulo install <source>` adds one (see `ulo docs packages`)"
                 );
                 return 0;
             }
@@ -223,7 +227,7 @@ async fn package_command(sub: &str, rest: &[String]) -> i32 {
             for package in list {
                 let status = match &package.status {
                     Status::Installed { counts, .. } => describe(counts),
-                    Status::Missing => "missing — run `e install`".into(),
+                    Status::Missing => "missing — run `ulo install`".into(),
                     Status::Invalid(reason) => format!("invalid: {reason}"),
                 };
                 println!("{:<width$}  {status}", package.spec);
@@ -238,7 +242,7 @@ async fn package_command(sub: &str, rest: &[String]) -> i32 {
                     for path in written {
                         println!("  {}", path.strip_prefix(&dir).unwrap_or(&path).display());
                     }
-                    println!("try it with `e --package {}`", dir.display());
+                    println!("try it with `ulo --package {}`", dir.display());
                     0
                 }
                 Err(message) => {
@@ -248,13 +252,16 @@ async fn package_command(sub: &str, rest: &[String]) -> i32 {
             }
         }
         _ => {
-            eprintln!("{}", cli::subcommand_usage(sub).unwrap_or("usage: e help"));
+            eprintln!(
+                "{}",
+                cli::subcommand_usage(sub).unwrap_or("usage: ulo help")
+            );
             2
         }
     }
 }
 
-/// `e trust [dir]` / `e untrust [dir]`: record a workspace's trust decision
+/// `ulo trust [dir]` / `ulo untrust [dir]`: record a workspace's trust decision
 /// without a terminal. An unattended session — a channel bot, a CI job — cannot
 /// answer the trust panel, so without this the directory silently keeps loading
 /// none of its own AGENTS.md, skills, prompts, or packages. Returns the exit
@@ -271,7 +278,7 @@ fn trust_command(sub: &str, rest: &[String]) -> i32 {
         },
         [dir] => std::path::PathBuf::from(dir),
         _ => {
-            eprintln!("usage: e {sub} [dir]");
+            eprintln!("usage: ulo {sub} [dir]");
             return 2;
         }
     };
@@ -282,7 +289,7 @@ fn trust_command(sub: &str, rest: &[String]) -> i32 {
             return 1;
         }
     };
-    match e::core::config::trust::set(&dir, trusted) {
+    match ulo::core::config::trust::set(&dir, trusted) {
         Ok(()) if trusted => {
             println!(
                 "trusted {} — its AGENTS.md, skills, and prompts load from now on",
@@ -305,7 +312,7 @@ fn trust_command(sub: &str, rest: &[String]) -> i32 {
 }
 
 /// Append the subcommand's usage line when the failing argv names one, so
-/// `e doctor --unknown` points at `e doctor` instead of generic help.
+/// `ulo doctor --unknown` points at `ulo doctor` instead of generic help.
 fn with_subcommand_usage(message: String, args: &[String]) -> String {
     match cli::leading_subcommand(args).and_then(cli::subcommand_usage) {
         Some(usage) => format!("{message}\n{usage}"),
@@ -320,10 +327,10 @@ async fn main() -> std::io::Result<()> {
         if cli::has_flag(&args, &["--json"]) {
             println!(
                 "{}",
-                serde_json::json!({"version": e::VERSION, "channel": e::CHANNEL, "commit": e::COMMIT})
+                serde_json::json!({"version": ulo::VERSION, "channel": ulo::CHANNEL, "commit": ulo::COMMIT})
             );
         } else {
-            println!("e {}", e::VERSION);
+            println!("ulo {}", ulo::VERSION);
         }
         return Ok(());
     }
@@ -341,28 +348,28 @@ async fn main() -> std::io::Result<()> {
         Some("doctor" | "providers" | "install" | "remove" | "packages" | "trust" | "untrust")
     );
     // Extensions' own requests (`ui.*`, `session.*`) travel this channel
-    // to whoever answers them: the terminal frontend, or `e rpc`, which
-    // relays questions to its client. `e -p` starts the host without it,
+    // to whoever answers them: the terminal frontend, or `ulo rpc`, which
+    // relays questions to its client. `ulo -p` starts the host without it,
     // so `initialize` tells extensions there is no UI.
     let headless = cli::has_flag(&args, &["--print", "-p"]);
     let (requests_tx, requests_rx) =
-        tokio::sync::mpsc::channel::<e::core::extensions::HostRequest>(256);
+        tokio::sync::mpsc::channel::<ulo::core::extensions::HostRequest>(256);
     // `--package <source>` packages join this run before extensions start,
     // so their extensions launch like installed ones. A bad source is a
     // usage error, not a silent omission.
     if !diagnostic_requested {
         for spec in cli::flag_values(&args, &["--package", "-P"]) {
-            if let Err(message) = e::core::resources::packages::use_once(&spec).await {
+            if let Err(message) = ulo::core::resources::packages::use_once(&spec).await {
                 eprintln!("--package {spec}: {message}");
-                e::core::resources::packages::forget_once();
+                ulo::core::resources::packages::forget_once();
                 std::process::exit(2);
             }
         }
     }
     let host = if cli::extensions_disabled(&args) || diagnostic_requested {
-        e::core::extensions::ExtensionHost::empty()
+        ulo::core::extensions::ExtensionHost::empty()
     } else {
-        e::core::extensions::ExtensionHost::start(
+        ulo::core::extensions::ExtensionHost::start(
             jobs_tx.clone(),
             (!headless).then(|| requests_tx.clone()),
         )
@@ -385,7 +392,7 @@ async fn main() -> std::io::Result<()> {
         // one.
         if let Some(sub @ ("install" | "remove" | "packages" | "trust" | "untrust")) = sub {
             if diagnostic_options.json {
-                eprintln!("--json is supported by `e doctor` and `e providers`");
+                eprintln!("--json is supported by `ulo doctor` and `ulo providers`");
                 std::process::exit(2);
             }
             let rest = &diagnostic_args[1..];
@@ -415,16 +422,16 @@ async fn main() -> std::io::Result<()> {
                         &host,
                         false,
                         if doctor {
-                            "usage: e doctor [--no-network]".into()
+                            "usage: ulo doctor [--no-network]".into()
                         } else {
-                            "usage: e providers".into()
+                            "usage: ulo providers".into()
                         },
                     )
                     .await;
                 }
             }
 
-            let report = e::core::providers::diagnostics::report(&host);
+            let report = ulo::core::providers::diagnostics::report(&host);
             if diagnostic_options.json {
                 let json = if doctor {
                     serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".into())
@@ -433,7 +440,7 @@ async fn main() -> std::io::Result<()> {
                 };
                 println!("{json}");
             } else if doctor {
-                println!("{}", e::core::providers::diagnostics::render(&report));
+                println!("{}", ulo::core::providers::diagnostics::render(&report));
             } else {
                 for provider in &report.providers {
                     println!(
@@ -455,8 +462,8 @@ async fn main() -> std::io::Result<()> {
         }
     }
     match host.startup(args).await {
-        Ok(e::core::extensions::StartupAction::Continue(next)) => args = next,
-        Ok(e::core::extensions::StartupAction::Relaunch { argv, request }) => {
+        Ok(ulo::core::extensions::StartupAction::Continue(next)) => args = next,
+        Ok(ulo::core::extensions::StartupAction::Relaunch { argv, request }) => {
             host.shutdown().await;
             return app::relaunch_self(&request.cwd, &argv, &request.env);
         }
@@ -467,7 +474,7 @@ async fn main() -> std::io::Result<()> {
                 eprintln!("{message}");
             }
             host.shutdown().await;
-            e::core::resources::packages::forget_once();
+            ulo::core::resources::packages::forget_once();
             std::process::exit(1);
         }
     }
@@ -493,7 +500,7 @@ async fn main() -> std::io::Result<()> {
         usage_error(
             &host,
             json_requested,
-            "diagnostics cannot follow extension flags — run `e doctor` or `e providers` first"
+            "diagnostics cannot follow extension flags — run `ulo doctor` or `ulo providers` first"
                 .into(),
         )
         .await;
@@ -504,10 +511,10 @@ async fn main() -> std::io::Result<()> {
         usage_error(&host, false, message).await;
     }
 
-    // `e help` is the subcommand form of `e --help`.
+    // `ulo help` is the subcommand form of `ulo --help`.
     if args.first().map(String::as_str) == Some("help") {
         if args.len() != 1 {
-            usage_error(&host, false, "usage: e help".to_string()).await;
+            usage_error(&host, false, "usage: ulo help".to_string()).await;
         }
         print_help(&host);
         host.shutdown().await;
@@ -516,11 +523,11 @@ async fn main() -> std::io::Result<()> {
     match auth_status_requested(args) {
         Ok(true) => {
             if options.json {
-                eprintln!("--json is supported by `e doctor` and `e providers`");
+                eprintln!("--json is supported by `ulo doctor` and `ulo providers`");
                 host.shutdown().await;
                 std::process::exit(2);
             }
-            e::core::auth::login::auth_status();
+            ulo::core::auth::login::auth_status();
             host.shutdown().await;
             return Ok(());
         }
@@ -530,57 +537,57 @@ async fn main() -> std::io::Result<()> {
         }
     }
     if args.first().map(String::as_str) == Some("rpc") {
-        return e::rpc::serve(host, &options, requests_rx, jobs_rx).await;
+        return ulo::rpc::serve(host, &options, requests_rx, jobs_rx).await;
     }
     if options.print {
         // An unattended run has no dialog to answer, so an untrusted workspace
         // stops it here instead of quietly working without its instructions.
         if let Some(refusal) =
-            e::core::config::trust::refusal(&std::env::current_dir().unwrap_or_default())
+            ulo::core::config::trust::refusal(&std::env::current_dir().unwrap_or_default())
         {
             eprintln!("error: {refusal}");
             host.shutdown().await;
             std::process::exit(1);
         }
         let status = print_turn(host.clone(), &options, args).await;
-        e::core::tools::kill_tracked_processes();
+        ulo::core::tools::kill_tracked_processes();
         host.shutdown().await;
-        e::core::resources::packages::forget_once();
+        ulo::core::resources::packages::forget_once();
         if status != 0 {
             std::process::exit(status);
         }
         return Ok(());
     }
     if options.json {
-        eprintln!("--json is supported by `e doctor`, `e providers`, and `-p`");
+        eprintln!("--json is supported by `ulo doctor`, `ulo providers`, and `-p`");
         host.shutdown().await;
         std::process::exit(2);
     }
     if args.first().map(String::as_str) == Some("update") {
         // Every one-shot exit owes extensions their shutdown notification.
-        if e::core::update::is_dev_build() {
-            println!("this is a dev build (under target/) — update with cargo, not e update");
+        if ulo::core::update::is_dev_build() {
+            println!("this is a dev build (under target/) — update with cargo, not ulo update");
             host.shutdown().await;
             return Ok(());
         }
-        if !["production", "dev", "beta"].contains(&e::CHANNEL)
-            || !e::core::update::is_release_version(e::VERSION)
+        if !["production", "dev", "beta"].contains(&ulo::CHANNEL)
+            || !ulo::core::update::is_release_version(ulo::VERSION)
         {
             println!(
-                "e {} is not a release build — update from source, not e update",
-                e::VERSION
+                "ulo {} is not a release build — update from source, not ulo update",
+                ulo::VERSION
             );
             host.shutdown().await;
             return Ok(());
         }
-        if e::core::update::target().is_none() {
-            println!("{}", e::core::update::NO_RELEASE);
+        if ulo::core::update::target().is_none() {
+            println!("{}", ulo::core::update::NO_RELEASE);
             host.shutdown().await;
             return Ok(());
         }
-        match e::core::update::self_update().await {
-            Ok(Some(version)) => println!("updated to e {version} — restart to use it"),
-            Ok(None) => println!("e {} is already the latest", e::VERSION),
+        match ulo::core::update::self_update().await {
+            Ok(Some(version)) => println!("updated to ulo {version} — restart to use it"),
+            Ok(None) => println!("ulo {} is already the latest", ulo::VERSION),
             Err(err) => {
                 eprintln!("{err}");
                 host.shutdown().await;
@@ -591,18 +598,18 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
     if args.first().map(String::as_str) == Some("docs") {
-        use e::core::resources::docs;
+        use ulo::core::resources::docs;
         match args.get(1).map(String::as_str) {
             Some(topic) => match docs::body(topic) {
                 Some(text) => println!("{text}"),
                 None => {
-                    eprintln!("no such topic: {topic} — run `e docs` for the list");
+                    eprintln!("no such topic: {topic} — run `ulo docs` for the list");
                     host.shutdown().await;
                     std::process::exit(2);
                 }
             },
             None => {
-                println!("built-in guides — `e docs <topic>`:\n");
+                println!("built-in guides — `ulo docs <topic>`:\n");
                 for (name, blurb) in docs::topics() {
                     println!("  {name:<18} {blurb}");
                 }
@@ -613,13 +620,13 @@ async fn main() -> std::io::Result<()> {
     }
 
     // The interactive frame loop needs a terminal it owns. Piped stdin has
-    // none, and headless one-shots go through `e rpc`, so refuse rather than
+    // none, and headless one-shots go through `ulo rpc`, so refuse rather than
     // half-run a session with no way to read the keyboard.
     if !std::io::stdin().is_terminal() {
         usage_error(
             &host,
             false,
-            "e needs an interactive terminal; for headless use `e rpc`".into(),
+            "ulo needs an interactive terminal; for headless use `ulo rpc`".into(),
         )
         .await;
     }
@@ -639,10 +646,10 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(2);
     }
     // The trust panel answers a workspace nobody has decided about yet; a
-    // recorded `false` is already an answer, and e only runs trusted.
+    // recorded `false` is already an answer, and ulo only runs trusted.
     let cwd = std::env::current_dir().unwrap_or_default();
-    if e::core::config::trust::status(&cwd) == Some(false) {
-        if let Some(refusal) = e::core::config::trust::refusal(&cwd) {
+    if ulo::core::config::trust::status(&cwd) == Some(false) {
+        if let Some(refusal) = ulo::core::config::trust::refusal(&cwd) {
             eprintln!("error: {refusal}");
         }
         host.shutdown().await;
@@ -671,18 +678,18 @@ async fn main() -> std::io::Result<()> {
         (requests_tx, requests_rx),
     )
     .await;
-    e::core::resources::packages::forget_once();
+    ulo::core::resources::packages::forget_once();
     outcome
 }
 
-/// `e -p [prompt]`: one headless turn. The prompt is the positional text,
+/// `ulo -p [prompt]`: one headless turn. The prompt is the positional text,
 /// or piped stdin when there is none. Plain mode streams the reply's text
 /// to stdout as it arrives and puts warnings and errors on stderr; `--json`
 /// streams every session event as one JSON line and ends with the same
-/// result object `e rpc` returns. Exit status: 0 for a completed turn, 1
+/// result object `ulo rpc` returns. Exit status: 0 for a completed turn, 1
 /// for an error or an interrupted turn, 2 for a usage problem.
 async fn print_turn(
-    host: std::sync::Arc<e::core::extensions::ExtensionHost>,
+    host: std::sync::Arc<ulo::core::extensions::ExtensionHost>,
     options: &Options,
     args: &[String],
 ) -> i32 {
@@ -721,16 +728,16 @@ async fn print_turn(
     };
     let slug = model::slug(&selected);
     let pricing = selected.pricing.clone();
-    let system = e::core::agent::context::system_prompt(&cwd);
+    let system = ulo::core::agent::context::system_prompt(&cwd);
     let (mut agent, mut events) = Agent::with_options(selected, cli::agent_options(options));
     let effort = agent.effort();
     agent.set_host(host);
     agent.submit_message(
-        e::core::providers::ChatMessage::user_with_images(prompt, images),
+        ulo::core::providers::ChatMessage::user_with_images(prompt, images),
         system,
     );
 
-    let mut result = e::rpc::TurnAccumulator::with_warnings(model::config_warnings());
+    let mut result = ulo::rpc::TurnAccumulator::with_warnings(model::config_warnings());
     let mut stdout = std::io::stdout();
     let mut printed_any = false;
     while let Some(event) = events.recv().await {
@@ -802,7 +809,7 @@ mod tests {
     #[test]
     fn auth_provider_argument_is_rejected_with_working_guidance() {
         let error = super::auth_status_requested(&args(&["auth", "openai-codex"])).unwrap_err();
-        assert!(error.contains("usage: e auth"));
+        assert!(error.contains("usage: ulo auth"));
         assert!(error.contains("/login <provider>"));
     }
 
@@ -813,14 +820,14 @@ mod tests {
             ..Default::default()
         })
         .unwrap()
-        .contains("did you mean `e docs`?"));
+        .contains("did you mean `ulo docs`?"));
         assert_eq!(
             super::unknown_command_hint(&super::Options {
                 positional: args(&["version"]),
                 ..Default::default()
             })
             .unwrap(),
-            "version is not a command — did you mean `e --version`?"
+            "version is not a command — did you mean `ulo --version`?"
         );
         // Real subcommands, ordinary words, multi-word prompts, and
         // `--`-escaped text all stay prompts.

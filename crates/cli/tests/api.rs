@@ -4,7 +4,7 @@
 
 use common::{env_lock, Home};
 
-use e::core::extensions::{ExtensionHost, StartupAction};
+use ulo::core::extensions::{ExtensionHost, StartupAction};
 
 mod common;
 
@@ -25,7 +25,7 @@ while IFS= read -r line; do
     *'"hook.startup"'*)
       case "$line" in
         *startup-error*) printf '{"id":%s,"error":"bad startup"}\n' "$id" ;;
-        *relaunch-me*) printf '{"id":%s,"result":{"argv":["-c"],"relaunch":{"cwd":"/tmp","env":{"E_TEST":"1"}}}}\n' "$id" ;;
+        *relaunch-me*) printf '{"id":%s,"result":{"argv":["-c"],"relaunch":{"cwd":"/tmp","env":{"ULO_TEST":"1"}}}}\n' "$id" ;;
         *probe-flags*) printf '{"id":%s,"result":{"argv":["-c"]}}\n' "$id" ;;
         *) printf '{"id":%s,"result":{"argv":["-c"]}}\n' "$id" ;;
       esac ;;
@@ -59,7 +59,7 @@ fn fake_home() -> Home {
     Home::with_extension("fake.sh", FAKE)
 }
 
-// The env lock is deliberately held across the awaits: E_HOME must stay ours
+// The env lock is deliberately held across the awaits: ULO_HOME must stay ours
 // for the whole test, and each #[tokio::test] runs on its own runtime.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
@@ -84,7 +84,7 @@ async fn extension_round_trip() {
         vec![("-x, --extra".to_string(), "an extension flag".to_string())]
     );
 
-    // Startup hooks consume custom arguments before e parses its own flags.
+    // Startup hooks consume custom arguments before ulo parses its own flags.
     match host.startup(vec!["--custom".into()]).await.unwrap() {
         StartupAction::Continue(argv) => assert_eq!(argv, vec!["-c"]),
         StartupAction::Relaunch { .. } => panic!("unexpected relaunch"),
@@ -93,7 +93,7 @@ async fn extension_round_trip() {
         StartupAction::Relaunch { argv, request } => {
             assert_eq!(argv, vec!["-c"]);
             assert_eq!(request.cwd, "/tmp");
-            assert_eq!(request.env["E_TEST"].as_deref(), Some("1"));
+            assert_eq!(request.env["ULO_TEST"].as_deref(), Some("1"));
         }
         StartupAction::Continue(_) => panic!("expected relaunch"),
     }
@@ -203,9 +203,9 @@ done
     assert_eq!(result.content, "finished");
     let first = updates.recv().await.unwrap();
     let second = updates.recv().await.unwrap();
-    assert_eq!(first.stream, e::core::tools::OutputStream::Stdout);
+    assert_eq!(first.stream, ulo::core::tools::OutputStream::Stdout);
     assert_eq!(first.chunk, "first\n");
-    assert_eq!(second.stream, e::core::tools::OutputStream::Stderr);
+    assert_eq!(second.stream, ulo::core::tools::OutputStream::Stderr);
     assert_eq!(second.chunk, "second\n");
 
     let compatibility = tokio::time::timeout(
@@ -250,12 +250,16 @@ done
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
-    let options = e::core::agent::AgentOptions {
+    let options = ulo::core::agent::AgentOptions {
         save_session: false,
-        ..e::core::agent::AgentOptions::default()
+        ..ulo::core::agent::AgentOptions::default()
     };
-    let (mut agent, mut events) = e::core::agent::Agent::with_options(
-        common::test_model("mock", port, e::core::providers::catalog::Api::Completions),
+    let (mut agent, mut events) = ulo::core::agent::Agent::with_options(
+        common::test_model(
+            "mock",
+            port,
+            ulo::core::providers::catalog::Api::Completions,
+        ),
         options,
     );
     agent.set_host(host.clone());
@@ -265,12 +269,12 @@ done
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while let Some(event) = events.recv().await {
             match event {
-                e::core::agent::SessionEvent::ToolOutput { chunk, .. } => {
+                ulo::core::agent::SessionEvent::ToolOutput { chunk, .. } => {
                     ordered.push(format!("output:{chunk}"));
                 }
-                e::core::agent::SessionEvent::ToolEnd { .. } => ordered.push("end".into()),
-                e::core::agent::SessionEvent::TurnEnd { .. } => break,
-                e::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
+                ulo::core::agent::SessionEvent::ToolEnd { .. } => ordered.push("end".into()),
+                ulo::core::agent::SessionEvent::TurnEnd { .. } => break,
+                ulo::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
                 _ => {}
             }
         }
@@ -314,12 +318,16 @@ done
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
     assert!(!host.is_empty());
-    let options = e::core::agent::AgentOptions {
+    let options = ulo::core::agent::AgentOptions {
         save_session: false,
-        ..e::core::agent::AgentOptions::default()
+        ..ulo::core::agent::AgentOptions::default()
     };
-    let (mut agent, mut events) = e::core::agent::Agent::with_options(
-        common::test_model("mock", port, e::core::providers::catalog::Api::Completions),
+    let (mut agent, mut events) = ulo::core::agent::Agent::with_options(
+        common::test_model(
+            "mock",
+            port,
+            ulo::core::providers::catalog::Api::Completions,
+        ),
         options,
     );
     agent.set_host(host.clone());
@@ -328,9 +336,9 @@ done
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while let Some(event) = events.recv().await {
             match event {
-                e::core::agent::SessionEvent::ToolEnd { content, .. } => shown = Some(content),
-                e::core::agent::SessionEvent::TurnEnd { .. } => break,
-                e::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
+                ulo::core::agent::SessionEvent::ToolEnd { content, .. } => shown = Some(content),
+                ulo::core::agent::SessionEvent::TurnEnd { .. } => break,
+                ulo::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
                 _ => {}
             }
         }
@@ -380,12 +388,16 @@ done
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
-    let options = e::core::agent::AgentOptions {
+    let options = ulo::core::agent::AgentOptions {
         save_session: false,
-        ..e::core::agent::AgentOptions::default()
+        ..ulo::core::agent::AgentOptions::default()
     };
-    let (mut agent, mut events) = e::core::agent::Agent::with_options(
-        common::test_model("mock", port, e::core::providers::catalog::Api::Completions),
+    let (mut agent, mut events) = ulo::core::agent::Agent::with_options(
+        common::test_model(
+            "mock",
+            port,
+            ulo::core::providers::catalog::Api::Completions,
+        ),
         options,
     );
     agent.set_host(host.clone());
@@ -395,11 +407,11 @@ done
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while let Some(event) = events.recv().await {
             match event {
-                e::core::agent::SessionEvent::ToolEnd {
+                ulo::core::agent::SessionEvent::ToolEnd {
                     outcome, content, ..
                 } => results.push((outcome, content)),
-                e::core::agent::SessionEvent::TurnEnd { .. } => break,
-                e::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
+                ulo::core::agent::SessionEvent::TurnEnd { .. } => break,
+                ulo::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
                 _ => {}
             }
         }
@@ -410,10 +422,10 @@ done
     // An extension that owns a built-in's name serves it (no builtin steal),
     // and the tool_call hook still gates the call.
     assert!(results.iter().any(|(outcome, content)| {
-        *outcome == e::core::tools::ToolOutcome::Blocked && content.contains("read denied")
+        *outcome == ulo::core::tools::ToolOutcome::Blocked && content.contains("read denied")
     }));
     assert!(results.iter().any(|(outcome, content)| {
-        *outcome == e::core::tools::ToolOutcome::Completed && content == "extension answered"
+        *outcome == ulo::core::tools::ToolOutcome::Completed && content == "extension answered"
     }));
     server.join().unwrap();
     host.shutdown().await;
@@ -446,13 +458,17 @@ done
     let (port, server) = common::serve_sse(&[first, second]);
     let (notices, _rx) = tokio::sync::mpsc::channel(4);
     let host = start_host(notices).await;
-    let options = e::core::agent::AgentOptions {
+    let options = ulo::core::agent::AgentOptions {
         save_session: false,
-        tool_mode: e::core::cli::ToolMode::None,
-        ..e::core::agent::AgentOptions::default()
+        tool_mode: ulo::core::cli::ToolMode::None,
+        ..ulo::core::agent::AgentOptions::default()
     };
-    let (mut agent, mut events) = e::core::agent::Agent::with_options(
-        common::test_model("mock", port, e::core::providers::catalog::Api::Completions),
+    let (mut agent, mut events) = ulo::core::agent::Agent::with_options(
+        common::test_model(
+            "mock",
+            port,
+            ulo::core::providers::catalog::Api::Completions,
+        ),
         options,
     );
     agent.set_host(host.clone());
@@ -462,11 +478,11 @@ done
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while let Some(event) = events.recv().await {
             match event {
-                e::core::agent::SessionEvent::ToolEnd {
+                ulo::core::agent::SessionEvent::ToolEnd {
                     outcome, content, ..
                 } => result = Some((outcome, content)),
-                e::core::agent::SessionEvent::TurnEnd { .. } => break,
-                e::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
+                ulo::core::agent::SessionEvent::TurnEnd { .. } => break,
+                ulo::core::agent::SessionEvent::Error(error) => panic!("agent failed: {error}"),
                 _ => {}
             }
         }
@@ -479,7 +495,7 @@ done
     // it — owning a tool name grants no escape from the safety mode.
     assert!(!server.join().unwrap()[1].contains("extension write description"));
     let (outcome, content) = result.expect("the write call resolves");
-    assert_eq!(outcome, e::core::tools::ToolOutcome::Blocked);
+    assert_eq!(outcome, ulo::core::tools::ToolOutcome::Blocked);
     assert!(content.contains("no-tools"));
     host.shutdown().await;
 }
@@ -617,7 +633,7 @@ done
     host.shutdown().await;
 }
 
-/// Typed flags are parsed from startup argv by e and handed to the hook as
+/// Typed flags are parsed from startup argv by ulo and handed to the hook as
 /// `params.flags`. The fake echoes them back over notify; the test asserts
 /// boolean (bare / =value / --no-), string (=value / value / bare-null),
 /// last-wins, and that a display-only flag name is never parsed.
@@ -640,7 +656,7 @@ rl.on("line", (line) => {
     }}) + "\n");
   } else if (req.method === "hook.startup") {
     process.stdout.write(JSON.stringify({ id: req.id, result: { argv: ["-c"] } }) + "\n");
-    // Report what e parsed (notify is a no-reply extension->e message).
+    // Report what ulo parsed (notify is a no-reply extension->ulo message).
     if (req.params && req.params.flags) {
       process.stdout.write(JSON.stringify({ method: "notify", params: { message: "FLAGS " + JSON.stringify(req.params.flags) } }) + "\n");
     }
@@ -832,7 +848,7 @@ rl.on("line", (line) => {
     let seen: serde_json::Value = serde_json::from_str(&r.content).unwrap();
     assert_eq!(seen["hasDry"], false, "absent flag stays absent: {seen}");
 
-    // A tool-only extension has no startup hook to rewrite argv. e must still
+    // A tool-only extension has no startup hook to rewrite argv. ulo must still
     // remove both typed flags and a separated string value before dispatching
     // the built-in subcommand or constructing an initial prompt.
     match host
@@ -1075,7 +1091,7 @@ done
 }
 
 /// shutdown kills and reaps: a child left as a zombie would survive the
-/// relaunch exec unreapable in the next e.
+/// relaunch exec unreapable in the next ulo.
 #[cfg(unix)]
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]

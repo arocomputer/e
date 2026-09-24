@@ -233,7 +233,7 @@ pub async fn run(
             match value["type"].as_str().unwrap_or("") {
                 "message_start" => {
                     // Anthropic reports disjoint prompt categories. Older
-                    // responses expose only the creation total; e requests
+                    // responses expose only the creation total; ulo requests
                     // ordinary ephemeral caching, so any unclassified write
                     // belongs to the five-minute bucket.
                     let usage = &value["message"]["usage"];

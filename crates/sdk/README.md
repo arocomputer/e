@@ -1,12 +1,12 @@
-# e-sdk
+# ulo-sdk
 
-e's coding agent as a Rust library: create a session against a working
+ulo's coding agent as a Rust library: create a session against a working
 directory, prompt it, read one ordered event stream, get a reply. The same
 core the terminal frontend drives — built-in tools, skills and AGENTS.md
 context, compaction, session logs, extensions — without a terminal.
 
 ```rust
-use e_sdk::{Event, Session};
+use ulo_sdk::{Event, Session};
 
 let mut session = Session::builder().cwd("/path/to/project").build().await?;
 let mut turn = session.prompt("What does this repository do?");
@@ -20,7 +20,7 @@ session.close().await;
 ```
 
 ```sh
-cargo run -p aro-e-sdk --example ask -- "what does this repository do"
+cargo run -p ulo-sdk --example ask -- "what does this repository do"
 ```
 
 See [docs/guides/extend/sdk.md](../../docs/guides/extend/sdk.md) for the API, package boundary, and usage rules.
@@ -28,11 +28,11 @@ The API is unstable until its first release declares a versioning policy.
 
 ## Versioning
 
-`aro-e-sdk` is published on crates.io and its versions mean something from
+`ulo-sdk` is published on crates.io and its versions mean something from
 the first release:
 
 ```sh
-cargo add aro-e-sdk
+cargo add ulo-sdk
 ```
 
 - **The SDK's API is the contract**: the types and methods
@@ -42,7 +42,7 @@ cargo add aro-e-sdk
   additive and internal changes move the patch. From 1.0 the usual rules apply.
 - **Its own version, not the application's.** The SDK changes for its own
   reasons, so its version tracks only those. It depends on the core crate
-  alone, `aro-e-core`, which carries the `aro-` family prefix since bare `e`
+  alone, `ulo-core`, which carries the `aro-` family prefix since bare `ulo`
   is taken on crates.io. It pins the exact core version it was tested
   against; publish that core version before publishing the SDK.
 - **The core's Rust items are not a promise.** What the SDK is built

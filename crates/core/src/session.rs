@@ -1,5 +1,5 @@
 //! Sessions: an append-only JSONL log per conversation, under
-//! `~/.e/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`.
+//! `~/.ulo/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`.
 //!
 //! One line per entry: a `session` header, then `message` entries carrying
 //! replayable ChatMessage content and an optional response envelope. A standalone
@@ -8,7 +8,7 @@
 //! their identity survives when compaction copies recent messages into a fresh
 //! log. The agent creates the file lazily on
 //! the first user send, and listing also rejects header-only or assistant-only
-//! files, so opening and closing e never counts as a session. Resume replays
+//! files, so opening and closing ulo never counts as a session. Resume replays
 //! messages back into the agent. The title is derived from the first user
 //! message (first line, eight words), never model-generated.
 //!
@@ -119,7 +119,7 @@ impl LockGuard {
         file.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                "this session is already active in another e",
+                "this session is already active in another ulo",
             ),
             std::fs::TryLockError::Error(error) => error,
         })?;
@@ -303,7 +303,7 @@ impl SessionLog {
         self.current = id;
     }
 
-    /// Set the display name e shows for this session. Idempotent; appends a
+    /// Set the display name ulo shows for this session. Idempotent; appends a
     /// name entry, so the most recent name wins on resume.
     pub fn set_name(&mut self, name: &str) -> std::io::Result<()> {
         let name = name.trim();
@@ -332,7 +332,7 @@ impl SessionLog {
     /// The stable per-conversation id — the UUID minted in `create` and
     /// recovered from the log's filename (`<stamp>_<id>.jsonl`; the stamp is
     /// digits and the id a UUID, so neither carries an underscore). Stable
-    /// across resume, since `reopen` keeps the same filename. e sends this as
+    /// across resume, since `reopen` keeps the same filename. ulo sends this as
     /// the opaque session handle to gateways that ask for one; it encodes no
     /// user identity. Empty only for an unexpected filename shape.
     pub fn id(&self) -> &str {
@@ -445,9 +445,9 @@ impl SessionLog {
                 }
                 Ok(_) => {}
                 Err(_) if Some(index) == last_nonempty => break,
-                Err(e) => {
+                Err(ulo) => {
                     return Err(std::io::Error::other(format!(
-                        "corrupt session record at line {}: {e}",
+                        "corrupt session record at line {}: {ulo}",
                         index + 1
                     )))
                 }
@@ -591,7 +591,7 @@ fn validate_format(version: u32) -> std::io::Result<()> {
         Ok(())
     } else {
         Err(std::io::Error::other(format!(
-            "session format {version} is newer than this e supports ({FORMAT_VERSION})"
+            "session format {version} is newer than this ulo supports ({FORMAT_VERSION})"
         )))
     }
 }
@@ -704,8 +704,13 @@ pub fn list(cwd: &Path) -> Vec<SessionInfo> {
         sessions.extend(
             entries
                 .flatten()
-                .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-                .filter_map(|e| info(&e.path(), if verify_header { Some(&cwd) } else { None })),
+                .filter(|ulo| {
+                    ulo.path()
+                        .extension()
+                        .map(|x| x == "jsonl")
+                        .unwrap_or(false)
+                })
+                .filter_map(|ulo| info(&ulo.path(), if verify_header { Some(&cwd) } else { None })),
         );
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
@@ -731,8 +736,13 @@ pub fn list_all() -> Vec<SessionInfo> {
         sessions.extend(
             entries
                 .flatten()
-                .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-                .filter_map(|e| info(&e.path(), None)),
+                .filter(|ulo| {
+                    ulo.path()
+                        .extension()
+                        .map(|x| x == "jsonl")
+                        .unwrap_or(false)
+                })
+                .filter_map(|ulo| info(&ulo.path(), None)),
         );
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
@@ -850,7 +860,7 @@ mod tests {
     #[test]
     fn listing_counts_user_turns_not_harness_messages() {
         let path = std::env::temp_dir().join(format!(
-            "e-session-turns-{}-{}.jsonl",
+            "ulo-session-turns-{}-{}.jsonl",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
@@ -903,7 +913,7 @@ mod tests {
     #[test]
     fn load_restores_only_the_most_recent_branch() {
         let path = std::env::temp_dir().join(format!(
-            "e-session-branch-{}-{}.jsonl",
+            "ulo-session-branch-{}-{}.jsonl",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
@@ -968,7 +978,7 @@ mod tests {
             // difficult disk-full + failed-rollback path deterministically.
             let file = OpenOptions::new().append(true).open("/dev/full").unwrap();
             let lock_path = std::env::temp_dir().join(format!(
-                "e-dev-full-{}-{}.lock",
+                "ulo-dev-full-{}-{}.lock",
                 std::process::id(),
                 uuid::Uuid::now_v7()
             ));

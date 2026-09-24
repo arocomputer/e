@@ -1,0 +1,88 @@
+---
+/** List ulo's policies in rule-separated semantic groups without visible category labels. */
+import Ulo from "@/sites/ulo/layouts/Ulo.astro";
+import SiteFrame from "@/sites/ulo/components/SiteFrame.astro";
+import "@/sites/ulo/styles/legal.css";
+
+const canonical = "https://ulo.sh/legal";
+const description = "Licensing, privacy, and security information for ulo.";
+const groups = [
+  {
+    title: "Using ulo",
+    links: [
+      {
+        href: "/ulo/legal/license",
+        title: "Software license",
+        description:
+          "The MIT license for using, modifying, and distributing ulo.",
+      },
+      {
+        href: "/ulo/legal/terms",
+        title: "Terms of service",
+        description: "Terms for this website and its services.",
+      },
+    ],
+  },
+  {
+    title: "Privacy & data",
+    links: [
+      {
+        href: "/ulo/legal/privacy",
+        title: "Privacy",
+        description: "How information is collected, used, and protected.",
+      },
+    ],
+  },
+  {
+    title: "Security",
+    links: [
+      {
+        href: "/ulo/legal/safety",
+        title: "Safety & privacy",
+        description:
+          "Tool permissions, directory trust, and handling sensitive data.",
+      },
+      {
+        href: "/ulo/legal/report-vulnerability",
+        title: "Report a vulnerability",
+        description:
+          "Private reporting instructions and the scope of safe harbor.",
+      },
+    ],
+  },
+];
+---
+
+<Ulo
+  title="Legal"
+  description={description}
+  canonical={canonical}
+  og={{ title: "Legal | ulo", url: canonical }}
+>
+  <SiteFrame>
+    <div class="ulo-legal-directory">
+      <header>
+        <h1>Legal</h1>
+      </header>
+      {groups.map((group) => (
+        <section class="ulo-legal-group">
+          <h2 class="ulo-visually-hidden">{group.title}</h2>
+          <ul>
+            {group.links.map((link) => (
+              <li>
+                <a href={link.href}>
+                  <h3>{link.title}</h3>
+                  <p>{link.description}</p>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p class="ulo-legal-contact">
+        Questions about these documents?{" "}
+        <a href="mailto:legal@aro.computer">legal@aro.computer</a>
+      </p>
+    </div>
+  </SiteFrame>
+</Ulo>

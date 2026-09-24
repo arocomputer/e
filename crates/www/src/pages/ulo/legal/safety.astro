@@ -1,0 +1,116 @@
+---
+/** Understand what ulo can access, what leaves your machine, and what a trust decision means. */
+import Ulo from "@/sites/ulo/layouts/Ulo.astro";
+import SiteFrame from "@/sites/ulo/components/SiteFrame.astro";
+import LegalArticle from "@/sites/ulo/components/legal/LegalArticle.astro";
+import "@/sites/ulo/styles/legal.css";
+
+const canonical = "https://ulo.sh/legal/safety";
+const description =
+  "Understand what ulo can access, what leaves your machine, and what a trust decision means.";
+---
+
+<Ulo
+  title="Safety"
+  description={description}
+  canonical={canonical}
+  og={{ title: "Safety | ulo", description, url: canonical }}
+>
+  <SiteFrame>
+    <LegalArticle
+      title="Safety & privacy"
+      lead={description}
+      sections={[
+        { id: "execution", title: "Tool execution" },
+        { id: "trust", title: "Directory trust" },
+        { id: "requests", title: "Model requests" },
+        { id: "storage", title: "Local storage" },
+        { id: "extensions", title: "Extensions" },
+        { id: "report", title: "Report a vulnerability" },
+      ]}
+    >
+      <Fragment slot="execution">
+        <p>
+          ulo runs tools with your user permissions. It does not sandbox file
+          edits or shell commands, and tool execution has no permission prompt
+          by default.
+        </p>
+        <aside class="ulo-doc-note">
+          <strong>Use isolation for untrusted work.</strong>
+          <p>
+            Run ulo in a container, VM, or OS sandbox when it should not have
+            the same access as your shell.
+          </p>
+        </aside>
+        <p>
+          Keep work in version control and review diffs and test output. Avoid
+          exposing credentials or directories the task does not need.
+        </p>
+      </Fragment>
+      <Fragment slot="trust">
+        <p>
+          Trust determines whether ulo loads a repository's instructions and
+          resources. It is not a per-command approval system and does not
+          constrain tool execution.
+        </p>
+        <p>
+          Review project instructions, skills, and extensions before trusting an
+          unfamiliar checkout.
+        </p>
+      </Fragment>
+      <Fragment slot="requests">
+        <p>
+          Requests go to the provider you select. They can include conversation
+          text, source files, and tool results used for the task. The provider's
+          data-use and retention policies apply.
+        </p>
+        <p>
+          A local endpoint sends model requests to the machine or network where
+          you host that endpoint. Local inference does not prevent shell tools
+          or extensions from making their own network requests.
+        </p>
+      </Fragment>
+      <Fragment slot="storage">
+        <dl class="ulo-doc-definitions">
+          <div>
+            <dt>
+              <code>~/.ulo/auth.json</code>
+            </dt>
+            <dd>
+              Stored provider credentials. Do not commit or share this file.
+            </dd>
+          </div>
+          <div>
+            <dt>
+              <code>~/.ulo/sessions/</code>
+            </dt>
+            <dd>Saved conversations, including tool activity.</dd>
+          </div>
+          <div>
+            <dt>HTML exports</dt>
+            <dd>
+              The active conversation branch. Review exports for private code
+              and data before sharing.
+            </dd>
+          </div>
+        </dl>
+      </Fragment>
+      <Fragment slot="extensions">
+        <p>
+          Extensions are executable programs, not isolated plugins. They run
+          with the permissions of the ulo process. Review their source and only
+          install code you trust.
+        </p>
+      </Fragment>
+      <Fragment slot="report">
+        <p>
+          Use the{" "}
+          <a href="/ulo/legal/report-vulnerability">
+            vulnerability reporting page
+          </a>
+          . Do not put credentials or sensitive project data in a public issue.
+        </p>
+      </Fragment>
+    </LegalArticle>
+  </SiteFrame>
+</Ulo>

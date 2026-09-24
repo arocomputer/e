@@ -1,6 +1,6 @@
 # Benchmarks
 
-The numbers e's identity depends on: a small binary, a fast start.
+The numbers ulo's identity depends on: a small binary, a fast start.
 
 ```sh
 ./x bench                          # enforce CI's generous regression budgets
@@ -16,13 +16,13 @@ targets. They are intentionally well above healthy measurements so shared CI
 noise does not fail a change; crossing one means a regression deserves an
 explicit investigation and budget change in the same review.
 
-Measured today: binary size, cold start (`e --version`, median of 20),
+Measured today: binary size, cold start (`ulo --version`, median of 20),
 spawn-to-first-frame on a bare home (median of 5), the true cold start —
 the same boot against a populated home (30 skills across a local package,
 two live extensions answering the initialize handshake, 1000 prompt-history
 entries, settings) — a cold launch (the binary's pages dropped from the
 file cache, then one boot to first frame: launching right after an update),
-session resume (`e -c` on a 400-turn saved session, spawn → restored tail),
+session resume (`ulo -c` on a 400-turn saved session, spawn → restored tail),
 and frame assembly and painting below 10,000 cached Markdown replies (mean
 of 100 changing-dock frames). The renderer measurement writes to a sink, so
 it measures CPU work and allocations, not terminal throughput. Its 10 ms

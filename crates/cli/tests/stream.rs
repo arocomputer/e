@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use common::{env_lock, serve_raw, serve_sse, sse_response, test_model, Home};
 
-use e::core::agent::{Agent, SessionEvent};
-use e::core::providers::catalog::Api;
-use e::core::providers::FailureCause;
+use ulo::core::agent::{Agent, SessionEvent};
+use ulo::core::providers::catalog::Api;
+use ulo::core::providers::FailureCause;
 
 fn mock_home() -> Home {
     let home = Home::new("stream");
@@ -21,7 +21,7 @@ fn mock_home() -> Home {
     home
 }
 
-// The env lock is held across awaits: E_HOME must stay ours and each
+// The env lock is held across awaits: ULO_HOME must stay ours and each
 // #[tokio::test] runs on its own runtime.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
@@ -79,9 +79,9 @@ async fn historical_images_are_stripped_for_a_model_that_cannot_accept_them() {
 
     let model = test_model("mock", port, Api::Completions); // image_input: false
     let (mut agent, mut rx) = Agent::new(model);
-    agent.load_history(vec![e::core::providers::ChatMessage::user_with_images(
+    agent.load_history(vec![ulo::core::providers::ChatMessage::user_with_images(
         "look at this",
-        vec![e::core::providers::ImageInput {
+        vec![ulo::core::providers::ImageInput {
             media_type: "image/png".into(),
             data: std::sync::Arc::from("aGVsbG8="),
         }],
@@ -247,13 +247,13 @@ async fn retry_recovers_after_a_transient_failure() {
             } => {
                 saw_retry = true;
                 assert_eq!(attempt, 2);
-                assert_eq!(limit, e::core::agent::retry::MAX_ATTEMPTS);
+                assert_eq!(limit, ulo::core::agent::retry::MAX_ATTEMPTS);
                 assert_eq!(cause, FailureCause::ProviderUnavailable);
             }
             SessionEvent::Recovered { attempt, limit } => {
                 saw_recovered = true;
                 assert_eq!(attempt, 2);
-                assert_eq!(limit, e::core::agent::retry::MAX_ATTEMPTS);
+                assert_eq!(limit, ulo::core::agent::retry::MAX_ATTEMPTS);
             }
             SessionEvent::TextDelta(d) => text.push_str(&d),
             SessionEvent::Error(_) => saw_error = true,
@@ -274,7 +274,7 @@ async fn retry_recovers_after_a_transient_failure() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn retry_campaign_gives_up_after_max_attempts() {
-    use e::core::agent::retry::MAX_ATTEMPTS;
+    use ulo::core::agent::retry::MAX_ATTEMPTS;
 
     let _lock = env_lock();
     let fail =
@@ -542,7 +542,7 @@ async fn reasoning_only_completion_reports_the_missing_answer() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn truncation_and_malformed_payloads_surface_in_stream_end() {
-    use e::core::providers::{stream, ChatMessage, Event, FinishReason, Request};
+    use ulo::core::providers::{stream, ChatMessage, Event, FinishReason, Request};
 
     let _lock = env_lock();
     let body = concat!(
@@ -567,8 +567,8 @@ async fn truncation_and_malformed_payloads_surface_in_stream_end() {
     let mut end = None;
     while let Some(event) = rx.recv().await {
         match event {
-            Event::Done(e) => {
-                end = Some(e);
+            Event::Done(ulo) => {
+                end = Some(ulo);
                 break;
             }
             Event::Error(err) => panic!("stream error: {}", err.message),
@@ -672,7 +672,7 @@ fn sleepy_server(script: Vec<Act>) -> u16 {
         let Ok((mut sock, _)) = listener.accept() else {
             return;
         };
-        let act = script.lock().unwrap_or_else(|e| e.into_inner()).next();
+        let act = script.lock().unwrap_or_else(|ulo| ulo.into_inner()).next();
         let Some(act) = act else { return };
         let mut buf = vec![0u8; 262144];
         let n = sock.read(&mut buf).unwrap();

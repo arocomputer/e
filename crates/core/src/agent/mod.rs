@@ -415,7 +415,7 @@ impl Agent {
     /// the machine wake. The turn loop attributes stream losses to it when
     /// the attempt was in flight across the gap.
     pub fn inject_sleep_gap(&mut self, duration: std::time::Duration) {
-        *self.wake.lock().unwrap_or_else(|e| e.into_inner()) = Some(wake::SleepGap {
+        *self.wake.lock().unwrap_or_else(|ulo| ulo.into_inner()) = Some(wake::SleepGap {
             duration,
             woke_at: Instant::now(),
         });
@@ -463,13 +463,13 @@ impl Agent {
         })?;
         // Keep the running agent in sync too. In particular, this replaces a
         // launch-time override so /effort and shift+tab take effect now rather
-        // than only after e restarts.
+        // than only after ulo restarts.
         self.options.effort_override = Some(effort.to_string());
         Ok(true)
     }
 
     /// Select one of the model's effort levels for this run only — nothing
-    /// is written to settings. `e rpc` changes a session's effort this way:
+    /// is written to settings. `ulo rpc` changes a session's effort this way:
     /// one client's session must not rewrite the user's saved preference.
     /// False when the model does not accept the value.
     pub fn set_run_effort(&mut self, effort: &str) -> bool {
@@ -505,14 +505,14 @@ impl Agent {
     pub fn history_snapshot(&self) -> Vec<ChatMessage> {
         self.history
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clone()
     }
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
         self.tools = Arc::new(tools::ToolRuntime::default());
         self.reset_session_scoped();
         self.remember_instructions(&messages);
-        *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
+        *self.history.lock().unwrap_or_else(|ulo| ulo.into_inner()) = messages;
     }
 
     /// The nested `AGENTS.md` a history already carries count as loaded:
@@ -521,14 +521,14 @@ impl Agent {
         *self
             .instructions_loaded
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = turn::instruction_dirs(messages);
+            .unwrap_or_else(|ulo| ulo.into_inner()) = turn::instruction_dirs(messages);
     }
     pub fn clear(&mut self) {
         self.tools = Arc::new(tools::ToolRuntime::default());
         self.reset_session_scoped();
         self.history
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clear();
     }
 
@@ -572,12 +572,12 @@ impl Agent {
         message.mark_internal();
         self.next_turn
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .push(message);
     }
 
     fn take_next_turn(&self) -> Vec<ChatMessage> {
-        std::mem::take(&mut *self.next_turn.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut *self.next_turn.lock().unwrap_or_else(|ulo| ulo.into_inner()))
     }
 
     /// State that belongs to one session's run and must not outlive it: the
@@ -586,12 +586,12 @@ impl Agent {
     fn reset_session_scoped(&self) {
         self.instructions_loaded
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clear();
         self.set_active_tools(None);
         self.next_turn
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clear();
     }
 
@@ -614,13 +614,16 @@ impl Agent {
     /// Narrow (or with None, restore) the tools advertised and executable
     /// from the next request on. Names are built-in or extension tools.
     pub fn set_active_tools(&self, names: Option<Vec<String>>) {
-        *self.active_tools.lock().unwrap_or_else(|e| e.into_inner()) = names;
+        *self
+            .active_tools
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner()) = names;
     }
 
     pub fn active_tools(&self) -> Option<Vec<String>> {
         self.active_tools
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clone()
     }
 
@@ -649,7 +652,7 @@ impl Agent {
 
     /// Attach a session log; created lazily on the first message when None.
     pub fn set_session(&self, session: Option<SessionLog>) {
-        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = if self.options.save_session {
+        *self.session.lock().unwrap_or_else(|ulo| ulo.into_inner()) = if self.options.save_session {
             session
         } else {
             None
@@ -664,7 +667,7 @@ impl Agent {
         // must not cascade into panics on every later reader.
         self.session
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .as_ref()
             .map(|s| s.path().to_path_buf())
     }
@@ -675,7 +678,7 @@ impl Agent {
     pub fn session_id(&self) -> Option<String> {
         self.session
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .as_ref()
             .map(|s| s.id().to_string())
     }
@@ -686,8 +689,8 @@ impl Agent {
     /// the abandoned tail survives as a sibling branch, not an overwrite.
     /// Same lock order as `commit`: history before session.
     pub fn rewind_to(&self, head: Option<String>, messages: Vec<ChatMessage>) {
-        let mut history_guard = self.history.lock().unwrap_or_else(|e| e.into_inner());
-        let mut session_guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut history_guard = self.history.lock().unwrap_or_else(|ulo| ulo.into_inner());
+        let mut session_guard = self.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if let Some(session) = session_guard.as_mut() {
             session.set_head(head);
         }
@@ -702,16 +705,19 @@ impl Agent {
     /// when the log is created on the first message. Either way the name is
     /// idempotent — the last one wins.
     pub fn set_session_name(&self, name: String) {
-        *self.session_name.lock().unwrap_or_else(|e| e.into_inner()) = Some(name);
+        *self
+            .session_name
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner()) = Some(name);
         if !self.options.save_session {
             return;
         }
-        let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if let Some(s) = guard.as_mut() {
             if let Some(name) = self
                 .session_name
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .clone()
             {
                 let result = s.set_name(&name);
@@ -724,14 +730,17 @@ impl Agent {
     /// Adopt the name a resumed session carries (or clear it for a fresh
     /// one). In-memory only — the log already holds its own name entries.
     pub fn adopt_session_name(&self, name: Option<String>) {
-        *self.session_name.lock().unwrap_or_else(|e| e.into_inner()) = name;
+        *self
+            .session_name
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner()) = name;
     }
 
     /// Prompts waiting on the running turn (steering not yet drained).
     pub fn queued_count(&self) -> usize {
         self.pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .items
             .len()
     }
@@ -742,7 +751,7 @@ impl Agent {
     pub fn queue_snapshot(&self) -> Vec<(u64, String)> {
         self.pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .items
             .iter()
             .filter(|(_, message)| !message.is_internal())
@@ -756,7 +765,7 @@ impl Agent {
     /// `removed` drop their entry if it is still waiting. Unnamed entries
     /// are untouched.
     pub fn update_queued(&self, edits: Vec<(u64, String)>, removed: Vec<u64>) {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self.pending.lock().unwrap_or_else(|ulo| ulo.into_inner());
         for (key, text) in edits {
             if let Some(entry) = pending.items.iter_mut().find(|(id, _)| *id == key) {
                 entry.1.content = text;
@@ -778,13 +787,16 @@ impl Agent {
     pub fn session_name(&self) -> Option<String> {
         self.session_name
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clone()
     }
 
     /// Drop the session name — a fresh session starts unnamed.
     pub fn clear_session_name(&self) {
-        *self.session_name.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self
+            .session_name
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner()) = None;
     }
 
     pub fn cwd(&self) -> PathBuf {
@@ -810,7 +822,7 @@ impl Agent {
     /// acquire a new binary payload halfway through its provider stream.
     pub fn submit_message(&mut self, message: ChatMessage, system: String) -> bool {
         let attached = self.take_next_turn();
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self.pending.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if pending.running {
             for held in attached.into_iter().chain(std::iter::once(message)) {
                 pending.next_id += 1;
@@ -837,7 +849,7 @@ impl Agent {
     /// prompt. The check and the hold share the queue lock with the
     /// supervisor's end-of-turn transition.
     pub fn steer(&mut self, text: String) -> bool {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self.pending.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if !pending.running {
             return false;
         }
@@ -862,7 +874,7 @@ impl Agent {
         system: String,
         steers: Vec<ChatMessage>,
     ) -> bool {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self.pending.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if pending.running {
             for held in steers.into_iter().chain(std::iter::once(message)) {
                 pending.next_id += 1;
@@ -1288,7 +1300,7 @@ mod option_tests {
 
     #[test]
     fn checkpoint_installation_rejects_a_snapshot_missing_a_concurrent_commit() {
-        let root = std::env::temp_dir().join(format!("e-compact-stale-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("ulo-compact-stale-{}", uuid::Uuid::new_v4()));
         for save_session in [false, true] {
             let home = root.join(save_session.to_string());
             let (agent, _events) = Agent::with_options(
@@ -1329,7 +1341,8 @@ mod option_tests {
 
     #[test]
     fn cancellation_during_checkpoint_preparation_keeps_the_original_session() {
-        let home = std::env::temp_dir().join(format!("e-compact-cancel-{}", uuid::Uuid::new_v4()));
+        let home =
+            std::env::temp_dir().join(format!("ulo-compact-cancel-{}", uuid::Uuid::new_v4()));
         let (agent, _events) = Agent::with_options(
             crate::providers::catalog::builtin_catalog().remove(0),
             AgentOptions {

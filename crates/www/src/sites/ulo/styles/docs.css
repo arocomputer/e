@@ -1,0 +1,653 @@
+/* Documentation has no outer frame. Navigation stays beside a bounded reading measure. */
+/* Scope boundary handling to desktop docs; leave mobile and other pages native. */
+@media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  html:has(.ulo-doc-site) {
+    overscroll-behavior-y: none;
+  }
+}
+/* A brighter reading canvas distinguishes docs from the product homepage, and
+   the prose sits nearer the ink than the product pages' secondary gray, which
+   docs keep for captions, metadata, and chrome. */
+.ulo-doc-site {
+  --paper: var(--docs-paper);
+  --field: var(--docs-field);
+  font-size: 15px;
+  line-height: 1.85;
+}
+.ulo-doc-article {
+  color: color-mix(in oklab, var(--ink) 88%, transparent);
+}
+.ulo-doc-header {
+  height: 60px;
+  padding: 0 40px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--paper);
+}
+.ulo-doc-header > nav {
+  align-items: center;
+  justify-self: end;
+  display: flex;
+  gap: 28px;
+  font-size: 14px;
+}
+.ulo-doc-mobile-menu {
+  display: none;
+}
+.ulo-doc-header .ulo-mark {
+  font-size: 32px;
+}
+.ulo-doc-workspace {
+  max-width: 1480px;
+  margin: auto;
+  padding: 48px 40px 100px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 760px) 200px;
+  gap: 48px;
+  align-items: start;
+}
+.ulo-doc-nav {
+  position: sticky;
+  top: 108px;
+  max-height: calc(100dvh - 140px);
+  overflow: auto;
+  overscroll-behavior-y: contain;
+  font-size: 14px;
+}
+.ulo-doc-group + .ulo-doc-group {
+  margin-top: 30px;
+}
+.ulo-doc-group p {
+  margin: 0 12px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.ulo-doc-group a {
+  display: block;
+  padding: 8px 12px;
+  border-left: 2px solid transparent;
+}
+/* Keep the keyboard ring inside the sidebar's scrolling boundary. */
+.ulo-doc-nav:focus-visible,
+.ulo-doc-group a:focus-visible {
+  outline-offset: -2px;
+}
+.ulo-doc-group a[aria-current="page"] {
+  text-decoration: none;
+  border-color: var(--ink);
+  background: var(--field);
+  color: var(--ink);
+}
+.ulo-doc-group p .ulo-doc-group-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline-offset: 0;
+}
+.ulo-doc-group p .ulo-doc-group-link[aria-current="page"] {
+  color: var(--ink);
+}
+.ulo-doc-article {
+  min-width: 0;
+}
+.ulo-doc-title {
+  margin-bottom: 50px;
+}
+.ulo-doc-title h1 {
+  color: var(--ink);
+  font-size: 36px;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.3;
+}
+.ulo-doc-title p,
+.ulo-doc-lead {
+  margin-top: 18px;
+  font-size: 16px;
+  line-height: 1.8;
+  max-width: 650px;
+}
+.ulo-doc-section + .ulo-doc-section {
+  margin-top: 48px;
+}
+.ulo-doc-section h2 {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 20px;
+  scroll-margin-top: 100px;
+  letter-spacing: -0.035em;
+}
+.ulo-doc-section p + p {
+  margin-top: 16px;
+}
+.ulo-doc-section a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--muted);
+}
+/* Inline code in guide text. The installer's command is code inside its copy
+   button and keeps the installer's own look. */
+.ulo-doc-section :not(pre, .ulo-copy) > code {
+  color: var(--ink);
+  background: var(--field);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.ulo-doc-section kbd {
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+/* Markdown shapes the guides use beyond prose. Tailwind's reset removes list
+   markers, table rules, and heading scale, so the article puts them back. */
+.ulo-doc-article :is(ul, ol) {
+  margin: 16px 0;
+  padding-left: 24px;
+}
+.ulo-doc-article ul {
+  list-style: disc;
+}
+.ulo-doc-article ol {
+  list-style: decimal;
+}
+.ulo-doc-article :is(ul, ol) :is(ul, ol) {
+  margin: 8px 0 0;
+}
+.ulo-doc-article ul ul {
+  list-style: circle;
+}
+.ulo-doc-article ul ul ul {
+  list-style: square;
+}
+.ulo-doc-article ol ol {
+  list-style: lower-alpha;
+}
+.ulo-doc-article li + li {
+  margin-top: 8px;
+}
+.ulo-doc-article li::marker {
+  color: var(--muted);
+}
+.ulo-doc-article strong:not(.ulo-installer strong) {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ulo-doc-article blockquote {
+  margin: 24px 0;
+  padding-left: 20px;
+  border-left: 2px solid var(--rule);
+}
+.ulo-doc-article hr {
+  margin: 40px 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+.ulo-doc-article table {
+  width: 100%;
+  margin: 24px 0;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.ulo-doc-article :is(th, td) {
+  padding: 10px 24px 10px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--rule);
+}
+.ulo-doc-article th {
+  color: var(--ink);
+  font-weight: 500;
+  border-bottom-color: var(--rule-strong);
+}
+.ulo-doc-note {
+  margin: 24px 0;
+  border-left: 2px solid var(--muted);
+  padding: 4px 0 4px 20px;
+}
+.ulo-doc-note strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ulo-doc-note p {
+  margin-top: 6px;
+}
+.ulo-doc-code {
+  margin: 24px 0;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--field);
+  color: var(--ink);
+}
+.ulo-doc-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--muted);
+}
+.ulo-doc-code-bar .ulo-copy {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 2px;
+  margin: -2px;
+}
+.ulo-doc-code .ulo-doc-code-text {
+  padding: 0;
+  background: none;
+  color: inherit;
+  user-select: text;
+  min-width: 0;
+  font:
+    13px/1.9 var(--ulo-mono),
+    monospace;
+  white-space: pre;
+}
+/* Without a copy button around it, the code itself takes the overflow so a long
+   line in an example scrolls instead of widening the page. */
+.ulo-doc-code-body > code {
+  display: block;
+  overflow-x: auto;
+}
+/* Highlighting keeps the page's warm neutrals: one green for strings, one amber
+   for numbers, one plum for keywords, and the shared muted ink for comments. */
+.ulo-doc-code {
+  --code-string: light-dark(rgb(58 104 62), rgb(160 200 152));
+  --code-number: light-dark(rgb(140 84 30), rgb(214 170 128));
+  --code-keyword: light-dark(rgb(120 74 116), rgb(198 166 200));
+}
+.ulo-doc-code :is(.hljs-comment, .hljs-quote, .hljs-meta, .hljs-punctuation) {
+  color: var(--muted);
+}
+.ulo-doc-code :is(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-bullet) {
+  color: var(--code-string);
+}
+.ulo-doc-code :is(.hljs-number, .hljs-literal, .hljs-code) {
+  color: var(--code-number);
+}
+.ulo-doc-code
+  :is(
+    .hljs-keyword,
+    .hljs-type,
+    .hljs-class,
+    .hljs-built_in,
+    .hljs-doctag,
+    .hljs-selector-tag
+  ) {
+  color: var(--code-keyword);
+}
+.ulo-doc-code .hljs-section {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ulo-doc-definitions > div {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 20px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.ulo-doc-definitions dt {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ulo-doc-definitions > div:last-child {
+  border-bottom: 0;
+}
+.ulo-doc-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+}
+/* The installer takes a code block's place inside a guide, so it keeps a code
+   block's spacing rather than the landing page's. */
+.ulo-doc-section .ulo-installer {
+  margin: 24px 0;
+}
+/* A page that ends on a table already has a rule under its last row, so that
+   rule is the divider: the page navigation drops its own and sits the same
+   24px below the table's. */
+.ulo-doc-section:has(+ .ulo-doc-next) > table:last-child,
+.ulo-doc-section:has(+ .ulo-doc-next)
+  > .ulo-doc-subsection:last-child
+  > table:last-child {
+  margin-bottom: 0;
+}
+.ulo-doc-section:has(
+    > table:last-child,
+    > .ulo-doc-subsection:last-child > table:last-child
+  )
+  + .ulo-doc-next {
+  margin-top: 0;
+  border-top: 0;
+}
+.ulo-doc-next a {
+  color: var(--ink);
+  text-decoration: none;
+  text-underline-offset: 5px;
+}
+.ulo-doc-next a[rel="next"] {
+  margin-left: auto;
+}
+.ulo-doc-next a:hover {
+  text-decoration: underline;
+}
+.ulo-page-index {
+  position: sticky;
+  top: 108px;
+  font-size: 13px;
+}
+.ulo-page-index nav > p {
+  color: var(--ink);
+  margin-bottom: 14px;
+  font-weight: 500;
+}
+.ulo-index-track {
+  position: relative;
+}
+.ulo-index-track ol {
+  position: relative;
+}
+.ulo-index-track a {
+  display: flex;
+  align-items: center;
+  padding: 8px 0 8px 16px;
+  line-height: 1.5;
+}
+.ulo-index-track li[data-active="true"] a {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ulo-mobile-toc {
+  display: none;
+}
+.ulo-branch-example {
+  margin: 28px 0;
+  padding: 24px;
+  background: var(--field);
+  font-size: 13px;
+  color: var(--ink);
+}
+.ulo-branch-example > div {
+  margin: 12px 0 0 8px;
+  border-left: 1px solid var(--muted);
+}
+.ulo-branch-example > div span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+.ulo-branch-example > div span::before {
+  content: "";
+  width: 20px;
+  height: 1px;
+  background: var(--muted);
+}
+@media (max-width: 1200px) {
+  .ulo-doc-workspace {
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 40px;
+    padding-inline: 32px;
+  }
+  .ulo-page-index {
+    display: none;
+  }
+  .ulo-mobile-toc {
+    display: block;
+    margin: -16px 0 36px;
+    font-size: 13px;
+  }
+  .ulo-mobile-toc summary {
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    list-style: none;
+    color: var(--ink);
+  }
+  .ulo-mobile-toc summary::-webkit-details-marker {
+    display: none;
+  }
+  .ulo-mobile-toc summary::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-right: 1.5px solid;
+    border-bottom: 1.5px solid;
+    transform: rotate(-45deg);
+  }
+  .ulo-mobile-toc details[open] summary::before {
+    transform: rotate(45deg);
+  }
+  .ulo-mobile-toc nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 0 0 20px;
+  }
+}
+@media (max-width: 760px) {
+  .ulo-doc-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 12px;
+    height: 56px;
+    padding-inline: 16px;
+  }
+  .ulo-doc-header > nav {
+    display: none;
+  }
+  .ulo-doc-mobile-menu {
+    display: block;
+    justify-self: end;
+  }
+  .ulo-doc-menu-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    color: var(--ink);
+  }
+  .ulo-doc-mobile-panel {
+    position: fixed;
+    inset: 56px 0 0;
+    padding: 24px 24px max(28px, env(safe-area-inset-bottom));
+    background: var(--paper);
+    overflow-y: auto;
+  }
+  .ulo-doc-mobile-panel[hidden] {
+    display: none;
+  }
+  .ulo-doc-mobile-primary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+    padding-bottom: 32px;
+  }
+  .ulo-doc-mobile-primary a {
+    display: flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 48px;
+    padding-inline: 12px;
+    color: var(--ink);
+  }
+  .ulo-doc-mobile-primary + .ulo-doc-group {
+    margin-top: 0;
+  }
+  .ulo-doc-workspace {
+    display: block;
+    padding: 32px 24px 56px;
+  }
+  .ulo-doc-nav {
+    display: none;
+  }
+  .ulo-doc-title {
+    margin-bottom: 40px;
+  }
+  .ulo-doc-title h1 {
+    font-size: 28px;
+  }
+  .ulo-doc-title p {
+    font-size: 15px;
+  }
+  .ulo-doc-section h2 {
+    font-size: 21px;
+    scroll-margin-top: 84px;
+  }
+  .ulo-doc-section + .ulo-doc-section {
+    margin-top: 40px;
+  }
+  .ulo-doc-code-body {
+    padding: 16px;
+  }
+  .ulo-doc-code .ulo-doc-code-text {
+    font-size: 12px;
+  }
+  .ulo-doc-code-bar {
+    padding-inline: 12px;
+  }
+  .ulo-doc-definitions > div {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+/* Code blocks sit on the docs field, so their copy button needs a visible hover. */
+.ulo-doc-site .ulo-copy:hover {
+  background: var(--rule);
+}
+.ulo-doc-code-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+}
+.ulo-doc-code-body .ulo-copy {
+  min-width: 0;
+  max-width: 100%;
+  align-items: flex-start;
+  padding: 8px;
+  margin: -8px;
+  overflow-x: auto;
+  color: var(--ink);
+}
+.ulo-doc-code-body .ulo-copy svg {
+  margin-top: 2px;
+}
+.ulo-doc-subsection {
+  margin-top: 32px;
+}
+.ulo-doc-subsection h3 {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 500;
+  scroll-margin-top: 100px;
+}
+.ulo-index-track li {
+  position: relative;
+}
+.ulo-index-track li[data-depth="3"] {
+  margin-left: 16px;
+}
+.ulo-index-track li:first-child a {
+  padding-top: 0;
+}
+.ulo-index-track li:last-child a {
+  padding-bottom: 0;
+}
+.ulo-mobile-toc a[data-depth="3"] {
+  padding-left: 16px;
+}
+
+/* Slide a visible window over one fixed path so square corners never morph or jump sideways. */
+.ulo-index-base-line,
+.ulo-index-active-line {
+  position: absolute;
+  inset: 0 auto auto 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-linejoin: miter;
+  transition: clip-path 180ms ease-out;
+}
+.ulo-index-base-line {
+  stroke: var(--rule);
+}
+/* Follow the same square-step path as the line's moving endpoint. */
+.ulo-index-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 2;
+  transition: offset-distance 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ulo-index-active-line,
+  .ulo-index-dot {
+    transition: none;
+  }
+}
+
+/* Callouts: a guide writes GitHub's alert syntax, the import turns it into
+   this component, and GitHub renders the same source as an alert. */
+.ulo-doc-callout {
+  margin: 24px 0;
+  padding: 14px 16px;
+  border-left: 2px solid var(--rule);
+  background: var(--field);
+  border-radius: 3px;
+}
+.ulo-doc-callout[data-kind="warning"],
+.ulo-doc-callout[data-kind="caution"],
+.ulo-doc-callout[data-kind="important"] {
+  border-left-color: var(--ink);
+}
+.ulo-doc-callout-label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ulo-doc-callout[data-kind="warning"] .ulo-doc-callout-label,
+.ulo-doc-callout[data-kind="caution"] .ulo-doc-callout-label,
+.ulo-doc-callout[data-kind="important"] .ulo-doc-callout-label {
+  color: var(--ink);
+}
+.ulo-doc-callout-body {
+  margin-top: 8px;
+}
