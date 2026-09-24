@@ -1373,17 +1373,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
-name = "ulo"
-version = "0.0.2"
-dependencies = [
- "serde_json",
- "tokio",
- "ulo-core",
- "ulo-rpc",
- "ulo-tui",
-]
-
-[[package]]
 name = "ulo-core"
 version = "0.0.2"
 dependencies = [
@@ -1406,18 +1395,8 @@ name = "ulo-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "ulo",
-]
-
-[[package]]
-name = "ulo-rpc"
-version = "0.0.2"
-dependencies = [
- "serde",
- "serde_json",
- "tokio",
  "ulo-core",
- "uuid",
+ "ulo-tui",
 ]
 
 [[package]]

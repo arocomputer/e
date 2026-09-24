@@ -5,7 +5,7 @@ layers:
 
 ```text
 crates/tui         crates/rpc                      crates/sdk
-CLI / TUI          ulo rpc (JSONL session server)    Rust SDK
+Terminal UI        ulo rpc (JSONL session server)    Rust SDK
     │ subscribes to one ordered SessionEvent stream
     ▼
 crates/core: terminal-free core
@@ -25,6 +25,39 @@ terminal. The frontends depend on core and never on each other.
 things: an independent consumer, a release or API boundary, a platform
 boundary, or a measured build-time benefit. File length alone is a reason to
 extract a module, not a crate.
+
+`fuzz/` is an independent, unpublished development workspace at the repository
+root. Its targets span core parsing and TUI text handling and depend on those
+libraries directly. It is not owned by the CLI and never ships with it.
+
+## Crate ownership review
+
+Directory placement follows the responsibility and actual consumers, not a
+goal of minimizing top-level folders. The current dependency direction is
+sound, but these module boundaries need follow-up:
+
+| Location | Finding | Intended ownership |
+| --- | --- | --- |
+| `core/src/cli.rs` | Mixes argv parsing, flag suggestions, subcommand usage, and shared runtime options. RPC consumes `Options`; core and SDK use `ToolMode`. | CLI owns argv parsing. Core retains frontend-neutral execution policy; RPC gets explicit startup options instead of a CLI flag structure. Split the consumers before moving the parser. |
+| `core/src/config/layout.rs` | Pane sides, widths, responsive thresholds, and status templates are consumed only by TUI modules. | TUI owns layout parsing and defaults, using core's home and store APIs for persistence. |
+| `core/src/update.rs` | Combines replacing the running executable with generic verified release-package installation, which core resource packages use. | Application startup owns self-update policy. Core retains shared download, verification, and resource-installation functions. Do not move the entire module into CLI and make TUI depend on CLI. |
+
+The other crate contents have identifiable owners:
+
+- `cli` owns the executable and composition of the frontends. Its cross-crate
+  integration suites test the assembled product, so their location is deliberate.
+- `core` owns sessions, providers, tools, resources, auth, and persistence.
+  Embedded guides and palette JSON are shared resource data; they do not link
+  a terminal library. Plain-text tool results and HTML exports are also valid
+  headless outputs.
+- `tui` owns rendering, input, terminal lifecycle, panels, and interactive app
+  state. Its production dependency is core, not RPC or SDK.
+- `rpc` owns JSONL requests, session routing, and wire results. The result
+  accumulator is shared with the binary's JSON print mode without depending
+  on TUI. Its use of CLI options is covered by the parser finding above.
+- `sdk` owns the public embedding API, examples, and consumer tests. Its
+  production dependency is core alone. The CLI dev-dependency supports shared
+  test fixtures and is not linked by SDK consumers.
 
 ## Invariants
 

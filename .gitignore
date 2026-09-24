@@ -1,11 +1,10 @@
 # Build
-/target/
-/crates/cli/fuzz/target/
-/crates/cli/fuzz/artifacts/
-/crates/cli/fuzz/corpus/*/*
-!/crates/cli/fuzz/corpus/sse/basic
-!/crates/cli/fuzz/corpus/extension_protocol/response
-!/crates/cli/fuzz/corpus/sanitize/terminal
+target/
+/fuzz/artifacts/
+/fuzz/corpus/*/*
+!/fuzz/corpus/sse/basic
+!/fuzz/corpus/extension_protocol/response
+!/fuzz/corpus/sanitize/terminal
 
 # Profiling and logs
 *.log

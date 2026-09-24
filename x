@@ -114,7 +114,7 @@ case "$command" in
     ;;
   fmt)
     cargo fmt "$@"
-    cargo fmt --manifest-path crates/cli/fuzz/Cargo.toml "$@"
+    cargo fmt --manifest-path fuzz/Cargo.toml "$@"
     ;;
   lint)
     cargo clippy --workspace --all-targets "$@" -- -D warnings

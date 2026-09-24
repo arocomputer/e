@@ -6,7 +6,7 @@
 
 - Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.
 - Moved the website to `services/www`, with native Astro routes and a direct email contact link instead of a shared form backend.
-- Grouped channel clients under `services/`, contributor guides under `docs/contributing/`, and the active fuzz targets under `crates/cli/fuzz/`.
+- Grouped channel clients under `services/` and contributor guides under `docs/contributing/`. Cross-crate fuzzing stays in the root `fuzz/` workspace.
 
 - Renamed the product to ulo, including the CLI, Rust crates, npm packages, Homebrew formula, environment variables, and project configuration. Existing state directories remain readable until moved; see the migration section in the installation guide.
 - Moved the product website into `services/www`, using the new wordmark and `ulo.sh`. The website builds its guides and installer from the same checkout as the application.

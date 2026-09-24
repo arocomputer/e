@@ -6,7 +6,7 @@
 #   cli   the `ulo` binary: arguments, subcommands, and which frontend runs
 #   sdk   the Rust library frontend, with its own version
 #
-# tui, rpc, and sdk depend on core and never on each other. crates/cli/fuzz/ stays its
+# tui, rpc, and sdk depend on core and never on each other. fuzz/ stays its
 # own workspace because cargo-fuzz requires it.
 [workspace]
 members = ["crates/core", "crates/tui", "crates/rpc", "crates/cli", "crates/sdk"]

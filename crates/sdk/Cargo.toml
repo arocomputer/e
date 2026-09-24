@@ -1,6 +1,5 @@
 [package]
-# The library is still `ulo_sdk`; the package carries the `aro-` crates.io family
-# prefix (`ulo-sdk`).
+# The package is `ulo-sdk`; Rust consumers import `ulo_sdk`.
 name = "ulo-sdk"
 # The SDK's own version, not the application's: different crates in this
 # repository change for different reasons, so an SDK release that breaks its API

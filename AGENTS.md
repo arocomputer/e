@@ -93,9 +93,9 @@ docs/        guides/: the guides, one folder per nav group, with front matter
              repository's own documentation, never published.
 crates/cli/  the `ulo` binary, published as ulo: src/main.rs (flags,
              rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `ulo`
-             library, re-exporting core, tui, and rpc for the binary, tests,
-             and fuzz targets) · tests/ (the integration suites, fixtures,
-             and the ui/ PTY scenarios) · fuzz/ (three scheduled fuzz targets)
+             library, re-exporting core, tui, and rpc for the binary and tests)
+             · tests/ (the integration suites, fixtures,
+             and the ui/ PTY scenarios)
 crates/sdk/  ulo-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a frontend over core alone, with its own release boundary
@@ -104,6 +104,8 @@ services/www/  the Astro website at ulo.sh, deployed as a Cloudflare Worker;
 services/slack/ · services/github/  reference clients of `ulo rpc`
              (docs/guides/usage/channels.md): a Bolt bot in TypeScript and an
              Actions workflow. A channel spawns ulo; it is not compiled into it.
+fuzz/        independent development workspace, testing core and tui directly;
+             three scheduled fuzz targets, never published or linked into ulo
 ```
 
 ## Running one thing, not everything

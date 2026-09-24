@@ -9,8 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-# Exercise the same public parsers and rendering helpers as the CLI tests.
-ulo = { path = ".." }
+# Cross-crate fuzzing targets the libraries directly, not the command-line wrapper.
+ulo-core = { path = "../crates/core" }
+ulo-tui = { path = "../crates/tui" }
 
 [[bin]]
 name = "sse"
