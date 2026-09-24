@@ -67,32 +67,36 @@ impl App {
                     .iter()
                     .all(|path| std::path::Path::new(path).is_file());
             if all_files && self.agent.model.image_input {
-                // The reads run off the event loop — a slow or networked
-                // file must not stall input and repaint. Stale results are
-                // dropped by the draft generation, like a clipboard read;
-                // a read that cannot attach restores the pasted text.
-                let generation = self.attachments.generation;
-                let results = self.results.clone();
-                let fallback = Some(text.clone());
-                e_core::config::home::spawn(async move {
-                    let images = tokio::task::spawn_blocking(move || {
-                        e_core::providers::ImageInput::from_paths(&paths)
-                    })
-                    .await
-                    .unwrap_or_else(|_| Err("image attachment reader panicked".into()));
-                    let _ = results
-                        .send(AppJob::ClipboardPaste {
-                            generation,
-                            paste: images.map(clipboard::Paste::Images),
-                            fallback,
-                        })
-                        .await;
-                });
+                self.attach_pasted_paths(paths, text);
                 return;
             }
         }
         self.editor.insert_paste(&text);
         self.sync_menu();
+    }
+
+    /// Read pasted image paths into attachments. The reads run off the event
+    /// loop — a slow or networked file must not stall input and repaint.
+    /// Stale results are dropped by the draft generation, like a clipboard
+    /// read; a read that cannot attach restores the pasted text.
+    fn attach_pasted_paths(&mut self, paths: Vec<String>, text: String) {
+        let generation = self.attachments.generation;
+        let results = self.results.clone();
+        let fallback = Some(text);
+        e_core::config::home::spawn(async move {
+            let images = tokio::task::spawn_blocking(move || {
+                e_core::providers::ImageInput::from_paths(&paths)
+            })
+            .await
+            .unwrap_or_else(|_| Err("image attachment reader panicked".into()));
+            let _ = results
+                .send(AppJob::ClipboardPaste {
+                    generation,
+                    paste: images.map(clipboard::Paste::Images),
+                    fallback,
+                })
+                .await;
+        });
     }
 
     /// True when nothing overlays the composer and a paste may attach to it.
@@ -166,9 +170,7 @@ impl App {
             // been pressed on that draft while this stale read still owned the
             // in-flight flag. Release the requested submission now.
             if submit_after {
-                let text = self.editor.expanded_text();
-                self.editor.set_text("");
-                self.submit_composer(text);
+                self.submit_held_draft();
             }
             return;
         }
@@ -200,10 +202,15 @@ impl App {
             }
         }
         if submit_after {
-            let text = self.editor.expanded_text();
-            self.editor.set_text("");
-            self.submit_composer(text);
+            self.submit_held_draft();
         }
+    }
+
+    /// Submit the draft Enter left waiting on a clipboard read.
+    fn submit_held_draft(&mut self) {
+        let text = self.editor.expanded_text();
+        self.editor.set_text("");
+        self.submit_composer(text);
     }
 
     /// Submit the visible draft with any clipboard images attached to it.
@@ -268,20 +275,7 @@ impl App {
         // History is recorded where the prompt is actually accepted — the
         // hook may consume or replace this text.
         if self.host.has_input_hook() {
-            let host = self.host.clone();
-            let results = self.results.clone();
-            let sequence = self.input_verdicts.reserve();
-            e_core::config::home::spawn(async move {
-                let verdict = host.hook_input(&prompt).await;
-                let _ = results
-                    .send(AppJob::InputVerdict {
-                        sequence,
-                        text: prompt,
-                        images: Some(images),
-                        verdict,
-                    })
-                    .await;
-            });
+            self.ask_input_hook(prompt.clone(), prompt, Some(images));
         } else {
             self.submit_with_images(prompt, images);
         }
@@ -310,23 +304,34 @@ impl App {
         // An input hook can consume or rewrite the line before anything else
         // sees it. Completed calls are applied in submission order below.
         if route == InputRoute::Hook {
-            let host = self.host.clone();
-            let results = self.results.clone();
-            let sequence = self.input_verdicts.reserve();
-            e_core::config::home::spawn(async move {
-                let verdict = host.hook_input(&trimmed).await;
-                let _ = results
-                    .send(AppJob::InputVerdict {
-                        sequence,
-                        text,
-                        images: None,
-                        verdict,
-                    })
-                    .await;
-            });
+            self.ask_input_hook(trimmed, text, None);
             return;
         }
         self.submit_direct(trimmed);
+    }
+
+    /// Run the input hook on `hook_text` off the loop; its verdict comes back
+    /// as a job carrying `text` and `images`, applied in submission order.
+    fn ask_input_hook(
+        &mut self,
+        hook_text: String,
+        text: String,
+        images: Option<Vec<e_core::providers::ImageInput>>,
+    ) {
+        let host = self.host.clone();
+        let results = self.results.clone();
+        let sequence = self.input_verdicts.reserve();
+        e_core::config::home::spawn(async move {
+            let verdict = host.hook_input(&hook_text).await;
+            let _ = results
+                .send(AppJob::InputVerdict {
+                    sequence,
+                    text,
+                    images,
+                    verdict,
+                })
+                .await;
+        });
     }
 
     pub(super) fn apply_input_verdict(
@@ -358,55 +363,18 @@ impl App {
         }
     }
 
-    /// The real submit flow, after the input hook (if any) has had its say.
+    /// The real submit flow, after the input hook (if any) has had its say:
+    /// a leading image path, a `!` shell line, a built-in command, a prompt
+    /// template or extension command, or a prompt.
     pub(super) fn submit_direct(&mut self, text: String) {
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
-
         if let Some((path, prompt)) = leading_image_prompt(&trimmed) {
-            // The successful branch records history in submit_with_images,
-            // with the text that actually went to the model; these falls
-            // record the original line.
-            if !self.agent.model.image_input {
-                // The image cannot ride along, but the question after the
-                // path is still the user's prompt — discarding it and
-                // stopping the turn would swallow the typed message along
-                // with the attachment.
-                if prompt.is_empty() {
-                    self.remember_prompt(text);
-                    self.notice(format!(
-                        "{} does not accept image input",
-                        model::slug(&self.agent.model)
-                    ));
-                } else {
-                    self.remember_prompt(text);
-                    self.notice(format!(
-                        "{} does not accept image input — sending the text without the screenshot",
-                        model::slug(&self.agent.model)
-                    ));
-                    self.prompt(prompt.to_string());
-                }
-                return;
-            }
-            match e_core::providers::ImageInput::from_path(std::path::Path::new(path)) {
-                Ok(image) => {
-                    let prompt = if prompt.is_empty() {
-                        "Describe this image.".to_string()
-                    } else {
-                        prompt.to_string()
-                    };
-                    self.submit_with_images(prompt, vec![image]);
-                }
-                Err(error) => {
-                    self.remember_prompt(text);
-                    self.notice(format!("could not attach image: {error}"));
-                }
-            }
+            self.submit_image_path(text, path, prompt);
             return;
         }
-
         self.remember_prompt(text);
 
         // `!cmd` runs in the shell directly; the output lands in the
@@ -417,7 +385,6 @@ impl App {
                 return;
             }
         }
-
         if let Some(rest) = command_arg(&trimmed, "/login") {
             let provider = rest.trim().to_string();
             if provider.is_empty() {
@@ -427,115 +394,120 @@ impl App {
             }
             return;
         }
-
         if trimmed == "/scoped-models" {
             self.open_scoped_menu();
             return;
         }
         if let Some(rest) = command_arg(&trimmed, "/effort") {
-            let requested = rest.trim();
-            let levels = self.agent.effort_levels();
-            if levels.is_empty() {
-                self.notice("this model has no reasoning effort control".into());
-            } else if requested.is_empty() {
-                let current = self.agent.effort().unwrap_or_else(|| levels[0].clone());
-                self.notice(format!(
-                    "reasoning effort is {current} · available: {} · use /effort <level>",
-                    levels.join(", ")
-                ));
-            } else if !levels.iter().any(|level| level == requested) {
-                self.notice(format!(
-                    "unsupported reasoning effort {requested:?} · available: {}",
-                    levels.join(", ")
-                ));
-            } else {
-                match self.agent.set_effort(requested) {
-                    Ok(true) => {
-                        self.refresh_status_cache();
-                        self.notice(format!("reasoning effort set to {requested}"));
-                    }
-                    Ok(false) => self.notice("this model has no reasoning effort control".into()),
-                    Err(error) => self.notice(format!("could not save reasoning effort: {error}")),
-                }
-            }
+            self.effort_command(rest.trim());
             return;
         }
         let model_rest =
             command_arg(&trimmed, "/models").or_else(|| command_arg(&trimmed, "/model"));
         if let Some(rest) = model_rest {
-            let query = rest.trim();
-            if query.is_empty() {
-                self.open_model_menu();
-            } else if let Some(found) = model::resolve(query) {
-                if let Err(error) = persist_model(&found) {
-                    self.notice(format!("could not save model choice: {error}"));
-                    return;
-                }
-                self.notice(format!("model set to {}", model::slug(&found)));
-                self.agent.model = found;
-                self.refresh_status_cache();
+            self.model_command(rest.trim());
+            return;
+        }
+        self.run_line(trimmed);
+    }
+
+    /// A line that starts with an image path: attach it and send the rest
+    /// as its question. The successful branch records history in
+    /// submit_with_images, with the text that actually went to the model;
+    /// these falls record the original line.
+    fn submit_image_path(&mut self, text: String, path: &str, prompt: &str) {
+        if !self.agent.model.image_input {
+            // The image cannot ride along, but the question after the
+            // path is still the user's prompt — discarding it and
+            // stopping the turn would swallow the typed message along
+            // with the attachment.
+            self.remember_prompt(text);
+            if prompt.is_empty() {
+                self.notice(format!(
+                    "{} does not accept image input",
+                    model::slug(&self.agent.model)
+                ));
             } else {
                 self.notice(format!(
-                    "no available model matches {query:?} — sign in to its provider with /login"
+                    "{} does not accept image input — sending the text without the screenshot",
+                    model::slug(&self.agent.model)
                 ));
+                self.prompt(prompt.to_string());
             }
             return;
         }
+        match e_core::providers::ImageInput::from_path(std::path::Path::new(path)) {
+            Ok(image) => {
+                let prompt = if prompt.is_empty() {
+                    "Describe this image.".to_string()
+                } else {
+                    prompt.to_string()
+                };
+                self.submit_with_images(prompt, vec![image]);
+            }
+            Err(error) => {
+                self.remember_prompt(text);
+                self.notice(format!("could not attach image: {error}"));
+            }
+        }
+    }
+
+    /// `/effort [level]`: report the levels, or set one.
+    fn effort_command(&mut self, requested: &str) {
+        let levels = self.agent.effort_levels();
+        if levels.is_empty() {
+            self.notice("this model has no reasoning effort control".into());
+        } else if requested.is_empty() {
+            let current = self.agent.effort().unwrap_or_else(|| levels[0].clone());
+            self.notice(format!(
+                "reasoning effort is {current} · available: {} · use /effort <level>",
+                levels.join(", ")
+            ));
+        } else if !levels.iter().any(|level| level == requested) {
+            self.notice(format!(
+                "unsupported reasoning effort {requested:?} · available: {}",
+                levels.join(", ")
+            ));
+        } else {
+            match self.agent.set_effort(requested) {
+                Ok(true) => {
+                    self.refresh_status_cache();
+                    self.notice(format!("reasoning effort set to {requested}"));
+                }
+                Ok(false) => self.notice("this model has no reasoning effort control".into()),
+                Err(error) => self.notice(format!("could not save reasoning effort: {error}")),
+            }
+        }
+    }
+
+    /// `/model [query]`: open the picker, or switch to the first match and
+    /// persist it.
+    fn model_command(&mut self, query: &str) {
+        if query.is_empty() {
+            self.open_model_menu();
+        } else if let Some(found) = model::resolve(query) {
+            if let Err(error) = persist_model(&found) {
+                self.notice(format!("could not save model choice: {error}"));
+                return;
+            }
+            self.notice(format!("model set to {}", model::slug(&found)));
+            self.agent.model = found;
+            self.refresh_status_cache();
+        } else {
+            self.notice(format!(
+                "no available model matches {query:?} — sign in to its provider with /login"
+            ));
+        }
+    }
+
+    /// The remaining built-in commands by name, then any other `/` line,
+    /// then a prompt.
+    fn run_line(&mut self, trimmed: String) {
         match trimmed.as_str() {
             "/quit" | "/exit" => self.should_quit = true,
             "/version" => self.notice(format!("e {}", e_core::VERSION)),
-            "/help" => {
-                // The reference help surface is the commands picker itself —
-                // browse, filter, Enter to use — not a wall of text. The
-                // non-command shortcuts ride the transcript as one notice so
-                // they stay discoverable.
-                self.notice(
-                    "! <cmd> runs a shell command (the model sees the output) · \
-                     shift+tab cycles reasoning effort · ctrl+v attaches clipboard images · \
-                     ctrl+o opens full tool detail"
-                        .into(),
-                );
-                self.menu = Some(
-                    crate::menu::Menu::new(
-                        crate::menu::MenuKind::Commands,
-                        "Commands",
-                        crate::menu::HINT_USE,
-                        self.command_items(),
-                    )
-                    .without_trigger(),
-                );
-            }
-            "/new" | "/clear" => {
-                // A running turn owns the history and session log; replacing
-                // them mid-turn would commit its reply into the wrong
-                // session. `is_streaming` also covers the gap between a
-                // submit and its TurnStart event.
-                if self.active.is_some() || self.agent.is_streaming() {
-                    self.notice("a turn is running — press Esc to stop it, then /new".into());
-                    return;
-                }
-                self.compacting = false;
-                self.held_prompts.clear();
-                self.shell_block = None;
-                self.reload_block = None;
-                self.context_tokens = 0;
-                self.discard_composer_images();
-                self.agent.clear();
-                self.agent.clear_session_name();
-                self.agent.set_session(None);
-                // The name is part of session identity: a fresh session must
-                // not inherit the old one's.
-                self.agent.adopt_session_name(None);
-                self.session_epoch += 1;
-                self.transcript.clear();
-                self.viewer_cache = None;
-                if self.layout.banner {
-                    self.transcript
-                        .push(Block::new(Kind::Banner, e_core::VERSION));
-                }
-                set_tab_title(&tab_title(&title_path(), None));
-                extui::shutdown_then_start(self, "new");
-            }
+            "/help" => self.show_help(),
+            "/new" | "/clear" => self.new_session(),
             "/resume" => self.open_resume_menu(),
             "/tree" => self.open_tree_menu(),
             "/settings" => self.open_settings(),
@@ -558,39 +530,103 @@ impl App {
                 self.compact_now(Some(trimmed["/compact ".len()..].trim().to_string()))
             }
             "/reload" => self.reload(),
-            "/trust" => match e_core::config::trust::set(&self.agent.cwd(), true) {
-                Ok(()) => {
-                    self.notice(
-                        "directory trusted — its AGENTS.md and .e skills/prompts now load".into(),
-                    );
-                    self.install_project_packages();
-                }
-                Err(e) => self.notice(format!("trust: {e}")),
-            },
-            _ if trimmed.starts_with('/') => {
-                let (name, args) = trimmed[1..].split_once(' ').unwrap_or((&trimmed[1..], ""));
-                if let Some(template) = e_core::resources::prompts::find(name, &self.agent.cwd()) {
-                    let expanded = e_core::resources::prompts::substitute(&template.content, args);
-                    self.prompt(expanded);
-                } else if self.host.has_command(name) {
-                    let host = self.host.clone();
-                    let results = self.results.clone();
-                    let (name, args) = (name.to_string(), args.to_string());
-                    let epoch = self.session_epoch;
-                    e_core::config::home::spawn(async move {
-                        let result = host.run_command(&name, &args).await;
-                        let _ = results.send(AppJob::Command { result, epoch }).await;
-                    });
-                } else if is_literal_slash_prompt(&trimmed) {
-                    // Absolute paths and a literal leading slash are prompt
-                    // text, not misspelled commands. This is how screenshot
-                    // clipboard tools hand e `/var/.../capture.png question`.
-                    self.prompt(trimmed);
-                } else {
-                    self.notice(format!("unknown command {trimmed}"));
-                }
-            }
+            "/trust" => self.trust_here(),
+            _ if trimmed.starts_with('/') => self.run_slash(trimmed),
             _ => self.prompt(trimmed),
+        }
+    }
+
+    /// `/help`. The reference help surface is the commands picker itself —
+    /// browse, filter, Enter to use — not a wall of text. The non-command
+    /// shortcuts ride the transcript as one notice so they stay
+    /// discoverable.
+    fn show_help(&mut self) {
+        self.notice(
+            "! <cmd> runs a shell command (the model sees the output) · \
+             shift+tab cycles reasoning effort · ctrl+v attaches clipboard images · \
+             ctrl+o opens full tool detail"
+                .into(),
+        );
+        self.menu = Some(
+            crate::menu::Menu::new(
+                crate::menu::MenuKind::Commands,
+                "Commands",
+                crate::menu::HINT_USE,
+                self.command_items(),
+            )
+            .without_trigger(),
+        );
+    }
+
+    /// `/new`: a fresh, unsaved session in place of this one.
+    fn new_session(&mut self) {
+        // A running turn owns the history and session log; replacing
+        // them mid-turn would commit its reply into the wrong
+        // session. `is_streaming` also covers the gap between a
+        // submit and its TurnStart event.
+        if self.active.is_some() || self.agent.is_streaming() {
+            self.notice("a turn is running — press Esc to stop it, then /new".into());
+            return;
+        }
+        self.compacting = false;
+        self.held_prompts.clear();
+        self.shell_block = None;
+        self.reload_block = None;
+        self.context_tokens = 0;
+        self.discard_composer_images();
+        self.agent.clear();
+        self.agent.clear_session_name();
+        self.agent.set_session(None);
+        // The name is part of session identity: a fresh session must
+        // not inherit the old one's.
+        self.agent.adopt_session_name(None);
+        self.session_epoch += 1;
+        self.transcript.clear();
+        self.viewer_cache = None;
+        if self.layout.banner {
+            self.transcript
+                .push(Block::new(Kind::Banner, e_core::VERSION));
+        }
+        set_tab_title(&tab_title(&title_path(), None));
+        extui::shutdown_then_start(self, "new");
+    }
+
+    /// `/trust`: trust the working directory and load what that unlocks.
+    fn trust_here(&mut self) {
+        match e_core::config::trust::set(&self.agent.cwd(), true) {
+            Ok(()) => {
+                self.notice(
+                    "directory trusted — its AGENTS.md and .e skills/prompts now load".into(),
+                );
+                self.install_project_packages();
+            }
+            Err(e) => self.notice(format!("trust: {e}")),
+        }
+    }
+
+    /// A `/name args` line no built-in took: a prompt template, then an
+    /// extension command, then literal prompt text, else unknown.
+    fn run_slash(&mut self, trimmed: String) {
+        let (name, args) = trimmed[1..].split_once(' ').unwrap_or((&trimmed[1..], ""));
+        if let Some(template) = e_core::resources::prompts::find(name, &self.agent.cwd()) {
+            let expanded = e_core::resources::prompts::substitute(&template.content, args);
+            self.prompt(expanded);
+        } else if self.host.has_command(name) {
+            let host = self.host.clone();
+            let results = self.results.clone();
+            let (name, args) = (name.to_string(), args.to_string());
+            let epoch = self.session_epoch;
+            e_core::config::home::spawn(async move {
+                let result = host.run_command(&name, &args).await;
+                let _ = results.send(AppJob::Command { result, epoch }).await;
+            });
+        } else if is_literal_slash_prompt(&trimmed) {
+            // Absolute paths and a literal leading slash are prompt
+            // text, not misspelled commands. This is how screenshot
+            // clipboard tools hand e `/var/.../capture.png question`.
+            self.prompt(trimmed);
+        } else {
+            self.notice(format!("unknown command {trimmed}"));
         }
     }
 
@@ -619,21 +655,8 @@ impl App {
         // whatever text is actually accepted (see apply_input_verdict).
         let route = input_route(self.pending_key.is_some(), self.host.has_input_hook());
         if route == InputRoute::Hook {
-            let host = self.host.clone();
-            let results = self.results.clone();
-            let sequence = self.input_verdicts.reserve();
             let images = std::mem::take(&mut self.pending_initial_images);
-            e_core::config::home::spawn(async move {
-                let verdict = host.hook_input(&text).await;
-                let _ = results
-                    .send(AppJob::InputVerdict {
-                        sequence,
-                        text,
-                        images: Some(images),
-                        verdict,
-                    })
-                    .await;
-            });
+            self.ask_input_hook(text.clone(), text, Some(images));
             return;
         }
         let images = std::mem::take(&mut self.pending_initial_images);
