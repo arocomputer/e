@@ -1,15 +1,15 @@
-//! `e doctor` reports useful state without echoing credentials.
+//! `ulo doctor` reports useful state without echoing credentials.
 
 use std::sync::Mutex;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-// E_HOME is process-global and must remain ours while the report reads it.
+// ULO_HOME is process-global and must remain ours while the report reads it.
 #[test]
 fn report_is_redacted_and_local_only() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let home = std::env::temp_dir().join(format!(
-        "e-doctor-{}-{}-\x1b]0;not-a-terminal-title\x07",
+        "ulo-doctor-{}-{}-\x1b]0;not-a-terminal-title\x07",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
@@ -20,11 +20,11 @@ fn report_is_redacted_and_local_only() {
     )
     .unwrap();
     std::fs::write(home.join("settings.json"), r#"{"format_version":1}"#).unwrap();
-    std::env::set_var("E_HOME", &home);
+    std::env::set_var("ULO_HOME", &home);
 
-    let host = e::core::extensions::ExtensionHost::empty();
-    let report = e::core::providers::diagnostics::report(&host);
-    let rendered = e::core::providers::diagnostics::render(&report);
+    let host = ulo::core::extensions::ExtensionHost::empty();
+    let report = ulo::core::providers::diagnostics::report(&host);
+    let rendered = ulo::core::providers::diagnostics::render(&report);
     assert!(rendered.contains("auth.json: valid, format 1"));
     assert!(!rendered.contains("DO-NOT-PRINT-THIS"));
     assert!(!rendered.contains('\x1b'));
@@ -44,32 +44,32 @@ fn report_is_redacted_and_local_only() {
 fn doctor_cli_emits_the_report_and_rejects_unknown_flags() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let home = std::env::temp_dir().join(format!(
-        "e-doctor-cli-{}-{}",
+        "ulo-doctor-cli-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&home).unwrap();
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["doctor", "--no-network"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("e doctor\n"));
+    assert!(stdout.starts_with("ulo doctor\n"));
     assert!(stdout.contains("configuration:"));
     assert!(!stdout.contains("reachable"));
 
-    let invalid = std::process::Command::new(env!("CARGO_BIN_EXE_e"))
+    let invalid = std::process::Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["doctor", "--unknown"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert_eq!(invalid.status.code(), Some(2));
     assert!(String::from_utf8(invalid.stderr)
         .unwrap()
-        .contains("usage: e doctor"));
+        .contains("usage: ulo doctor"));
 
     let _ = std::fs::remove_dir_all(home);
 }
@@ -81,7 +81,7 @@ fn doctor_never_launches_extensions() {
 
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let home = std::env::temp_dir().join(format!(
-        "e-doctor-extension-{}-{}",
+        "ulo-doctor-extension-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
@@ -91,7 +91,7 @@ fn doctor_never_launches_extensions() {
     std::fs::write(
         &extension,
         r##"#!/bin/sh
-touch "$E_HOME/extension-ran"
+touch "$ULO_HOME/extension-ran"
 IFS= read -r initialize
 printf '%s\n' '{"id":1000000,"result":{"name":"broken-startup","version":"1","hooks":["startup"]}}'
 while IFS= read -r line; do
@@ -105,9 +105,9 @@ done
     .unwrap();
     std::fs::set_permissions(&extension, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_e"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["doctor", "--no-network"])
-        .env("E_HOME", &home)
+        .env("ULO_HOME", &home)
         .output()
         .unwrap();
     assert!(output.status.success());

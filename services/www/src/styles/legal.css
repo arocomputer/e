@@ -1,0 +1,136 @@
+/* Legal shares ulo's frame but uses grouped directory rows and a quieter reading column. */
+.ulo-legal-directory {
+  padding: 64px 80px 40px;
+}
+.ulo-legal-directory h1,
+.ulo-legal-article h1 {
+  color: var(--ink);
+  font-size: 36px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: -0.04em;
+}
+.ulo-legal-directory header > p,
+.ulo-legal-article header > p {
+  margin-top: 14px;
+}
+.ulo-legal-directory header {
+  padding-bottom: 48px;
+}
+.ulo-legal-group {
+  padding: 30px 0;
+  border-top: 1px solid var(--rule);
+}
+.ulo-legal-group li + li {
+  margin-top: 16px;
+}
+.ulo-legal-group li a {
+  display: block;
+  padding: 8px 0;
+}
+.ulo-legal-group h3 {
+  font-size: 18px;
+  line-height: 1.6;
+}
+.ulo-legal-group p {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.ulo-site .ulo-legal-group a:hover {
+  text-decoration: none;
+}
+.ulo-legal-group a:hover h3 {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+.ulo-legal-contact {
+  border-top: 1px solid var(--rule);
+  padding-top: 26px;
+  font-size: 13px;
+}
+.ulo-legal-contact a,
+.ulo-legal-article a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.ulo-legal-article {
+  max-width: 840px;
+  margin: auto;
+  padding: 48px 60px 64px;
+  overflow-wrap: anywhere;
+}
+.ulo-legal-back {
+  display: inline-block;
+  font-size: 14px;
+  margin-bottom: 28px;
+}
+.ulo-legal-contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 30px 0 42px;
+  padding-block: 20px;
+  border-block: 1px solid var(--rule);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.ulo-legal-article section + section {
+  margin-top: 40px;
+}
+.ulo-legal-article h2 {
+  scroll-margin-top: 112px;
+  font-size: 20px;
+}
+.ulo-legal-article section p {
+  margin-top: 16px;
+  line-height: 1.9;
+}
+.ulo-legal-article code {
+  font-size: 0.9em;
+  color: var(--ink);
+}
+.ulo-legal-article aside {
+  margin-top: 24px;
+  padding: 20px 24px;
+  background: var(--field);
+  border-left: 2px solid var(--rule);
+}
+.ulo-legal-article dl {
+  margin-top: 20px;
+}
+.ulo-legal-article dl > div + div {
+  margin-top: 20px;
+}
+.ulo-legal-article dt {
+  color: var(--ink);
+}
+.ulo-legal-article dd {
+  margin-top: 4px;
+}
+@media (max-width: 1000px) {
+  .ulo-legal-directory {
+    padding-inline: 40px;
+  }
+}
+@media (max-width: 640px) {
+  .ulo-legal-directory {
+    padding: 36px 20px 28px;
+  }
+  .ulo-legal-directory h1,
+  .ulo-legal-article h1 {
+    font-size: 28px;
+  }
+  .ulo-legal-directory header {
+    padding-bottom: 28px;
+  }
+  .ulo-legal-group {
+    padding-block: 22px;
+  }
+  .ulo-legal-group h3 {
+    font-size: 17px;
+  }
+  .ulo-legal-article {
+    padding: 28px 20px 40px;
+  }
+}

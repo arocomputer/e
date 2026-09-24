@@ -30,9 +30,9 @@ use crate::statusline::{
 use crate::theme::Theme;
 use crate::transcript::{Block, Kind, Transcript};
 use crate::trustpanel::{self, TrustStage};
-use e_core::agent::{Agent, AgentOptions, SessionEvent};
-use e_core::output::{format_duration, format_tokens};
-use e_core::providers::catalog::{self as model, Model};
+use ulo_core::agent::{Agent, AgentOptions, SessionEvent};
+use ulo_core::output::{format_duration, format_tokens};
+use ulo_core::providers::catalog::{self as model, Model};
 
 mod clipboard;
 mod conversation;
@@ -107,20 +107,20 @@ enum AppJob {
     InputVerdict {
         sequence: u64,
         text: String,
-        images: Option<Vec<e_core::providers::ImageInput>>,
-        verdict: e_core::extensions::InputVerdict,
+        images: Option<Vec<ulo_core::providers::ImageInput>>,
+        verdict: ulo_core::extensions::InputVerdict,
     },
     /// A finished `!` shell command: what ran and what it printed. Tagged
     /// with the session epoch it started in.
     Shell {
         cmd: String,
-        output: e_core::tools::ToolOutput,
+        output: ulo_core::tools::ToolOutput,
         epoch: u64,
     },
     /// An extension command or shortcut finished. Tagged with the session
     /// epoch it started in.
     Command {
-        result: e_core::extensions::CommandResult,
+        result: ulo_core::extensions::CommandResult,
         epoch: u64,
     },
     /// Argument completions for `/command prefix` arrived; shown only if the
@@ -128,16 +128,16 @@ enum AppJob {
     Completions {
         command: String,
         prefix: String,
-        items: Vec<e_core::extensions::Completion>,
+        items: Vec<ulo_core::extensions::Completion>,
     },
     /// A /reload finished: the restarted extension host.
-    Reloaded(std::sync::Arc<e_core::extensions::ExtensionHost>),
+    Reloaded(std::sync::Arc<ulo_core::extensions::ExtensionHost>),
     /// An extension's `render` hook answered for a finished entry. Tagged
     /// with the session epoch; a late answer for a session that moved on
     /// is dropped.
     Rendered {
         target: RenderTarget,
-        show: e_core::extensions::Show,
+        show: ulo_core::extensions::Show,
         epoch: u64,
     },
     /// The background updater installed a new version.
@@ -184,8 +184,8 @@ fn input_route(awaiting_api_key: bool, has_input_hook: bool) -> InputRoute {
 /// second line can overtake a slow first one and reverse the conversation.
 type InputVerdictItem = (
     String,
-    Option<Vec<e_core::providers::ImageInput>>,
-    e_core::extensions::InputVerdict,
+    Option<Vec<ulo_core::providers::ImageInput>>,
+    ulo_core::extensions::InputVerdict,
 );
 
 #[derive(Default)]
@@ -206,8 +206,8 @@ impl PendingInputVerdicts {
         &mut self,
         sequence: u64,
         text: String,
-        images: Option<Vec<e_core::providers::ImageInput>>,
-        verdict: e_core::extensions::InputVerdict,
+        images: Option<Vec<ulo_core::providers::ImageInput>>,
+        verdict: ulo_core::extensions::InputVerdict,
     ) -> Vec<InputVerdictItem> {
         self.ready.insert(sequence, (text, images, verdict));
         let mut ordered = Vec::new();
@@ -221,7 +221,7 @@ impl PendingInputVerdicts {
 
 struct ActiveLogin {
     flow_id: u64,
-    cancellation: e_core::auth::login::LoginCancellation,
+    cancellation: ulo_core::auth::login::LoginCancellation,
     task: tokio::task::JoinHandle<()>,
     wait_for_callback: bool,
 }
@@ -231,14 +231,14 @@ impl Drop for ActiveLogin {
         self.cancellation.cancel();
         self.task.abort();
         if self.wait_for_callback {
-            e_core::auth::login::wait_for_callback_release();
+            ulo_core::auth::login::wait_for_callback_release();
         }
     }
 }
 
 struct App {
     theme: Theme,
-    /// The composer's chord overrides from `~/.e/keybindings.json`. Reread
+    /// The composer's chord overrides from `~/.ulo/keybindings.json`. Reread
     /// alongside the theme — startup, /settings close, /reload — never
     /// mid-keystroke.
     keymap: crate::keybindings::Keymap,
@@ -270,13 +270,13 @@ struct App {
     /// Background job narration (login flows) into the transcript.
     jobs: tokio::sync::mpsc::Sender<String>,
     /// How a login flow ended; control flow reads this, never the notices.
-    logins: tokio::sync::mpsc::Sender<e_core::auth::login::Outcome>,
+    logins: tokio::sync::mpsc::Sender<ulo_core::auth::login::Outcome>,
     /// The owned OAuth task; dropping it cancels polling and callback waits.
     login_task: Option<ActiveLogin>,
     /// Monotonic identity used to ignore a canceled flow's queued outcome.
     login_sequence: u64,
     /// Extension host; commands and prompts come back on `results`.
-    host: std::sync::Arc<e_core::extensions::ExtensionHost>,
+    host: std::sync::Arc<ulo_core::extensions::ExtensionHost>,
     results: tokio::sync::mpsc::Sender<AppJob>,
     /// Completed input-hook calls waiting for earlier submissions to finish.
     input_verdicts: PendingInputVerdicts,
@@ -289,7 +289,7 @@ struct App {
     /// A command-line prompt held until the first-visit trust choice is
     /// persisted, so its system prompt reflects that choice.
     pending_initial: Option<String>,
-    pending_initial_images: Vec<e_core::providers::ImageInput>,
+    pending_initial_images: Vec<ulo_core::providers::ImageInput>,
     /// Transcript index of the running `!` block, updated on completion.
     shell_block: Option<usize>,
     /// A /reload is restarting the extension host; prompts are held.
@@ -334,8 +334,8 @@ struct App {
     /// loop and swallow keystrokes, so a changed terminal background
     /// applies on restart.
     light_background: bool,
-    /// Cached statusline inputs. Deriving them reads `~/.e/auth.json` and
-    /// `~/.e/settings.json`; doing that per frame stalls streaming, so
+    /// Cached statusline inputs. Deriving them reads `~/.ulo/auth.json` and
+    /// `~/.ulo/settings.json`; doing that per frame stalls streaming, so
     /// they refresh only via `refresh_status_cache`.
     bottom_pinned: bool,
     live_preview_rows: usize,
@@ -346,7 +346,7 @@ struct App {
     status_effort: Option<String>,
     /// Where extensions' `ui.*` / `session.*` requests arrive; handed to
     /// every host this session starts (launch, /reload).
-    requests: tokio::sync::mpsc::Sender<e_core::extensions::HostRequest>,
+    requests: tokio::sync::mpsc::Sender<ulo_core::extensions::HostRequest>,
     /// Modal requests waiting for the footer to be free, first-come.
     ui_queue: extui::UiQueue,
     /// The open modal request, if any.
@@ -366,8 +366,8 @@ struct App {
     /// Extensions' widget rows above the composer, by `extension/key`.
     widgets: std::collections::BTreeMap<String, Vec<Vec<extui::Span>>>,
     /// Where the regions go and what the status row says
-    /// (`~/.e/layout.json`), reread with the theme and keymap.
-    layout: e_core::config::layout::Layout,
+    /// (`~/.ulo/layout.json`), reread with the theme and keymap.
+    layout: crate::layout::Layout,
     /// ctrl+g was pressed: the frame loop hands the terminal to the
     /// external editor before its next select.
     external_edit: bool,
@@ -600,16 +600,18 @@ impl App {
         let results = self.results.clone();
         let cwd = self.agent.cwd();
         let epoch = self.session_epoch;
-        e_core::config::home::spawn(async move {
+        ulo_core::config::home::spawn(async move {
             let shell_cmd = cmd.clone();
-            let home = e_core::config::home::home();
+            let home = ulo_core::config::home::home();
             let output = tokio::task::spawn_blocking(move || {
-                e_core::config::home::with_home(home, || e_core::tools::run_shell(&shell_cmd, &cwd))
+                ulo_core::config::home::with_home(home, || {
+                    ulo_core::tools::run_shell(&shell_cmd, &cwd)
+                })
             })
             .await
-            .unwrap_or(e_core::tools::ToolOutput {
+            .unwrap_or(ulo_core::tools::ToolOutput {
                 content: "shell command panicked".into(),
-                outcome: e_core::tools::ToolOutcome::Failed,
+                outcome: ulo_core::tools::ToolOutcome::Failed,
                 summary: "error".into(),
                 display: None,
             });
@@ -643,7 +645,7 @@ impl App {
         let results = self.results.clone();
         let epoch = self.session_epoch;
         let (subject, name, content) = (subject.to_string(), name.to_string(), content.to_string());
-        e_core::config::home::spawn(async move {
+        ulo_core::config::home::spawn(async move {
             if let Some(show) = host.hook_render(&subject, &name, &content).await {
                 let _ = results
                     .send(AppJob::Rendered {
@@ -657,17 +659,17 @@ impl App {
     }
 
     /// A `render` answer lands: a tool's stored output takes the body (a
-    /// diff in e's row grammar), a reply takes it as its markdown.
-    fn apply_render(&mut self, target: RenderTarget, show: e_core::extensions::Show, epoch: u64) {
+    /// diff in ulo's row grammar), a reply takes it as its markdown.
+    fn apply_render(&mut self, target: RenderTarget, show: ulo_core::extensions::Show, epoch: u64) {
         if epoch != self.session_epoch {
             return;
         }
-        let body = e_core::tools::sanitize_display(&show.body);
+        let body = ulo_core::tools::sanitize_display(&show.body);
         match target {
             RenderTarget::Tool(id) => {
                 let body = match show.format {
-                    e_core::extensions::Format::Diff => {
-                        e_core::tools::diffview::from_unified(&body)
+                    ulo_core::extensions::Format::Diff => {
+                        ulo_core::tools::diffview::from_unified(&body)
                     }
                     _ => body,
                 };
@@ -680,7 +682,7 @@ impl App {
                 if let Some(block) = self.transcript.blocks.get_mut(index) {
                     if block.kind == Kind::Assistant && block.text.len() == len {
                         block.text = match show.format {
-                            e_core::extensions::Format::Diff => {
+                            ulo_core::extensions::Format::Diff => {
                                 format!("```diff\n{body}\n```")
                             }
                             _ => body,
@@ -699,22 +701,22 @@ impl App {
             .map(|(_, _, body)| body.as_str())
     }
 
-    /// /reload, the reference behavior: refresh what a session caches. In e
+    /// /reload, the reference behavior: refresh what a session caches. In ulo
     /// that is the extension host (restarted) and the theme (re-resolved) —
     /// skills, prompts, AGENTS.md, settings, and models.json are read fresh
     /// on every use already.
-    /// A just-trusted repository's `.e/packages` may list packages not on
+    /// A just-trusted repository's `.ulo/packages` may list packages not on
     /// disk: install them now, in the background, and say so — the one
     /// moment trust and a network fetch belong together. The result lands
     /// as a notice; `/reload` picks the packages up.
     fn install_project_packages(&mut self) {
         let cwd = self.agent.cwd().to_path_buf();
-        let missing = e_core::resources::packages::project_missing(&cwd);
+        let missing = ulo_core::resources::packages::project_missing(&cwd);
         if missing.is_empty() {
             return;
         }
         self.notice(format!(
-            "installing {} from .e/packages…",
+            "installing {} from .ulo/packages…",
             match missing.len() {
                 1 => "1 package".to_string(),
                 n => format!("{n} packages"),
@@ -722,19 +724,19 @@ impl App {
         ));
         let results = self.results.clone();
         let epoch = self.session_epoch;
-        e_core::config::home::spawn(async move {
-            let outcomes = e_core::resources::packages::install_project(&cwd).await;
+        ulo_core::config::home::spawn(async move {
+            let outcomes = ulo_core::resources::packages::install_project(&cwd).await;
             let failed = outcomes.iter().filter(|r| r.is_err()).count();
             let lines: Vec<String> = outcomes
                 .into_iter()
-                .map(|r| r.unwrap_or_else(|e| e))
+                .map(|r| r.unwrap_or_else(|ulo| ulo))
                 .collect();
             let notice = if failed == 0 {
                 format!("{} — /reload to use them", lines.join("; "))
             } else {
-                format!("{} — fix and run `e install`", lines.join("; "))
+                format!("{} — fix and run `ulo install`", lines.join("; "))
             };
-            let result = e_core::extensions::CommandResult {
+            let result = ulo_core::extensions::CommandResult {
                 notice: Some(notice),
                 show: None,
                 prompt: None,
@@ -787,11 +789,11 @@ impl App {
         let results = self.results.clone();
         let requests = self.requests.clone();
         let path = self.agent.session_path().map(|p| p.display().to_string());
-        e_core::config::home::spawn(async move {
+        ulo_core::config::home::spawn(async move {
             old.event("session_shutdown", serde_json::json!({"reason": "reload"}))
                 .await;
             old.shutdown().await;
-            let host = e_core::extensions::ExtensionHost::start(jobs, Some(requests)).await;
+            let host = ulo_core::extensions::ExtensionHost::start(jobs, Some(requests)).await;
             host.event(
                 "session_start",
                 serde_json::json!({"reason": "reload", "path": path}),
@@ -831,42 +833,43 @@ impl App {
     /// Reload the theme from settings, using the startup background probe.
     fn apply_theme(&mut self) {
         self.theme =
-            crate::theme::resolve(&e_core::config::settings::theme(), self.light_background);
+            crate::theme::resolve(&ulo_core::config::settings::theme(), self.light_background);
         self.transcript.invalidate();
     }
 
-    /// Re-read `~/.e/keybindings.json`. A malformed or missing file fails
+    /// Re-read `~/.ulo/keybindings.json`. A malformed or missing file fails
     /// open to no overrides — never an error that blocks typing.
     fn apply_keymap(&mut self) {
         self.keymap = crate::keybindings::load();
-        self.layout = e_core::config::layout::load();
+        self.layout = crate::layout::load();
     }
 
     /// Refresh cached sign-in, effort, and layout preferences from disk.
     /// Call after sign-in, model switches, effort cycles, settings changes,
     /// and /reload.
     fn refresh_status_cache(&mut self) {
-        self.signed_in = e_core::auth::signed_in(&e_core::auth::load(), &self.agent.model.provider);
+        self.signed_in =
+            ulo_core::auth::signed_in(&ulo_core::auth::load(), &self.agent.model.provider);
         self.status_effort = self.agent.effort();
-        self.bottom_pinned = e_core::config::settings::tui_mode() == "fullscreen";
-        self.show_thinking = e_core::config::settings::show_thinking();
-        self.thinking_hint = e_core::config::settings::get_string("thinking_hint")
+        self.bottom_pinned = ulo_core::config::settings::tui_mode() == "fullscreen";
+        self.show_thinking = ulo_core::config::settings::show_thinking();
+        self.thinking_hint = ulo_core::config::settings::get_string("thinking_hint")
             .unwrap_or_else(|| "Thinking · ctrl o to view".into());
-        self.scroll_lines = e_core::config::settings::get_u64("scroll_lines")
+        self.scroll_lines = ulo_core::config::settings::get_u64("scroll_lines")
             .filter(|n| (1..=100).contains(n))
             .unwrap_or(3) as usize;
-        self.scroll_hint = e_core::config::settings::get_string("scroll_hint")
+        self.scroll_hint = ulo_core::config::settings::get_string("scroll_hint")
             .unwrap_or_else(|| "Scrolled · End to follow".into());
-        self.scroll_hint = e_core::tools::sanitize_display(&self.scroll_hint).replace('\n', " ");
-        self.tool_history_limit = e_core::config::settings::get_u64("tool_history_limit")
+        self.scroll_hint = ulo_core::tools::sanitize_display(&self.scroll_hint).replace('\n', " ");
+        self.tool_history_limit = ulo_core::config::settings::get_u64("tool_history_limit")
             .filter(|n| *n <= 1000)
             .unwrap_or(10) as usize;
-        self.tool_history_hint = e_core::config::settings::get_string("tool_history_hint")
+        self.tool_history_hint = ulo_core::config::settings::get_string("tool_history_hint")
             .unwrap_or_else(|| "{count} earlier successful tools · ctrl o to view".into());
-        self.live_preview_rows = e_core::config::settings::get_u64("tool_preview_rows")
+        self.live_preview_rows = ulo_core::config::settings::get_u64("tool_preview_rows")
             .filter(|n| *n <= 20)
             .unwrap_or(5) as usize;
-        self.tool_label_rows = e_core::config::settings::get_u64("tool_label_rows")
+        self.tool_label_rows = ulo_core::config::settings::get_u64("tool_label_rows")
             .filter(|n| (1..=20).contains(n))
             .unwrap_or(2) as usize;
         for block in &mut self.transcript.blocks {
@@ -931,7 +934,7 @@ fn tab_title(path: &str, session_name: Option<&str>) -> String {
     let label = session_name
         .filter(|n| !n.trim().is_empty())
         .unwrap_or(path);
-    format!("𝑒 · {label}")
+    format!("ulo · {label}")
 }
 
 /// Write a title without letting a path or session name terminate its OSC.
@@ -941,7 +944,7 @@ fn set_tab_title(title: &str) {
     if !stdout_is_tty() {
         return;
     }
-    let title = e_core::tools::sanitize_display(title).replace('\n', " ");
+    let title = ulo_core::tools::sanitize_display(title).replace('\n', " ");
     let mut out = std::io::stdout();
     let _ = write!(out, "\x1b]0;{title}\x07");
     let _ = out.flush();
@@ -1026,11 +1029,11 @@ fn ago(ms: u64) -> String {
 }
 
 fn system_prompt() -> String {
-    e_core::agent::context::system_prompt_here()
+    ulo_core::agent::context::system_prompt_here()
 }
 
 fn persist_model(m: &Model) -> std::io::Result<()> {
-    e_core::config::settings::set_string("model", &model::slug(m))
+    ulo_core::config::settings::set_string("model", &model::slug(m))
 }
 
 /// The text after a slash command, only on a word boundary: `/login x` →
@@ -1166,7 +1169,7 @@ fn stage_initial_prompt(
     }
 }
 
-/// Replace this process with the current e binary, optionally in a new cwd.
+/// Replace this process with the current ulo binary, optionally in a new cwd.
 /// Extensions may choose arguments and environment, but never an arbitrary
 /// executable.
 pub fn relaunch_self(
@@ -1204,7 +1207,7 @@ pub fn relaunch_self(
 /// /tree's rewind points: every user-turn node's id, one-line preview, and
 /// whether its parent already has more than one child — a branch point,
 /// meaning /tree was used at that spot before.
-fn tree_items(nodes: &[e_core::session::Node]) -> Vec<(String, String, bool)> {
+fn tree_items(nodes: &[ulo_core::session::Node]) -> Vec<(String, String, bool)> {
     let mut children_of = std::collections::HashMap::<&str, usize>::new();
     for n in nodes {
         if let Some(p) = n.parent.as_deref() {
@@ -1239,10 +1242,14 @@ fn tree_items(nodes: &[e_core::session::Node]) -> Vec<(String, String, bool)> {
 /// replays as a dangling call), and its prompt text for the composer. None
 /// means the id no longer resolves or the ancestor path is corrupt.
 fn rewind_target(
-    nodes: &[e_core::session::Node],
+    nodes: &[ulo_core::session::Node],
     node_id: &str,
-) -> Option<(Option<String>, Vec<e_core::providers::ChatMessage>, String)> {
-    let by_id: std::collections::HashMap<&str, &e_core::session::Node> =
+) -> Option<(
+    Option<String>,
+    Vec<ulo_core::providers::ChatMessage>,
+    String,
+)> {
+    let by_id: std::collections::HashMap<&str, &ulo_core::session::Node> =
         nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let target = *by_id.get(node_id)?;
     let head = target.parent.clone();
@@ -1262,14 +1269,14 @@ fn rewind_target(
         .iter()
         .filter_map(|id| by_id.get(id.as_str()).map(|n| n.message.clone()))
         .collect();
-    e_core::session::repair_history(&mut messages);
+    ulo_core::session::repair_history(&mut messages);
     Some((head, messages, target.message.content.clone()))
 }
 
-/// The composer's editing keymap: a user's `~/.e/keybindings.json` chord
+/// The composer's editing keymap: a user's `~/.ulo/keybindings.json` chord
 /// override is consulted first (`Some(action)` overrides, `Some(None)`
 /// swallows the chord, `None` means "not mentioned"); anything left
-/// unmentioned falls through to e's built-in bindings below, so an empty or
+/// unmentioned falls through to ulo's built-in bindings below, so an empty or
 /// missing file reproduces this function's behavior exactly.
 fn key_of(event: &KeyEvent, keymap: &crate::keybindings::Keymap) -> Option<Key> {
     // Crossterm can report Command/Super through the enhanced keyboard
@@ -1284,7 +1291,7 @@ fn key_of(event: &KeyEvent, keymap: &crate::keybindings::Keymap) -> Option<Key> 
     let alt = event.modifiers.contains(KeyModifiers::ALT);
     let shift = event.modifiers.contains(KeyModifiers::SHIFT);
     if let Some(base) = crate::keybindings::base_name(event.code) {
-        let chord = e_core::config::chord::chord_string(ctrl, alt, shift, &base);
+        let chord = ulo_core::config::chord::chord_string(ctrl, alt, shift, &base);
         if let Some(bound) = keymap.lookup(&chord) {
             return bound;
         }
@@ -1322,7 +1329,7 @@ fn key_of(event: &KeyEvent, keymap: &crate::keybindings::Keymap) -> Option<Key> 
         (KeyCode::Char('f'), true, _) => Key::Right,
         (KeyCode::Char('j'), true, _) => Key::Newline,
         // ctrl+d with text deletes forward, completing the emacs chord
-        // family (a/e/k/u/w/b/f). On an empty composer the app-level
+        // family (a/ulo/k/u/w/b/f). On an empty composer the app-level
         // handler above has already taken it as quit, like a shell EOF.
         (KeyCode::Char('d'), true, _) => Key::Delete,
         (KeyCode::Char(c), false, false) => Key::Char(c),

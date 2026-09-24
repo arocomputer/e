@@ -1,4 +1,4 @@
-//! `~/.e/settings.json`: preferences, read-merge-write so unrelated keys are
+//! `~/.ulo/settings.json`: preferences, read-merge-write so unrelated keys are
 //! preserved. Typed accessors sit on top; readers elsewhere (model, prompt)
 //! parse the same file independently.
 
@@ -108,7 +108,7 @@ pub fn extensions_config() -> serde_json::Value {
         .unwrap_or(serde_json::Value::Object(Default::default()))
 }
 
-/// A settings choice: a label, a category, and the options to cycle through./// Options are owned so some (theme) can be computed from `~/.e/` at runtime —
+/// A settings choice: a label, a category, and the options to cycle through./// Options are owned so some (theme) can be computed from `~/.ulo/` at runtime —
 /// user themes are just files, not a compiled list.
 pub struct Setting {
     pub key: String,
@@ -140,7 +140,7 @@ impl Setting {
 }
 
 /// Theme names selectable today: `auto`, the built-ins, any file in
-/// `~/.e/themes/`, and any installed package's `themes/`. Editable — drop a
+/// `~/.ulo/themes/`, and any installed package's `themes/`. Editable — drop a
 /// `<name>.json` in and it appears here.
 pub fn theme_names() -> Vec<String> {
     let mut names = vec!["auto".to_string(), "light".to_string(), "dark".to_string()];

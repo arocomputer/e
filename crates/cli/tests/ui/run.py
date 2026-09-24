@@ -2,9 +2,9 @@
 """Check real terminal frames against a loopback streaming provider.
 
 Run through `./x ui`, which builds the binary and provides pyte:
-  ./x ui --out /tmp/e-ui
+  ./x ui --out /tmp/ulo-ui
 Artifacts contain only generated prompts and a dummy credential. Each scenario
-gets its own HOME, E_HOME, workspace, raw PTY capture, and rendered frames.
+gets its own HOME, ULO_HOME, workspace, raw PTY capture, and rendered frames.
 """
 import argparse
 import fcntl
@@ -94,7 +94,7 @@ def capture(name, steps, out, port):
     directory = out / name
     directory.mkdir(parents=True, exist_ok=False)
     home = directory / 'home'
-    state = home / '.e'
+    state = home / '.ulo'
     workspace = directory / ('workspace\x1b]0;BOUNTY_INJECTED\x07' if name == 'path-control' else 'workspace')
     state.mkdir(parents=True)
     workspace.mkdir()
@@ -107,15 +107,15 @@ def capture(name, steps, out, port):
     (state / 'settings.json').write_text(json.dumps(settings))
     if name not in ('trust-exit', 'narrow-trust', 'path-control'):
         (state / 'trust.json').write_text(json.dumps({str(workspace): {'trusted': True}}))
-    env = {'HOME': str(home), 'E_HOME': str(state), 'PATH': '/usr/bin:/bin',
+    env = {'HOME': str(home), 'ULO_HOME': str(state), 'PATH': '/usr/bin:/bin',
            'TERM': 'xterm-256color', 'LANG': 'en_US.UTF-8'}
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(workspace)
-        args = ['e', '--no-save', '--no-extensions', '--model', 'mock/audit']
+        args = ['ulo', '--no-save', '--no-extensions', '--model', 'mock/audit']
         if name not in ('tool-tree', 'single-tool', 'heredoc-tool', 'diff-counts', 'visible-work'):
             args.append('--no-tools')
-        os.execve(str(ROOT / 'target/debug/e'), args, env)
+        os.execve(str(ROOT / 'target/debug/ulo'), args, env)
     raw = bytearray()
     sizes = []
     answered = set()
@@ -218,7 +218,7 @@ def main():
             parser.error(f'artifact directory already exists: {out}; choose a fresh path')
     else:
         # Match the canonical cwd used by directory trust, including macOS /private/var.
-        out = Path(tempfile.mkdtemp(prefix='e-ui-')).resolve()
+        out = Path(tempfile.mkdtemp(prefix='ulo-ui-')).resolve()
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Provider)
     server.requests = []
     threading.Thread(target=server.serve_forever, daemon=True).start()

@@ -2,7 +2,7 @@
 //! rendered markdown, tool calls folded with their results, internal and
 //! reasoning records left out, and every string escaped.
 
-use e::core::providers::{ChatMessage, ToolCall};
+use ulo::core::providers::{ChatMessage, ToolCall};
 
 #[test]
 fn export_renders_the_branch_and_escapes_everything() {
@@ -26,7 +26,7 @@ fn export_renders_the_branch_and_escapes_everything() {
             Vec::new(),
         ),
     ];
-    let page = e::core::export::html("my <session>", "mock/test", &messages);
+    let page = ulo::core::export::html("my <session>", "mock/test", &messages);
     assert!(page.starts_with("<!doctype html>"));
     assert!(page.contains("<title>my &lt;session&gt;</title>"));
     assert!(page.contains("<div class=\"user\">fix &lt;main&gt; &amp; tell me</div>"));

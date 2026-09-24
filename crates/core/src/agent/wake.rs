@@ -76,7 +76,7 @@ pub async fn heartbeat(gaps: Shared, stop: Arc<std::sync::atomic::AtomicBool>, i
         }
         let now = Beat::now();
         if let Some(gap) = observe(last, now) {
-            let mut slot = gaps.lock().unwrap_or_else(|e| e.into_inner());
+            let mut slot = gaps.lock().unwrap_or_else(|ulo| ulo.into_inner());
             // Keep only the latest gap — an earlier one is history, and
             // its window verdict has already been applied.
             *slot = Some(gap);
@@ -89,12 +89,12 @@ pub async fn heartbeat(gaps: Shared, stop: Arc<std::sync::atomic::AtomicBool>, i
 /// recorded before `since` cannot be this attempt's loss, and a fresh
 /// request after wake correctly owns whatever happens to it next.
 pub fn gap_since(gaps: &Shared, since: Instant) -> Option<SleepGap> {
-    let slot = gaps.lock().unwrap_or_else(|e| e.into_inner());
+    let slot = gaps.lock().unwrap_or_else(|ulo| ulo.into_inner());
     let gap = *slot;
     gap.filter(|gap| gap.woke_at >= since)
 }
 
-/// Resume policy knobs, read from `~/.e/settings.json` with built-in
+/// Resume policy knobs, read from `~/.ulo/settings.json` with built-in
 /// defaults: how long a sleep the turn will ride out, and how many
 /// mid-reply continuations one turn may chain.
 pub mod policy {
@@ -159,7 +159,7 @@ mod tests {
         let gaps = shared();
         let (last, now) = beats(8_000, 1_000);
         if let Some(gap) = observe(last, now) {
-            *gaps.lock().unwrap_or_else(|e| e.into_inner()) = Some(gap);
+            *gaps.lock().unwrap_or_else(|ulo| ulo.into_inner()) = Some(gap);
         }
         // The attempt was running when the gap ended (started before the
         // wake) — attributable.

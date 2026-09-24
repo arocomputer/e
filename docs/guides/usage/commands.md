@@ -6,19 +6,19 @@ order: 5
 
 # Command line
 
-`e help` prints this list, with any flags and commands your extensions add.
+`ulo help` prints this list, with any flags and commands your extensions add.
 
 ## Start a session
 
 | Command | What it does |
 | --- | --- |
-| `e [message]` | start a session in this directory, optionally with a first prompt |
-| `e -c` | continue this directory's most recent session |
-| `e -r` | pick a saved session to resume |
-| `e -p [message]` | run one turn headless and print the reply |
-| `e rpc` | run the headless session server over stdin and stdout |
+| `ulo [message]` | start a session in this directory, optionally with a first prompt |
+| `ulo -c` | continue this directory's most recent session |
+| `ulo -r` | pick a saved session to resume |
+| `ulo -p [message]` | run one turn headless and print the reply |
+| `ulo rpc` | run the headless session server over stdin and stdout |
 
-A plain `e` does not read piped stdin. Use `e -p` for one turn, or `e rpc` for
+A plain `ulo` does not read piped stdin. Use `ulo -p` for one turn, or `ulo rpc` for
 a client of your own. See [automation](automation.md).
 
 ## Run options
@@ -39,21 +39,21 @@ a client of your own. See [automation](automation.md).
 
 | Command | What it does |
 | --- | --- |
-| `e docs [topic]` | print a built-in guide |
-| `e update` | update to the latest release |
-| `e install [source]` | install a package, or make every listed one current |
-| `e remove <source>` | forget a package and delete its clone |
-| `e packages` | list installed packages |
-| `e packages init <dir>` | start a package to publish |
-| `e trust [dir]` | trust a workspace's `AGENTS.md`, skills, and prompts |
-| `e untrust [dir]` | stop loading them for that workspace |
-| `e auth` | show sign-in status |
-| `e providers` | list provider support and sign-in state |
-| `e doctor [--no-network]` | print diagnostics that are safe to paste |
-| `e help` | print the help |
-| `e -v`, `e --version` | print the version |
+| `ulo docs [topic]` | print a built-in guide |
+| `ulo update` | update to the latest release |
+| `ulo install [source]` | install a package, or make every listed one current |
+| `ulo remove <source>` | forget a package and delete its clone |
+| `ulo packages` | list installed packages |
+| `ulo packages init <dir>` | start a package to publish |
+| `ulo trust [dir]` | trust a workspace's `AGENTS.md`, skills, and prompts |
+| `ulo untrust [dir]` | stop loading them for that workspace |
+| `ulo auth` | show sign-in status |
+| `ulo providers` | list provider support and sign-in state |
+| `ulo doctor [--no-network]` | print diagnostics that are safe to paste |
+| `ulo help` | print the help |
+| `ulo -v`, `ulo --version` | print the version |
 
-[Packages](../extend/packages.md) has its own guide. For `e trust`, see
+[Packages](../extend/packages.md) has its own guide. For `ulo trust`, see
 [instructions](../customize/instructions.md).
 
 ## Inside a session

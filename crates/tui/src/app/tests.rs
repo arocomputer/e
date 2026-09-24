@@ -72,8 +72,8 @@ fn main_wheel_keeps_the_draft_and_reading_position_through_output_and_review() {
 /// Collapsed thinking stays available to review and to the settings toggle.
 #[test]
 fn thinking_can_be_revealed_after_it_arrived_collapsed() {
-    let home = std::env::temp_dir().join(format!("e-thinking-{}", uuid::Uuid::new_v4()));
-    e_core::config::home::with_home(home.clone(), || {
+    let home = std::env::temp_dir().join(format!("ulo-thinking-{}", uuid::Uuid::new_v4()));
+    ulo_core::config::home::with_home(home.clone(), || {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(
             home.join("settings.json"),
@@ -97,13 +97,13 @@ fn thinking_can_be_revealed_after_it_arrived_collapsed() {
             .viewer_rows(80, false)
             .join("\n")
             .contains("retained thought"));
-        e_core::config::settings::set_string("show_thinking", "on").unwrap();
+        ulo_core::config::settings::set_string("show_thinking", "on").unwrap();
         app.refresh_status_cache();
         assert!(app
             .transcript_frame(80)
             .join("\n")
             .contains("retained thought"));
-        e_core::config::settings::set_string("show_thinking", "off").unwrap();
+        ulo_core::config::settings::set_string("show_thinking", "off").unwrap();
         app.refresh_status_cache();
         assert!(!app
             .transcript_frame(80)
@@ -121,10 +121,10 @@ fn thinking_can_be_revealed_after_it_arrived_collapsed() {
 fn tab_title_shortens_to_two_components() {
     assert_eq!(
         title_path_from(
-            std::path::Path::new("/Volumes/v0/workspaces/worktrees/e/bold-fox"),
+            std::path::Path::new("/Volumes/v0/workspaces/worktrees/ulo/bold-fox"),
             ""
         ),
-        "e/bold-fox"
+        "ulo/bold-fox"
     );
     assert_eq!(title_path_from(std::path::Path::new("/etc"), ""), "etc");
     assert_eq!(title_path_from(std::path::Path::new("/"), ""), "/");
@@ -152,9 +152,9 @@ fn tab_title_is_home_relative_under_home() {
 fn node(
     id: &str,
     parent: Option<&str>,
-    message: e_core::providers::ChatMessage,
-) -> e_core::session::Node {
-    e_core::session::Node {
+    message: ulo_core::providers::ChatMessage,
+) -> ulo_core::session::Node {
+    ulo_core::session::Node {
         id: id.into(),
         parent: parent.map(String::from),
         message,
@@ -163,7 +163,7 @@ fn node(
 
 #[test]
 fn tree_items_lists_user_turns_and_flags_branch_points() {
-    use e_core::providers::ChatMessage;
+    use ulo_core::providers::ChatMessage;
     let nodes = vec![
         node("1", None, ChatMessage::user("root question")),
         node(
@@ -189,7 +189,7 @@ fn tree_items_lists_user_turns_and_flags_branch_points() {
 
 #[test]
 fn rewind_target_replays_ancestors_and_restores_the_chosen_prompt() {
-    use e_core::providers::ChatMessage;
+    use ulo_core::providers::ChatMessage;
     let nodes = vec![
         node("1", None, ChatMessage::user("first")),
         node("2", Some("1"), ChatMessage::assistant("reply", Vec::new())),
@@ -205,7 +205,7 @@ fn rewind_target_replays_ancestors_and_restores_the_chosen_prompt() {
 
 #[test]
 fn rewind_target_to_the_root_yields_an_empty_history_and_no_head() {
-    use e_core::providers::ChatMessage;
+    use ulo_core::providers::ChatMessage;
     let nodes = vec![node("1", None, ChatMessage::user("only message"))];
     let (head, messages, prompt) = rewind_target(&nodes, "1").expect("node 1 exists");
     assert!(head.is_none());
@@ -215,12 +215,12 @@ fn rewind_target_to_the_root_yields_an_empty_history_and_no_head() {
 
 #[test]
 fn rewind_target_is_none_for_an_unknown_id() {
-    use e_core::providers::ChatMessage;
+    use ulo_core::providers::ChatMessage;
     let nodes = vec![node("1", None, ChatMessage::user("only message"))];
     assert!(rewind_target(&nodes, "missing").is_none());
 }
 
-// E_HOME is process-global; serialize the tests below that set it.
+// ULO_HOME is process-global; serialize the tests below that set it.
 static KEY_OF_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
@@ -243,14 +243,16 @@ fn key_of_matches_the_built_in_bindings_when_the_keymap_is_empty() {
 
 #[test]
 fn key_of_consults_an_override_before_the_built_in_binding() {
-    let _guard = KEY_OF_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = KEY_OF_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|ulo| ulo.into_inner());
     let dir = std::env::temp_dir().join(format!(
-        "e-key-of-override-{}-{}",
+        "ulo-key-of-override-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("E_HOME", &dir);
+    std::env::set_var("ULO_HOME", &dir);
     std::fs::write(dir.join("keybindings.json"), r#"{"ctrl+w": "home"}"#).unwrap();
 
     let keymap = crate::keybindings::load();
@@ -265,14 +267,16 @@ fn key_of_consults_an_override_before_the_built_in_binding() {
 
 #[test]
 fn key_of_none_override_swallows_a_built_in_chord() {
-    let _guard = KEY_OF_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = KEY_OF_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|ulo| ulo.into_inner());
     let dir = std::env::temp_dir().join(format!(
-        "e-key-of-none-{}-{}",
+        "ulo-key-of-none-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("E_HOME", &dir);
+    std::env::set_var("ULO_HOME", &dir);
     // ctrl+j is a built-in binding for Newline; "none" must swallow it
     // rather than falling through to the default.
     std::fs::write(dir.join("keybindings.json"), r#"{"ctrl+j": "none"}"#).unwrap();
@@ -323,13 +327,13 @@ fn api_keys_bypass_input_hooks() {
 
 #[test]
 fn tab_title_prefers_the_session_name_over_the_path() {
-    assert_eq!(tab_title("~/work", None), "𝑒 · ~/work");
+    assert_eq!(tab_title("~/work", None), "ulo · ~/work");
     assert_eq!(
         tab_title("~/work", Some("fix the renderer")),
-        "𝑒 · fix the renderer"
+        "ulo · fix the renderer"
     );
     // A blank name falls back to the path, never an empty title.
-    assert_eq!(tab_title("~/work", Some("   ")), "𝑒 · ~/work");
+    assert_eq!(tab_title("~/work", Some("   ")), "ulo · ~/work");
 }
 
 #[test]
@@ -342,7 +346,7 @@ fn input_hook_verdicts_apply_in_submission_order() {
         second,
         "second".into(),
         None,
-        e_core::extensions::InputVerdict::default(),
+        ulo_core::extensions::InputVerdict::default(),
     );
     assert!(later.is_empty(), "a later verdict must wait");
 
@@ -350,7 +354,7 @@ fn input_hook_verdicts_apply_in_submission_order() {
         first,
         "first".into(),
         None,
-        e_core::extensions::InputVerdict::default(),
+        ulo_core::extensions::InputVerdict::default(),
     );
     assert_eq!(
         ordered
@@ -372,7 +376,7 @@ fn input_hook_verdicts_carry_images_with_the_right_sequence_entry() {
     let text_only = pending.reserve();
     let with_images = pending.reserve();
 
-    let image = e_core::providers::ImageInput {
+    let image = ulo_core::providers::ImageInput {
         media_type: "image/png".into(),
         data: std::sync::Arc::from(""),
     };
@@ -382,7 +386,7 @@ fn input_hook_verdicts_carry_images_with_the_right_sequence_entry() {
         with_images,
         "with images".into(),
         Some(vec![image]),
-        e_core::extensions::InputVerdict::default(),
+        ulo_core::extensions::InputVerdict::default(),
     );
     assert!(none_ready.is_empty(), "text_only hasn't completed yet");
 
@@ -390,7 +394,7 @@ fn input_hook_verdicts_carry_images_with_the_right_sequence_entry() {
         text_only,
         "text only".into(),
         None,
-        e_core::extensions::InputVerdict::default(),
+        ulo_core::extensions::InputVerdict::default(),
     );
     assert_eq!(ordered.len(), 2);
     let (first_text, first_images, _) = &ordered[0];
@@ -408,7 +412,7 @@ fn input_hook_verdicts_carry_images_with_the_right_sequence_entry() {
 #[test]
 fn a_command_submitted_with_attachments_dispatches_without_them() {
     let mut app = session_app();
-    app.attachments.images = vec![e_core::providers::ImageInput {
+    app.attachments.images = vec![ulo_core::providers::ImageInput {
         media_type: "image/png".into(),
         data: std::sync::Arc::from("AA=="),
     }];
@@ -462,7 +466,7 @@ fn saved_unavailable_models_remain_visible_in_the_scope_picker() {
 fn a_paste_over_an_open_surface_stays_text() {
     let mut app = session_app();
     app.viewer = Some(Viewer::new());
-    let path = std::env::temp_dir().join("e-paste-gate-test.png");
+    let path = std::env::temp_dir().join("ulo-paste-gate-test.png");
     std::fs::write(&path, b"png").unwrap();
 
     app.paste(&path.display().to_string());
@@ -546,11 +550,11 @@ fn stale_clipboard_deferred_submit_expands_long_paste() {
 
 #[tokio::test]
 async fn fork_during_a_shell_command_preserves_its_session_and_held_prompts() {
-    let home = std::env::temp_dir().join(format!("e-fork-shell-{}", uuid::Uuid::new_v4()));
-    e_core::config::home::with_home(home.clone(), || {
+    let home = std::env::temp_dir().join(format!("ulo-fork-shell-{}", uuid::Uuid::new_v4()));
+    ulo_core::config::home::with_home(home.clone(), || {
         let mut app = session_app();
-        let messages = vec![e_core::providers::ChatMessage::user("keep history")];
-        let log = e_core::session::SessionLog::create_with(
+        let messages = vec![ulo_core::providers::ChatMessage::user("keep history")];
+        let log = ulo_core::session::SessionLog::create_with(
             &app.agent.cwd(),
             &app.agent.model_slug(),
             &messages,
@@ -586,7 +590,7 @@ async fn fork_during_a_shell_command_preserves_its_session_and_held_prompts() {
 fn clipboard_images_stay_out_of_editable_text_and_get_chat_labels() {
     let mut app = session_app();
     app.agent.model.image_input = true;
-    let image = || e_core::providers::ImageInput {
+    let image = || ulo_core::providers::ImageInput {
         media_type: "image/png".into(),
         data: std::sync::Arc::from("AA=="),
     };
@@ -616,7 +620,7 @@ fn clipboard_images_stay_out_of_editable_text_and_get_chat_labels() {
 
 #[test]
 fn screenshot_paths_at_the_start_of_a_prompt_are_split_from_the_question() {
-    let dir = std::env::temp_dir().join(format!("e-shot-{}", uuid::Uuid::now_v7()));
+    let dir = std::env::temp_dir().join(format!("ulo-shot-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Shotbase Capture.png");
     std::fs::write(&path, b"png").unwrap();
@@ -635,7 +639,7 @@ fn screenshot_paths_at_the_start_of_a_prompt_are_split_from_the_question() {
 /// prompt, with a notice saying the image was dropped.
 #[tokio::test(flavor = "multi_thread")]
 async fn image_paste_text_survives_a_model_without_image_input() {
-    let dir = std::env::temp_dir().join(format!("e-shot-{}", uuid::Uuid::now_v7()));
+    let dir = std::env::temp_dir().join(format!("ulo-shot-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("shot.png");
     std::fs::write(&path, b"png").unwrap();
@@ -670,7 +674,7 @@ async fn image_paste_text_survives_a_model_without_image_input() {
 /// the image is dropped, so only the notice appears.
 #[tokio::test(flavor = "multi_thread")]
 async fn bare_image_path_on_a_text_only_model_only_notices() {
-    let dir = std::env::temp_dir().join(format!("e-shot-{}", uuid::Uuid::now_v7()));
+    let dir = std::env::temp_dir().join(format!("ulo-shot-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("shot.png");
     std::fs::write(&path, b"png").unwrap();
@@ -726,7 +730,7 @@ fn paste_normalizes_line_endings_once() {
 #[tokio::test]
 async fn ctrl_c_cancels_login_before_arming_exit() {
     let mut app = session_app();
-    let cancellation = e_core::auth::login::LoginCancellation::default();
+    let cancellation = ulo_core::auth::login::LoginCancellation::default();
     let observed = cancellation.clone();
     app.login_task = Some(ActiveLogin {
         flow_id: 1,
@@ -751,7 +755,7 @@ async fn ctrl_c_cancels_login_before_arming_exit() {
 
 #[tokio::test]
 async fn active_login_guard_cancels_on_drop() {
-    let cancellation = e_core::auth::login::LoginCancellation::default();
+    let cancellation = ulo_core::auth::login::LoginCancellation::default();
     let observed = cancellation.clone();
     let task = tokio::spawn(std::future::pending());
     let login = ActiveLogin {
@@ -771,33 +775,33 @@ fn compaction_uses_the_request_models_pricing_after_a_model_switch() {
     let mut app = session_app();
     app.on_session_event(SessionEvent::TurnStart);
     app.agent.model.id = "switched".into();
-    app.agent.model.pricing = Some(e_core::providers::catalog::Pricing {
+    app.agent.model.pricing = Some(ulo_core::providers::catalog::Pricing {
         input_per_million: 99.0,
         output_per_million: 99.0,
         cache_read_per_million: None,
         cache_write_5m_per_million: None,
         cache_write_1h_per_million: None,
     });
-    let request_pricing = e_core::providers::catalog::Pricing {
+    let request_pricing = ulo_core::providers::catalog::Pricing {
         input_per_million: 2.0,
         output_per_million: 10.0,
         cache_read_per_million: Some(0.2),
         cache_write_5m_per_million: Some(2.5),
         cache_write_1h_per_million: Some(4.0),
     };
-    let usage = e_core::providers::Usage {
+    let usage = ulo_core::providers::Usage {
         input: 1_000_000,
         ..Default::default()
     };
     app.on_session_event(SessionEvent::Compacted {
         summary: "summary".into(),
         context_tokens: 10,
-        response: e_core::providers::ResponseMeta {
+        response: ulo_core::providers::ResponseMeta {
             id: "response".into(),
             timestamp: 1,
             provider: "mock".into(),
             model: "m".into(),
-            purpose: e_core::providers::ResponsePurpose::Compaction,
+            purpose: ulo_core::providers::ResponsePurpose::Compaction,
             usage: Some(usage),
         },
         pricing: Some(request_pricing),
@@ -811,13 +815,13 @@ fn session_app() -> App {
         provider: "mock".into(),
         id: "m".into(),
         base_url: "http://localhost".into(),
-        api: e_core::providers::catalog::Api::Completions,
-        catalog: e_core::providers::registry::CatalogStrategy::Openai,
-        responses_mount: e_core::providers::registry::ResponsesMount::Platform,
+        api: ulo_core::providers::catalog::Api::Completions,
+        catalog: ulo_core::providers::registry::CatalogStrategy::Openai,
+        responses_mount: ulo_core::providers::registry::ResponsesMount::Platform,
         provider_supports_tools: true,
         provider_image_input: false,
         effort: Vec::new(),
-        thinking: e_core::providers::catalog::Thinking::Manual,
+        thinking: ulo_core::providers::catalog::Thinking::Manual,
         context_window: 200_000,
         max_output: None,
         supports_tools: true,
@@ -850,7 +854,7 @@ fn session_app() -> App {
         logins,
         login_task: None,
         login_sequence: 0,
-        host: e_core::extensions::ExtensionHost::empty(),
+        host: ulo_core::extensions::ExtensionHost::empty(),
         results,
         input_verdicts: PendingInputVerdicts::default(),
         compacting: false,
@@ -891,7 +895,7 @@ fn session_app() -> App {
         pane: None,
         pane_hidden: false,
         widgets: std::collections::BTreeMap::new(),
-        layout: e_core::config::layout::Layout::default(),
+        layout: crate::layout::Layout::default(),
         external_edit: false,
     }
 }
@@ -903,10 +907,10 @@ fn fake_request(
     method: &str,
     params: serde_json::Value,
 ) -> (
-    e_core::extensions::HostRequest,
+    ulo_core::extensions::HostRequest,
     tokio::sync::oneshot::Receiver<Result<serde_json::Value, String>>,
 ) {
-    e_core::extensions::HostRequest::fake(extension, method, params)
+    ulo_core::extensions::HostRequest::fake(extension, method, params)
 }
 
 #[test]
@@ -1089,10 +1093,9 @@ fn picking_an_argument_completion_replaces_the_typed_prefix() {
 #[test]
 fn a_pane_splits_the_frame_where_the_layout_says_and_answers_its_owner() {
     let mut app = session_app();
-    app.layout = e_core::config::layout::parse(
-        r#"{"panes":{"diff":{"side":"left","width":40}},"split_min":100}"#,
-    )
-    .unwrap();
+    app.layout =
+        crate::layout::parse(r#"{"panes":{"diff":{"side":"left","width":40}},"split_min":100}"#)
+            .unwrap();
     let (request, reply) = fake_request(
         "diff",
         "ui.pane",
@@ -1105,7 +1108,10 @@ fn a_pane_splits_the_frame_where_the_layout_says_and_answers_its_owner() {
     assert!(reply.blocking_recv().unwrap().is_ok());
     let frame = app.frame(120, 20);
     assert_eq!(frame.len(), 20, "a split is a fixed-height frame");
-    let plain: Vec<String> = frame.iter().map(|r| e_core::tools::strip_ansi(r)).collect();
+    let plain: Vec<String> = frame
+        .iter()
+        .map(|r| ulo_core::tools::strip_ansi(r))
+        .collect();
     // The layout put the pane on the left at 40%: 48 columns, then the
     // divider, then the conversation.
     assert!(plain[1].starts_with("Changes"), "{:?}", plain[1]);
@@ -1119,12 +1125,12 @@ fn a_pane_splits_the_frame_where_the_layout_says_and_answers_its_owner() {
     assert!(plain.iter().any(|r| r.contains("+ y")), "{plain:?}");
     // Too narrow to split: the focused pane fills the frame.
     let narrow = app.frame(80, 20);
-    assert!(e_core::tools::strip_ansi(&narrow[1]).starts_with("Changes"));
+    assert!(ulo_core::tools::strip_ansi(&narrow[1]).starts_with("Changes"));
     app.pane.as_mut().unwrap().focused = false;
     let narrow = app.frame(80, 20);
     let plain: Vec<String> = narrow
         .iter()
-        .map(|r| e_core::tools::strip_ansi(r))
+        .map(|r| ulo_core::tools::strip_ansi(r))
         .collect();
     assert!(
         !plain[1].starts_with("Changes"),
@@ -1182,7 +1188,10 @@ fn a_package_shaped_pane_paints_every_row_of_the_split() {
     app.on_host_request(request);
     let frame = app.frame(130, 32);
     assert_eq!(frame.len(), 32);
-    let plain: Vec<String> = frame.iter().map(|r| e_core::tools::strip_ansi(r)).collect();
+    let plain: Vec<String> = frame
+        .iter()
+        .map(|r| ulo_core::tools::strip_ansi(r))
+        .collect();
     for (i, row) in plain.iter().enumerate() {
         assert!(row.contains(" │ "), "row {i} lost the divider: {row:?}");
         assert!(
@@ -1209,10 +1218,10 @@ fn a_package_shaped_pane_paints_every_row_of_the_split() {
 fn a_render_answer_rewrites_its_entry_and_a_stale_one_is_dropped() {
     let mut app = session_app();
     let id = app.remember_output("bash".into(), "raw output".into());
-    let diff = e_core::extensions::Show {
+    let diff = ulo_core::extensions::Show {
         title: String::new(),
         body: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".into(),
-        format: e_core::extensions::Format::Diff,
+        format: ulo_core::extensions::Format::Diff,
     };
     app.apply_render(RenderTarget::Tool(id), diff.clone(), app.session_epoch);
     let body = App::output_body(&app.outputs, id).unwrap();
@@ -1224,10 +1233,10 @@ fn a_render_answer_rewrites_its_entry_and_a_stale_one_is_dropped() {
     app.transcript
         .push(Block::new(Kind::Assistant, "plain reply"));
     let index = app.transcript.blocks.len() - 1;
-    let markdown = e_core::extensions::Show {
+    let markdown = ulo_core::extensions::Show {
         title: String::new(),
         body: "**bold reply**".into(),
-        format: e_core::extensions::Format::Markdown,
+        format: ulo_core::extensions::Format::Markdown,
     };
     app.apply_render(
         RenderTarget::Assistant { index, len: 3 },
@@ -1274,7 +1283,7 @@ fn the_activity_row_follows_its_template_and_carries_extension_text() {
     let plain: Vec<String> = app
         .transcript_frame(80)
         .iter()
-        .map(|r| e_core::tools::strip_ansi(r))
+        .map(|r| ulo_core::tools::strip_ansi(r))
         .collect();
     assert_eq!(plain.last().map(String::as_str), Some("3 tests running"));
     // During a turn the template composes the row; the user's template
@@ -1297,7 +1306,7 @@ fn the_activity_row_follows_its_template_and_carries_extension_text() {
     }
     let row = |app: &mut App| -> String {
         let rows = app.transcript_frame(80);
-        e_core::tools::strip_ansi(rows.last().unwrap())
+        ulo_core::tools::strip_ansi(rows.last().unwrap())
             .trim()
             .to_string()
     };
@@ -1344,7 +1353,7 @@ fn widgets_sit_above_the_composer_and_keyed_status_fills_the_template() {
     let plain: Vec<String> = app
         .frame(80, 20)
         .iter()
-        .map(|r| e_core::tools::strip_ansi(r))
+        .map(|r| ulo_core::tools::strip_ansi(r))
         .collect();
     // Widgets stack in key order: plan/clock before plan/steps.
     let clock = plain.iter().position(|r| r == "12:00").unwrap();
@@ -1556,7 +1565,7 @@ fn review_screen_rebuilds_when_a_tool_reports() {
     app.active.as_mut().unwrap().tool_blocks.insert(7, block);
     app.on_session_event(SessionEvent::ToolEnd {
         id: 7,
-        outcome: e_core::tools::ToolOutcome::Completed,
+        outcome: ulo_core::tools::ToolOutcome::Completed,
         summary: "done".into(),
         content: "full saved output".into(),
     });
@@ -1613,7 +1622,12 @@ fn review_branches_connect_through_output_and_omission_rows() {
     );
     for id in 1..=2 {
         group.start_tool(id);
-        group.finish_tool(id, e_core::tools::ToolOutcome::Completed, "done".into(), "");
+        group.finish_tool(
+            id,
+            ulo_core::tools::ToolOutcome::Completed,
+            "done".into(),
+            "",
+        );
     }
     for child in &mut group.tool_children {
         child.detail = Some(detail);
@@ -1623,7 +1637,7 @@ fn review_branches_connect_through_output_and_omission_rows() {
         let rows: Vec<_> = app
             .viewer_rows(80, full)
             .iter()
-            .map(|row| e_core::tools::strip_ansi(row))
+            .map(|row| ulo_core::tools::strip_ansi(row))
             .collect();
         assert_eq!(rows.iter().filter(|row| row.starts_with('└')).count(), 1);
         assert_eq!(rows.iter().filter(|row| row.starts_with('├')).count(), 2);
@@ -1644,19 +1658,19 @@ fn review_branches_connect_through_output_and_omission_rows() {
 
 #[test]
 fn tui_mode_defaults_inline_and_settings_cycle_the_layout() {
-    let home = std::env::temp_dir().join(format!("e-composer-{}", uuid::Uuid::new_v4()));
-    e_core::config::home::with_home(home.clone(), || {
+    let home = std::env::temp_dir().join(format!("ulo-composer-{}", uuid::Uuid::new_v4()));
+    ulo_core::config::home::with_home(home.clone(), || {
         let mut app = session_app();
         app.refresh_status_cache();
         assert!(!app.bottom_pinned);
         assert!(app.frame(80, 30).len() < 30);
 
-        let setting = e_core::config::settings::all(Vec::new())
+        let setting = ulo_core::config::settings::all(Vec::new())
             .into_iter()
             .find(|setting| setting.key == "tui_mode")
             .unwrap();
         assert_eq!(setting.current(), "inline");
-        e_core::config::settings::set_string("composer_position", "bottom").unwrap();
+        ulo_core::config::settings::set_string("composer_position", "bottom").unwrap();
         app.refresh_status_cache();
         assert!(app.bottom_pinned);
         assert_eq!(setting.current(), "fullscreen");
@@ -1672,7 +1686,7 @@ fn tui_mode_defaults_inline_and_settings_cycle_the_layout() {
         assert!(!app.bottom_pinned);
         assert!(app.frame(80, 30).len() < 30);
 
-        e_core::config::settings::set_string("tui_mode", "invalid").unwrap();
+        ulo_core::config::settings::set_string("tui_mode", "invalid").unwrap();
         app.refresh_status_cache();
         assert_eq!(setting.current(), "inline");
         assert!(!app.bottom_pinned);
@@ -1683,13 +1697,13 @@ fn tui_mode_defaults_inline_and_settings_cycle_the_layout() {
 /// Reloaded label budgets invalidate existing frames and apply to new groups.
 #[test]
 fn tool_label_preference_updates_existing_and_new_groups() {
-    let home = std::env::temp_dir().join(format!("e-tool-labels-{}", uuid::Uuid::new_v4()));
-    e_core::config::home::with_home(home.clone(), || {
+    let home = std::env::temp_dir().join(format!("ulo-tool-labels-{}", uuid::Uuid::new_v4()));
+    ulo_core::config::home::with_home(home.clone(), || {
         let mut app = session_app();
         app.refresh_status_cache();
         app.on_session_event(SessionEvent::TurnStart);
         let batch = || SessionEvent::ToolBatchStart {
-            calls: vec![e_core::agent::ToolCallPresentation {
+            calls: vec![ulo_core::agent::ToolCallPresentation {
                 id: 1,
                 name: "bash".into(),
                 arguments: "{}".into(),
@@ -1702,7 +1716,7 @@ fn tool_label_preference_updates_existing_and_new_groups() {
         app.on_session_event(batch());
         app.on_session_event(SessionEvent::ToolStart { id: 1 });
         let original = app.transcript.blocks[0].lines_for_test(&app.theme, 40);
-        e_core::config::store::update_versioned(
+        ulo_core::config::store::update_versioned(
             &home.join("settings.json"),
             0o644,
             1,
@@ -1727,7 +1741,7 @@ fn command_output_and_completion_do_not_move_the_composer_dock() {
     app.bottom_pinned = true;
     app.on_session_event(SessionEvent::TurnStart);
     app.on_session_event(SessionEvent::ToolBatchStart {
-        calls: vec![e_core::agent::ToolCallPresentation {
+        calls: vec![ulo_core::agent::ToolCallPresentation {
             id: 1,
             name: "bash".into(),
             arguments: "{}".into(),
@@ -1741,12 +1755,12 @@ fn command_output_and_completion_do_not_move_the_composer_dock() {
     for (width, height, count) in [(80, 24, 1), (24, 12, 30), (80, 24, 2)] {
         app.on_session_event(SessionEvent::ToolOutput {
             id: 1,
-            stream: e_core::tools::OutputStream::Stdout,
+            stream: ulo_core::tools::OutputStream::Stdout,
             chunk: "output line with a long argument\n".repeat(count),
         });
         let frame = app.frame(width, height);
         assert!(frame.len() >= height);
-        assert!(e_core::tools::strip_ansi(&frame[frame.len() - 3]).starts_with("┃ "));
+        assert!(ulo_core::tools::strip_ansi(&frame[frame.len() - 3]).starts_with("┃ "));
         let review = app.viewer_rows(width, true).join("\n");
         assert!(
             review.contains("output line"),
@@ -1755,14 +1769,14 @@ fn command_output_and_completion_do_not_move_the_composer_dock() {
     }
     app.on_session_event(SessionEvent::ToolEnd {
         id: 1,
-        outcome: e_core::tools::ToolOutcome::Completed,
+        outcome: ulo_core::tools::ToolOutcome::Completed,
         summary: "done".into(),
         content: "authoritative final output".into(),
     });
     app.on_session_event(SessionEvent::TurnEnd { aborted: false });
     let frame = app.frame(80, 24);
     assert_eq!(frame.len(), 24);
-    assert!(e_core::tools::strip_ansi(&frame[21]).starts_with("┃ "));
+    assert!(ulo_core::tools::strip_ansi(&frame[21]).starts_with("┃ "));
     assert!(app
         .viewer_rows(80, true)
         .join("\n")
@@ -1806,12 +1820,13 @@ fn cancelled_turn_discards_the_reviewed_prompt_from_composer() {
 
 #[test]
 fn rejected_image_suffixes_remain_literal_prompts() {
-    let image = std::env::temp_dir().join(format!("e-image-command-{}.png", uuid::Uuid::new_v4()));
+    let image =
+        std::env::temp_dir().join(format!("ulo-image-command-{}.png", uuid::Uuid::new_v4()));
     std::fs::write(&image, b"image placeholder").unwrap();
     for suffix in ["/new", "/quit", "!touch should-not-run"] {
         let mut app = session_app();
         app.agent
-            .load_history(vec![e_core::providers::ChatMessage::user("keep history")]);
+            .load_history(vec![ulo_core::providers::ChatMessage::user("keep history")]);
         // Hold literal prompts locally without starting a provider request.
         app.reloading = true;
         app.submit_direct(format!("{} {suffix}", image.display()));
@@ -1833,7 +1848,7 @@ fn stale_tool_lifecycle_does_not_change_the_current_turn() {
         TurnPhase::Waiting
     ));
     app.on_session_event(SessionEvent::ToolBatchStart {
-        calls: vec![e_core::agent::ToolCallPresentation {
+        calls: vec![ulo_core::agent::ToolCallPresentation {
             id: 2,
             name: "bash".into(),
             arguments: "{}".into(),
@@ -1845,7 +1860,7 @@ fn stale_tool_lifecycle_does_not_change_the_current_turn() {
     });
     app.on_session_event(SessionEvent::ToolEnd {
         id: 99,
-        outcome: e_core::tools::ToolOutcome::Completed,
+        outcome: ulo_core::tools::ToolOutcome::Completed,
         summary: "late".into(),
         content: "old output".into(),
     });
@@ -1919,7 +1934,7 @@ fn transcript_rebuild_discards_previous_output_details() {
 
 fn tool_batch() -> SessionEvent {
     SessionEvent::ToolBatchStart {
-        calls: vec![e_core::agent::ToolCallPresentation {
+        calls: vec![ulo_core::agent::ToolCallPresentation {
             id: 1,
             name: "read".into(),
             arguments: "{\"path\":\"f.rs\"}".into(),
@@ -1987,7 +2002,7 @@ fn thinking_stays_expanded_at_retry_and_steer() {
         attempt: 1,
         limit: 3,
         delay_secs: 1,
-        cause: e_core::providers::FailureCause::Network,
+        cause: ulo_core::providers::FailureCause::Network,
         reason: "timeout".into(),
     });
     assert_eq!(

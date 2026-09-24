@@ -1,0 +1,50 @@
+/* Direct contact details inside the site's responsive page frame. */
+.ulo-contact {
+  padding: 60px 80px;
+}
+.ulo-contact h1 {
+  color: var(--ink);
+  font-size: 36px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.4;
+}
+.ulo-contact header p {
+  margin-top: 16px;
+}
+.ulo-contact-grid {
+  margin-top: 44px;
+  padding-top: 36px;
+  border-top: 1px solid var(--rule);
+}
+.ulo-site .ulo-contact-details h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.ulo-contact-details a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.ulo-contact-details > p {
+  max-width: 52ch;
+  margin-top: 24px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+@media (max-width: 1000px) {
+  .ulo-contact {
+    padding: 48px 40px;
+  }
+}
+@media (max-width: 640px) {
+  .ulo-contact {
+    padding: 36px 20px;
+  }
+  .ulo-contact h1 {
+    font-size: 28px;
+  }
+  .ulo-contact-grid {
+    margin-top: 28px;
+    padding-top: 28px;
+  }
+}

@@ -18,10 +18,10 @@ class Packages(unittest.TestCase):
         self.assets.mkdir()
         checksums = []
         for target in PLATFORMS.values():
-            path = self.assets / f"e-{target}.tar.gz"
+            path = self.assets / f"ulo-{target}.tar.gz"
             data = b'#!/bin/sh\nprintf "%s\\n" "$@"\n'
             with tarfile.open(path, "w:gz") as archive:
-                member = tarfile.TarInfo("e")
+                member = tarfile.TarInfo("ulo")
                 member.size = len(data)
                 member.mode = 0o755
                 archive.addfile(member, io.BytesIO(data))
@@ -36,22 +36,22 @@ class Packages(unittest.TestCase):
     def test_one_version_and_owned_binaries_without_install_scripts(self):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
-        wrapper = json.loads((output / "e/package.json").read_text())
+        wrapper = json.loads((output / "ulo/package.json").read_text())
         self.assertEqual(set(wrapper["optionalDependencies"].values()), {"1.2.3"})
         self.assertNotIn("scripts", wrapper)
         for platform in PLATFORMS:
             package = json.loads((output / platform / "package.json").read_text())
             self.assertEqual(package["version"], "1.2.3")
             self.assertEqual(
-                (output / platform / "bin/.e-install-method").read_text(), "npm\n"
+                (output / platform / "bin/.ulo-install-method").read_text(), "npm\n"
             )
-        formula = (output / "e.rb").read_text()
+        formula = (output / "ulo.rb").read_text()
         self.assertIn('version "1.2.3"', formula)
         self.assertEqual(formula.count("sha256 "), 4)
-        self.assertIn('libexec/".e-install-method"', formula)
+        self.assertIn('libexec/".ulo-install-method"', formula)
 
     def test_corrupt_archive_fails_before_creating_packages(self):
-        (self.assets / f"e-{next(iter(PLATFORMS.values()))}.tar.gz").write_bytes(
+        (self.assets / f"ulo-{next(iter(PLATFORMS.values()))}.tar.gz").write_bytes(
             b"corrupt"
         )
         output = self.root / "dist"
@@ -71,14 +71,14 @@ class Packages(unittest.TestCase):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
         package = json.loads((output / "slack/package.json").read_text())
-        self.assertEqual(package["name"], "@arocomputer/e-slack")
+        self.assertEqual(package["name"], "@arocomputer/ulo-slack")
         # The channel versions itself; mutable tags stay outside its tarball.
         self.assertEqual(package["version"], "0.0.2")
         self.assertEqual(package["publishConfig"], {"access": "public"})
-        self.assertEqual(package["bin"], {"e-slack": "bin/e-slack.js"})
+        self.assertEqual(package["bin"], {"ulo-slack": "bin/ulo-slack.js"})
         self.assertNotIn("scripts", package)
         self.assertNotIn("devDependencies", package)
-        self.assertTrue((output / "slack/bin/e-slack.js").is_file())
+        self.assertTrue((output / "slack/bin/ulo-slack.js").is_file())
         self.assertTrue((output / "slack/src/index.ts").is_file())
         self.assertTrue((output / "slack/manifest.json").is_file())
         self.assertTrue((output / "slack/LICENSE").is_file())
@@ -92,14 +92,14 @@ class Packages(unittest.TestCase):
     def test_production_packages_use_latest_and_the_e_command(self):
         output = self.root / "dist"
         prepare("v1.2.3", self.assets, output)
-        wrapper = json.loads((output / "e/package.json").read_text())
+        wrapper = json.loads((output / "ulo/package.json").read_text())
         self.assertEqual(wrapper["publishConfig"]["tag"], "latest")
-        self.assertEqual(wrapper["bin"], {"e": "bin/e"})
-        self.assertEqual((output / "darwin-arm64/bin/.e-install-method").read_text(), "npm\n")
-        formula = (output / "e.rb").read_text()
-        self.assertIn('https://github.com/arocomputer/e/releases/download/', formula)
-        self.assertIn('class E < Formula', formula)
-        self.assertIn('=> "e"', formula)
+        self.assertEqual(wrapper["bin"], {"ulo": "bin/ulo"})
+        self.assertEqual((output / "darwin-arm64/bin/.ulo-install-method").read_text(), "npm\n")
+        formula = (output / "ulo.rb").read_text()
+        self.assertIn('https://github.com/arocomputer/ulo/releases/download/', formula)
+        self.assertIn('class Ulo < Formula', formula)
+        self.assertIn('=> "ulo"', formula)
 
     def test_slack_payload_is_identical_for_production_releases(self):
         payloads = []

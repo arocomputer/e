@@ -17,8 +17,8 @@
 use crate::markdown::visible_width;
 use crate::render::{self, bold};
 use crate::theme::Theme;
-use e_core::auth::{self};
-use e_core::providers::registry::{self, Provider};
+use ulo_core::auth::{self};
+use ulo_core::providers::registry::{self, Provider};
 
 pub enum AuthStage {
     /// The method choice; `selected` indexes the two options. The root:
@@ -173,8 +173,8 @@ fn choose_rows(theme: &Theme, width: usize, selected: usize) -> Vec<String> {
             theme,
             selected == 1,
             "Sign in with an API key",
-            if e_core::CHANNEL == "production" {
-                "stored in ~/.e/auth.json"
+            if ulo_core::CHANNEL == "production" {
+                "stored in ~/.ulo/auth.json"
             } else {
                 "stored in this channel's auth.json"
             },
@@ -244,7 +244,7 @@ fn api_key_rows(theme: &Theme, width: usize, provider: &str, mask_count: usize) 
         String::new(),
         dim(&format!(
             "   Paste your {} API key",
-            e_core::providers::catalog::display_name(provider)
+            ulo_core::providers::catalog::display_name(provider)
         )),
         entry,
         dim(&format!(

@@ -1,5 +1,5 @@
 //! `docs/guides/` is the single source for three readers — GitHub, the website, and the
-//! binary's `e docs` — so its shape is a contract: complete front matter the
+//! binary's `ulo docs` — so its shape is a contract: complete front matter the
 //! website can parse, unique topic names, and relative links that resolve.
 //! `docs/README.md` is the guide for whoever edits this folder.
 
@@ -98,10 +98,10 @@ fn every_guide_has_complete_front_matter() {
 /// syntax, a terminal gets the label written out.
 #[test]
 fn a_terminal_reads_an_alert_as_a_label() {
-    let packages = e::core::resources::docs::body("packages").unwrap();
+    let packages = ulo::core::resources::docs::body("packages").unwrap();
     assert!(packages.contains("> Warning:"), "{packages}");
     assert!(!packages.contains("[!"), "the marker reached the terminal");
-    let models = e::core::resources::docs::body("models").unwrap();
+    let models = ulo::core::resources::docs::body("models").unwrap();
     assert!(!models.contains("[!"), "a guide without an alert grew one");
 }
 
@@ -152,23 +152,22 @@ fn topics_are_unique_and_served_without_front_matter() {
     for path in guides() {
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         assert!(stems.insert(stem.clone()), "two guides share `{stem}`");
-        let body = e::core::resources::docs::body(&stem)
-            .unwrap_or_else(|| panic!("e docs does not serve `{stem}`"));
+        let body = ulo::core::resources::docs::body(&stem)
+            .unwrap_or_else(|| panic!("ulo docs does not serve `{stem}`"));
         assert!(
             !body.starts_with("---") && !body.is_empty(),
             "`{stem}` reaches the terminal with front matter or empty"
         );
     }
     // The folder's own guide is for the repository, not a topic.
-    assert!(e::core::resources::docs::body("README").is_none());
-    assert!(e::core::resources::docs::body("readme").is_none());
+    assert!(ulo::core::resources::docs::body("README").is_none());
+    assert!(ulo::core::resources::docs::body("readme").is_none());
 }
 
 #[test]
 fn every_relative_link_resolves() {
     let manifest = repo();
     let mut files = walk(&docs());
-    files.extend(walk(&manifest.join("contributing")));
     // A reader starts at the repository root, so its guides are checked too.
     for name in [
         "docs/README.md",

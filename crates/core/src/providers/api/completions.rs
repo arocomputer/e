@@ -118,7 +118,7 @@ fn body(request: &Request) -> Value {
     // model declares a knob, so gateways that never heard of it never see
     // it. `off` has no wire encoding here — absence is the closest thing.
     // Skipped for a model already known to reject it (see `reasoning_rejected`).
-    if let Some(effort) = request.effort.as_deref().filter(|e| *e != "off") {
+    if let Some(effort) = request.effort.as_deref().filter(|ulo| *ulo != "off") {
         if !reasoning_is_rejected(&request.model, effort) {
             body["reasoning_effort"] = json!(effort);
         }

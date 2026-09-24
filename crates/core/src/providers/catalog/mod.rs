@@ -2,8 +2,8 @@
 //! pick to a Model. Built-ins come from the provider registry (data), the
 //! models.dev facts (`modelsdev.rs`) bring their windows, effort levels,
 //! and pricing up to date, live remote sync (`remote.rs`) adds the ids each
-//! provider actually serves, and explicit `~/.e/models.json` values win over
-//! all of it. The active model comes from `~/.e/settings.json`
+//! provider actually serves, and explicit `~/.ulo/models.json` values win over
+//! all of it. The active model comes from `~/.ulo/settings.json`
 //! `{"model": "provider/id"}` or a `/model` switch at runtime.
 
 use serde::Deserialize;
@@ -85,7 +85,7 @@ impl Thinking {
 
 /// Optional USD rates per million tokens. Pricing changes independently of
 /// protocol support, so built-ins may omit it; users and gateways can declare
-/// authoritative rates in models.json without waiting for an e release.
+/// authoritative rates in models.json without waiting for an ulo release.
 #[derive(Clone, Debug, Deserialize, serde::Serialize, PartialEq)]
 pub struct Pricing {
     pub input_per_million: f64,
@@ -311,7 +311,7 @@ pub fn config_warnings() -> Vec<String> {
     warnings
 }
 
-/// Built-ins plus `~/.e/models.json` — and the file wins on a name clash,
+/// Built-ins plus `~/.ulo/models.json` — and the file wins on a name clash,
 /// the same rule as themes: never override what the user declared.
 pub fn catalog() -> Vec<Model> {
     let mut models = builtin_catalog();
@@ -336,7 +336,7 @@ pub fn catalog() -> Vec<Model> {
     models
 }
 
-/// `~/.e/models.json`, when it exists and parses; `config_warnings` reports
+/// `~/.ulo/models.json`, when it exists and parses; `config_warnings` reports
 /// why it doesn't.
 fn models_file() -> Option<ModelsFile> {
     let json = std::fs::read_to_string(home::home().join("models.json")).ok()?;
@@ -547,7 +547,7 @@ fn apply_provider_defaults(model: &mut Model, entry: &ProviderEntry) {
     if let Some(max_output) = entry.max_output {
         model.max_output = Some(max_output);
     }
-    if let Some(effort) = entry.effort.as_ref().filter(|e| !e.is_empty()) {
+    if let Some(effort) = entry.effort.as_ref().filter(|ulo| !ulo.is_empty()) {
         model.effort = effort.clone();
     }
     if let Some(thinking) = entry.thinking.as_deref().and_then(Thinking::parse) {
@@ -574,7 +574,7 @@ fn declared_model(
     } else {
         match &entry.effort {
             // …then the per-provider default from the file…
-            Some(e) if !e.is_empty() => e.clone(),
+            Some(ulo) if !ulo.is_empty() => ulo.clone(),
             // …then the model's own effort.
             _ => existing.effort,
         }
@@ -628,7 +628,7 @@ struct Settings {
 
 pub const DEFAULT_MODEL: &str = "opencode-go/deepseek-v4-flash";
 
-/// The catalog cut to providers with credentials — the models e can
+/// The catalog cut to providers with credentials — the models ulo can
 /// actually serve. Everything user-facing (the picker, resolution, the
 /// default) works on this set; the full catalog is data, not a menu.
 pub fn available() -> Vec<Model> {

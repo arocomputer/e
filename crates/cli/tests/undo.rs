@@ -4,7 +4,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use e::core::tools::{ToolOutcome, ToolRuntime};
+use ulo::core::tools::{ToolOutcome, ToolRuntime};
 
 fn run(runtime: &ToolRuntime, cwd: &std::path::Path, name: &str, args: &str) -> ToolOutcome {
     let cancel = AtomicBool::new(false);
@@ -15,7 +15,7 @@ fn run(runtime: &ToolRuntime, cwd: &std::path::Path, name: &str, args: &str) -> 
 
 #[test]
 fn undo_walks_back_through_writes_and_edits() {
-    let ws = std::env::temp_dir().join(format!("e-undo-{}", std::process::id()));
+    let ws = std::env::temp_dir().join(format!("ulo-undo-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&ws);
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("a.txt"), "one\ntwo\n").unwrap();
@@ -71,7 +71,7 @@ fn undo_walks_back_through_writes_and_edits() {
 #[test]
 fn a_failed_write_leaves_nothing_to_undo() {
     use std::os::unix::fs::PermissionsExt;
-    let ws = std::env::temp_dir().join(format!("e-undo-fail-{}", std::process::id()));
+    let ws = std::env::temp_dir().join(format!("ulo-undo-fail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&ws);
     std::fs::create_dir_all(ws.join("locked")).unwrap();
     std::fs::set_permissions(ws.join("locked"), std::fs::Permissions::from_mode(0o500)).unwrap();

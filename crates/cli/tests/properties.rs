@@ -1,11 +1,11 @@
 //! Cross-cutting properties for parsers and render sanitizers. Fixed examples
 //! live with their subsystem tests; these vary boundaries and arbitrary text.
 
-use e::core::extensions::{parse_incoming, Incoming};
-use e::core::providers::SseSplitter;
-use e::core::tools::sanitize_display;
-use e::tui::markdown::{visible_width, wrap_styled};
 use proptest::prelude::*;
+use ulo::core::extensions::{parse_incoming, Incoming};
+use ulo::core::providers::SseSplitter;
+use ulo::core::tools::sanitize_display;
+use ulo::tui::markdown::{visible_width, wrap_styled};
 
 proptest! {
     #[test]

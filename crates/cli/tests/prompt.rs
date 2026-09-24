@@ -1,9 +1,9 @@
 //! The system prompt: the reference's structure, the settings override,
 //! layered context.
 
-use e::core::agent::context::{no_tools_notice, system_prompt, tool_allowlist_notice};
 use std::path::Path;
 use std::sync::Mutex;
+use ulo::core::agent::context::{no_tools_notice, system_prompt, tool_allowlist_notice};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -23,11 +23,11 @@ fn regex_lite_date(s: &str) -> bool {
 }
 
 fn with_home<F: FnOnce()>(name: &str, f: F) {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = std::env::temp_dir().join(format!("e-prompt-{name}-{}", std::process::id()));
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|ulo| ulo.into_inner());
+    let home = std::env::temp_dir().join(format!("ulo-prompt-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("E_HOME", &home);
+    std::env::set_var("ULO_HOME", &home);
     f();
     let _ = std::fs::remove_dir_all(&home);
 }
@@ -37,15 +37,15 @@ fn default_prompt_has_required_sections() {
     with_home("default", || {
         let prompt = system_prompt(Path::new("/tmp/proj"));
         assert!(prompt.starts_with(
-            "You are an expert coding assistant operating inside e, a coding agent harness."
+            "You are an expert coding assistant operating inside ulo, a coding agent harness."
         ));
         assert!(prompt.contains("Available tools:"));
         assert!(prompt.contains("- read:") && prompt.contains("- bash:"));
         assert!(prompt.contains("Guidelines:"));
         assert!(prompt.contains("- Be concise in your responses"));
-        // The self-docs section: the agent learns e's own formats via `e docs`.
-        assert!(prompt.contains("e documentation (read only when the user asks about e itself"));
-        assert!(prompt.contains("`e docs <topic>`"));
+        // The self-docs section: the agent learns ulo's own formats via `ulo docs`.
+        assert!(prompt.contains("ulo documentation (read only when the user asks about ulo itself"));
+        assert!(prompt.contains("`ulo docs <topic>`"));
         // The environment tail: cwd, then facts the model would otherwise
         // guess (platform, today's date).
         assert!(prompt.contains("Current working directory: /tmp/proj"));
@@ -66,7 +66,7 @@ fn default_prompt_has_required_sections() {
 #[test]
 fn settings_prompt_replaces_the_base() {
     with_home("override", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         std::fs::write(
             format!("{home}/settings.json"),
             r#"{"system_prompt":"You are Custom. Do custom things."}"#,
@@ -95,7 +95,7 @@ fn tool_mode_notices_default_to_the_built_in_wording() {
 #[test]
 fn tool_mode_notices_are_file_backed_overrides() {
     with_home("mode-notices-override", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         std::fs::write(
             format!("{home}/settings.json"),
             r#"{"no_tools_notice":"Custom no-tools wording.","tool_allowlist_notice":"Only {tools}, please."}"#,
@@ -112,7 +112,7 @@ fn tool_mode_notices_are_file_backed_overrides() {
 #[test]
 fn agents_md_layers_as_project_instructions() {
     with_home("agents", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         std::fs::write(format!("{home}/AGENTS.md"), "Never touch the database.").unwrap();
         let prompt = system_prompt(Path::new("/tmp/proj"));
         assert!(prompt.contains("<project_context>"));
@@ -124,10 +124,10 @@ fn agents_md_layers_as_project_instructions() {
 #[test]
 fn trusting_an_ancestor_covers_its_children_but_declining_does_not() {
     with_home("trust-ancestor", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         let root = std::path::PathBuf::from(&home).join("code");
-        let child = root.join("clones").join("e-1");
-        let sibling = root.join("clones").join("e-2");
+        let child = root.join("clones").join("ulo-1");
+        let sibling = root.join("clones").join("ulo-2");
         std::fs::create_dir_all(&child).unwrap();
         std::fs::create_dir_all(&sibling).unwrap();
         let root = root.canonicalize().unwrap();
@@ -135,37 +135,37 @@ fn trusting_an_ancestor_covers_its_children_but_declining_does_not() {
 
         // Trusting the top ancestor extends to everything inside it; the
         // child needs no first-visit question of its own.
-        e::core::config::trust::set(&root, true).unwrap();
-        assert_eq!(e::core::config::trust::status(&child), Some(true));
+        ulo::core::config::trust::set(&root, true).unwrap();
+        assert_eq!(ulo::core::config::trust::status(&child), Some(true));
 
         // The child's own explicit answer wins over the ancestor's.
-        e::core::config::trust::set(&child, false).unwrap();
-        assert_eq!(e::core::config::trust::status(&child), Some(false));
+        ulo::core::config::trust::set(&child, false).unwrap();
+        assert_eq!(ulo::core::config::trust::status(&child), Some(false));
 
         // A *declined* ancestor answers only for itself: its other
         // children still get their own question.
-        e::core::config::trust::set(&root, false).unwrap();
-        assert_eq!(e::core::config::trust::status(&sibling), None);
+        ulo::core::config::trust::set(&root, false).unwrap();
+        assert_eq!(ulo::core::config::trust::status(&sibling), None);
     });
 }
 
 #[test]
 fn trust_gates_project_instructions() {
     with_home("trust", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         let ws = std::path::PathBuf::from(&home).join("ws");
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(ws.join("AGENTS.md"), "SECRET-PROJECT-RULE").unwrap();
         let ws = ws.canonicalize().unwrap();
 
-        assert_eq!(e::core::config::trust::status(&ws), None);
+        assert_eq!(ulo::core::config::trust::status(&ws), None);
         assert!(!system_prompt(&ws).contains("SECRET-PROJECT-RULE"));
 
-        e::core::config::trust::set(&ws, false).unwrap();
-        assert_eq!(e::core::config::trust::status(&ws), Some(false));
+        ulo::core::config::trust::set(&ws, false).unwrap();
+        assert_eq!(ulo::core::config::trust::status(&ws), Some(false));
         assert!(!system_prompt(&ws).contains("SECRET-PROJECT-RULE"));
 
-        e::core::config::trust::set(&ws, true).unwrap();
+        ulo::core::config::trust::set(&ws, true).unwrap();
         assert!(system_prompt(&ws).contains("SECRET-PROJECT-RULE"));
     });
 }
@@ -176,7 +176,7 @@ fn trust_keys_distinguish_non_utf8_paths_with_the_same_lossy_form() {
     use std::os::unix::ffi::OsStringExt;
 
     with_home("trust-bytes", || {
-        let home = std::path::PathBuf::from(std::env::var("E_HOME").unwrap());
+        let home = std::path::PathBuf::from(std::env::var("ULO_HOME").unwrap());
         let parent = home.join("workspaces");
         std::fs::create_dir_all(&parent).unwrap();
 
@@ -186,10 +186,10 @@ fn trust_keys_distinguish_non_utf8_paths_with_the_same_lossy_form() {
         std::fs::create_dir(&second).unwrap();
         assert_eq!(first.to_string_lossy(), second.to_string_lossy());
 
-        e::core::config::trust::set(&first, true).unwrap();
-        assert_eq!(e::core::config::trust::status(&first), Some(true));
+        ulo::core::config::trust::set(&first, true).unwrap();
+        assert_eq!(ulo::core::config::trust::status(&first), Some(true));
         assert_eq!(
-            e::core::config::trust::status(&second),
+            ulo::core::config::trust::status(&second),
             None,
             "a distinct raw path must receive its own trust decision"
         );
@@ -199,7 +199,7 @@ fn trust_keys_distinguish_non_utf8_paths_with_the_same_lossy_form() {
 #[test]
 fn legacy_utf8_trust_keys_remain_readable() {
     with_home("trust-legacy", || {
-        let home = std::path::PathBuf::from(std::env::var("E_HOME").unwrap());
+        let home = std::path::PathBuf::from(std::env::var("ULO_HOME").unwrap());
         let workspace = home.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let workspace = workspace.canonicalize().unwrap();
@@ -214,7 +214,7 @@ fn legacy_utf8_trust_keys_remain_readable() {
         )
         .unwrap();
         assert_eq!(
-            e::core::config::trust::status(&workspace),
+            ulo::core::config::trust::status(&workspace),
             Some(true),
             "valid UTF-8 trust decisions migrate read-only"
         );
@@ -233,16 +233,16 @@ fn working_directory_metadata_cannot_add_prompt_lines() {
 
 #[test]
 fn every_docs_topic_has_a_body() {
-    for (name, _) in e::core::resources::docs::topics() {
-        let body = e::core::resources::docs::body(name).unwrap();
+    for (name, _) in ulo::core::resources::docs::topics() {
+        let body = ulo::core::resources::docs::body(name).unwrap();
         assert!(!body.trim().is_empty(), "empty doc: {name}");
         assert!(
             !body.starts_with("---"),
             "front matter reaches the terminal: {name}"
         );
     }
-    assert!(e::core::resources::docs::body("extensions")
+    assert!(ulo::core::resources::docs::body("extensions")
         .unwrap()
         .contains("initialize"));
-    assert!(e::core::resources::docs::body("nope").is_none());
+    assert!(ulo::core::resources::docs::body("nope").is_none());
 }

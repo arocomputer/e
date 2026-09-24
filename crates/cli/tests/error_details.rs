@@ -2,8 +2,8 @@
 mod common;
 
 use common::{env_lock, serve_raw, test_model, Home};
-use e::core::agent::{failure::RetryDecision, Agent, AgentOptions, SessionEvent};
-use e::core::providers::{catalog::Api, FailureStage};
+use ulo::core::agent::{failure::RetryDecision, Agent, AgentOptions, SessionEvent};
+use ulo::core::providers::{catalog::Api, FailureStage};
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
@@ -53,7 +53,7 @@ async fn interrupted_body_records_context_and_retains_partial_work() {
         .unwrap();
     assert!(error["parent"].is_string());
     assert_eq!(error["details"]["response"]["request_id"], "diagnostic-123");
-    let restored = e::core::session::SessionLog::load(&path).unwrap();
+    let restored = ulo::core::session::SessionLog::load(&path).unwrap();
     assert!(restored
         .iter()
         .any(|message| message.content == "partial reply"));
@@ -102,7 +102,7 @@ async fn no_save_failures_still_emit_redacted_backend_details() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn shared_stream_error_classifier_keeps_diagnostics_in_both_dialects() {
-    use e::core::providers::{self, ChatMessage, Event, FailureCause, Request};
+    use ulo::core::providers::{self, ChatMessage, Event, FailureCause, Request};
     let _lock = env_lock();
     let home = Home::new("shared-error-diagnostics");
     home.auth(r#"{"mock":{"key":"synthetic-key"}}"#);
@@ -173,7 +173,7 @@ async fn partial_tool_arguments_prevent_retry_and_record_that_decision() {
     assert_eq!(details.attempt, 1);
 }
 
-/// Blocking summary lookup retains the caller's scoped home rather than E_HOME.
+/// Blocking summary lookup retains the caller's scoped home rather than ULO_HOME.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn summary_override_loads_in_the_scoped_home() {
@@ -185,10 +185,10 @@ async fn summary_override_loads_in_the_scoped_home() {
         "scoped/settings.json",
         r#"{"error_stalled":"Custom interruption."}"#,
     );
-    e::core::config::home::scope(home.dir.join("scoped"), async {
-        let error = e::core::providers::ProviderError::stalled("test");
+    ulo::core::config::home::scope(home.dir.join("scoped"), async {
+        let error = ulo::core::providers::ProviderError::stalled("test");
         assert_eq!(
-            e::core::agent::failure::ErrorDetails::summary(&error).await,
+            ulo::core::agent::failure::ErrorDetails::summary(&error).await,
             "Custom interruption."
         );
     })

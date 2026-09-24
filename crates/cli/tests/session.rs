@@ -3,10 +3,10 @@
 mod common;
 use common::{env_lock, Home};
 
-use e::core::agent::Agent;
-use e::core::providers::catalog::{Api, Model};
-use e::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
-use e::core::session::{self, SessionLog};
+use ulo::core::agent::Agent;
+use ulo::core::providers::catalog::{Api, Model};
+use ulo::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
+use ulo::core::session::{self, SessionLog};
 
 #[test]
 fn released_session_fixtures_remain_readable() {
@@ -29,7 +29,7 @@ fn released_session_fixtures_remain_readable() {
 #[test]
 fn future_session_format_fails_with_an_actionable_error() {
     let path = std::env::temp_dir().join(format!(
-        "e-future-session-{}-{}.jsonl",
+        "ulo-future-session-{}-{}.jsonl",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
@@ -41,7 +41,7 @@ fn future_session_format_fails_with_an_actionable_error() {
     )
     .unwrap();
     let error = SessionLog::load(&path).expect_err("future format must fail");
-    assert!(error.to_string().contains("newer than this e supports"));
+    assert!(error.to_string().contains("newer than this ulo supports"));
     let _ = std::fs::remove_file(path);
 }
 
@@ -50,7 +50,7 @@ fn session_round_trips_and_lists() {
     let _lock = env_lock();
     let _home = Home::new("session");
 
-    let cwd = std::env::temp_dir().join("e-proj");
+    let cwd = std::env::temp_dir().join("ulo-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "opencode-go/deepseek-v4-flash").unwrap();
@@ -61,7 +61,7 @@ fn session_round_trips_and_lists() {
     s.append(&ChatMessage::tool_result_with_meta(
         "call-1",
         "line one\nline two",
-        e::core::tools::ToolOutcome::Failed,
+        ulo::core::tools::ToolOutcome::Failed,
         "exit 7",
     ))
     .unwrap();
@@ -73,7 +73,7 @@ fn session_round_trips_and_lists() {
     assert_eq!(loaded[0].role(), "user");
     assert_eq!(loaded[1].content, "There are three.");
     let meta = loaded[2].tool_meta().expect("tool metadata persisted");
-    assert_eq!(meta.outcome, e::core::tools::ToolOutcome::Failed);
+    assert_eq!(meta.outcome, ulo::core::tools::ToolOutcome::Failed);
     assert_eq!(meta.summary, "exit 7");
 
     let listed = session::list(&cwd);
@@ -85,7 +85,7 @@ fn session_round_trips_and_lists() {
     assert_eq!(session::most_recent(&cwd), Some(path));
 }
 
-// The stable conversation id e sends as the OpenCode session header: a real
+// The stable conversation id ulo sends as the OpenCode session header: a real
 // UUID carried in the filename, unchanged when the log is reopened for resume.
 #[test]
 fn response_provenance_is_outside_model_history_and_survives_copying() {
@@ -139,7 +139,7 @@ fn response_provenance_is_outside_model_history_and_survives_copying() {
 fn session_id_is_stable_across_reopen() {
     let _lock = env_lock();
     let _home = Home::new("session");
-    let cwd = std::env::temp_dir().join("e-id-proj");
+    let cwd = std::env::temp_dir().join("ulo-id-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "test/model").unwrap();
@@ -174,12 +174,12 @@ fn session_name_sets_reads_and_clears() {
         id: "model".into(),
         base_url: "http://127.0.0.1:1".into(),
         api: Api::Completions,
-        catalog: e::core::providers::registry::CatalogStrategy::Openai,
-        responses_mount: e::core::providers::registry::ResponsesMount::Platform,
+        catalog: ulo::core::providers::registry::CatalogStrategy::Openai,
+        responses_mount: ulo::core::providers::registry::ResponsesMount::Platform,
         provider_supports_tools: true,
         provider_image_input: false,
         effort: Vec::new(),
-        thinking: e::core::providers::catalog::Thinking::Manual,
+        thinking: ulo::core::providers::catalog::Thinking::Manual,
         context_window: 1_000,
         max_output: None,
         supports_tools: true,
@@ -206,12 +206,12 @@ fn opening_e_does_not_count_as_a_session() {
         id: "model".into(),
         base_url: "http://127.0.0.1:1".into(),
         api: Api::Completions,
-        catalog: e::core::providers::registry::CatalogStrategy::Openai,
-        responses_mount: e::core::providers::registry::ResponsesMount::Platform,
+        catalog: ulo::core::providers::registry::CatalogStrategy::Openai,
+        responses_mount: ulo::core::providers::registry::ResponsesMount::Platform,
         provider_supports_tools: true,
         provider_image_input: false,
         effort: Vec::new(),
-        thinking: e::core::providers::catalog::Thinking::Manual,
+        thinking: ulo::core::providers::catalog::Thinking::Manual,
         context_window: 1_000,
         max_output: None,
         supports_tools: true,
@@ -417,9 +417,9 @@ fn lock_contents_cannot_override_a_live_owner() {
 #[test]
 fn simultaneous_resumes_have_exactly_one_owner() {
     let _lock = env_lock();
-    let home = std::env::temp_dir().join(format!("e-lock-race-{}", uuid::Uuid::new_v4()));
+    let home = std::env::temp_dir().join(format!("ulo-lock-race-{}", uuid::Uuid::new_v4()));
     let saved =
-        e::core::config::home::with_home(home.clone(), || SessionLog::create(&home, "mock/test"))
+        ulo::core::config::home::with_home(home.clone(), || SessionLog::create(&home, "mock/test"))
             .unwrap();
     let path = saved.path().to_path_buf();
     drop(saved);
@@ -569,7 +569,7 @@ fn a_dangling_tool_call_is_repaired_on_load() {
     s.append(&ChatMessage::user("task")).unwrap();
     s.append(&ChatMessage::assistant(
         "working",
-        vec![e::core::providers::ToolCall {
+        vec![ulo::core::providers::ToolCall {
             id: "call-1".into(),
             name: "bash".into(),
             arguments: "{}".into(),
@@ -605,7 +605,7 @@ fn a_dangling_tool_call_is_still_answered_on_the_second_resume() {
     s.append(&ChatMessage::user("task")).unwrap();
     s.append(&ChatMessage::assistant(
         "working",
-        vec![e::core::providers::ToolCall {
+        vec![ulo::core::providers::ToolCall {
             id: "call-1".into(),
             name: "bash".into(),
             arguments: "{}".into(),
@@ -675,24 +675,24 @@ fn an_orphaned_reasoning_block_is_dropped_wherever_it_sits() {
 async fn persistence_failure_warns_once_not_silently() {
     let _lock = env_lock();
     let _home = Home::new("session-blocked");
-    // E_HOME pointing at a regular file makes every session create fail.
-    let blocked = std::env::temp_dir().join(format!("e-blocked-{}", std::process::id()));
+    // ULO_HOME pointing at a regular file makes every session create fail.
+    let blocked = std::env::temp_dir().join(format!("ulo-blocked-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&blocked);
     let _ = std::fs::remove_file(&blocked);
     std::fs::write(&blocked, "not a directory").unwrap();
-    std::env::set_var("E_HOME", &blocked);
+    std::env::set_var("ULO_HOME", &blocked);
 
     let model = Model {
         provider: "mock".into(),
         id: "m".into(),
         base_url: "http://127.0.0.1:1".into(),
         api: Api::Completions,
-        catalog: e::core::providers::registry::CatalogStrategy::Openai,
-        responses_mount: e::core::providers::registry::ResponsesMount::Platform,
+        catalog: ulo::core::providers::registry::CatalogStrategy::Openai,
+        responses_mount: ulo::core::providers::registry::ResponsesMount::Platform,
         provider_supports_tools: true,
         provider_image_input: false,
         effort: Vec::new(),
-        thinking: e::core::providers::catalog::Thinking::Manual,
+        thinking: ulo::core::providers::catalog::Thinking::Manual,
         context_window: 200_000,
         max_output: None,
         supports_tools: true,
@@ -705,7 +705,7 @@ async fn persistence_failure_warns_once_not_silently() {
 
     let mut warnings = 0;
     while let Ok(event) = rx.try_recv() {
-        if matches!(event, e::core::agent::SessionEvent::Warning(_)) {
+        if matches!(event, ulo::core::agent::SessionEvent::Warning(_)) {
             warnings += 1;
         }
     }
@@ -723,7 +723,7 @@ fn nodes_chain_linearly_when_nothing_rewound() {
     let _lock = env_lock();
     let fixture = Home::new("session");
     let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-tree-linear-proj");
+    let cwd = std::env::temp_dir().join("ulo-tree-linear-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "test/model").unwrap();
@@ -753,7 +753,7 @@ fn set_head_grows_a_branch_without_touching_the_old_tail() {
     let _lock = env_lock();
     let fixture = Home::new("session");
     let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-tree-branch-proj");
+    let cwd = std::env::temp_dir().join("ulo-tree-branch-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "test/model").unwrap();
@@ -801,7 +801,7 @@ fn reopen_continues_the_branch_that_was_active() {
     let _lock = env_lock();
     let fixture = Home::new("session");
     let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-tree-reopen-proj");
+    let cwd = std::env::temp_dir().join("ulo-tree-reopen-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "test/model").unwrap();
@@ -842,7 +842,7 @@ fn legacy_records_synthesize_a_linear_chain() {
     let _lock = env_lock();
     let fixture = Home::new("session");
     let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-tree-legacy-proj");
+    let cwd = std::env::temp_dir().join("ulo-tree-legacy-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     // Hand-write a pre-branching-format log: no id/parent on the records.
@@ -853,7 +853,7 @@ fn legacy_records_synthesize_a_linear_chain() {
         "{}\n{}\n{}\n",
         serde_json::json!({"type":"session","id":"x","cwd":cwd.to_string_lossy(),"created":1,"model":"test/model"}),
         serde_json::json!({"type":"message","message":ChatMessage::user("legacy first")}),
-        serde_json::json!({"type":"message","message":ChatMessage::assistant("legacy reply", Vec::<e::core::providers::ToolCall>::new())}),
+        serde_json::json!({"type":"message","message":ChatMessage::assistant("legacy reply", Vec::<ulo::core::providers::ToolCall>::new())}),
     );
     std::fs::write(&path, legacy).unwrap();
 
@@ -882,7 +882,7 @@ fn the_latest_persisted_name_is_readable_for_resume() {
     let _lock = env_lock();
     let fixture = Home::new("session");
     let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-name-proj");
+    let cwd = std::env::temp_dir().join("ulo-name-proj");
     std::fs::create_dir_all(&cwd).unwrap();
 
     let mut s = SessionLog::create(&cwd, "mock/m").unwrap();
@@ -905,10 +905,10 @@ fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
     std::fs::create_dir_all(&cwd).unwrap();
     let mut original = SessionLog::create(&cwd, "test/model").unwrap();
     original
-        .append(&e::core::providers::ChatMessage::user("one"))
+        .append(&ulo::core::providers::ChatMessage::user("one"))
         .unwrap();
     original
-        .append(&e::core::providers::ChatMessage::assistant(
+        .append(&ulo::core::providers::ChatMessage::assistant(
             "two",
             Vec::new(),
         ))
@@ -919,7 +919,7 @@ fn a_fork_seeds_a_new_file_and_leaves_the_original_alone() {
     let mut fork = SessionLog::create_with(&cwd, "test/model", &branch).unwrap();
     assert_ne!(fork.path(), original.path());
     assert_ne!(fork.id(), original.id());
-    fork.append(&e::core::providers::ChatMessage::user("three"))
+    fork.append(&ulo::core::providers::ChatMessage::user("three"))
         .unwrap();
 
     let forked = SessionLog::load(fork.path()).unwrap();

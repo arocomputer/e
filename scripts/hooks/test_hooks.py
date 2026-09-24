@@ -70,7 +70,7 @@ class HookTests(unittest.TestCase):
         self.run_command('git', 'config', 'core.hooksPath', str(previous.parent))
         self.run_command('python3', str(INSTALL))
         self.run_command('python3', str(INSTALL))
-        self.assertEqual(self.run_command('git', 'config', '--worktree', '--get', 'e.previousPreCommit').stdout.strip(), str(previous))
+        self.assertEqual(self.run_command('git', 'config', '--worktree', '--get', 'ulo.previousPreCommit').stdout.strip(), str(previous))
         result = subprocess.run(['sh', str(HOOK)], cwd=self.root, env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 23)
 

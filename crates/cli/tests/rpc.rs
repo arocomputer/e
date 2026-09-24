@@ -1,4 +1,4 @@
-//! `e rpc` as a session server: `hello` names the protocol, a session keeps
+//! `ulo rpc` as a session server: `hello` names the protocol, a session keeps
 //! its history across prompts, events stream tagged with their session and
 //! request, sessions interleave, saved sessions list and resume, extension
 //! questions reach a client that answers them, and a version-1 line still
@@ -34,7 +34,7 @@ fn mock_home(label: &str, port: u16) -> Home {
     home
 }
 
-/// A running `e rpc` with a line reader on its stdout.
+/// A running `ulo rpc` with a line reader on its stdout.
 struct Rpc {
     child: Child,
     stdin: ChildStdin,
@@ -46,13 +46,13 @@ impl Rpc {
         // The process cwd is the workspace a version-1 one-shot runs in, so it
         // has to be trusted; keep it out of the temp root, whose other
         // children are workspaces tests refuse.
-        let cwd = std::env::temp_dir().join(format!("e-rpc-cwd-{}", std::process::id()));
+        let cwd = std::env::temp_dir().join(format!("ulo-rpc-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&cwd).unwrap();
-        e::core::config::trust::set(&cwd, true).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+        ulo::core::config::trust::set(&cwd, true).unwrap();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
             .args(extra)
             .arg("rpc")
-            .env("E_HOME", &home.dir)
+            .env("ULO_HOME", &home.dir)
             .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -133,13 +133,13 @@ impl Rpc {
 }
 
 fn workspace(label: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("e-rpc-{label}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ulo-rpc-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     // A session refuses a workspace nobody has trusted; these tests are about
     // what a session does once it is open, and the refusal has its own test
     // below.
-    e::core::config::trust::set(&dir, true).unwrap();
+    ulo::core::config::trust::set(&dir, true).unwrap();
     dir
 }
 
@@ -149,7 +149,7 @@ fn a_session_cannot_open_an_untrusted_workspace() {
     let _lock = env_lock();
     let home = mock_home("rpc-untrusted", 1);
     let mut rpc = Rpc::spawn(&home, &["--no-extensions"]);
-    let dir = std::env::temp_dir().join(format!("e-rpc-refused-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ulo-rpc-refused-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -159,8 +159,8 @@ fn a_session_cannot_open_an_untrusted_workspace() {
         json!({"cwd": dir, "model": "mock/test"}),
     );
     let error = created["error"].as_str().expect("refused");
-    assert!(error.contains("must be trusted to run e"), "{error}");
-    assert!(error.contains("e trust"), "{error}");
+    assert!(error.contains("must be trusted to run ulo"), "{error}");
+    assert!(error.contains("ulo trust"), "{error}");
     assert!(rpc.finish().success());
 }
 
@@ -213,7 +213,7 @@ fn a_prompt_streams_tagged_events_then_answers_with_the_result() {
     assert!(
         events
             .iter()
-            .any(|e| e["type"] == "text" && e["delta"] == "ok"),
+            .any(|ulo| ulo["type"] == "text" && ulo["delta"] == "ok"),
         "{events:?}"
     );
     for event in &events {
@@ -238,9 +238,9 @@ fn a_prompt_streams_tagged_events_then_answers_with_the_result() {
 
 #[test]
 fn cancelled_unstarted_tools_count_as_failures_in_headless_results() {
-    use e::core::agent::{SessionEvent, ToolCallPresentation};
-    use e::core::tools::ToolOutcome;
-    use e::rpc::result::TurnAccumulator;
+    use ulo::core::agent::{SessionEvent, ToolCallPresentation};
+    use ulo::core::tools::ToolOutcome;
+    use ulo::rpc::result::TurnAccumulator;
 
     let mut result = TurnAccumulator::default();
     result.observe(&SessionEvent::ToolBatchStart {
@@ -523,9 +523,9 @@ fn shutdown_answers_then_exits_zero() {
 }
 
 /// An extension whose `before_turn` hook asks the person a yes/no question
-/// and logs the answer. Over `e rpc` that question must reach the client.
+/// and logs the answer. Over `ulo rpc` that question must reach the client.
 const ASKER: &str = r#"#!/bin/sh
-log="$E_HOME/ext.log"
+log="$ULO_HOME/ext.log"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\),"method".*/\1/p')
   case "$line" in

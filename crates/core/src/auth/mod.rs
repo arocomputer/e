@@ -1,4 +1,4 @@
-//! Credentials stored in e's own `~/.e/auth.json`.
+//! Credentials stored in ulo's own `~/.ulo/auth.json`.
 //!
 //! Two credential shapes: a static API key, and OAuth (access/refresh/expiry,
 //! plus the account id some backends demand in a header). The file is written
@@ -35,7 +35,7 @@ pub enum Credential {
 
 pub type AuthFile = BTreeMap<String, Credential>;
 
-/// Load the credentials e can interpret. Entries in a shape e doesn't
+/// Load the credentials ulo can interpret. Entries in a shape ulo doesn't
 /// understand are skipped here but left untouched on disk — never wiped.
 /// A provider with no stored credential falls back to its conventional
 /// environment variable (ANTHROPIC_API_KEY and friends, declared in the
@@ -74,7 +74,7 @@ pub fn load() -> AuthFile {
 /// Whether a provider counts as signed in: a stored or environment
 /// credential, or a keyless local backend (auth `none`), which needs none.
 /// Deliberately not a phantom `load()` entry — the credential file staying
-/// truthful keeps first-run onboarding ("nothing signed in") and `e auth`
+/// truthful keeps first-run onboarding ("nothing signed in") and `ulo auth`
 /// honest.
 pub fn signed_in(auth: &AuthFile, provider: &str) -> bool {
     auth.contains_key(provider)
@@ -82,7 +82,7 @@ pub fn signed_in(auth: &AuthFile, provider: &str) -> bool {
 }
 
 /// Store one provider's credential, merging into the file so every other
-/// provider — including any e couldn't parse — survives.
+/// provider — including any ulo couldn't parse — survives.
 pub fn set(provider: &str, credential: Credential) -> io::Result<()> {
     let value = serde_json::to_value(credential).unwrap_or(serde_json::Value::Null);
     crate::config::store::update_versioned(&home::auth_path(), 0o600, FORMAT_VERSION, |obj| {

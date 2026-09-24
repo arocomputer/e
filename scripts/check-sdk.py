@@ -41,22 +41,22 @@ def main():
     manifest = tomllib.loads((ROOT / 'Cargo.toml').read_text())
     app = manifest['workspace']['package']['version']
     sdk = tomllib.loads((ROOT / 'crates/sdk/Cargo.toml').read_text())
-    assert sdk['dependencies']['e-core']['version'] == f'={app}', 'SDK must pin the current core version'
-    with tempfile.TemporaryDirectory(prefix='e-sdk-consumer-') as tmp:
+    assert sdk['dependencies']['ulo-core']['version'] == f'={app}', 'SDK must pin the current core version'
+    with tempfile.TemporaryDirectory(prefix='ulo-sdk-consumer-') as tmp:
         root = Path(tmp)
-        stage(['aro-e-core', 'aro-e-sdk'], root)
+        stage(['ulo-core', 'ulo-sdk'], root)
         consumer = root / 'consumer'
         (consumer / 'src').mkdir(parents=True)
-        shutil.copyfile(root / 'aro-e-sdk/examples/ask.rs', consumer / 'src/main.rs')
+        shutil.copyfile(root / 'ulo-sdk/examples/ask.rs', consumer / 'src/main.rs')
         (consumer / 'Cargo.toml').write_text('''[package]
-name = "e-sdk-consumer"
+name = "ulo-sdk-consumer"
 version = "0.0.0"
 edition = "2021"
 [dependencies]
-e_sdk = { package = "aro-e-sdk", path = "../aro-e-sdk" }
+ulo_sdk = { package = "ulo-sdk", path = "../ulo-sdk" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [patch.crates-io]
-aro-e-core = { path = "../aro-e-core" }
+ulo-core = { path = "../ulo-core" }
 ''')
         metadata = json.loads(subprocess.check_output(
             ['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=ROOT, text=True))

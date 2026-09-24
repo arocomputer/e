@@ -12,12 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
-
-[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,36 +209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
-]
-
-[[package]]
-name = "e"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "crossterm",
- "futures",
- "libc",
- "pulldown-cmark",
- "rand",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "unicode-width",
- "uuid",
-]
-
-[[package]]
-name = "e-fuzz"
-version = "0.0.0"
-dependencies = [
- "e",
- "libfuzzer-sys",
 ]
 
 [[package]]
@@ -771,8 +735,15 @@ checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
 dependencies = [
  "bitflags",
  "memchr",
+ "pulldown-cmark-escape",
  "unicase",
 ]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "quinn"
@@ -1400,6 +1371,49 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "ulo-core"
+version = "0.0.2"
+dependencies = [
+ "base64 0.23.1",
+ "futures",
+ "libc",
+ "pulldown-cmark",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ulo-fuzz"
+version = "0.0.0"
+dependencies = [
+ "libfuzzer-sys",
+ "ulo-core",
+ "ulo-tui",
+]
+
+[[package]]
+name = "ulo-tui"
+version = "0.0.2"
+dependencies = [
+ "base64 0.23.1",
+ "crossterm",
+ "libc",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "tokio",
+ "ulo-core",
+ "unicode-width",
+ "uuid",
+]
 
 [[package]]
 name = "unicase"

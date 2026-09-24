@@ -1,5 +1,11 @@
 version: 2
 updates:
+  - package-ecosystem: npm
+    labels: []
+    directory: /services/www
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
   - package-ecosystem: cargo
     labels: []
     directory: /

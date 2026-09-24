@@ -1,12 +1,12 @@
-//! `~/.e/keybindings.json`: overrides load, unrecognized entries fail open
+//! `~/.ulo/keybindings.json`: overrides load, unrecognized entries fail open
 //! rather than breaking the composer, and a missing/malformed file behaves
 //! exactly like an empty one.
 
 mod common;
 use common::{env_lock, Home};
 
-use e::tui::content::composer::Key;
-use e::tui::keybindings::{self, Keymap};
+use ulo::tui::content::composer::Key;
+use ulo::tui::keybindings::{self, Keymap};
 
 /// Run each keymap case with an isolated configuration home.
 fn with_home<F: FnOnce()>(name: &str, f: F) {
@@ -26,7 +26,7 @@ fn load_is_empty_with_no_file_on_disk() {
 #[test]
 fn load_fails_open_on_malformed_json() {
     with_home("malformed", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         std::fs::write(format!("{home}/keybindings.json"), "not json").unwrap();
         let map = keybindings::load();
         assert!(map.lookup("ctrl+w").is_none());
@@ -36,7 +36,7 @@ fn load_fails_open_on_malformed_json() {
 #[test]
 fn load_parses_overrides_none_and_skips_unknown_actions() {
     with_home("parse", || {
-        let home = std::env::var("E_HOME").unwrap();
+        let home = std::env::var("ULO_HOME").unwrap();
         std::fs::write(
             format!("{home}/keybindings.json"),
             r#"{

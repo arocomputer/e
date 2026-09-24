@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use futures::Stream;
 
-use e_core::agent::{SessionEvent, ToolCallPresentation};
-use e_core::providers::catalog::Pricing;
-use e_core::providers::{ChatMessage, Usage};
-use e_core::tools::{OutputStream, ToolOutcome};
+use ulo_core::agent::{SessionEvent, ToolCallPresentation};
+use ulo_core::providers::catalog::Pricing;
+use ulo_core::providers::{ChatMessage, Usage};
+use ulo_core::tools::{OutputStream, ToolOutcome};
 
 use crate::{Session, TurnError};
 

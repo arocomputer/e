@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""e's benchmark suite: the numbers e's identity depends on.
+"""ulo's benchmark suite: the numbers ulo's identity depends on.
 
 Measures the release binary — build it first (`cargo build --release`) or let
 this script do it. Normal runs write a timestamped report. `--check` applies
@@ -10,10 +10,10 @@ import argparse, datetime, hashlib, fcntl, json, os, platform, pty, re, select, 
 import statistics, struct, subprocess, sys, termios, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BINARY = os.path.join(ROOT, "target", "release", "e")
+BINARY = os.path.join(ROOT, "target", "release", "ulo")
 BUDGETS = os.path.join(ROOT, "benchmarks", "budgets.json")
 
-# A real extension: answers the initialize handshake, then idles until e
+# A real extension: answers the initialize handshake, then idles until ulo
 # closes stdin. No hooks declared, so hook.startup is never sent to it.
 EXTENSION_SH = r"""#!/bin/sh
 while IFS= read -r line; do
@@ -49,7 +49,7 @@ def long_session_frame():
 
 
 def cold_start_version(runs=20):
-    """Process spawn to exit for `e --version`: the floor of every launch."""
+    """Process spawn to exit for `ulo --version`: the floor of every launch."""
     samples = []
     for _ in range(runs):
         t0 = time.perf_counter()
@@ -63,7 +63,7 @@ def make_loaded_home():
     cold start touches: global and package skills, package prompts, two live
     extensions (one shipped in the package, one in the home), a full prompt
     history, and settings. Return the home's path."""
-    root = f"/tmp/e-bench-loaded-{os.getpid()}"
+    root = f"/tmp/ulo-bench-loaded-{os.getpid()}"
     shutil.rmtree(root, ignore_errors=True)
     os.makedirs(root)
     package = os.path.join(root, "packages", "bench-pkg")
@@ -117,17 +117,17 @@ def evict_binary():
         os.close(fd)
 
 
-def boot_sample(home, marker=b"Run /help", argv=("e",)):
+def boot_sample(home, marker=b"Run /help", argv=("ulo",)):
     """One pty spawn → marker on screen, measured in ms. The marker is the
     first thing that proves the wanted frame painted: the fresh-session
     banner by default, or a resumed session's tail. Answers the OSC 11
-    background query the way a real terminal does — otherwise e's 400 ms
+    background query the way a real terminal does — otherwise ulo's 400 ms
     detection timeout dominates the number. Reaps with WNOHANG: blocking
     waitpid on a SIGKILLed pty child can wedge on macOS."""
     t0 = time.perf_counter()
     pid, fd = pty.fork()
     if pid == 0:
-        os.execve(BINARY, list(argv), dict(os.environ, E_HOME=home, TERM="xterm-256color"))
+        os.execve(BINARY, list(argv), dict(os.environ, ULO_HOME=home, TERM="xterm-256color"))
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     buf = b""
     answered = False
@@ -160,7 +160,7 @@ def boot_to_first_frame(runs=5, home=None):
     samples = []
     for i in range(runs):
         fresh = home is None
-        path = home or f"/tmp/e-bench-home-{os.getpid()}-{i}"
+        path = home or f"/tmp/ulo-bench-home-{os.getpid()}-{i}"
         samples.append(boot_sample(path))
         if fresh:
             shutil.rmtree(path, ignore_errors=True)
@@ -170,7 +170,7 @@ def boot_to_first_frame(runs=5, home=None):
 def loaded_boot(runs=5):
     """Boot against the populated home: the true cold start, extensions and
     all. The fixture is built once and reused — the measurements are about
-    e's read set, not the fixture builder."""
+    ulo's read set, not the fixture builder."""
     home = make_loaded_home()
     try:
         return boot_to_first_frame(runs, home)
@@ -184,7 +184,7 @@ def cold_launch():
     binary must come off disk. A single sample — the floor, not a median."""
     subprocess.run([BINARY, "--version"], capture_output=True, check=True)
     evict_binary()
-    home = f"/tmp/e-bench-cold-{os.getpid()}"
+    home = f"/tmp/ulo-bench-cold-{os.getpid()}"
     try:
         return boot_sample(home)
     finally:
@@ -195,10 +195,10 @@ def make_session_home(i):
     """A home holding one heavy saved session for this workspace — 400 turns
     of prompt and markdown reply, the tail a unique marker — plus a fake
     provider sign-in so the boot goes straight to the restored transcript.
-    Sessions are keyed by the cwd's sha256 slug; the benchmark spawns e with
+    Sessions are keyed by the cwd's sha256 slug; the benchmark spawns ulo with
     cwd = ROOT."""
     slug = "sha256-" + hashlib.sha256(os.path.realpath(ROOT).encode()).hexdigest()
-    home = f"/tmp/e-bench-session-{os.getpid()}-{i}"
+    home = f"/tmp/ulo-bench-session-{os.getpid()}-{i}"
     sessions = os.path.join(home, "sessions", slug)
     os.makedirs(sessions)
     messages = [json.dumps({
@@ -230,14 +230,14 @@ def make_session_home(i):
 
 
 def session_resume(runs=5):
-    """`e -c` on the heavy session: spawn → the restored tail painted. The
+    """`ulo -c` on the heavy session: spawn → the restored tail painted. The
     cost of every 'continue where I left off', parse and rebuild included."""
     samples = []
     for i in range(runs):
         home = make_session_home(i)
         try:
             samples.append(boot_sample(home, marker=b"resume-benchmark-tail",
-                                       argv=("e", "-c")))
+                                       argv=("ulo", "-c")))
         finally:
             shutil.rmtree(home, ignore_errors=True)
     return statistics.median(samples)
@@ -270,7 +270,7 @@ def main():
         f"version:         {version} ({commit})",
         f"machine:         {platform.machine()} · {platform.system()} {platform.release()}",
         f"binary size:     {size} bytes ({size / 1024 / 1024:.2f} MiB)",
-        f"cold start:      {cold:.1f} ms   (e --version, median of 20)",
+        f"cold start:      {cold:.1f} ms   (ulo --version, median of 20)",
         f"first frame:     {boot:.1f} ms   (spawn → banner on a bare home, median of 5)",
         f"loaded boot:     {loaded:.1f} ms   "
         "(spawn → banner on a populated home — 30 skills, a package, 2 "
@@ -278,7 +278,7 @@ def main():
         f"cold launch:     {chill:.1f} ms   "
         "(binary evicted from the file cache → first frame, single run)",
         f"session resume:  {resume:.1f} ms   "
-        "(spawn → restored tail, e -c on a 400-turn session, median of 5)",
+        "(spawn → restored tail, ulo -c on a 400-turn session, median of 5)",
         f"long session:    {frame:.3f} ms/frame   (10,000 cached reply blocks, mean of 100)",
         "",
     ])

@@ -2,15 +2,15 @@
 # The harness without a terminal: the agent turn loop, provider dialects,
 # tools, sessions, configuration, extensions, and the embedded guides. Nothing
 # here depends on a frontend crate or a terminal library.
-name = "aro-e-core"
+name = "ulo-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "The terminal-free core of e, the coding agent you can put anywhere"
-documentation = "https://e.aro.computer/docs"
+description = "The terminal-free core of ulo, the coding agent you can put anywhere"
+documentation = "https://ulo.sh/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "llm"]
 categories = ["development-tools"]
@@ -19,7 +19,7 @@ categories = ["development-tools"]
 include = ["/src", "/build.rs", "/guides", "/themes"]
 
 [lib]
-name = "e_core"
+name = "ulo_core"
 
 [dependencies]
 serde.workspace = true

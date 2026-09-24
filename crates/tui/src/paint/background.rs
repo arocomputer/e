@@ -8,7 +8,7 @@
 //!   color first (the terminal's real RGB), then the `COLORFGBG` env
 //!   report, then dark.
 //! - `query_cursor_row`: the launch anchor for the main-screen renderer —
-//!   e paints below where the user launched it, which needs the cursor row. DSR 6n answers it. No reply
+//!   ulo paints below where the user launched it, which needs the cursor row. DSR 6n answers it. No reply
 //!   (raw pty, exotic terminal) falls back to the screen's bottom row at
 //!   the caller.
 //!

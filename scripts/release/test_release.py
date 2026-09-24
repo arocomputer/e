@@ -7,9 +7,9 @@ from notes import parse
 class ReleaseContracts(unittest.TestCase):
     def test_channel_versions_and_numeric_order(self):
         self.assertEqual(identity('v1.2.3')['npm_tag'], 'latest')
-        self.assertEqual(identity('v1.2.3')['repository'], 'arocomputer/e')
-        self.assertEqual(identity('v1.2.3')['command'], 'e')
-        self.assertEqual(identity('v0.0.0-pr-12')['command'], 'e-pr')
+        self.assertEqual(identity('v1.2.3')['repository'], 'arocomputer/ulo')
+        self.assertEqual(identity('v1.2.3')['command'], 'ulo')
+        self.assertEqual(identity('v0.0.0-pr-12')['command'], 'ulo-pr')
         self.assertGreater(version_key('0.0.0-pr-12'), version_key('0.0.0-pr-9'))
         for invalid in ['1.2.3-rc.1', '1.2.3-dev', '1.2.3-dev.1.g../file', '01.2.3', '0.0.0-beta-1']:
             with self.assertRaises(ValueError):
@@ -26,9 +26,9 @@ class ReleaseContracts(unittest.TestCase):
                 self.assertEqual(release['version'], version)
 
     def test_release_asset_preserves_grouped_markdown_and_continuations(self):
-        result = parse('2026-09-15\n\n### Easier testing\n\nTry a preview.\n\n### New features\n- Run `e`\n  alongside stable.\n### Improvements\n- **Upgrade:** Sign in separately.\n### Fixes\n- Keep updates in their channel.')
+        result = parse('2026-09-15\n\n### Easier testing\n\nTry a preview.\n\n### New features\n- Run `ulo`\n  alongside stable.\n### Improvements\n- **Upgrade:** Sign in separately.\n### Fixes\n- Keep updates in their channel.')
         self.assertEqual(result['title'], 'Easier testing')
-        self.assertEqual(result['groups']['New features'], ['Run `e` alongside stable.'])
+        self.assertEqual(result['groups']['New features'], ['Run `ulo` alongside stable.'])
         with self.assertRaises(ValueError):
             parse('### A title\n- Ungrouped change')
 
@@ -48,21 +48,21 @@ class ShellInstaller(unittest.TestCase):
             work = Path(tmp)
             output = work / 'bin'
             output.mkdir()
-            (output / 'e').write_text('old build')
+            (output / 'ulo').write_text('old build')
             arch = 'aarch64' if platform.machine() in ('arm64', 'aarch64') else 'x86_64'
             target = arch + ('-apple-darwin' if platform.system() == 'Darwin' else '-unknown-linux-gnu')
-            archive = work / f'e-{target}.tar.gz'
+            archive = work / f'ulo-{target}.tar.gz'
             version = '1.2.3'
-            binary = f'#!/bin/sh\necho "e {version}"\n'.encode()
+            binary = f'#!/bin/sh\necho "ulo {version}"\n'.encode()
             with tarfile.open(archive, 'w:gz') as tar:
-                member = tarfile.TarInfo('e')
+                member = tarfile.TarInfo('ulo')
                 member.size, member.mode = len(binary), 0o755
                 tar.addfile(member, io.BytesIO(binary))
             (work / 'checksums.txt').write_text(f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n')
-            env = dict(os.environ, E_RELEASE_BASE=work.as_uri(), E_INSTALL_DIR=str(output))
+            env = dict(os.environ, ULO_RELEASE_BASE=work.as_uri(), ULO_INSTALL_DIR=str(output))
             result = subprocess.run(['sh', str(root / 'install.sh'), '--version', version], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((output / 'e').read_text(), f'#!/bin/sh\necho "e {version}"\n')
+            self.assertEqual((output / 'ulo').read_text(), f'#!/bin/sh\necho "ulo {version}"\n')
 
     def test_rejects_a_version_that_is_not_semver(self):
         import subprocess

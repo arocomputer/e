@@ -1,5 +1,5 @@
-//! Skills: `SKILL.md` directories under `~/.e/skills/`, each installed
-//! package's `skills/`, and, for trusted directories, `<repo>/.e/skills/`.
+//! Skills: `SKILL.md` directories under `~/.ulo/skills/`, each installed
+//! package's `skills/`, and, for trusted directories, `<repo>/.ulo/skills/`.
 //!
 //! Each skill is a folder with a `SKILL.md`: YAML-ish frontmatter (name,
 //! description, optional `disable-model-invocation`) then a markdown body.
@@ -28,7 +28,7 @@ pub struct Skill {
 }
 
 /// Global skills, then package skills not shadowed by a global name, plus,
-/// when `cwd` is trusted, its own `.e/skills/`; on a name clash the repo's
+/// when `cwd` is trusted, its own `.ulo/skills/`; on a name clash the repo's
 /// skill wins.
 pub fn list(cwd: &Path) -> Vec<Skill> {
     let mut skills = read_dir(&home::skills_dir());
@@ -47,7 +47,7 @@ pub fn list(cwd: &Path) -> Vec<Skill> {
         }
     }
     if trust::trusted(cwd) {
-        let local = read_dir(&cwd.join(".e").join("skills"));
+        let local = read_dir(&crate::config::home::workspace_directory(cwd).join("skills"));
         skills.retain(|g| !local.iter().any(|l| l.name == g.name));
         skills.extend(local);
     }
@@ -65,7 +65,7 @@ fn read_dir(dir: &Path) -> Vec<Skill> {
     };
     entries
         .flatten()
-        .filter_map(|e| load(&e.path().join("SKILL.md")))
+        .filter_map(|ulo| load(&ulo.path().join("SKILL.md")))
         .collect()
 }
 

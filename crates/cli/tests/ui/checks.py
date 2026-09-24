@@ -70,7 +70,7 @@ def heredoc_tool(frames):
     """The main tree hides heredoc bodies; Ctrl+O still shows the full command."""
     final = frames[-1]
     assert final.find('HEREDOC_FINISHED') is not None, 'heredoc turn did not finish'
-    row = final.find("├ Ran cat <<'E_LABEL_SCRIPT' >/dev/null …")
+    row = final.find("├ Ran cat <<'ULO_LABEL_SCRIPT' >/dev/null …")
     assert row is not None, 'missing abbreviated heredoc header'
     assert final.rows[row + 1].startswith('└ ctrl+o to view'), 'heredoc body occupied preview rows'
     assert final.find('HEREDOC_BODY_ONLY') is None, 'body leaked into the main tree'
@@ -79,7 +79,7 @@ def heredoc_tool(frames):
         observed = [frame for frame in frames if frame.find(f'┃ {mode} ·') is not None]
         assert observed, f'{mode} was not opened'
         for frame in observed:
-            start = frame.find("├ Ran cat <<'E_LABEL_SCRIPT'")
+            start = frame.find("├ Ran cat <<'ULO_LABEL_SCRIPT'")
             end = frame.find(ending)
             assert start is not None and end is not None and end > start, 'review closed before its output'
             assert all(frame.rows[row].startswith('│ ') for row in range(start + 1, end)), 'broken review rail'

@@ -1,6 +1,6 @@
-//! Prompt templates: `~/.e/prompts/<name>.md` becomes the `/name` command,
+//! Prompt templates: `~/.ulo/prompts/<name>.md` becomes the `/name` command,
 //! an installed package's `prompts/<name>.md` adds `/name` unless the home
-//! has one, and a trusted repo's `.e/prompts/<name>.md` shadows both — the
+//! has one, and a trusted repo's `.ulo/prompts/<name>.md` shadows both — the
 //! closer context wins.
 //!
 //! Frontmatter (optional): `description:` for the picker, `argument-hint:`
@@ -21,7 +21,7 @@ pub struct Template {
 }
 
 /// Global templates, package templates not shadowed by a global name, plus,
-/// when `cwd` is trusted, its own `.e/prompts/`; on a name clash the repo's
+/// when `cwd` is trusted, its own `.ulo/prompts/`; on a name clash the repo's
 /// template wins.
 pub fn list(cwd: &Path) -> Vec<Template> {
     let mut templates = read_dir(&home::prompts_dir());
@@ -36,7 +36,7 @@ pub fn list(cwd: &Path) -> Vec<Template> {
         }
     }
     if trust::trusted(cwd) {
-        let local = read_dir(&cwd.join(".e").join("prompts"));
+        let local = read_dir(&crate::config::home::workspace_directory(cwd).join("prompts"));
         templates.retain(|g| !local.iter().any(|l| l.name == g.name));
         templates.extend(local);
     }
@@ -54,10 +54,10 @@ fn read_dir(dir: &Path) -> Vec<Template> {
     };
     entries
         .flatten()
-        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
-        .filter_map(|e| {
-            let name = e.path().file_stem()?.to_string_lossy().into_owned();
-            let raw = std::fs::read_to_string(e.path()).ok()?;
+        .filter(|ulo| ulo.path().extension().map(|x| x == "md").unwrap_or(false))
+        .filter_map(|ulo| {
+            let name = ulo.path().file_stem()?.to_string_lossy().into_owned();
+            let raw = std::fs::read_to_string(ulo.path()).ok()?;
             Some(parse(name, &raw))
         })
         .collect()

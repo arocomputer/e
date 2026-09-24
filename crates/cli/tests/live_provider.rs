@@ -3,10 +3,10 @@
 //! all the way through auth, streaming, a tool call, replay, and final text.
 //!
 //! Run deliberately:
-//!   E_LIVE_MODEL=provider/model cargo test --test live_provider -- --ignored
+//!   ULO_LIVE_MODEL=provider/model cargo test --test live_provider -- --ignored
 
-use e::core::providers::catalog;
-use e::core::providers::{self, ChatMessage, Event, Request, ToolCall};
+use ulo::core::providers::catalog;
+use ulo::core::providers::{self, ChatMessage, Event, Request, ToolCall};
 
 async fn response(request: Request) -> (String, Vec<ToolCall>, usize, usize, usize) {
     let (mut events, _handle) = providers::stream(request);
@@ -33,12 +33,12 @@ async fn response(request: Request) -> (String, Vec<ToolCall>, usize, usize, usi
 #[tokio::test]
 #[ignore = "uses configured credentials and incurs a real provider request"]
 async fn configured_provider_streams_a_complete_tool_loop() {
-    let slug = std::env::var("E_LIVE_MODEL")
-        .expect("set E_LIVE_MODEL=provider/model before running the paid canary");
+    let slug = std::env::var("ULO_LIVE_MODEL")
+        .expect("set ULO_LIVE_MODEL=provider/model before running the paid canary");
     let model = catalog::catalog()
         .into_iter()
         .find(|model| catalog::slug(model) == slug)
-        .unwrap_or_else(|| panic!("E_LIVE_MODEL `{slug}` is not in the catalog"));
+        .unwrap_or_else(|| panic!("ULO_LIVE_MODEL `{slug}` is not in the catalog"));
     let tool = serde_json::json!({
         "type": "function",
         "function": {
@@ -56,7 +56,7 @@ async fn configured_provider_streams_a_complete_tool_loop() {
         model: model.clone(),
         system: "This is a provider conformance canary. Follow the tool instruction exactly.".into(),
         messages: vec![ChatMessage::user(
-            "Run the live canary by calling live_echo once with marker E_LIVE_OK. Do not answer before using the tool.",
+            "Run the live canary by calling live_echo once with marker ULO_LIVE_OK. Do not answer before using the tool.",
         )],
         effort: None,
         session_id: String::new(),
@@ -77,7 +77,7 @@ async fn configured_provider_streams_a_complete_tool_loop() {
     let mut history = vec![ChatMessage::user("Run the live canary.")];
     history.push(ChatMessage::assistant("", calls.clone()));
     for call in &calls {
-        history.push(ChatMessage::tool_result(&call.id, "E_LIVE_OK"));
+        history.push(ChatMessage::tool_result(&call.id, "ULO_LIVE_OK"));
     }
     let second = Request {
         model,
@@ -92,7 +92,7 @@ async fn configured_provider_streams_a_complete_tool_loop() {
             .await
             .expect("live follow-up timed out");
     assert!(
-        text.contains("E_LIVE_OK"),
+        text.contains("ULO_LIVE_OK"),
         "unexpected final response: {text}"
     );
 }

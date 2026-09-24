@@ -15,10 +15,10 @@ assert release['channel']=='production', 'release-check expects a production tag
 assert release['version']==base, 'manifest mismatch'
 PY
   ./scripts/release-notes.sh "$tag" < CHANGELOG.md | python3 -c 'import sys; sys.path.insert(0,"scripts/release"); from notes import parse; parse(sys.stdin.read())'
-  export E_BUILD_VERSION=${tag#v} E_BUILD_CHANNEL=production
-  export E_BUILD_COMMIT=${E_BUILD_COMMIT:-$(git rev-parse HEAD)}
+  export ULO_BUILD_VERSION=${tag#v} ULO_BUILD_CHANNEL=production
+  export ULO_BUILD_COMMIT=${ULO_BUILD_COMMIT:-$(git rev-parse HEAD)}
 fi
 cargo build --release --locked
-actual=$(./target/release/e --version)
-if [ -n "$tag" ]; then [ "$actual" = "e ${tag#v}" ]; fi
+actual=$(./target/release/ulo --version)
+if [ -n "$tag" ]; then [ "$actual" = "ulo ${tag#v}" ]; fi
 echo "release-check: $actual qualified"

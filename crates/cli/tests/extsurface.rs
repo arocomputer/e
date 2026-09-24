@@ -7,7 +7,7 @@
 mod common;
 
 use common::{env_lock, Home};
-use e::core::extensions::{ExtensionHost, HostRequest};
+use ulo::core::extensions::{ExtensionHost, HostRequest};
 
 /// Put one shell extension into an isolated home.
 fn with_extension(label: &str, body: &str) -> Home {
@@ -31,10 +31,10 @@ fn log_of(home: &Home) -> String {
 
 /// A version-2 extension: subscribes to two events, declares every new
 /// hook, labels its tool, owns a shortcut, and on initialize immediately
-/// asks two things of e (`session.info`, then `ui.select`), logging the
-/// answers. Every request e sends is logged by method.
+/// asks two things of ulo (`session.info`, then `ui.select`), logging the
+/// answers. Every request ulo sends is logged by method.
 const SURFACE: &str = r#"#!/bin/sh
-log="$E_HOME/ext.log"
+log="$ULO_HOME/ext.log"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\),"method".*/\1/p')
   case "$line" in
@@ -174,12 +174,12 @@ async fn events_go_only_to_subscribers_and_hooks_chain_their_answers() {
     );
 
     // The render hook is asked only about what the manifest lists, and an
-    // empty answer leaves the entry as e paints it.
+    // empty answer leaves the entry as ulo paints it.
     assert!(host.renders("tool:bash") && host.renders("assistant"));
     assert!(!host.renders("tool:read"));
     let rendered = host.hook_render("tool:bash", "bash", "raw").await.unwrap();
     assert_eq!(rendered.body, "rendered: bash");
-    assert_eq!(rendered.format, e::core::extensions::Format::Markdown);
+    assert_eq!(rendered.format, ulo::core::extensions::Format::Markdown);
     assert!(host.hook_render("assistant", "", "reply").await.is_none());
     assert!(host.hook_render("tool:read", "read", "x").await.is_none());
     host.shutdown().await;

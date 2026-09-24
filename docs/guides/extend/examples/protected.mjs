@@ -17,8 +17,8 @@
  * close that one. See docs/guides/usage/sandboxing.md for why a hook is a speed bump,
  * not an isolation boundary.
  *
- * Copy scaffold.mjs + protected.mjs into ~/.e/extensions/ (chmod +x) and
- * restart e, then ask the model to read ~/.ssh/id_rsa and watch it be
+ * Copy scaffold.mjs + protected.mjs into ~/.ulo/extensions/ (chmod +x) and
+ * restart ulo, then ask the model to read ~/.ssh/id_rsa and watch it be
  * refused.
  */
 

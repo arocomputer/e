@@ -50,7 +50,7 @@ impl TurnLog {
         }
         let log = self.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let mut session = log.session.lock().unwrap_or_else(|e| e.into_inner());
+            let mut session = log.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
             match session.as_mut() {
                 Some(session) => session.append_response(response),
                 None => Ok(()),
@@ -68,7 +68,7 @@ impl TurnLog {
         }
         let log = self.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let mut session = log.session.lock().unwrap_or_else(|e| e.into_inner());
+            let mut session = log.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
             match session.as_mut() {
                 Some(session) => session.record_error(details),
                 None => Ok(()),
@@ -85,12 +85,12 @@ impl TurnLog {
 
     pub(super) fn append_inner(&self, message: ChatMessage) -> std::io::Result<()> {
         // Keep the history/session commit together relative to checkpoint swaps.
-        let mut history = self.history.lock().unwrap_or_else(|e| e.into_inner());
+        let mut history = self.history.lock().unwrap_or_else(|ulo| ulo.into_inner());
         history.push(message.clone());
         if !self.save_session {
             return Ok(());
         }
-        let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
         if guard.is_none() {
             let mut created = SessionLog::create(&self.cwd, &slug(&self.model))?;
             // A pending name applies before the first record. It is
@@ -101,7 +101,7 @@ impl TurnLog {
             if let Some(name) = self
                 .session_name
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .clone()
             {
                 let _ = created.set_name(&name);
@@ -154,7 +154,7 @@ impl TurnLog {
         fresh_history.extend(kept);
 
         // Same lock order as `commit`: history before session.
-        let mut history_guard = self.history.lock().unwrap_or_else(|e| e.into_inner());
+        let mut history_guard = self.history.lock().unwrap_or_else(|ulo| ulo.into_inner());
         // A summary only describes its snapshot. Concurrent commits must survive.
         if cancel.load(Ordering::SeqCst) || expected != history_guard.as_slice() {
             return false;
@@ -163,14 +163,14 @@ impl TurnLog {
             *history_guard = fresh_history;
             return true;
         }
-        let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.session.lock().unwrap_or_else(|ulo| ulo.into_inner());
         let result = match SessionLog::create(&self.cwd, &slug(&self.model)) {
             Ok(mut created) => {
                 // Same best-effort pending-name application as `commit`.
                 if let Some(name) = self
                     .session_name
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .clone()
                 {
                     let _ = created.set_name(&name);
@@ -196,7 +196,7 @@ impl TurnLog {
                 *history_guard = fresh_history;
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(ulo) => Err(ulo),
         };
         let installed = result.is_ok();
         note_persist(&self.persist_warned, result, &self.events);
@@ -215,11 +215,11 @@ pub(super) fn note_persist(
 ) {
     match result {
         Ok(()) => warned.store(false, Ordering::SeqCst),
-        Err(e) => {
+        Err(ulo) => {
             if !warned.load(Ordering::SeqCst)
                 && events
                     .try_send(SessionEvent::Warning(format!(
-                        "session not saved: {e} — the conversation continues in memory only"
+                        "session not saved: {ulo} — the conversation continues in memory only"
                     )))
                     .is_ok()
             {

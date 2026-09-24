@@ -52,7 +52,7 @@ export async function publishPackages(
                 (only.length === 0 || only.includes(name)) &&
                 !exclude.includes(name),
         )
-        .sort((a, b) => (a === "e" ? 1 : b === "e" ? -1 : a.localeCompare(b)));
+        .sort((a, b) => (a === "ulo" ? 1 : b === "ulo" ? -1 : a.localeCompare(b)));
     for (const folder of folders) {
         const path = resolve(root, folder);
         const manifest = JSON.parse(

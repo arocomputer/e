@@ -6,10 +6,10 @@
 mod common;
 
 use common::{env_lock, serve_sse, test_model, Home};
-use e::core::agent::{Agent, SessionEvent};
-use e::core::providers::catalog::Api;
+use ulo::core::agent::{Agent, SessionEvent};
+use ulo::core::providers::catalog::Api;
 
-// The env lock is deliberately held across awaits: E_HOME and cwd must stay
+// The env lock is deliberately held across awaits: ULO_HOME and cwd must stay
 // ours for the whole test, and each #[tokio::test] runs on its own runtime.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
@@ -24,7 +24,7 @@ async fn agent_runs_a_tool_then_replies() {
     home.auth(r#"{"mock":{"key":"k"}}"#);
 
     // A workspace with one file for the tool to read.
-    let ws = std::env::temp_dir().join(format!("e-ws-{port}"));
+    let ws = std::env::temp_dir().join(format!("ulo-ws-{port}"));
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("hello.txt"), "line one\nline two\n").unwrap();
     std::env::set_current_dir(&ws).unwrap();
@@ -97,7 +97,7 @@ async fn large_tool_result_compacts_and_continues_without_frontend_help() {
     let (port, server) = serve_sse(&[first, summary, last]);
     let home = Home::new("tool-context-guard");
     home.auth(r#"{"mock":{"key":"k"}}"#);
-    let ws = std::env::temp_dir().join(format!("e-ws-context-{port}"));
+    let ws = std::env::temp_dir().join(format!("ulo-ws-context-{port}"));
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("large.txt"), "wide result line\n".repeat(8_000)).unwrap();
     std::env::set_current_dir(&ws).unwrap();
@@ -155,7 +155,7 @@ async fn tool_batches_run_concurrently_and_commit_in_source_order() {
     let home = Home::new("concurrent");
     home.auth(r#"{"mock":{"key":"k"}}"#);
 
-    let ws = std::env::temp_dir().join(format!("e-ws-c-{port}"));
+    let ws = std::env::temp_dir().join(format!("ulo-ws-c-{port}"));
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("quick.txt"), "quick body\n").unwrap();
     std::env::set_current_dir(&ws).unwrap();

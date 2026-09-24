@@ -1,0 +1,6 @@
+Contact: https://ulo.sh/legal/report-vulnerability
+Contact: mailto:security@aro.computer
+Expires: 2027-07-31T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://ulo.sh/.well-known/security.txt
+Policy: https://ulo.sh/legal/report-vulnerability

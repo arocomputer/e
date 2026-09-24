@@ -155,7 +155,7 @@ async fn send(
             http()?
                 .post(format!("{}/codex/responses", request.model.base_url))
                 .header("chatgpt-account-id", account)
-                .header("originator", "e")
+                .header("originator", "ulo")
                 .header("OpenAI-Beta", "responses=experimental")
                 .header("session-id", &session_id)
                 .header("x-client-request-id", uuid::Uuid::new_v4().to_string())

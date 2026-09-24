@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** plan — a plan mode on the extension surface, built on the scaffold.
  *
- * Copy scaffold.mjs + plan.mjs into ~/.e/extensions/ (chmod +x) and
- * restart e:
+ * Copy scaffold.mjs + plan.mjs into ~/.ulo/extensions/ (chmod +x) and
+ * restart ulo:
  *
  *   /plan            — toggle plan mode: the model can only read and grep,
  *                      a status slot says so, and every turn gets a
@@ -12,8 +12,8 @@
  *   /plan show       — the plan steps in a side pane; ↑/↓ move, Enter or x
  *                      checks a step off, Esc closes (ctrl+t moves focus)
  *
- * Every surface here is data e paints: the picker is e's picker, the pane
- * sits where ~/.e/layout.json says, the status slot sits on e's status row.
+ * Every surface here is data ulo paints: the picker is ulo's picker, the pane
+ * sits where ~/.ulo/layout.json says, the status slot sits on ulo's status row.
  * Nothing in this file touches the terminal.
  */
 
@@ -80,11 +80,11 @@ const ext = connect({
     };
   },
   event({ name }) {
-    // A new or resumed session starts in build mode; e resets the toolset
+    // A new or resumed session starts in build mode; ulo resets the toolset
     // itself, this keeps the status slot honest.
     if (name === "session_start" && planning) setPlanning(false);
   },
-  // e moves the cursor and tells us; Enter (or x) checks the step off.
+  // ulo moves the cursor and tells us; Enter (or x) checks the step off.
   paneSelect({ id }) {
     cursor = Number(id) || 0;
   },

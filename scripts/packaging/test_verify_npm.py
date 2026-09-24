@@ -25,19 +25,19 @@ mkdir -p "$prefix/node_modules/.bin"
 if [ "$count" -lt "$READY" ]; then
   [ "$FAILURE" != metadata ] || exit 1
   [ "$FAILURE" != missing ] || exit 0
-  echo '#!/bin/sh' > "$prefix/node_modules/.bin/e-dev"
-  echo 'echo e wrong-version' >> "$prefix/node_modules/.bin/e-dev"
+  echo '#!/bin/sh' > "$prefix/node_modules/.bin/ulo-dev"
+  echo 'echo ulo wrong-version' >> "$prefix/node_modules/.bin/ulo-dev"
 else
-  echo '#!/bin/sh' > "$prefix/node_modules/.bin/e-dev"
-  echo 'echo e "$VERSION"' >> "$prefix/node_modules/.bin/e-dev"
+  echo '#!/bin/sh' > "$prefix/node_modules/.bin/ulo-dev"
+  echo 'echo ulo "$VERSION"' >> "$prefix/node_modules/.bin/ulo-dev"
 fi
-chmod +x "$prefix/node_modules/.bin/e-dev"
+chmod +x "$prefix/node_modules/.bin/ulo-dev"
 ''')
             npm.chmod(0o755)
             (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
             (root / 'sleep').chmod(0o755)
             env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', STATE=str(root / 'calls'),
-                       VERSION='0.0.0-dev-1', COMMAND='e-dev', FAILURE=failure, READY=str(ready))
+                       VERSION='0.0.0-dev-1', COMMAND='ulo-dev', FAILURE=failure, READY=str(ready))
             result = subprocess.run(['sh', str(ROOT / 'scripts/packaging/verify-npm.sh')],
                                     env=env, capture_output=True, text=True)
             return result.returncode, int((root / 'calls').read_text())

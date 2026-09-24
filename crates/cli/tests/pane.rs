@@ -1,5 +1,5 @@
 //! The side pane end to end: an extension opens one over the real
-//! protocol, e paints it beside the conversation on a real pty, Esc closes
+//! protocol, ulo paints it beside the conversation on a real pty, Esc closes
 //! it, and the terminal comes back from the alternate screen.
 
 mod common;
@@ -60,10 +60,10 @@ fn a_pane_opens_beside_the_conversation_and_esc_restores_the_screen() {
         .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/ptycap.py"))
         .arg(&capture)
         .args(["120", "30", "4.0", "5"])
-        .arg(env!("CARGO_BIN_EXE_e"))
+        .arg(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-save", "--no-tools", "--model", "mock/audit"])
         .current_dir(&workspace)
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .env("CAP_PROMPT", "/pane")
         .env(
             "CAP_STEPS",
@@ -83,13 +83,13 @@ fn a_pane_opens_beside_the_conversation_and_esc_restores_the_screen() {
     let raw = std::fs::read(&capture).unwrap();
     let text = String::from_utf8_lossy(&raw);
     // The pane painted on the alternate screen, beside the conversation.
-    let plain = e::core::tools::strip_ansi(&text);
+    let plain = ulo::core::tools::strip_ansi(&text);
     let entered = text
         .find("\x1b[?1049h")
         .unwrap_or_else(|| panic!("the pane uses the alternate screen; saw:\n{plain}"));
     let painted = &text[entered..];
     // Content checks read past the colour codes the row grammar paints.
-    let shown = e::core::tools::strip_ansi(painted);
+    let shown = ulo::core::tools::strip_ansi(painted);
     assert!(shown.contains("Demo pane"), "the pane title was painted");
     assert!(shown.contains("alpha.rs") && shown.contains("beta.rs"));
     assert!(

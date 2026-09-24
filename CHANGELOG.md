@@ -1,10 +1,15 @@
-# e releases
+# ulo releases
 
 ## Unreleased
 
 ### Improvements
 
-- **Upgrade:** the website moved from `e.intuitum.sh` to `e.aro.computer`. `install.sh`, the docs, and the package metadata use the new host; the old host redirects. Reinstall with `curl -fsSL https://e.aro.computer/install.sh | sh` if a bookmark or script pinned the old URL.
+- Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.
+- Moved the website to `services/www`, with native Astro routes and a direct email contact link instead of a shared form backend.
+- Grouped channel clients under `services/` and contributor guides under `docs/contributing/`. Cross-crate fuzzing stays in the root `fuzz/` workspace.
+
+- Renamed the product to ulo, including the CLI, Rust crates, npm packages, Homebrew formula, environment variables, and project configuration. Existing state directories remain readable until moved; see the migration section in the installation guide.
+- Moved the product website into `services/www`, using the new wordmark and `ulo.sh`. The website builds its guides and installer from the same checkout as the application.
 - **Upgrade:** npm packages publish with trusted publishing; the `NPM_BOOTSTRAP_TOKEN` secret is gone.
 
 ### Fixes
@@ -29,20 +34,20 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Try a change before it merges with a pinned PR build (`./x preview`). Preview builds keep separate state.
 - Run a checkout with `./x dev` and inspect repeatable terminal scenarios with `./x scenario`. Build diagnostics include the channel and source commit.
 
-- Install e through brew, npm, or bun. Releases publish the native packages automatically; package-managed installations use their package manager for updates.
-- Install resource packages from git, npm, local directories, or checksum-verified release archives. `e packages` lists them, `e remove` removes them, and `e packages init` creates a package to share.
-- Load a package for one run with `--package` (`-P`), share project packages through `.e/packages`, and filter which extensions, skills, prompts, or themes a package loads. npm lifecycle scripts stay disabled.
-- Add extension side panes, widgets, status slots, activity text, editors, and selection dialogs. Configure pane placement and status-row templates in `~/.e/layout.json`; Ctrl+T moves focus between regions.
+- Install ulo through brew, npm, or bun. Releases publish the native packages automatically; package-managed installations use their package manager for updates.
+- Install resource packages from git, npm, local directories, or checksum-verified release archives. `ulo packages` lists them, `ulo remove` removes them, and `ulo packages init` creates a package to share.
+- Load a package for one run with `--package` (`-P`), share project packages through `.ulo/packages`, and filter which extensions, skills, prompts, or themes a package loads. npm lifecycle scripts stay disabled.
+- Add extension side panes, widgets, status slots, activity text, editors, and selection dialogs. Configure pane placement and status-row templates in `~/.ulo/layout.json`; Ctrl+T moves focus between regions.
 - Extension commands support argument hints and completions. Hooks can shape input, turns, tool results, rendering, and compaction summaries. Session requests can steer, name, interrupt, compact, or narrow a session's tools.
 - Keep extension entry points and helper files together in bundle directories. Examples cover planning, delegated agents, project startup, and MCP tools.
-- Run a headless turn with `e -p`; add `--json` for session events. `e rpc` accepts a built-in tool allowlist and returns the saved session path.
-- `e rpc` is a session server: `session.create` opens a conversation against any working directory, `session.prompt` streams its events tagged with the session and request and answers with the turn result, and sessions run side by side. Steer, interrupt, compact, fork, export, resume saved sessions, list models, and change model or effort between turns. Extension questions reach the client as `ask` lines to answer. Version-1 one-shot lines keep working unchanged.
-- Trust a workspace without the terminal with `e trust [dir]`, and reverse it with `e untrust [dir]`. An unattended session — a channel bot, a CI job — cannot answer the trust panel, and until now that left it loading none of the repository's own instructions.
-- Install the Slack channel from npm (`npm install -g @arocomputer/e-slack`, or `npx @arocomputer/e-slack`). It keeps its own version and publishes under `latest` with production releases.
-- Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/e` on issues and pull requests. `e docs channels` describes the pattern.
-- Run the Slack channel on a server from the published `ghcr.io/intuitums/e-slack` image, or build `channels/slack/Dockerfile` from a checkout: e comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of e.
-- Embed e with the `aro-e-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
-- Install the SDK from crates.io with `cargo add aro-e-sdk`. It follows semantic versioning on a version of its own, independent of the application. The SDK is the only crate published; the application ships through the shell script, Homebrew, and npm.
+- Run a headless turn with `ulo -p`; add `--json` for session events. `ulo rpc` accepts a built-in tool allowlist and returns the saved session path.
+- `ulo rpc` is a session server: `session.create` opens a conversation against any working directory, `session.prompt` streams its events tagged with the session and request and answers with the turn result, and sessions run side by side. Steer, interrupt, compact, fork, export, resume saved sessions, list models, and change model or effort between turns. Extension questions reach the client as `ask` lines to answer. Version-1 one-shot lines keep working unchanged.
+- Trust a workspace without the terminal with `ulo trust [dir]`, and reverse it with `ulo untrust [dir]`. An unattended session — a channel bot, a CI job — cannot answer the trust panel, and until now that left it loading none of the repository's own instructions.
+- Install the Slack channel from npm (`npm install -g @arocomputer/ulo-slack`, or `npx @arocomputer/ulo-slack`). It keeps its own version and publishes under `latest` with production releases.
+- Reference channels under `channels/`: a Slack bot (one thread, one session, with buttons for extension questions, created from `channels/slack/manifest.json`) and a GitHub Actions workflow answering `/ulo` on issues and pull requests. `ulo docs channels` describes the pattern.
+- Run the Slack channel on a server from the published `ghcr.io/intuitums/ulo-slack` image, or build `channels/slack/Dockerfile` from a checkout: ulo comes from the release and the bot from the repository, so the host needs neither Node nor a checkout of ulo.
+- Embed ulo with the `ulo-sdk` package. Its session builder configures models and resources, streams typed turn events, and supports steering and cancellation.
+- Install the SDK from crates.io with `cargo add ulo-sdk`. It follows semantic versioning on a version of its own, independent of the application. The SDK is the only crate published; the application ships through the shell script, Homebrew, and npm.
 - Use `/fork` to continue a branch in a new session and `/export` to save a self-contained HTML conversation.
 - Use `/undo` to restore up to 100 session writes or edits and `/usage` to inspect recorded tokens and estimated cost by model.
 - Recall prompts from previous sessions with Up on an empty composer. Ctrl+G opens the current draft in an external editor.
@@ -51,46 +56,46 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Give `/compact` a focus to guide its checkpoint. Filter `/resume` and `/tree` by typing.
 - Select Inline or Fullscreen TUI mode in `/settings`. `tool_label_rows` controls the height of command labels, and `paste_placeholder` controls pasted-text collapse.
 - Use the updated model catalogs, including GPT-6 Astra and the GPT-5.6 models. ChatGPT subscription discovery follows its live model picker.
-- New models arrive with their facts, not just their ids. e reads models.dev in the same background refresh as the providers' own lists, caches a trimmed copy in `~/.e/models-dev.json`, and sets context windows, effort levels, the Anthropic thinking shape, image and tool support, and pricing on built-in and discovered models. Seeds are the offline fallback; `models.json` still wins.
+- New models arrive with their facts, not just their ids. ulo reads models.dev in the same background refresh as the providers' own lists, caches a trimmed copy in `~/.ulo/models-dev.json`, and sets context windows, effort levels, the Anthropic thinking shape, image and tool support, and pricing on built-in and discovered models. Seeds are the offline fallback; `models.json` still wins.
 
 ### Improvements
 
-- **Upgrade:** the npm packages moved from the `@intuitums` scope to `@arocomputer`. Reinstall with `npm install -g @arocomputer/e` (or `bun add -g @arocomputer/e`); the old `@intuitums/e` stops receiving updates. The `e update` instructions now name the new scope.
-- **Upgrade:** the application no longer publishes to crates.io. The `aro-e`, `aro-e-core`, `aro-e-tui`, and `aro-e-rpc` `0.0.1` versions are yanked; install e from the shell script, Homebrew, or npm. The embedded SDK (`aro-e-sdk`) still publishes.
-- **Upgrade:** the `dev` and `beta` release channels are removed. Preview changes with a pinned PR build (`./x preview`) instead. Remove a previous `e-beta` or `e-dev` installation and reinstall from the production command; those binaries no longer receive updates.
+- **Upgrade:** the npm packages moved from the `@intuitums` scope to `@arocomputer`. Reinstall with `npm install -g @arocomputer/ulo` (or `bun add -g @arocomputer/ulo`); the old `@intuitums/ulo` stops receiving updates. The `ulo update` instructions now name the new scope.
+- **Upgrade:** the application no longer publishes to crates.io. The `ulo`, `ulo-core`, `ulo-tui`, and `ulo-rpc` `0.0.1` versions are yanked; install ulo from the shell script, Homebrew, or npm. The embedded SDK (`ulo-sdk`) still publishes.
+- **Upgrade:** the `dev` and `beta` release channels are removed. Preview changes with a pinned PR build (`./x preview`) instead. Remove a previous `ulo-beta` or `ulo-dev` installation and reinstall from the production command; those binaries no longer receive updates.
 - Rewrite the README around installation and first use, with a captured terminal example.
 
-- The Rust SDK depends only on the new `aro-e-core` crate, so a program that embeds e no longer compiles the terminal frontend. The application now publishes as `aro-e-core`, `aro-e-tui`, `aro-e-rpc`, and `aro-e`.
+- The Rust SDK depends only on the new `ulo-core` crate, so a program that embeds ulo no longer compiles the terminal frontend. The application now publishes as `ulo-core`, `ulo-tui`, `ulo-rpc`, and `ulo`.
 - Scroll the conversation with the wheel or PageUp/PageDown while keeping the draft editable. Reading earlier output pauses following; End or returning to the bottom resumes it. Fullscreen now uses a fixed conversation viewport.
 - Retain thinking behind a compact hint by default. Ctrl+O and the Show thinking setting reveal reasoning already received during the session. Long tool groups fold older successful calls while retaining failures, running work, and the complete review history.
 - Recover reply text from completed Responses API messages when a gateway omits text deltas, without duplicating streamed text. A reasoning-only finish now explains that the model supplied no answer.
 
-- The page the browser shows after `/login` wears e.aro.computer's look: the three-bar mark, the warm paper and ink palette in light and dark, JetBrains Mono where it is installed, and a green or red title for the outcome. A finished sign-in closes its tab where the browser allows it.
-- **Docs:** the user guides under `docs/` are grouped by folder — `start/`, `usage/`, `customize/`, `extend/` — and front matter is their only metadata. `e docs` builds its topic list by reading those files, so the guides no longer have a second list to drift from, and `docs/README.md` explains the layout to whoever edits them. The repository's own documentation (architecture, rendering, releases) moved to `contributing/`, and a new `sessions` guide covers resuming, branching, compaction, and export (`e docs sessions`).
+- The page the browser shows after `/login` wears ulo.sh's look: the three-bar mark, the warm paper and ink palette in light and dark, JetBrains Mono where it is installed, and a green or red title for the outcome. A finished sign-in closes its tab where the browser allows it.
+- **Docs:** the user guides under `docs/` are grouped by folder — `start/`, `usage/`, `customize/`, `extend/` — and front matter is their only metadata. `ulo docs` builds its topic list by reading those files, so the guides no longer have a second list to drift from, and `docs/README.md` explains the layout to whoever edits them. The repository's own documentation (architecture, rendering, releases) moved to `contributing/`, and a new `sessions` guide covers resuming, branching, compaction, and export (`ulo docs sessions`).
 
 - **Docs:** `docs/guides/start/getting-started.md` is a first run rather than a
   reference, and it is the website's `/docs` landing page. Installation,
   preview channels, and updates moved to `install`, the CLI and the in-session
-  commands are in `commands`, and the `~/.e` home is in `settings`. Models and
-  providers moved to `customize/` beside the rest of the `~/.e` surface, and
+  commands are in `commands`, and the `~/.ulo` home is in `settings`. Models and
+  providers moved to `customize/` beside the rest of the `~/.ulo` surface, and
   extensions, packages, and their examples moved to `extend/`.
 - **Docs:** every guide is rewritten for reading: a one-sentence description,
   short sections that lead with what a thing is for, and tables for keys,
-  flags, and methods. `e docs` lists each topic with that description. The
+  flags, and methods. `ulo docs` lists each topic with that description. The
   keybindings guide now unbinds an extension's chord with `"none"`, the value
   the loader accepts; `null` made it ignore the whole file.
 
-- **Upgrade:** e refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `e trust [dir]` for a session with no terminal.
+- **Upgrade:** ulo refuses to run in an untrusted workspace instead of running it without the repository's own instructions. Accept the trust dialog, or record the decision with `ulo trust [dir]` for a session with no terminal.
 - Linux binaries are built against glibc 2.31 instead of the build runner's 2.39, so they run on Debian 11+, Ubuntu 22.04+, and RHEL 9+ too, and the release refuses to publish one that needs anything newer. The installer refuses a host below the floor with a message naming the requirement instead of failing after the download with a linker error.
 
 - **Upgrade:** Beta binaries move to a separate repository. Reinstall beta once to adopt its new update source. Dev builds now use npm/bun; production releases remain in the main repository.
 
 - **Upgrade:** the stable release channel is now `production`, and preview versions are `0.0.0-<channel>-<build>` (the `publish` run number) instead of `X.Y.Z-channel.N.gCOMMIT`. `install.sh` accepts `--channel production` and keeps `stable` as an alias for it; package tags and update commands keep their channel names.
 
-- **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the production home. Set `E_HOME` explicitly to select another dedicated home.
+- **Upgrade:** Local Cargo builds now use `~/.ulo-dev` instead of the production home. Set `ULO_HOME` explicitly to select another dedicated home.
 
-- **Upgrade:** `/diff` is now the separate [e-diff](https://github.com/fschrhunt/e-diff) package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
-- **Upgrade:** `e ask` is removed. Use `e -p` for a headless turn or `e rpc` for JSONL automation. Piped stdin requires a supported headless mode.
+- **Upgrade:** `/diff` is now the separate [ulo-diff](https://github.com/fschrhunt/ulo-diff) package. Install it with `ulo install git:github.com/fschrhunt/ulo-diff`; the old in-repository package and its build instructions are removed.
+- **Upgrade:** `ulo ask` is removed. Use `ulo -p` for a headless turn or `ulo rpc` for JSONL automation. Piped stdin requires a supported headless mode.
 - **Upgrade:** read-only mode and the `ask` tool are removed. Use `--no-tools` or a tool allowlist; extensions should obtain required input through configuration or their supported interface requests.
 - **Upgrade:** Ctrl+D deletes forward. Press Ctrl+C twice to exit, or change the keybindings. Unlabeled code fences no longer guess a language, and footnotes remain literal text.
 - **Upgrade:** the unstable Rust API uses `core::extensions`, `SessionLog`, and tagged `MessageKind` values. Session logs use OS-held locks; stop older processes before resuming their sessions.
@@ -105,7 +110,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - Provider failures show a short message while retaining diagnostics privately. Quota failures stop retries; transient failures show cancellable backoff.
 - Provider-level model settings and context-window overrides survive catalog refreshes. Anthropic tool-result batching and prompt caching follow the conversation.
 - Startup and long-session rendering have performance budgets. Terminal-frame checks cover tool trees, composer placement, errors, and review colors.
-- **Upgrade:** the repository moved to the `arocomputer` organization. `e update`, `install.sh`, and the install guides use the new URLs; point an existing checkout's remote at `https://github.com/arocomputer/e`.
+- **Upgrade:** the repository moved to the `arocomputer` organization. `ulo update`, `install.sh`, and the install guides use the new URLs; point an existing checkout's remote at `https://github.com/arocomputer/ulo`.
 
 ### Fixes
 
@@ -137,7 +142,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 - **Security:** new credentials and sessions are private from creation. Unix homes use `0700`, session files use `0600`, and reopening older sessions tightens permissions.
 - **Security:** model output, tool labels, draft text, trust paths, and extension notices cannot inject terminal controls. Git review disables external helpers and does not write the index.
 - **Security:** file writes detect replacement during staging, remove partial new files after failure, and fail freshness checks on metadata errors.
-- `--package npm:<name>` loads the package it installed. Git URLs with `user:password@` credentials parse as one source, `e remove` finds a clone recorded under different case, prompt templates with CRLF endings keep their front matter, and an empty `E_HOME` no longer means the current directory.
+- `--package npm:<name>` loads the package it installed. Git URLs with `user:password@` credentials parse as one source, `ulo remove` finds a clone recorded under different case, prompt templates with CRLF endings keep their front matter, and an empty `ULO_HOME` no longer means the current directory.
 - Responses streams surface a top-level `error` event instead of stalling, keep one cache key per session on the Codex mount, and leave out a reasoning item that no output followed. Gemini calls without `args` carry `{}`; a request that cannot be built is not retried.
 - `read` pages past a line over the 64 KiB cap instead of failing the file, `read_result` accepts numeric strings and never returns an empty window, `edit` counts overlapping matches as ambiguous, and bash keeps a code point split around the other stream, reports dropped bytes correctly, accepts `"background": "true"`, and keeps text before a trailing carriage return.
 - A session tail torn inside a character still loads and lists, and resuming after a lost final newline starts the next record on its own line. A `grep` of a directory loads that directory's `AGENTS.md`. Usage from a failed attempt no longer stands in for the retry's.
@@ -150,23 +155,23 @@ September 9, 2026
 
 ### A coding agent for your terminal
 
-The first release of e runs on macOS and Linux. Connect a hosted or local model,
+The first release of ulo runs on macOS and Linux. Connect a hosted or local model,
 work in a repository, and save conversations you can resume or branch later.
 
 ### New features
 
 - Connect to OpenAI, Anthropic, Google, xAI, OpenCode, OpenRouter, and other hosted providers, or use Ollama and LM Studio locally.
 - Sign in with supported subscriptions or API keys. The model picker refreshes live catalogs and lets you save a preferred model scope.
-- Resume with `e -c` or `/resume`, and branch from an earlier prompt with `/tree`. Older linear sessions load without conversion.
+- Resume with `ulo -c` or `/resume`, and branch from an earlier prompt with `/tree`. Older linear sessions load without conversion.
 - Steer an active turn by sending another message. Review queued prompts above the composer.
 - Attach PNG, JPEG, GIF, and WebP images. Supported models receive them, and sessions retain them for resume.
 - Open full tool output and edit diffs with Ctrl+O. Run shell commands directly with `!`.
 - Use `/compact` or automatic compaction to continue long conversations. The previous session remains available in `/resume`.
 - Add tools, slash commands, hooks, and typed launch flags through executable JSONL extensions. Examples include MCP tools, delegated agents, and worktree launches.
-- Customize themes, composer keybindings, models, prompt templates, and skills under `~/.e/`. Trusted projects can supply their own instructions, skills, and prompts.
-- Use `e ask` for a headless turn or `e rpc` for JSONL automation. `e doctor` and `e providers` provide redacted diagnostics.
-- Install checksum-verified binaries for macOS and Linux on ARM64 or x86-64. `e update` downloads updates, and `/reload` switches to an installed update while resuming your session.
-- Read the bundled configuration and extension guides with `e docs`.
+- Customize themes, composer keybindings, models, prompt templates, and skills under `~/.ulo/`. Trusted projects can supply their own instructions, skills, and prompts.
+- Use `ulo ask` for a headless turn or `ulo rpc` for JSONL automation. `ulo doctor` and `ulo providers` provide redacted diagnostics.
+- Install checksum-verified binaries for macOS and Linux on ARM64 or x86-64. `ulo update` downloads updates, and `/reload` switches to an installed update while resuming your session.
+- Read the bundled configuration and extension guides with `ulo docs`.
 
 ### Improvements
 

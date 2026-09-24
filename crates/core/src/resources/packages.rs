@@ -2,17 +2,17 @@
 //! themes.
 //!
 //! A package is an npm package, a git repository, or a local directory laid
-//! out like `~/.e/` itself — `extensions/`, `skills/`, `prompts/`, `themes/`,
-//! any subset, no manifest of e's own. `e install <source>` fetches it under
-//! `~/.e/packages/` (`npm/node_modules/<name>` for npm, `<host>/<path>` for
+//! out like `~/.ulo/` itself — `extensions/`, `skills/`, `prompts/`, `themes/`,
+//! any subset, no manifest of ulo's own. `ulo install <source>` fetches it under
+//! `~/.ulo/packages/` (`npm/node_modules/<name>` for npm, `<host>/<path>` for
 //! git) and records the source in the `packages` list of `settings.json`;
-//! every loader then reads each package's directory after `~/.e/`'s own, so
-//! a resource in the home shadows a package's, and a trusted repo's `.e/`
+//! every loader then reads each package's directory after `~/.ulo/`'s own, so
+//! a resource in the home shadows a package's, and a trusted repo's `.ulo/`
 //! shadows both. A settings entry may carry per-kind glob filters
 //! ([`Filter`]) that leave part of a package unloaded.
 //!
 //! Settings are the source of truth, not the directory: delete an install
-//! and `e install` with no arguments puts it back. Startup never touches the
+//! and `ulo install` with no arguments puts it back. Startup never touches the
 //! network — a listed package missing on disk is reported in the transcript.
 //! git and npm run as subprocesses, always with lifecycle scripts off, so
 //! installing needs them on `PATH` and speaks whatever registries and
@@ -20,8 +20,8 @@
 //!
 //! A release package (`release:<owner>/<repo>/<name>[@tag]`) is a compiled
 //! extension published as a GitHub release asset, `<name>-<target>.tar.gz`
-//! beside a `checksums.txt` — how e's own `packages/` crates reach users.
-//! It installs under `~/.e/packages/releases/<owner>/<repo>/<name>` with the
+//! beside a `checksums.txt` — how ulo's own `packages/` crates reach users.
+//! It installs under `~/.ulo/packages/releases/<owner>/<repo>/<name>` with the
 //! executable in `extensions/`, the same shape as every other package.
 
 mod source;
@@ -73,7 +73,7 @@ async fn install_release(source: &Source) -> Result<(), String> {
     install_release_from(source, &base, &api).await
 }
 
-/// A configured package, as `e packages` shows it.
+/// A configured package, as `ulo packages` shows it.
 pub struct Package {
     /// The settings entry, verbatim.
     pub spec: String,
@@ -83,7 +83,7 @@ pub struct Package {
 pub enum Status {
     /// On disk; per-kind resource counts in [`KINDS`] order.
     Installed { counts: [usize; 4] },
-    /// Listed in settings, absent on disk — `e install` restores it.
+    /// Listed in settings, absent on disk — `ulo install` restores it.
     Missing,
     /// The settings entry does not parse.
     Invalid(String),
@@ -193,8 +193,8 @@ impl Entry {
     }
 }
 
-/// The entries recorded in `settings.json`, in order — what `e install` and
-/// `e remove` edit. A malformed entry is dropped here and rewritten away by
+/// The entries recorded in `settings.json`, in order — what `ulo install` and
+/// `ulo remove` edit. A malformed entry is dropped here and rewritten away by
 /// the next edit.
 pub fn settings_entries() -> Vec<Entry> {
     settings::get_array(SETTINGS_KEY)
@@ -208,7 +208,7 @@ fn set_entries(entries: &[Entry]) -> std::io::Result<()> {
     settings::set_array(SETTINGS_KEY, entries.iter().map(Entry::to_value).collect())
 }
 
-/// A trusted repository's own list: `<cwd>/.e/packages`, one source per
+/// A trusted repository's own list: `<cwd>/.ulo/packages`, one source per
 /// line, `#` comments. Shared by the team through the repository; installs
 /// land in the user's managed roots like any other package. Only npm, git,
 /// and release sources are honoured: a local directory would run in place,
@@ -217,7 +217,9 @@ pub fn project_entries(cwd: &Path) -> Vec<String> {
     if !crate::config::trust::trusted(cwd) {
         return Vec::new();
     }
-    let Ok(text) = std::fs::read_to_string(cwd.join(".e").join("packages")) else {
+    let Ok(text) =
+        std::fs::read_to_string(crate::config::home::workspace_directory(cwd).join("packages"))
+    else {
         return Vec::new();
     };
     text.lines()
@@ -278,9 +280,12 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
             // A throwaway prefix: the package lands at
             // `<dir>/node_modules/<name>`, and the whole prefix goes at exit.
             let dir = std::env::temp_dir().join(format!(
-                "e-package-{}-{}",
+                "ulo-package-{}-{}",
                 std::process::id(),
-                once_roots().lock().unwrap_or_else(|e| e.into_inner()).len()
+                once_roots()
+                    .lock()
+                    .unwrap_or_else(|ulo| ulo.into_inner())
+                    .len()
             ));
             let _ = std::fs::remove_dir_all(&dir);
             npm_install(&dir, &source)?;
@@ -290,9 +295,12 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
         }
         Source::Git { url, rev, .. } => {
             let dir = std::env::temp_dir().join(format!(
-                "e-package-{}-{}",
+                "ulo-package-{}-{}",
                 std::process::id(),
-                once_roots().lock().unwrap_or_else(|e| e.into_inner()).len()
+                once_roots()
+                    .lock()
+                    .unwrap_or_else(|ulo| ulo.into_inner())
+                    .len()
             ));
             let _ = std::fs::remove_dir_all(&dir);
             git(
@@ -313,9 +321,12 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
             ..
         } => {
             let dir = std::env::temp_dir().join(format!(
-                "e-package-{}-{}",
+                "ulo-package-{}-{}",
                 std::process::id(),
-                once_roots().lock().unwrap_or_else(|e| e.into_inner()).len()
+                once_roots()
+                    .lock()
+                    .unwrap_or_else(|ulo| ulo.into_inner())
+                    .len()
             ));
             let (base, api) = crate::update::github_release_urls(owner, repo);
             let wanted = match tag {
@@ -330,7 +341,7 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
     };
     once_roots()
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .push(root.clone());
     Ok(root)
 }
@@ -340,8 +351,8 @@ pub async fn use_once(spec: &str) -> Result<PathBuf, String> {
 /// directory removed is the ancestor this process created under the
 /// temporary directory, not necessarily the root itself.
 pub fn forget_once() {
-    let roots = std::mem::take(&mut *once_roots().lock().unwrap_or_else(|e| e.into_inner()));
-    let prefix = format!("e-package-{}-", std::process::id());
+    let roots = std::mem::take(&mut *once_roots().lock().unwrap_or_else(|ulo| ulo.into_inner()));
+    let prefix = format!("ulo-package-{}-", std::process::id());
     let temp = std::env::temp_dir();
     for root in roots {
         let temporary = root.ancestors().find(|dir| {
@@ -400,7 +411,7 @@ fn loaded() -> Vec<(PathBuf, Filter)> {
         .collect();
     for root in once_roots()
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|ulo| ulo.into_inner())
         .iter()
     {
         if !roots.iter().any(|(known, _)| known == root) {
@@ -435,7 +446,7 @@ pub fn missing() -> Vec<String> {
 pub fn counts(root: &Path) -> [usize; 4] {
     let entries = |kind: &str| -> Vec<PathBuf> {
         std::fs::read_dir(root.join(kind))
-            .map(|d| d.flatten().map(|e| e.path()).collect())
+            .map(|d| d.flatten().map(|ulo| ulo.path()).collect())
             .unwrap_or_default()
     };
     let extensions = entries("extensions")
@@ -500,7 +511,7 @@ pub async fn install(spec: &str) -> Result<(PathBuf, [usize; 4]), String> {
         Source::Local(path) => path.to_string_lossy().into_owned(),
         _ => spec.trim().to_string(),
     };
-    record(&source, &recorded).map_err(|e| format!("could not update settings.json: {e}"))?;
+    record(&source, &recorded).map_err(|ulo| format!("could not update settings.json: {ulo}"))?;
     let counts = counts(&root);
     Ok((root, counts))
 }
@@ -535,7 +546,7 @@ async fn install_one(spec: &str) -> Result<String, String> {
         Source::Local(_) => Ok(format!("{spec}: in place")),
         Source::Npm { .. } => {
             let before = installed_npm_version(&source.root());
-            npm_install(&npm_prefix(), &source).map_err(|e| format!("{spec}: {e}"))?;
+            npm_install(&npm_prefix(), &source).map_err(|ulo| format!("{spec}: {ulo}"))?;
             let after = installed_npm_version(&source.root());
             Ok(format!(
                 "{spec}: {}",
@@ -548,7 +559,7 @@ async fn install_one(spec: &str) -> Result<String, String> {
         }
         Source::Git { .. } => {
             let fresh = !source.root().is_dir();
-            sync(&source).map_err(|e| format!("{spec}: {e}"))?;
+            sync(&source).map_err(|ulo| format!("{spec}: {ulo}"))?;
             Ok(format!(
                 "{spec}: {}",
                 if fresh { "installed" } else { "up to date" }
@@ -558,7 +569,7 @@ async fn install_one(spec: &str) -> Result<String, String> {
             let before = crate::update::installed_release_tag(&source.root());
             install_release(&source)
                 .await
-                .map_err(|e| format!("{spec}: {e}"))?;
+                .map_err(|ulo| format!("{spec}: {ulo}"))?;
             let after = crate::update::installed_release_tag(&source.root());
             Ok(format!(
                 "{spec}: {}",
@@ -573,7 +584,7 @@ async fn install_one(spec: &str) -> Result<String, String> {
 }
 
 /// Forget a package: drop its settings entry and delete a managed clone. A
-/// local directory is left alone — e never owned it.
+/// local directory is left alone — ulo never owned it.
 pub fn remove(spec: &str) -> Result<PathBuf, String> {
     let source = Source::parse(spec)?;
     let identity = source.identity();
@@ -591,7 +602,7 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
     let Some(source) = installed else {
         return Err(format!("{spec} is not installed"));
     };
-    set_entries(&entries).map_err(|e| format!("could not update settings.json: {e}"))?;
+    set_entries(&entries).map_err(|ulo| format!("could not update settings.json: {ulo}"))?;
     let root = source.root();
     if let Source::Npm { name, .. } = &source {
         if root.is_dir() {
@@ -611,7 +622,7 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
         let managed = home::packages_dir();
         if root.starts_with(&managed) && root != managed && root.exists() {
             std::fs::remove_dir_all(&root)
-                .map_err(|e| format!("could not delete {}: {e}", root.display()))?;
+                .map_err(|ulo| format!("could not delete {}: {ulo}", root.display()))?;
             // Empty `<host>/<user>` parents are litter, not state.
             let mut parent = root.parent();
             while let Some(dir) = parent {
@@ -626,7 +637,7 @@ pub fn remove(spec: &str) -> Result<PathBuf, String> {
 }
 
 /// Append the source as typed, replacing any entry for the same package so
-/// `e install …@v2` moves a pin instead of duplicating it. Filters the
+/// `ulo install …@v2` moves a pin instead of duplicating it. Filters the
 /// replaced entry carried stay with it.
 fn record(source: &Source, spec: &str) -> std::io::Result<()> {
     let identity = source.identity();
@@ -660,7 +671,7 @@ fn sync(source: &Source) -> Result<(), String> {
     }
     if !root.is_dir() {
         let parent = root.parent().unwrap_or(&managed);
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|ulo| ulo.to_string())?;
         let result = git(
             parent,
             &["clone", "--quiet", "--", url, &root.to_string_lossy()],
@@ -669,9 +680,9 @@ fn sync(source: &Source) -> Result<(), String> {
             Some(rev) => checkout(&root, rev),
             None => Ok(()),
         });
-        if let Err(e) = result {
+        if let Err(ulo) = result {
             let _ = std::fs::remove_dir_all(&root);
-            return Err(e);
+            return Err(ulo);
         }
         return install_dependencies(&root);
     }
@@ -702,28 +713,28 @@ fn sync(source: &Source) -> Result<(), String> {
 }
 
 /// The npm project every npm package installs into. One `package.json` of
-/// e's own marks it, so npm treats it as a project rather than walking up
-/// to whatever the user has above `~/.e`.
+/// ulo's own marks it, so npm treats it as a project rather than walking up
+/// to whatever the user has above `~/.ulo`.
 pub fn npm_prefix() -> PathBuf {
     home::packages_dir().join("npm")
 }
 
 /// Install (or bring current) one npm package into the project at `prefix`,
 /// creating the project on first use. Lifecycle scripts never run: the
-/// package's code runs when e loads it, not when npm unpacks it. An
-/// unpinned package asks for `latest`, which is how `e install` updates it.
+/// package's code runs when ulo loads it, not when npm unpacks it. An
+/// unpinned package asks for `latest`, which is how `ulo install` updates it.
 fn npm_install(prefix: &Path, source: &Source) -> Result<(), String> {
     let Source::Npm { name, version } = source else {
         return Ok(());
     };
-    std::fs::create_dir_all(prefix).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(prefix).map_err(|ulo| ulo.to_string())?;
     let manifest = prefix.join("package.json");
     if !manifest.is_file() {
         std::fs::write(
             &manifest,
-            "{\n  \"name\": \"e-packages\",\n  \"private\": true,\n  \"description\": \"npm packages e installed; edit with `e install` and `e remove`\"\n}\n",
+            "{\n  \"name\": \"ulo-packages\",\n  \"private\": true,\n  \"description\": \"npm packages ulo installed; edit with `ulo install` and `ulo remove`\"\n}\n",
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|ulo| ulo.to_string())?;
     }
     let spec = format!("{name}@{}", version.as_deref().unwrap_or("latest"));
     npm(
@@ -751,7 +762,7 @@ fn installed_npm_version(root: &Path) -> Option<String> {
 
 /// A git package whose `package.json` declares dependencies gets them
 /// installed beside it, scripts off, so an extension that imports a library
-/// runs after `e install` the way an npm package's would. A package without
+/// runs after `ulo install` the way an npm package's would. A package without
 /// a manifest, or without dependencies, is left exactly as cloned.
 fn install_dependencies(root: &Path) -> Result<(), String> {
     let manifest = root.join("package.json");
@@ -759,7 +770,7 @@ fn install_dependencies(root: &Path) -> Result<(), String> {
         return Ok(());
     };
     let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", manifest.display()))?;
+        serde_json::from_str(&text).map_err(|ulo| format!("{}: {ulo}", manifest.display()))?;
     let has_dependencies = json
         .get("dependencies")
         .and_then(|d| d.as_object())
@@ -794,7 +805,7 @@ fn npm(cwd: &Path, args: &[&str]) -> Result<String, String> {
         .env("NPM_CONFIG_UPDATE_NOTIFIER", "false")
         .args(args)
         .output()
-        .map_err(|e| format!("could not run npm: {e} (npm packages need npm on PATH)"))?;
+        .map_err(|ulo| format!("could not run npm: {ulo} (npm packages need npm on PATH)"))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -820,7 +831,7 @@ fn checkout(root: &Path, rev: &str) -> Result<(), String> {
 /// Run git in `cwd`, returning stdout; a failure carries git's own stderr.
 /// Every call names its directory so no command inherits the process cwd —
 /// a checkout's own `.git/config` (an `insteadOf` rewrite, say) must not
-/// shape a clone e performs. Git never prompts: a source that needs
+/// shape a clone ulo performs. Git never prompts: a source that needs
 /// credentials fails instead of hanging the terminal.
 fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
@@ -828,7 +839,7 @@ fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(args)
         .output()
-        .map_err(|e| format!("could not run git: {e}"))?;
+        .map_err(|ulo| format!("could not run git: {ulo}"))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -841,15 +852,15 @@ fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     })
 }
 
-/// `e packages init <dir>`: a package to start from. One extension on the
+/// `ulo packages init <dir>`: a package to start from. One extension on the
 /// optional scaffold, the three other directories ready, a `package.json`
-/// carrying the `e-package` keyword so `npm publish` lists it in the
+/// carrying the `ulo-package` keyword so `npm publish` lists it in the
 /// catalog, and a README that says what to change. Refuses a directory that
 /// already has files.
 pub fn init(dir: &Path) -> Result<Vec<PathBuf>, String> {
     if dir.is_dir()
         && std::fs::read_dir(dir)
-            .map_err(|e| e.to_string())?
+            .map_err(|ulo| ulo.to_string())?
             .next()
             .is_some()
     {
@@ -860,7 +871,7 @@ pub fn init(dir: &Path) -> Result<Vec<PathBuf>, String> {
         .and_then(|n| n.to_str())
         .filter(|n| parse_npm(n, n).is_ok())
         .map(str::to_string)
-        .unwrap_or_else(|| "my-e-package".to_string());
+        .unwrap_or_else(|| "my-ulo-package".to_string());
     let files: [(&str, String); 7] = [
         ("extensions/scaffold.mjs", SCAFFOLD.to_string()),
         ("extensions/hello.mjs", HELLO.to_string()),
@@ -870,7 +881,7 @@ pub fn init(dir: &Path) -> Result<Vec<PathBuf>, String> {
         (
             "package.json",
             format!(
-                "{{\n  \"name\": \"{name}\",\n  \"version\": \"0.1.0\",\n  \"description\": \"an e package\",\n  \"keywords\": [\"e-package\"],\n  \"license\": \"MIT\",\n  \"files\": [\"extensions\", \"skills\", \"prompts\", \"themes\", \"README.md\"]\n}}\n"
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"0.1.0\",\n  \"description\": \"an ulo package\",\n  \"keywords\": [\"ulo-package\"],\n  \"license\": \"MIT\",\n  \"files\": [\"extensions\", \"skills\", \"prompts\", \"themes\", \"README.md\"]\n}}\n"
             ),
         ),
         ("README.md", README.replace("{name}", &name)),
@@ -879,14 +890,14 @@ pub fn init(dir: &Path) -> Result<Vec<PathBuf>, String> {
     for (relative, contents) in files {
         let path = dir.join(relative);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(parent).map_err(|ulo| ulo.to_string())?;
         }
-        std::fs::write(&path, contents).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(&path, contents).map_err(|ulo| format!("{}: {ulo}", path.display()))?;
         #[cfg(unix)]
         if relative.starts_with("extensions/") {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| e.to_string())?;
+                .map_err(|ulo| ulo.to_string())?;
         }
         written.push(path);
     }
@@ -928,22 +939,22 @@ ext.run();
 
 const README: &str = r#"# {name}
 
-An [e](https://github.com/arocomputer/e) package: any subset of `extensions/`,
-`skills/`, `prompts/`, and `themes/`, laid out like `~/.e/` itself.
+An [ulo](https://github.com/arocomputer/ulo) package: any subset of `extensions/`,
+`skills/`, `prompts/`, and `themes/`, laid out like `~/.ulo/` itself.
 
 Try it in place while you work on it:
 
 ```sh
-e --package . 
+ulo --package .
 ```
 
 Install it for good:
 
 ```sh
-e install .
+ulo install .
 ```
 
-Publish it so `e install npm:{name}` works for everyone — the `e-package`
+Publish it so `ulo install npm:{name}` works for everyone — the `ulo-package`
 keyword in `package.json` is what lists it in the catalog:
 
 ```sh
@@ -981,33 +992,34 @@ mod tests {
 
     #[test]
     fn shorthand_clones_over_https_and_splits_the_ref() {
-        let (url, host, path, rev) = git_parts("git:github.com/intuitums/e-diff@v1");
-        assert_eq!(url, "https://github.com/intuitums/e-diff");
+        let (url, host, path, rev) = git_parts("git:github.com/intuitums/ulo-diff@v1");
+        assert_eq!(url, "https://github.com/intuitums/ulo-diff");
         assert_eq!(host, "github.com");
-        assert_eq!(path, "intuitums/e-diff");
+        assert_eq!(path, "intuitums/ulo-diff");
         assert_eq!(rev.as_deref(), Some("v1"));
-        let (_, _, _, rev) = git_parts("git:github.com/intuitums/e-diff");
+        let (_, _, _, rev) = git_parts("git:github.com/intuitums/ulo-diff");
         assert_eq!(rev, None);
     }
 
     #[test]
     fn urls_and_scp_forms_share_one_identity() {
         let specs = [
-            "git:github.com/Intuitums/e-diff@v1",
-            "https://github.com/intuitums/e-diff.git",
-            "git:git@github.com:intuitums/e-diff@main",
-            "ssh://git@github.com/intuitums/e-diff",
-            "git:ssh://git@github.com:22/intuitums/e-diff@release/1.0",
+            "git:github.com/Intuitums/ulo-diff@v1",
+            "https://github.com/intuitums/ulo-diff.git",
+            "git:git@github.com:intuitums/ulo-diff@main",
+            "ssh://git@github.com/intuitums/ulo-diff",
+            "git:ssh://git@github.com:22/intuitums/ulo-diff@release/1.0",
         ];
         let identities: std::collections::HashSet<String> = specs
             .iter()
             .map(|s| Source::parse(s).unwrap().identity())
             .collect();
         assert_eq!(identities.len(), 1, "{identities:?}");
-        let (url, _, _, rev) = git_parts("git:git@github.com:intuitums/e-diff@main");
-        assert_eq!(url, "git@github.com:intuitums/e-diff");
+        let (url, _, _, rev) = git_parts("git:git@github.com:intuitums/ulo-diff@main");
+        assert_eq!(url, "git@github.com:intuitums/ulo-diff");
         assert_eq!(rev.as_deref(), Some("main"));
-        let (_, _, _, rev) = git_parts("git:ssh://git@github.com:22/intuitums/e-diff@release/1.0");
+        let (_, _, _, rev) =
+            git_parts("git:ssh://git@github.com:22/intuitums/ulo-diff@release/1.0");
         assert_eq!(rev.as_deref(), Some("release/1.0"));
     }
 
@@ -1027,44 +1039,44 @@ mod tests {
 
     #[test]
     fn managed_root_is_host_then_path_and_never_escapes() {
-        let source = Source::parse("git:github.com/intuitums/e-diff").unwrap();
+        let source = Source::parse("git:github.com/intuitums/ulo-diff").unwrap();
         assert_eq!(
             source.root(),
             home::packages_dir()
                 .join("github.com")
-                .join("intuitums/e-diff")
+                .join("intuitums/ulo-diff")
         );
         assert!(Source::parse("git:github.com/../x").is_err());
-        assert!(Source::parse("git:../arocomputer/e").is_err());
-        assert!(Source::parse("git:.hidden/arocomputer/e").is_err());
-        assert!(Source::parse("git:github.com/arocomputer/e@-bad").is_err());
+        assert!(Source::parse("git:../arocomputer/ulo").is_err());
+        assert!(Source::parse("git:.hidden/arocomputer/ulo").is_err());
+        assert!(Source::parse("git:github.com/arocomputer/ulo@-bad").is_err());
         assert!(Source::parse("--upload-pack=x").is_err());
         assert!(Source::parse("git:github.com").is_err());
     }
 
     #[test]
     fn npm_names_are_scoped_versioned_and_kept_safe() {
-        let plain = Source::parse("npm:e-diff").unwrap();
+        let plain = Source::parse("npm:ulo-diff").unwrap();
         assert_eq!(
             plain,
             Source::Npm {
-                name: "e-diff".into(),
+                name: "ulo-diff".into(),
                 version: None
             }
         );
         assert_eq!(
             plain.root(),
-            npm_prefix().join("node_modules").join("e-diff")
+            npm_prefix().join("node_modules").join("ulo-diff")
         );
-        let scoped = Source::parse("npm:@fschr/e-diff@1.2.0").unwrap();
+        let scoped = Source::parse("npm:@fschr/ulo-diff@1.2.0").unwrap();
         assert_eq!(
             scoped,
             Source::Npm {
-                name: "@fschr/e-diff".into(),
+                name: "@fschr/ulo-diff".into(),
                 version: Some("1.2.0".into())
             }
         );
-        assert_eq!(scoped.identity(), "npm:@fschr/e-diff");
+        assert_eq!(scoped.identity(), "npm:@fschr/ulo-diff");
         assert_eq!(
             Source::parse("npm:@fschr/E-Diff@2").map(|s| s.identity()),
             Err("`npm:@fschr/E-Diff@2` is not an npm package name".into())
@@ -1116,7 +1128,7 @@ mod tests {
             Source::Local(_)
         ));
         assert!(matches!(Source::parse("./pkg").unwrap(), Source::Local(p) if p.is_absolute()));
-        assert!(Source::parse("intuitums/e-diff").is_err());
+        assert!(Source::parse("intuitums/ulo-diff").is_err());
         let (_, host, path, _) = git_parts("file:///tmp/pkg");
         assert_eq!((host.as_str(), path.as_str()), ("file", "tmp/pkg"));
     }

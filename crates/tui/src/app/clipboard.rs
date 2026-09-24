@@ -5,7 +5,7 @@
 //! helper) can neither stall a ctrl+v forever nor balloon memory: the run
 //! is killed and the read surfaces as a notice.
 
-use e_core::providers::{ImageInput, MAX_IMAGE_BYTES};
+use ulo_core::providers::{ImageInput, MAX_IMAGE_BYTES};
 
 /// One clipboard read may take this long before its helpers are killed.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -52,7 +52,7 @@ fn run(program: &str, args: &[&str]) -> Result<RunOutput, RunError> {
     if stdout.len() as u64 > MAX_IMAGE_BYTES {
         // The reader stopped draining, so the child may be blocked on a
         // full pipe and never exit on its own — kill the group first.
-        e_core::tools::kill_group(child.id());
+        ulo_core::tools::kill_group(child.id());
         let _ = child.wait();
         let _ = reader.thread.join();
         return Err(RunError::Failed(format!(
@@ -66,7 +66,7 @@ fn run(program: &str, args: &[&str]) -> Result<RunOutput, RunError> {
     // The leader has exited, but a forked descendant may still hold the
     // pipe and block the reader — take the group down before waiting for
     // the reader's exit.
-    e_core::tools::kill_group(child.id());
+    ulo_core::tools::kill_group(child.id());
     let _ = child.wait();
     await_reader(&reader.done);
     let _ = reader.thread.join();
@@ -117,7 +117,7 @@ fn wait_for_exit(child: &mut std::process::Child) -> Option<bool> {
 /// the timeout.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn give_up(child: &mut std::process::Child, reader: &Reader, program: &str) -> RunError {
-    e_core::tools::kill_group(child.id());
+    ulo_core::tools::kill_group(child.id());
     let _ = child.wait();
     await_reader(&reader.done);
     RunError::Failed(format!(
@@ -199,7 +199,7 @@ pub(super) fn read() -> Result<Paste, String> {
     }
 }
 
-/// JXA reaches AppKit's pasteboard directly. It keeps e dependency-free but
+/// JXA reaches AppKit's pasteboard directly. It keeps ulo dependency-free but
 /// avoids AppleScript's expensive clipboard coercion (roughly 40–60 ms
 /// rather than 700 ms for the same screenshot in a local benchmark).
 #[cfg(target_os = "macos")]
@@ -240,13 +240,13 @@ function run(argv) {
 fn platform_images() -> Result<Vec<ImageInput>, String> {
     use std::os::unix::fs::OpenOptionsExt as _;
 
-    // The system temp dir, not the e home: the export is transient and is
+    // The system temp dir, not the ulo home: the export is transient and is
     // removed below, and osascript's write itself cannot be size-capped —
     // the bound is enforced when the file is read back.
     let dir = std::env::temp_dir();
     let id = uuid::Uuid::now_v7();
-    let raw = dir.join(format!(".e-clipboard-{id}.image"));
-    let png = dir.join(format!(".e-clipboard-{id}.png"));
+    let raw = dir.join(format!(".ulo-clipboard-{id}.image"));
+    let png = dir.join(format!(".ulo-clipboard-{id}.png"));
     let (Some(raw), Some(png)) = (raw.to_str(), png.to_str()) else {
         return Err("clipboard: temp path is not valid unicode".into());
     };
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn a_missing_helper_tries_the_next_one() {
         assert_eq!(
-            super::command_output("e-definitely-not-installed", &[]),
+            super::command_output("ulo-definitely-not-installed", &[]),
             Ok(None)
         );
     }

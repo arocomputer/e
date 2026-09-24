@@ -4,7 +4,7 @@
 //! tools and steering flow through, and persisted sessions resume.
 //!
 //! The mock provider is the repository's shared one (`crates/cli/tests/common`). Homes
-//! are plain temp directories passed to the builder — never `E_HOME` — so
+//! are plain temp directories passed to the builder — never `ULO_HOME` — so
 //! these tests also prove that configuration injection works without
 //! touching the process environment.
 
@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use common::{request_json, serve_raw, serve_sse};
-use e_sdk::{Event, Message, Session, Stop, ToolOutcome, Tools, Usage};
+use ulo_sdk::{Event, Message, Session, Stop, ToolOutcome, Tools, Usage};
 
 /// One plain reply with usage, in the Completions dialect.
 const OK: &str = concat!(
@@ -43,7 +43,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new(label: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "e-sdk-{label}-{}-{}",
+            "ulo-sdk-{label}-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
@@ -58,7 +58,7 @@ impl Drop for TempDir {
     }
 }
 
-/// An e home declaring one mock provider per `(name, port)`, each signed
+/// An ulo home declaring one mock provider per `(name, port)`, each signed
 /// in with an API key and serving a model called `test`.
 fn mock_home(label: &str, providers: &[(&str, u16)]) -> TempDir {
     let home = TempDir::new(label);
@@ -277,13 +277,13 @@ fn clearing_after_a_dropped_turn_waits_for_its_final_commit() {
         assert_eq!(texts, ["new prompt", "ok"]);
         let new_path = session.path().unwrap();
         assert_ne!(new_path, old_path);
-        let old: Vec<_> = e_sdk::transcript(old_path)
+        let old: Vec<_> = ulo_sdk::transcript(old_path)
             .unwrap()
             .into_iter()
             .map(|m| m.content)
             .collect();
         assert_eq!(old, ["old prompt", "ok"]);
-        assert_eq!(e_sdk::transcript(new_path).unwrap(), session.history());
+        assert_eq!(ulo_sdk::transcript(new_path).unwrap(), session.history());
         let requests = server.join().unwrap();
         assert_eq!(
             &message_texts(&request_json(&requests[1]))[1..],
@@ -482,7 +482,7 @@ async fn resume_cannot_be_unpersisted_afterwards() {
         .unwrap();
     resumed.prompt("second").await.unwrap();
     assert_eq!(
-        e_sdk::transcript(&path).unwrap().len(),
+        ulo_sdk::transcript(&path).unwrap().len(),
         4,
         "the resumed file kept growing despite persist(false) after resume"
     );
@@ -524,7 +524,7 @@ async fn build_checks_the_home_can_persist_before_any_turn() {
         Err(error) => error,
     };
     assert!(
-        matches!(error, e_sdk::Error::Session(_)),
+        matches!(error, ulo_sdk::Error::Session(_)),
         "expected the persistence preflight, got: {error}"
     );
 }
@@ -556,7 +556,7 @@ async fn a_persisted_session_is_listed_and_resumes_from_its_file() {
     assert_eq!(resumed.history().len(), 2);
     resumed.prompt("second").await.unwrap();
     assert_eq!(resumed.path(), Some(path.clone()));
-    assert_eq!(e_sdk::transcript(&path).unwrap().len(), 4);
+    assert_eq!(ulo_sdk::transcript(&path).unwrap().len(), 4);
 
     let second = request_json(&server.join().unwrap()[1]);
     let texts = message_texts(&second);
@@ -612,10 +612,10 @@ async fn the_builder_refuses_what_cannot_work_before_any_request() {
         .build()
         .await
         .unwrap_err();
-    assert!(matches!(error, e_sdk::Error::UnknownTool(name) if name == "teleport"));
+    assert!(matches!(error, ulo_sdk::Error::UnknownTool(name) if name == "teleport"));
 
     let error = base().effort("max").build().await.unwrap_err();
-    assert!(matches!(error, e_sdk::Error::Effort { .. }), "{error}");
+    assert!(matches!(error, ulo_sdk::Error::Effort { .. }), "{error}");
 
     let error = Session::builder()
         .home(&home.0)
@@ -624,13 +624,13 @@ async fn the_builder_refuses_what_cannot_work_before_any_request() {
         .await
         .unwrap_err();
     assert!(
-        matches!(error, e_sdk::Error::ModelUnavailable(_)),
+        matches!(error, ulo_sdk::Error::ModelUnavailable(_)),
         "{error}"
     );
 
     let empty = TempDir::new("empty-home");
     let error = Session::builder().home(&empty.0).build().await.unwrap_err();
-    assert!(matches!(error, e_sdk::Error::NoProvider), "{error}");
+    assert!(matches!(error, ulo_sdk::Error::NoProvider), "{error}");
 }
 
 /// Install an executable extension script in the home.
@@ -685,7 +685,7 @@ async fn extension_exited(pid: &str) {
 }
 
 /// A protocol-speaking extension that records its `initialize` request in
-/// its own working directory, then idles until e closes its stdin.
+/// its own working directory, then idles until ulo closes its stdin.
 #[cfg(unix)]
 const PROBE_EXTENSION: &str = r#"#!/bin/sh
 read line
@@ -888,7 +888,7 @@ async fn build_rejects_a_working_directory_that_is_not_one() {
         .await
         .expect_err("a file cannot be a workspace");
     assert!(
-        matches!(error, e_sdk::Error::Cwd { .. }),
+        matches!(error, ulo_sdk::Error::Cwd { .. }),
         "expected a cwd error, got: {error}"
     );
     // The message names the path and says what is wrong with it.
@@ -905,5 +905,5 @@ async fn build_rejects_a_working_directory_that_is_not_one() {
 fn sessions_and_turns_are_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Session>();
-    assert_send::<e_sdk::Turn<'static>>();
+    assert_send::<ulo_sdk::Turn<'static>>();
 }

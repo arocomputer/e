@@ -1,4 +1,4 @@
-//! The generic `e rpc` knobs a subagent extension shapes a delegated turn
+//! The generic `ulo rpc` knobs a subagent extension shapes a delegated turn
 //! with: the `tools` allowlist and the saved-transcript `session` path. Core
 //! stays generic — it never learns what an "agent" is, and nothing is
 //! appended to the delegated turn's prompt.
@@ -27,10 +27,10 @@ use common::{env_lock, request_json, serve_sse, Home};
 fn run_rpc(home: &Home, request_line: &str) -> Vec<u8> {
     // A version-1 line runs in the process cwd, which has to be trusted; this
     // test home starts empty, so the launch directory is trusted here.
-    e::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    ulo::core::config::trust::set(&std::env::current_dir().unwrap(), true).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -162,7 +162,7 @@ fn rpc_waits_for_the_answer_after_automatic_compaction() {
     assert_eq!(server.join().unwrap().len(), 3);
 }
 
-/// The subagent watchdog sends SIGTERM to its `e rpc` child. RPC must kill
+/// The subagent watchdog sends SIGTERM to its `ulo rpc` child. RPC must kill
 /// the active bash process group before exiting, or a detached grandchild can
 /// wake later and keep changing the workspace.
 #[cfg(unix)]
@@ -188,18 +188,18 @@ fn rpc_sigterm_kills_delegated_bash_descendants() {
     let (port, server) = serve_sse(&[&stream]);
     let home = mock_home("delegation-sigterm", port);
     let workspace = std::env::temp_dir().join(format!(
-        "e-delegation-sigterm-{}-{}",
+        "ulo-delegation-sigterm-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&workspace).unwrap();
     // A session refuses an untrusted workspace, and this one is only a place for
     // the delegated bash command to write its marker.
-    e::core::config::trust::set(&workspace, true).unwrap();
+    ulo::core::config::trust::set(&workspace, true).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_e"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ulo"))
         .args(["--no-extensions", "rpc"])
-        .env("E_HOME", &home.dir)
+        .env("ULO_HOME", &home.dir)
         .current_dir(&workspace)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -1,0 +1,56 @@
+---
+/**
+ * Shared product frame for ulo's pages outside the docs: header, mobile menu,
+ * `<main>`, and the copyright (linking to aro.computer) and resource links
+ * outside the rails. Render it
+ * inside `layouts/Site.astro`; the page's content is the default slot.
+ */
+import { Logo } from "./logo";
+import { SiteMenu } from "./site-menu";
+---
+
+<div class="ulo-site">
+  <a class="ulo-skip" href="#main">
+    {" "}
+    Skip to content{" "}
+  </a>
+  <div class="ulo-shell">
+    <header class="ulo-header">
+      <a class="ulo-mark" aria-label="ulo home" href="/">
+        <Logo />
+      </a>
+      <nav aria-label="Main">
+        <a class="ulo-nav-link" href="/docs">
+          {" "}
+          Docs{" "}
+        </a>
+        <a class="ulo-nav-link" href="/changelog">
+          {" "}
+          Changelog{" "}
+        </a>
+        <a
+          class="ulo-button ulo-button-primary"
+          href="https://github.com/arocomputer/ulo"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>
+      </nav>
+      <SiteMenu client:load />
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+  </div>
+  <footer class="ulo-footer">
+    <p>
+      © 2026 Fischer Hunt, doing business as{" "}
+      <a href="https://aro.computer">The Aro Computer Co.</a>
+    </p>
+    <nav aria-label="Resources">
+      <a href="/legal">Legal</a>
+      <a href="/contact">Contact</a>
+    </nav>
+  </footer>
+</div>

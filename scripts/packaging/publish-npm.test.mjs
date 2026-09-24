@@ -8,20 +8,20 @@ import { publishPackages } from "./publish-npm.mjs";
 
 /** Model the immutable tarball and registry responses without publishing test packages. */
 function fixture(t) {
-    const root = mkdtempSync(join(tmpdir(), "e-npm-publish-"));
+    const root = mkdtempSync(join(tmpdir(), "ulo-npm-publish-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
-    mkdirSync(join(root, "e"));
+    mkdirSync(join(root, "ulo"));
     writeFileSync(
-        join(root, "e/package.json"),
-        JSON.stringify({ name: "@arocomputer/e", version: "1.2.3" }),
+        join(root, "ulo/package.json"),
+        JSON.stringify({ name: "@arocomputer/ulo", version: "1.2.3" }),
     );
-    writeFileSync(join(root, "e.tgz"), "tarball");
+    writeFileSync(join(root, "ulo.tgz"), "tarball");
     const integrity =
         "sha512-" + createHash("sha512").update("tarball").digest("base64");
     const calls = [];
     const npm = (...args) => {
         calls.push(args);
-        return JSON.stringify([{ filename: "e.tgz" }]);
+        return JSON.stringify([{ filename: "ulo.tgz" }]);
     };
     return { root, integrity, calls, npm };
 }
@@ -31,13 +31,13 @@ test("a narrowed run only publishes the packages it names", async (t) => {
     mkdirSync(join(f.root, "slack"));
     writeFileSync(
         join(f.root, "slack/package.json"),
-        JSON.stringify({ name: "@arocomputer/e-slack", version: "1.2.3" }),
+        JSON.stringify({ name: "@arocomputer/ulo-slack", version: "1.2.3" }),
     );
     writeFileSync(join(f.root, "slack.tgz"), "slack tarball");
     const integrity = {};
     for (const [name, bytes] of [
-        ["@arocomputer/e", "tarball"],
-        ["@arocomputer/e-slack", "slack tarball"],
+        ["@arocomputer/ulo", "tarball"],
+        ["@arocomputer/ulo-slack", "slack tarball"],
     ])
         integrity[name] =
             "sha512-" + createHash("sha512").update(bytes).digest("base64");
@@ -48,14 +48,14 @@ test("a narrowed run only publishes the packages it names", async (t) => {
             npm: (command, path) => {
                 if (command === "pack") packed.push(path.split("/").pop());
                 return JSON.stringify([
-                    { filename: path.endsWith("slack") ? "slack.tgz" : "e.tgz" },
+                    { filename: path.endsWith("slack") ? "slack.tgz" : "ulo.tgz" },
                 ]);
             },
             lookup: async (name) => ({ dist: { integrity: integrity[name] } }),
         });
         return packed;
     };
-    assert.deepEqual(await publish({ exclude: ["slack"] }), ["e"]);
+    assert.deepEqual(await publish({ exclude: ["slack"] }), ["ulo"]);
     assert.deepEqual(await publish({ only: ["slack"] }), ["slack"]);
 });
 
@@ -109,7 +109,7 @@ test("a different tarball under the same version fails without overwriting it", 
  test("an older beta retry cannot move beta backward or touch latest", async (t) => {
     const f = fixture(t);
     const version = "0.0.0-beta-9";
-    writeFileSync(join(f.root, "e/package.json"), JSON.stringify({name:"@arocomputer/e", version, publishConfig:{tag:"beta"}}));
+    writeFileSync(join(f.root, "ulo/package.json"), JSON.stringify({name:"@arocomputer/ulo", version, publishConfig:{tag:"beta"}}));
     let published = false;
     const lookups = [];
     await publishPackages(f.root, {

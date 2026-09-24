@@ -1,24 +1,24 @@
 [package]
 # The terminal frontend: painting, the transcript and composer, panels and
 # pickers, and the app loop that drives a core session.
-name = "aro-e-tui"
+name = "ulo-tui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "The terminal frontend of e, the coding agent you can put anywhere"
-documentation = "https://e.aro.computer/docs"
+description = "The terminal frontend of ulo, the coding agent you can put anywhere"
+documentation = "https://ulo.sh/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "tui"]
 categories = ["command-line-utilities"]
 
 [lib]
-name = "e_tui"
+name = "ulo_tui"
 
 [dependencies]
-e-core.workspace = true
+ulo-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 unicode-width.workspace = true

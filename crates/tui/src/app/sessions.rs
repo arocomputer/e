@@ -12,8 +12,8 @@ impl App {
             self.notice("a turn is running — press Esc to stop it, then /resume".into());
             return;
         }
-        let cwd = e_core::session::normalized_cwd(&self.agent.cwd());
-        let items = session_items(e_core::session::list_all(), &cwd);
+        let cwd = ulo_core::session::normalized_cwd(&self.agent.cwd());
+        let items = session_items(ulo_core::session::list_all(), &cwd);
         if items.is_empty() {
             self.notice("no saved sessions".into());
             return;
@@ -32,7 +32,7 @@ impl App {
 
     pub(super) fn resume_recent(&mut self) {
         let cwd = self.agent.cwd();
-        match e_core::session::most_recent(&cwd) {
+        match ulo_core::session::most_recent(&cwd) {
             Some(path) => self.resume_path(path),
             None => self.notice("no saved sessions for this workspace".into()),
         }
@@ -45,7 +45,7 @@ impl App {
     /// wanting exactly the same replay, just fed a different list. A resumed
     /// transcript carries no welcome banner — the reference reserves it for
     /// a fresh session.
-    pub(super) fn rebuild_transcript(&mut self, messages: &[e_core::providers::ChatMessage]) {
+    pub(super) fn rebuild_transcript(&mut self, messages: &[ulo_core::providers::ChatMessage]) {
         self.transcript.clear();
         self.outputs.clear();
         self.viewer = None;
@@ -88,12 +88,12 @@ impl App {
         // and the auto-compact check don't see an empty context until the
         // first real usage report lands.
         self.context_tokens =
-            e_core::agent::compact::estimate_request_tokens(&system_prompt(), messages);
+            ulo_core::agent::compact::estimate_request_tokens(&system_prompt(), messages);
     }
 
     /// Replay an assistant message: its text as a reply block, its tool
     /// calls as pending rows in the open tool group (or a new one).
-    fn replay_assistant(&mut self, m: &e_core::providers::ChatMessage, replay: &mut Replay) {
+    fn replay_assistant(&mut self, m: &ulo_core::providers::ChatMessage, replay: &mut Replay) {
         if !m.content.trim().is_empty() {
             replay.open_group = None;
             self.transcript
@@ -107,7 +107,7 @@ impl App {
         for call in m.tool_calls() {
             replay.last_id += 1;
             let args = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-            let shown = e_core::tools::present(&call.name, &args);
+            let shown = ulo_core::tools::present(&call.name, &args);
             children.push(crate::transcript::ToolChild::pending(
                 replay.last_id,
                 shown.category,
@@ -135,7 +135,7 @@ impl App {
 
     /// Replay a tool result onto the row its call left pending. A result
     /// for no replayed call is skipped.
-    fn replay_tool_result(&mut self, m: &e_core::providers::ChatMessage, replay: &Replay) {
+    fn replay_tool_result(&mut self, m: &ulo_core::providers::ChatMessage, replay: &Replay) {
         let Some(call_id) = m.tool_call_id() else {
             return;
         };
@@ -146,7 +146,7 @@ impl App {
             .tool_meta()
             .as_ref()
             .map(|meta| (meta.outcome, meta.summary.clone()))
-            .unwrap_or((e_core::tools::ToolOutcome::Completed, "done".into()));
+            .unwrap_or((ulo_core::tools::ToolOutcome::Completed, "done".into()));
         let mut title = None;
         if let Some(group) = self.transcript.blocks.get_mut(block) {
             group.start_tool(id);
@@ -166,7 +166,7 @@ impl App {
         }
         let detail = self.remember_output(
             title.unwrap_or_else(|| "tool output".into()),
-            e_core::tools::sanitize_display(&m.content),
+            ulo_core::tools::sanitize_display(&m.content),
         );
         if let Some(child) = self
             .transcript
@@ -187,20 +187,20 @@ impl App {
             self.notice("a turn is running — press Esc to stop it, then resume".into());
             return;
         }
-        // Ownership first: a session another e is appending to must not be
+        // Ownership first: a session another ulo is appending to must not be
         // replayed into a second, diverging history.
-        let session = match e_core::session::SessionLog::reopen(&path) {
+        let session = match ulo_core::session::SessionLog::reopen(&path) {
             Ok(s) => s,
-            Err(e) => {
-                self.notice(format!("could not resume session: {e}"));
+            Err(ulo) => {
+                self.notice(format!("could not resume session: {ulo}"));
                 self.release_initial_prompt();
                 return;
             }
         };
-        let messages = match e_core::session::SessionLog::load(&path) {
+        let messages = match ulo_core::session::SessionLog::load(&path) {
             Ok(m) => m,
-            Err(e) => {
-                self.notice(format!("could not open session: {e}"));
+            Err(ulo) => {
+                self.notice(format!("could not open session: {ulo}"));
                 self.release_initial_prompt();
                 return;
             }
@@ -219,7 +219,7 @@ impl App {
         // Identity travels together: the resumed log's persisted name
         // replaces whatever the previous session was called.
         self.agent
-            .adopt_session_name(e_core::session::name_of(&path));
+            .adopt_session_name(ulo_core::session::name_of(&path));
         self.session_epoch += 1;
         extui::shutdown_then_start(self, "resume");
         self.notice(format!(
@@ -247,10 +247,10 @@ impl App {
             self.notice("nothing to rewind yet — send a message first".into());
             return;
         };
-        let nodes = match e_core::session::SessionLog::nodes(&path) {
+        let nodes = match ulo_core::session::SessionLog::nodes(&path) {
             Ok(n) => n,
-            Err(e) => {
-                self.notice(format!("could not read session: {e}"));
+            Err(ulo) => {
+                self.notice(format!("could not read session: {ulo}"));
                 return;
             }
         };
@@ -291,10 +291,10 @@ impl App {
         let Some(path) = self.agent.session_path() else {
             return;
         };
-        let nodes = match e_core::session::SessionLog::nodes(&path) {
+        let nodes = match ulo_core::session::SessionLog::nodes(&path) {
             Ok(n) => n,
-            Err(e) => {
-                self.notice(format!("could not read session: {e}"));
+            Err(ulo) => {
+                self.notice(format!("could not read session: {ulo}"));
                 return;
             }
         };
@@ -316,7 +316,7 @@ impl App {
     /// `/usage [24h|7d|30d|all]`: tokens and estimated cost by model over a
     /// period, from the sessions on disk.
     pub(super) fn show_usage(&mut self, period: &str) {
-        let Some(report) = e_core::usage::report_for(period) else {
+        let Some(report) = ulo_core::usage::report_for(period) else {
             self.notice("usage periods: 24h, 7d (default), 30d, all".into());
             return;
         };
@@ -326,11 +326,12 @@ impl App {
             "all" => "whole history",
             _ => "last 7 days",
         };
-        self.transcript.push(Block::show(e_core::extensions::Show {
-            title: format!("Usage · {label}"),
-            body: e_core::usage::markdown(&report, label),
-            format: e_core::extensions::Format::Markdown,
-        }));
+        self.transcript
+            .push(Block::show(ulo_core::extensions::Show {
+                title: format!("Usage · {label}"),
+                body: ulo_core::usage::markdown(&report, label),
+                format: ulo_core::extensions::Format::Markdown,
+            }));
     }
 
     /// `/undo`: put back what the last write or edit replaced.
@@ -374,14 +375,17 @@ impl App {
             return;
         }
         let model = self.agent.model_slug();
-        let mut log =
-            match e_core::session::SessionLog::create_with(&self.agent.cwd(), &model, &messages) {
-                Ok(log) => log,
-                Err(error) => {
-                    self.notice(format!("could not fork: {error}"));
-                    return;
-                }
-            };
+        let mut log = match ulo_core::session::SessionLog::create_with(
+            &self.agent.cwd(),
+            &model,
+            &messages,
+        ) {
+            Ok(log) => log,
+            Err(error) => {
+                self.notice(format!("could not fork: {error}"));
+                return;
+            }
+        };
         let name = name
             .filter(|n| !n.is_empty())
             .or_else(|| self.agent.session_name().map(|n| format!("{n} (fork)")));
@@ -406,7 +410,7 @@ impl App {
     }
 
     /// `/export [path]`: write the current branch as a self-contained HTML
-    /// page. Default: `e-session-<id>.html` in the working directory.
+    /// page. Default: `ulo-session-<id>.html` in the working directory.
     pub(super) fn export_session(&mut self, path: Option<String>) {
         let messages = self.agent.history_snapshot();
         if messages.is_empty() {
@@ -421,7 +425,7 @@ impl App {
                     .session_path()
                     .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
             })
-            .unwrap_or_else(|| "e session".into());
+            .unwrap_or_else(|| "ulo session".into());
         let target = match path.filter(|p| !p.is_empty()) {
             Some(path) => {
                 let path = std::path::PathBuf::from(path);
@@ -437,10 +441,10 @@ impl App {
                     .session_id()
                     .map(|id| id.chars().take(8).collect::<String>())
                     .unwrap_or_else(|| "unsaved".into());
-                self.agent.cwd().join(format!("e-session-{id}.html"))
+                self.agent.cwd().join(format!("ulo-session-{id}.html"))
             }
         };
-        let page = e_core::export::html(&title, &self.agent.model_slug(), &messages);
+        let page = ulo_core::export::html(&title, &self.agent.model_slug(), &messages);
         match std::fs::write(&target, page) {
             Ok(()) => self.notice(format!("exported to {}", target.display())),
             Err(error) => self.notice(format!("could not export: {error}")),
@@ -475,7 +479,7 @@ struct Replay {
 /// fall back to the full `~`-collapsed path so the rows stay
 /// distinguishable.
 fn session_items(
-    listed: Vec<e_core::session::SessionInfo>,
+    listed: Vec<ulo_core::session::SessionInfo>,
     cwd: &std::path::Path,
 ) -> Vec<MenuItem> {
     let mut tail_counts = std::collections::HashMap::<String, usize>::new();
@@ -522,7 +526,7 @@ fn session_items(
             // "All workspaces" tab itself. Tagging other workspaces 1
             // works because `tab_admits` checks all_tab before item
             // tags — reordering these tabs breaks that silently.
-            item.tab = Some(if e_core::session::normalized_cwd(&info.cwd) == cwd {
+            item.tab = Some(if ulo_core::session::normalized_cwd(&info.cwd) == cwd {
                 0
             } else {
                 1

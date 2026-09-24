@@ -1,0 +1,27 @@
+---
+/**
+ * The limited inline Markdown release notes use — code spans, bold, and
+ * absolute links — rendered as escaped text. Anything else stays literal.
+ */
+interface Props {
+  text: string;
+}
+
+const parts = Astro.props.text.split(
+  /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g,
+);
+---
+
+{parts.map((part) =>
+  /^\[.*\]\(https?:/.test(part) ? (
+    <a href={part.slice(part.indexOf("](") + 2, -1)}>
+      {part.slice(1, part.indexOf("]("))}
+    </a>
+  ) : part.startsWith("`") ? (
+    <code>{part.slice(1, -1)}</code>
+  ) : part.startsWith("**") ? (
+    <strong>{part.slice(2, -2)}</strong>
+  ) : (
+    part
+  ),
+)}

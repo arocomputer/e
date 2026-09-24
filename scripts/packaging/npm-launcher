@@ -8,11 +8,11 @@ while [ -L "$entry" ]; do
   case "$entry" in /*) ;; *) entry="$parent/$entry" ;; esac
 done
 root=$(CDPATH= cd -P "$(dirname "$entry")/.." && pwd)
-case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) echo 'e supports macOS and glibc Linux.' >&2; exit 1 ;; esac
-case "$(uname -m)" in arm64|aarch64) cpu=arm64 ;; x86_64|amd64) cpu=x64 ;; *) echo 'e supports ARM64 and x86-64.' >&2; exit 1 ;; esac
-name="e-$os-$cpu"
-for binary in "$root/node_modules/@arocomputer/$name/bin/e" "$root/../$name/bin/e"; do
+case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) echo 'ulo supports macOS and glibc Linux.' >&2; exit 1 ;; esac
+case "$(uname -m)" in arm64|aarch64) cpu=arm64 ;; x86_64|amd64) cpu=x64 ;; *) echo 'ulo supports ARM64 and x86-64.' >&2; exit 1 ;; esac
+name="ulo-$os-$cpu"
+for binary in "$root/node_modules/@arocomputer/$name/bin/ulo" "$root/../$name/bin/ulo"; do
   if [ -x "$binary" ]; then exec "$binary" "$@"; fi
 done
-echo "Missing @arocomputer/$name. Reinstall @arocomputer/e with optional dependencies enabled. Linux requires glibc." >&2
+echo "Missing @arocomputer/$name. Reinstall @arocomputer/ulo with optional dependencies enabled. Linux requires glibc." >&2
 exit 1

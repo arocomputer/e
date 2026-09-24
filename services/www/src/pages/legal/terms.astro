@@ -1,0 +1,121 @@
+---
+import Site from "@/layouts/Site.astro";
+import LegalDocument, {
+  type LegalSection,
+} from "@/components/legal/LegalDocument.astro";
+import SiteFrame from "@/components/SiteFrame.astro";
+import { LEGAL_ENTITY } from "@/data/operator";
+import "@/styles/legal.css";
+
+const sections: LegalSection[] = [
+  {
+    heading: "Open-source software",
+    body: [
+      'The ulo software is distributed under its <a href="/legal/license">MIT license</a>. These website terms do not replace or restrict the rights granted by that license.',
+    ],
+  },
+  {
+    heading: "Acceptance",
+    body: [
+      "By accessing or using the Services, you agree to these terms. If you use them on behalf of an organization, you accept on its behalf and confirm you have the authority to do so. If you do not agree, do not use the Services.",
+    ],
+  },
+  {
+    heading: "The Services",
+    body: [
+      "Aro builds ulo. As the work advances we may add, change, or retire features. Before a change that materially reduces functionality you depend on, we will give reasonable notice where we can.",
+    ],
+  },
+  {
+    heading: "Eligibility and accounts",
+    body: [
+      "You must be able to form a binding contract to use the Services. Where an account is required, you are responsible for keeping its credentials safe and for the activity that happens under it. Tell us promptly if you suspect unauthorized use.",
+    ],
+  },
+  {
+    heading: "Acceptable use",
+    body: [
+      "You agree not to misuse the Services — no unlawful activity, no infringing the rights of others, no probing or breaching our security, and no interfering with normal operation. You may not reverse-engineer our systems except to the narrow extent the law allows. We may suspend access when we must to protect the Services or the people who use them.",
+    ],
+  },
+  {
+    heading: "Your content",
+    body: [
+      "You keep ownership of the content and code you submit. You grant us only the license needed to run the Services — to store, process, and show your content back to you. We claim nothing beyond what operating the Services requires. We do not use your content to train our models except as described in our Privacy Policy.",
+    ],
+  },
+  {
+    heading: "Intellectual property",
+    body: [
+      `The Services — their software, design, and marks — belong to ${LEGAL_ENTITY} and its licensors. These terms give you a limited, revocable, non-exclusive license to use the Services as intended, and no other rights.`,
+    ],
+  },
+  {
+    heading: "Third-party services",
+    body: [
+      "The Services may connect to third-party tools and models. Your use of those is governed by their own terms, and we are not responsible for how they behave.",
+    ],
+  },
+  {
+    heading: "Export control",
+    body: [
+      "You may not access or use the Services in violation of U.S. export control or economic sanctions laws — including if you are located in, or ordinarily resident in, a country or region subject to U.S. embargo, or if you are listed on any U.S. government restricted-party list. By using the Services, you represent that neither applies to you.",
+    ],
+  },
+  {
+    heading: "Disclaimers",
+    body: [
+      "The Services are provided “as is” and “as available.” Software that reasons can still be wrong, and you remain responsible for reviewing its output before you rely on it. To the fullest extent the law permits, we disclaim the implied warranties of merchantability, fitness for a particular purpose, and non-infringement.",
+    ],
+  },
+  {
+    heading: "Limitation of liability",
+    body: [
+      "To the fullest extent the law permits, we will not be liable for indirect, incidental, special, or consequential damages, and our total liability arising from the Services will not exceed the greater of what you paid us in the twelve months before the claim or one hundred U.S. dollars.",
+    ],
+  },
+  {
+    heading: "Termination",
+    body: [
+      "You may stop using the Services at any time. We may suspend or end your access if you breach these terms, or if we must to comply with the law or protect the Services. Terms that should outlast the agreement — ownership, disclaimers, and the limits of liability — will survive.",
+    ],
+  },
+  {
+    heading: "Governing law",
+    body: [
+      "These terms are governed by the laws of the State of Delaware, without regard to its conflict-of-laws rules. Any dispute will be brought in the state or federal courts of Delaware, and you consent to their jurisdiction.",
+    ],
+  },
+  {
+    heading: "Changes to these terms",
+    body: [
+      "We may revise these terms as the Services change. Material revisions will be posted here with a new effective date; if you keep using the Services after they take effect, you accept them.",
+    ],
+  },
+  {
+    heading: "Miscellaneous",
+    body: [
+      "If any provision of these terms is found unenforceable, the rest will remain in effect, and the unenforceable provision will be modified to the minimum extent necessary to make it enforceable. These terms, together with any documents they incorporate by reference, are the entire agreement between us about the Services and supersede any prior agreements on the same subject. Our failure to enforce a provision is not a waiver of it. You may not assign these terms without our consent; we may assign them freely in connection with a merger, acquisition, or sale of substantially all our assets.",
+    ],
+  },
+];
+---
+
+<Site
+  title="Terms"
+  canonical="https://ulo.sh/legal/terms"
+  og={{
+    title: "Terms | ulo",
+    url: "https://ulo.sh/legal/terms",
+  }}
+>
+  <SiteFrame>
+    <LegalDocument
+      title="Terms of Service"
+      updated="September 19, 2026"
+      intro={`These terms are the agreement between you and ${LEGAL_ENTITY} for the use of ulo.sh and its related services. They are written to be read: plain about what we offer, what we ask of you, and where the limits lie.`}
+      sections={sections}
+      contactEmail="legal@aro.computer"
+    />
+  </SiteFrame>
+</Site>

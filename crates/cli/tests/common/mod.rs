@@ -1,7 +1,7 @@
 //! Shared fixtures for the integration tests.
 #![allow(dead_code)] // each test crate takes a subset of the helpers
 //!
-//! Each `tests/*.rs` crate `mod common;`s this directory. `E_HOME` is
+//! Each `tests/*.rs` crate `mod common;`s this directory. `ULO_HOME` is
 //! process-global, so anything that writes it takes `env_lock()` first —
 //! including across `#[tokio::test]` awaits (each test has its own runtime).
 
@@ -11,27 +11,27 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 
-use e::core::providers::catalog::{Api, Model, Thinking};
+use ulo::core::providers::catalog::{Api, Model, Thinking};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Hold this for the whole test whenever `E_HOME` or a provider `key_env`
+/// Hold this for the whole test whenever `ULO_HOME` or a provider `key_env`
 /// must stay ours. A prior panic must not cascade as `PoisonError`.
 pub fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    ENV_LOCK.lock().unwrap_or_else(|ulo| ulo.into_inner())
 }
 
 /// Registry env keys leak a developer's real sign-in into signed-out
 /// assertions. Clear every declared `key_env` for this process.
 pub fn clear_env_keys() {
-    for provider in e::core::providers::registry::all() {
+    for provider in ulo::core::providers::registry::all() {
         if let Some(env) = &provider.auth.key_env {
             std::env::remove_var(env);
         }
     }
 }
 
-/// A unique `E_HOME`; dropping it restores the prior value and removes its files.
+/// A unique `ULO_HOME`; dropping it restores the prior value and removes its files.
 pub struct Home {
     pub dir: PathBuf,
     previous: Option<std::ffi::OsString>,
@@ -40,14 +40,14 @@ pub struct Home {
 impl Home {
     pub fn new(label: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "e-{label}-{}-{}",
+            "ulo-{label}-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let previous = std::env::var_os("E_HOME");
-        std::env::set_var("E_HOME", &dir);
+        let previous = std::env::var_os("ULO_HOME");
+        std::env::set_var("ULO_HOME", &dir);
         Home { dir, previous }
     }
 
@@ -84,8 +84,8 @@ impl Home {
 impl Drop for Home {
     fn drop(&mut self) {
         match &self.previous {
-            Some(value) => std::env::set_var("E_HOME", value),
-            None => std::env::remove_var("E_HOME"),
+            Some(value) => std::env::set_var("ULO_HOME", value),
+            None => std::env::remove_var("ULO_HOME"),
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
@@ -147,8 +147,8 @@ pub fn test_model(provider: &str, port: u16, api: Api) -> Model {
         id: "test".into(),
         base_url: format!("http://127.0.0.1:{port}"),
         api,
-        catalog: e::core::providers::registry::CatalogStrategy::Openai,
-        responses_mount: e::core::providers::registry::ResponsesMount::Platform,
+        catalog: ulo::core::providers::registry::CatalogStrategy::Openai,
+        responses_mount: ulo::core::providers::registry::ResponsesMount::Platform,
         provider_supports_tools: true,
         provider_image_input: false,
         effort: vec!["low".into(), "medium".into(), "high".into()],

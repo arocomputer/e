@@ -20,9 +20,9 @@ def identity(version):
     if channel == 'pr':
         title += f' · PR {match[4]}'
     return {'version': version.removeprefix('v'), 'channel': channel, 'title': title,
-            'command': 'e' if channel == 'production' else 'e-pr',
+            'command': 'ulo' if channel == 'production' else 'ulo-pr',
             'npm_tag': 'latest' if channel == 'production' else 'pr',
-            'repository': 'arocomputer/e'}
+            'repository': 'arocomputer/ulo'}
 
 
 def version_key(version):

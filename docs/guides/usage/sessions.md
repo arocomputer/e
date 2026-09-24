@@ -11,20 +11,20 @@ output, and the usage they recorded.
 
 Several features work on whole sessions:
 
-- `e rpc` opens a session. See [automation](automation.md).
+- `ulo rpc` opens a session. See [automation](automation.md).
 - `/resume` lists sessions.
 - A [channel](channels.md) maps a session to a thread.
 
 ## Where they live
 
-e saves each conversation as a JSONL file under `~/.e/sessions/`, one file per
-session. e appends to the file as the turn runs.
+ulo saves each conversation as a JSONL file under `~/.ulo/sessions/`, one file per
+session. ulo appends to the file as the turn runs.
 
 | Command | Effect |
 | --- | --- |
-| `e` | start a new session |
-| `e -c` | continue this directory's most recent session |
-| `e -r` | pick a session from the list |
+| `ulo` | start a new session |
+| `ulo -c` | continue this directory's most recent session |
+| `ulo -r` | pick a session from the list |
 
 In the terminal, `/resume` does the same as `-r` with a picker. `/tree` shows
 the current session's shape.
@@ -52,11 +52,11 @@ undo edits a tool already made. Use git for the files.
 the next task deserves a separate history rather than a second branch of this
 one.
 
-`e rpc` exposes both, as `session.fork` and the `parent` of a resumed session.
+`ulo rpc` exposes both, as `session.fork` and the `parent` of a resumed session.
 
 ## Context
 
-When the model's context window fills, e summarizes older messages to make room
+When the model's context window fills, ulo summarizes older messages to make room
 and continues the same turn. You do not restart the task.
 
 Run `/compact` to ask for that summary by hand. Add a focus to steer what the
@@ -82,7 +82,7 @@ Read the page before you send it. It is exactly what the model saw.
 ## Recall
 
 Press up on an empty composer to walk back through your prompts from this and
-earlier sessions. e keeps them in `~/.e/history.jsonl`. This is usually faster
+earlier sessions. ulo keeps them in `~/.ulo/history.jsonl`. This is usually faster
 than remembering which session you meant.
 
 `/undo` restores up to 100 session writes or edits.

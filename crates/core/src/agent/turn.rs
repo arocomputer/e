@@ -1068,7 +1068,7 @@ async fn settle_tool(
 
 /// Lock a mutex, recovering the data if a panicking holder poisoned it.
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex.lock().unwrap_or_else(|ulo| ulo.into_inner())
 }
 
 /// Whole milliseconds, saturating at `u64::MAX`.
@@ -1080,7 +1080,7 @@ fn millis(duration: Duration) -> u64 {
 /// path performs it: an automatic one that lands first honours it rather
 /// than racing it, and the manual one then finds nothing left to do.
 fn take_focus(focus: &Arc<Mutex<Option<String>>>) -> Option<String> {
-    focus.lock().unwrap_or_else(|e| e.into_inner()).take()
+    focus.lock().unwrap_or_else(|ulo| ulo.into_inner()).take()
 }
 
 /// Largest nested `AGENTS.md` that is read in full; the rest of a longer
@@ -1201,7 +1201,7 @@ async fn load_nested_instructions(
     for dir in pending {
         let fresh = loaded
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .insert(dir.clone());
         if !fresh {
             continue;

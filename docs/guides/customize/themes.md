@@ -1,13 +1,13 @@
 ---
 title: Themes
-description: Recolor e with a theme JSON file.
+description: Recolor ulo with a theme JSON file.
 order: 6
 ---
 
 # Themes
 
-A theme is a JSON file that sets e's colors. Put it at
-`~/.e/themes/<name>.json`, or at `themes/<name>.json` in an installed
+A theme is a JSON file that sets ulo's colors. Put it at
+`~/.ulo/themes/<name>.json`, or at `themes/<name>.json` in an installed
 [package](../extend/packages.md).
 
 The names in `/settings` → Theme come from these directories plus the two
@@ -28,7 +28,7 @@ both the home and a package have one, the home's file comes first.
 - `colors` maps a UI token to a var name, an index, or a hex color. `""` means
   the terminal default.
 
-To start, copy a built-in. `e docs theme-dark` prints the dark theme's JSON
+To start, copy a built-in. `ulo docs theme-dark` prints the dark theme's JSON
 verbatim. Save it under a new name and edit it.
 
 Apply a theme instantly with `/reload`, or pick it in `/settings`.
@@ -45,7 +45,7 @@ These are the tokens you will most likely touch:
 - `accent`
 - the `syntax*` family, for code tinting
 
-e ignores unknown tokens. A missing token falls back to the terminal default,
+ulo ignores unknown tokens. A missing token falls back to the terminal default,
 so a partial theme is valid.
 
 ### Full transcript reader

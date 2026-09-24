@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-/** project routes a launch to another directory with `e --project <path>`.
+/** project routes a launch to another directory with `ulo --project <path>`.
  *
  * This startup-hook example uses a typed string flag and a same-binary
- * relaunch. The bootstrap marker names the e process that requested the
+ * relaunch. The bootstrap marker names the ulo process that requested the
  * relaunch, preventing a loop without trusting an inherited fixed value.
  *
- * Copy scaffold.mjs + project.mjs into ~/.e/extensions/ (chmod +x), restart
- * e, then run `e --project ../another-project "inspect this repository"`.
+ * Copy scaffold.mjs + project.mjs into ~/.ulo/extensions/ (chmod +x), restart
+ * ulo, then run `ulo --project ../another-project "inspect this repository"`.
  */
 
 import { realpathSync, statSync } from "node:fs";
@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { connect } from "./scaffold.mjs";
 
-const BOOTSTRAP_ENV = "E_PROJECT_BOOTSTRAPPED";
+const BOOTSTRAP_ENV = "ULO_PROJECT_BOOTSTRAPPED";
 
 /** Expand a leading home shorthand before resolving relative to the launch cwd. */
 function expandHome(path) {
@@ -43,14 +43,14 @@ const ext = connect({
   manifest: {
     name: "project",
     version: "1.0",
-    description: "e --project: relaunch in another project directory (example)",
+    description: "ulo --project: relaunch in another project directory (example)",
     flags: [
-      { name: "project", type: "string", description: "relaunch e in this directory" },
+      { name: "project", type: "string", description: "relaunch ulo in this directory" },
     ],
     hooks: ["startup"],
   },
   startup({ cwd, argv }) {
-    // The extension is a child of e. Relaunch replaces that same parent
+    // The extension is a child of ulo. Relaunch replaces that same parent
     // process, so its PID identifies only the relaunch this hook requested.
     const hostPid = String(process.ppid);
     if (process.env[BOOTSTRAP_ENV] === hostPid) {

@@ -6,11 +6,11 @@
 mod common;
 
 use common::{env_lock, request_json, serve_sse, test_model, Home};
-use e::core::agent::Agent;
-use e::core::providers::catalog::Api;
-use e::core::providers::{ChatMessage, ToolCall};
+use ulo::core::agent::Agent;
+use ulo::core::providers::catalog::Api;
+use ulo::core::providers::{ChatMessage, ToolCall};
 
-// The env lock is deliberately held across the summarize await: E_HOME and
+// The env lock is deliberately held across the summarize await: ULO_HOME and
 // the cwd must stay ours for the whole test, and each tokio test gets its
 // own runtime.
 #[allow(clippy::await_holding_lock)]
@@ -25,7 +25,7 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
     let (port, server) = serve_sse(&[reply]);
     let home = Home::new("compact");
     home.auth(r#"{"mock":{"key":"k"}}"#);
-    let ws = std::env::temp_dir().join(format!("e-compact-ws-{port}"));
+    let ws = std::env::temp_dir().join(format!("ulo-compact-ws-{port}"));
     std::fs::create_dir_all(&ws).unwrap();
     // macOS: /var is a symlink to /private/var; the agent sees the canonical
     // cwd, so the session lookup must use it too.
@@ -51,13 +51,13 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
     ];
 
     let summary =
-        e::core::agent::compact::summarize(model.clone(), &history[..3], String::new(), None)
+        ulo::core::agent::compact::summarize(model.clone(), &history[..3], String::new(), None)
             .await
             .unwrap();
     assert_eq!(summary.text, "Goal: fix the parser. Next: run tests.");
     assert_eq!(
         summary.response.purpose,
-        e::core::providers::ResponsePurpose::Compaction
+        ulo::core::providers::ResponsePurpose::Compaction
     );
     assert_eq!(summary.response.usage.unwrap().input, 40);
 
@@ -82,7 +82,7 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
     assert_eq!(seeded.len(), 2, "seed plus the kept tail");
     assert!(seeded[0].content.contains("Goal: fix the parser."));
     assert_eq!(seeded[1].content, "the bug is in line 3");
-    let latest = e::core::session::list(&ws).into_iter().next().unwrap();
+    let latest = ulo::core::session::list(&ws).into_iter().next().unwrap();
     let logged = std::fs::read_to_string(&latest.path).unwrap();
     assert!(
         logged.contains("Goal: fix the parser."),
@@ -98,7 +98,7 @@ async fn compact_summarizes_and_seeds_a_fresh_session() {
 
 #[test]
 fn threshold_is_window_minus_reserve() {
-    use e::core::agent::compact::{
+    use ulo::core::agent::compact::{
         keep_recent_tokens, reserve_tokens, should_compact, RESERVE_TOKENS,
     };
     // Large windows keep the reference reserve.
@@ -123,7 +123,7 @@ fn split_spares_small_histories() {
         ChatMessage::user("hi"),
         ChatMessage::assistant("hello", Vec::new()),
     ];
-    let (to_summarize, kept) = e::core::agent::compact::split(&history, 200_000);
+    let (to_summarize, kept) = ulo::core::agent::compact::split(&history, 200_000);
     assert!(to_summarize.is_empty());
     assert_eq!(kept.len(), 2);
 }
@@ -150,7 +150,7 @@ fn split_never_cuts_at_a_tool_result() {
         ChatMessage::tool_result("c1", &big),
         ChatMessage::assistant("done", Vec::new()),
     ];
-    let (to_summarize, kept) = e::core::agent::compact::split(&history, 200_000);
+    let (to_summarize, kept) = ulo::core::agent::compact::split(&history, 200_000);
     assert_eq!(
         kept.len(),
         1,
@@ -184,7 +184,7 @@ fn split_never_separates_signed_thinking_from_its_assistant_turn() {
         ChatMessage::tool_result("c1", "ok"),
         ChatMessage::assistant("done", Vec::new()),
     ];
-    let (to_summarize, kept) = e::core::agent::compact::split(&history, 200_000);
+    let (to_summarize, kept) = ulo::core::agent::compact::split(&history, 200_000);
     // A cut happened, and the signed block stayed with its turn: either both
     // were summarized away or both remain in the kept tail, adjacent.
     let reasoning_kept = kept.iter().any(|m| m.role() == "reasoning");
@@ -218,7 +218,7 @@ async fn failed_fresh_log_keeps_the_old_session_attached() {
     use std::os::unix::fs::PermissionsExt;
     let _env = env_lock();
     let home = Home::new("loadcompact");
-    let ws = std::env::temp_dir().join(format!("e-loadcompact-ws-{}", std::process::id()));
+    let ws = std::env::temp_dir().join(format!("ulo-loadcompact-ws-{}", std::process::id()));
     std::fs::create_dir_all(&ws).unwrap();
     let ws = ws.canonicalize().unwrap();
     std::env::set_current_dir(&ws).unwrap();
@@ -226,7 +226,7 @@ async fn failed_fresh_log_keeps_the_old_session_attached() {
     let model = test_model("mock", 1, Api::Completions);
 
     // An old session with history, attached the way a resumed session is.
-    let mut old = e::core::session::SessionLog::create(&ws, "m").unwrap();
+    let mut old = ulo::core::session::SessionLog::create(&ws, "m").unwrap();
     let old_path = old.path().to_path_buf();
     old.append(&ChatMessage::user("original work")).unwrap();
     let (mut agent, _rx) = Agent::new(model);
@@ -266,7 +266,7 @@ async fn failed_fresh_log_keeps_the_old_session_attached() {
     // No second session log appeared.
     let logs: Vec<_> = walk(&sessions)
         .into_iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .filter(|p| p.extension().is_some_and(|ulo| ulo == "jsonl"))
         .collect();
     assert_eq!(logs.len(), 1, "a fresh log was created despite the failure");
 
@@ -309,7 +309,7 @@ async fn one_huge_tool_call_cannot_bypass_the_summary_budget() {
         }],
     )];
 
-    let summary = e::core::agent::compact::summarize(model, &history, String::new(), None)
+    let summary = ulo::core::agent::compact::summarize(model, &history, String::new(), None)
         .await
         .unwrap();
     assert_eq!(summary.text, "summary");
@@ -332,7 +332,7 @@ async fn a_truncated_summary_is_rejected() {
     let (port, server) = serve_sse(&[response]);
     let home = Home::new("compact-truncated");
     home.auth(r#"{"mock":{"key":"k"}}"#);
-    let result = e::core::agent::compact::summarize(
+    let result = ulo::core::agent::compact::summarize(
         test_model("mock", port, Api::Completions),
         &[ChatMessage::user("original task")],
         String::new(),
@@ -371,7 +371,7 @@ async fn an_overlong_focus_is_clipped_to_its_reserved_room() {
     let model = test_model("mock", port, Api::Completions);
     let history = [ChatMessage::user("fix the parser")];
     let focus = "f".repeat(5000);
-    e::core::agent::compact::summarize(model, &history, String::new(), Some(&focus))
+    ulo::core::agent::compact::summarize(model, &history, String::new(), Some(&focus))
         .await
         .unwrap();
     let sent = server.join().unwrap().remove(0);
@@ -393,7 +393,7 @@ async fn a_focus_reaches_the_checkpoint_prompt_and_missing_sections_are_named() 
     home.auth(r#"{"mock":{"key":"k"}}"#);
     let model = test_model("mock", port, Api::Completions);
     let history = [ChatMessage::user("fix the parser")];
-    let summary = e::core::agent::compact::summarize(
+    let summary = ulo::core::agent::compact::summarize(
         model,
         &history,
         String::new(),
@@ -413,7 +413,7 @@ async fn a_focus_reaches_the_checkpoint_prompt_and_missing_sections_are_named() 
     // The model kept two of six sections; compaction proceeds and reports
     // exactly which are missing.
     assert_eq!(
-        e::core::agent::compact::missing_sections(&summary.text),
+        ulo::core::agent::compact::missing_sections(&summary.text),
         vec![
             "## Constraints & Preferences",
             "## Progress",
@@ -421,7 +421,7 @@ async fn a_focus_reaches_the_checkpoint_prompt_and_missing_sections_are_named() 
             "## Critical Context"
         ]
     );
-    assert!(e::core::agent::compact::missing_sections(
+    assert!(ulo::core::agent::compact::missing_sections(
         "## Goal\n## Constraints & Preferences\n## Progress\n## Key Decisions\n## Next Steps\n## Critical Context"
     )
     .is_empty());

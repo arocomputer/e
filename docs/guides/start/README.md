@@ -1,6 +1,6 @@
 ---
 title: Start
-description: install e and run your first task
+description: install ulo and run your first task
 order: 1
 ---
 

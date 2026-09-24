@@ -1,13 +1,13 @@
 ---
 title: SDK
-description: Embed e's agent core in your Rust programs.
+description: Embed ulo's agent core in your Rust programs.
 order: 3
 ---
 
 # SDK
 
-The SDK is e's coding agent as a Rust library. It lives in `crates/sdk/` and is
-published as `aro-e-sdk`.
+The SDK is ulo's coding agent as a Rust library. It lives in `crates/sdk/` and is
+published as `ulo-sdk`.
 
 With the SDK you create a session against a working directory, prompt it,
 read the core's ordered event stream, and get a reply. Extension notices
@@ -18,7 +18,7 @@ terminal. You get the built-in tools, skills and `AGENTS.md` context,
 automatic compaction, on-disk session logs, and extensions.
 
 ```sh
-cargo add aro-e-sdk
+cargo add ulo-sdk
 ```
 
 ## Quick start
@@ -27,7 +27,7 @@ This example opens a session, streams one turn's events, and then prompts
 again for just the reply:
 
 ```rust
-use e_sdk::{Event, Session};
+use ulo_sdk::{Event, Session};
 
 let mut session = Session::builder()
     .cwd("/path/to/project")
@@ -76,7 +76,7 @@ poll it.
 
 - Iterate it for `Event`s, then call `finish()` for the `Reply`.
 - Or `.await` it directly to skip the events.
-- `steer()` adds a message to the running turn. e delivers it before the
+- `steer()` adds a message to the running turn. ulo delivers it before the
   turn's next provider request.
 - `cancel()` works like pressing Esc.
 - Dropping a running turn also interrupts it.
@@ -116,14 +116,14 @@ event. It ends the turn, so it arrives as the `TurnError`.
 - **Nothing is lost.** The turn reads the core's event channel directly, so
   an unread event holds the model instead of growing a buffer. A failed
   turn's partial text, usage, and tool counts come back inside the error.
-- **Nothing touches `~/.e` unless you ask.** Conversations are memory-only
+- **Nothing touches `~/.ulo` unless you ask.** Conversations are memory-only
   unless you set `persist(true)`. Extensions start only with
   `extensions(true)`. The SDK never writes settings. Effort set at build is
   local to the process.
 - **Configuration is injected, not inherited.** `home()` scopes every
   configuration read to that directory without touching the process
   environment. Sessions with different homes can coexist in one process.
-  Without `home()`, the home is `E_HOME`, then `~/.e`, as for the terminal.
+  Without `home()`, the home is `ULO_HOME`, then `~/.ulo`, as for the terminal.
 
 ## Events
 
@@ -144,7 +144,7 @@ A turn yields events in the order they happen:
 - `Warning`.
 - `Notice` for extension messages.
 
-Core events keep their order. e delivers a `Notice` only when no core event
+Core events keep their order. ulo delivers a `Notice` only when no core event
 is waiting. A talkative extension can interleave with model output but never
 delay it.
 
@@ -154,30 +154,30 @@ first event.
 ## Sessions on disk
 
 `persist(true)` writes the conversation to a JSONL log under the home's
-`sessions/`. These are the same files `e -r` lists, in the documented
+`sessions/`. These are the same files `ulo -r` lists, in the documented
 session format.
 
 | API | What it does |
 | --- | --- |
 | `SessionBuilder::saved()` | Lists a workspace's logs. |
 | `resume(path)` | Continues a log in place and holds its lock. |
-| `e_sdk::transcript(path)` | Reads a log without taking ownership. |
+| `ulo_sdk::transcript(path)` | Reads a log without taking ownership. |
 | `history(messages)` | Seeds a session from a transcript. With `persist(true)` the seeds are written to the session file, so a resume replays the whole conversation. |
 
 That is the whole checkpoint story: a readable file, not opaque bytes.
 
 ## Versioning
 
-The SDK versions itself, separately from the e binary.
+The SDK versions itself, separately from the ulo binary.
 
-The crate is named `aro-e-sdk` because bare `e` is taken on crates.io. The
+The crate is named `ulo-sdk` because bare `ulo` is taken on crates.io. The
 application crates share the same `aro-` family prefix.
 
 The SDK follows semantic versioning from its first published release.
 Before 1.0, a release that changes the documented API without a compatible
 path moves the minor version and names the change in the changelog.
 
-The SDK depends on `aro-e-core` alone and pins the exact version it was
+The SDK depends on `ulo-core` alone and pins the exact version it was
 tested against. The core's Rust items are not a stable API. See
 [Compatibility](compatibility.md).
 
@@ -188,15 +188,15 @@ immutable.
 ## Why a separate package
 
 The SDK is not part of the core and not an extension. It is a frontend over
-the core, like the terminal and `e rpc`, and it never links either of them. It has its own release boundary so that
+the core, like the terminal and `ulo rpc`, and it never links either of them. It has its own release boundary so that
 stabilizing an API is a deliberate act, not an accident of visibility.
 
 ## Building
 
 ```sh
-cargo build -p aro-e-sdk
-cargo test -p aro-e-sdk
-cargo run -p aro-e-sdk --example ask -- "what does this repository do"
+cargo build -p ulo-sdk
+cargo test -p ulo-sdk
+cargo run -p ulo-sdk --example ask -- "what does this repository do"
 ```
 
 The package is a member of the root workspace, so `./x check` and `./x test`
@@ -211,13 +211,13 @@ release job publishes the application before the SDK.
 ## What the SDK is not
 
 - **Not an extension.** Extensions are child processes that speak a JSONL
-  protocol to a running e. See [Extensions](extensions.md). The SDK links
+  protocol to a running ulo. See [Extensions](extensions.md). The SDK links
   the core into your program. With `extensions(true)`, it starts the home's
   extensions for their tools and hooks. They run in the session's `cwd` and
   are told so at `initialize`. Startup hooks do not run, and no flags are
-  parsed for them, because the host process's command line is not e's.
-- **Not a daemon.** e stays a spawned process. There is no server to run.
-- **Not a tool kernel.** The SDK runs e's tools in the working directory you
+  parsed for them, because the host process's command line is not ulo's.
+- **Not a daemon.** ulo stays a spawned process. There is no server to run.
+- **Not a tool kernel.** The SDK runs ulo's tools in the working directory you
   give it, as your user, without a permission prompt. This is the same
   safety contract as the terminal. Host-defined in-process tools are not
   part of the surface. Use an extension instead.

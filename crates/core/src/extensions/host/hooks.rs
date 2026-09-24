@@ -39,7 +39,7 @@ impl ExtensionHost {
     pub fn has_input_hook(&self) -> bool {
         self.extensions
             .iter()
-            .any(|e| e.manifest.hooks.iter().any(|h| h == "input"))
+            .any(|ulo| ulo.manifest.hooks.iter().any(|h| h == "input"))
     }
 
     /// Ask every extension with the `input` hook. The first extension to
@@ -52,7 +52,7 @@ impl ExtensionHost {
         if !self
             .extensions
             .iter()
-            .any(|e| e.manifest.hooks.iter().any(|h| h == "input"))
+            .any(|ulo| ulo.manifest.hooks.iter().any(|h| h == "input"))
         {
             return InputVerdict::default();
         }
@@ -147,7 +147,7 @@ impl ExtensionHost {
     pub fn renders(&self, subject: &str) -> bool {
         self.extensions
             .iter()
-            .any(|e| Self::wants_render(&e.manifest, subject))
+            .any(|ulo| Self::wants_render(&ulo.manifest, subject))
     }
 
     pub(super) fn wants_render(manifest: &Manifest, subject: &str) -> bool {
@@ -224,7 +224,7 @@ impl ExtensionHost {
     pub fn has_hook(&self, hook: &str) -> bool {
         self.extensions
             .iter()
-            .any(|e| e.manifest.hooks.iter().any(|h| h == hook))
+            .any(|ulo| ulo.manifest.hooks.iter().any(|h| h == hook))
     }
 
     /// Fire-and-forget lifecycle event to every subscribed extension. A
@@ -237,7 +237,7 @@ impl ExtensionHost {
         for ext in &self.extensions {
             let subscribed = match &ext.manifest.events {
                 None => name == "turn_end",
-                Some(events) => events.iter().any(|e| e == name),
+                Some(events) => events.iter().any(|ulo| ulo == name),
             };
             if subscribed {
                 let _ = ext.writer.try_send(line.clone());
@@ -251,7 +251,7 @@ impl ExtensionHost {
         if let Some(ext) = self
             .extensions
             .iter()
-            .find(|e| e.manifest.name == extension)
+            .find(|ulo| ulo.manifest.name == extension)
         {
             let line = json!({"method": method, "params": params}).to_string();
             let _ = ext.writer.try_send(line);

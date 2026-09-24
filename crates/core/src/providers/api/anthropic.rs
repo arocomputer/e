@@ -298,7 +298,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Anthropic reports disjoint prompt categories. Older responses expose
-    /// only the creation total; e requests ordinary ephemeral caching, so any
+    /// only the creation total; ulo requests ordinary ephemeral caching, so any
     /// unclassified write belongs to the five-minute bucket.
     fn message_start(&mut self, usage: &Value) {
         self.usage.input = usage["input_tokens"].as_u64().unwrap_or(0);

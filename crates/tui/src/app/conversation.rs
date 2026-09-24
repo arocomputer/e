@@ -87,10 +87,8 @@ impl App {
         if let Some(pane) = self.pane.as_ref() {
             let in_pane = match pane.split(width, &self.layout) {
                 Some((conversation, pane_width)) => match pane.side(&self.layout) {
-                    e_core::config::layout::Side::Right => {
-                        event.column as usize >= conversation + 3
-                    }
-                    e_core::config::layout::Side::Left => (event.column as usize) < pane_width,
+                    crate::layout::Side::Right => event.column as usize >= conversation + 3,
+                    crate::layout::Side::Left => (event.column as usize) < pane_width,
                 },
                 None => pane.focused,
             };

@@ -47,7 +47,7 @@ pub enum FinishReason {
     Refusal,
     /// The provider's content filter blocked or removed output.
     ContentFilter,
-    /// A reason e doesn't classify; carried verbatim.
+    /// A reason ulo doesn't classify; carried verbatim.
     Other(String),
 }
 
@@ -122,7 +122,7 @@ pub struct Request {
 
 /// Attach a provider's opt-in attribution headers before the request is sent.
 /// A provider opts in through `client_header` / `session_header` in its
-/// registry data; e sends its client name and stable session id under those
+/// registry data; ulo sends its client name and stable session id under those
 /// names so an OpenCode-style gateway recognizes the caller and can pin a
 /// conversation to one upstream for cache hits. A provider that declares
 /// neither receives neither — the session id is never broadcast to a provider
@@ -405,7 +405,7 @@ mod tests {
 
     fn temp_image_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "e-image-test-{}-{}-{name}",
+            "ulo-image-test-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

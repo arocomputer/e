@@ -37,7 +37,7 @@ const BUILTIN_COMMANDS: &[(&str, &str)] = &[
     ("/undo", "put back what the last write or edit replaced"),
     (
         "/trust",
-        "trust this directory (loads its AGENTS.md, .e resources)",
+        "trust this directory (loads its AGENTS.md, .ulo resources)",
     ),
     ("/settings", "change preferences"),
     ("/help", "show commands"),
@@ -67,7 +67,7 @@ impl App {
         // Built-in dispatch wins name clashes, so a template or extension
         // command shadowed by a built-in is unreachable — listing it would
         // show a duplicate row that runs the built-in anyway.
-        for template in e_core::resources::prompts::list(&self.agent.cwd()) {
+        for template in ulo_core::resources::prompts::list(&self.agent.cwd()) {
             if is_builtin_command(&template.name) {
                 continue;
             }
@@ -102,7 +102,7 @@ impl App {
     /// an argument hint, or an extension command that declared arguments.
     fn command_takes_arguments(&self, slashed: &str) -> bool {
         let name = slashed.trim_start_matches('/');
-        if let Some(template) = e_core::resources::prompts::find(name, &self.agent.cwd()) {
+        if let Some(template) = ulo_core::resources::prompts::find(name, &self.agent.cwd()) {
             return !template.argument_hint.trim().is_empty();
         }
         self.host
@@ -131,7 +131,7 @@ impl App {
     fn request_completions(&mut self, command: String, prefix: String) {
         let host = self.host.clone();
         let results = self.results.clone();
-        e_core::config::home::spawn(async move {
+        ulo_core::config::home::spawn(async move {
             let items = host.complete_command(&command, &prefix).await;
             let _ = results
                 .send(AppJob::Completions {
@@ -149,7 +149,7 @@ impl App {
         &mut self,
         command: &str,
         prefix: &str,
-        items: Vec<e_core::extensions::Completion>,
+        items: Vec<ulo_core::extensions::Completion>,
     ) {
         let text = self.editor.text();
         match self.completion_prefix(&text) {
@@ -314,8 +314,8 @@ impl App {
         // the gateways in the background (60s floor), and pop new rows into
         // the open picker when the answer lands.
         let results = self.results.clone();
-        e_core::config::home::spawn(async move {
-            e_core::providers::catalog::refresh_remote_within(60_000).await;
+        ulo_core::config::home::spawn(async move {
+            ulo_core::providers::catalog::refresh_remote_within(60_000).await;
             let _ = results.send(AppJob::CatalogRefreshed).await;
         });
         self.build_model_menu();
@@ -334,7 +334,7 @@ impl App {
         // the grouped order the rows themselves use.
         let mut tabs = vec!["All".to_string()];
         for m in &available {
-            let display = e_core::providers::catalog::display_name(&m.provider);
+            let display = ulo_core::providers::catalog::display_name(&m.provider);
             if !tabs[1..].contains(&display) {
                 tabs.push(display);
             }
@@ -346,7 +346,7 @@ impl App {
             .iter()
             .map(|m| {
                 let mut item = MenuItem::new(&m.id, &model_facts(m), &model::slug(m));
-                let display = e_core::providers::catalog::display_name(&m.provider);
+                let display = ulo_core::providers::catalog::display_name(&m.provider);
                 item.tab = tabs.iter().position(|t| *t == display);
                 item
             })
@@ -365,13 +365,13 @@ impl App {
         // Single-line rows, the reference's grammar: the skill name with a
         // dim source scope beside it, no description — Tab cycles the
         // source filter.
-        let global_root = e_core::config::home::skills_dir();
-        let items: Vec<MenuItem> = e_core::resources::skills::list(&self.agent.cwd())
+        let global_root = ulo_core::config::home::skills_dir();
+        let items: Vec<MenuItem> = ulo_core::resources::skills::list(&self.agent.cwd())
             .into_iter()
             .map(|s| {
                 let (scope, tab) = if s.dir.starts_with(&global_root) {
                     ("Global", 1)
-                } else if e_core::resources::packages::is_packaged(&s.dir) {
+                } else if ulo_core::resources::packages::is_packaged(&s.dir) {
                     ("Package", 3)
                 } else {
                     ("Workspace", 2)
@@ -401,7 +401,7 @@ impl App {
 
     pub(super) fn open_file_menu(&mut self, query: &str) {
         let cwd = std::env::current_dir().unwrap_or_default();
-        let items = e_core::workspace::list_files(&cwd)
+        let items = ulo_core::workspace::list_files(&cwd)
             .into_iter()
             .map(|path| MenuItem::new(&path, "", &path))
             .collect();
@@ -589,7 +589,7 @@ impl App {
         self.discard_composer_images();
 
         self.editor.set_text("");
-        let Some(skill) = e_core::resources::skills::get(name, &self.agent.cwd()) else {
+        let Some(skill) = ulo_core::resources::skills::get(name, &self.agent.cwd()) else {
             return;
         };
         // The directory rides along, exactly as the system-prompt
@@ -629,7 +629,7 @@ impl App {
 
 /// `200K context · 8K output` — exact multiples compact to K/M,
 /// anything else stays raw, the reference's fact grammar.
-fn model_facts(m: &e_core::providers::catalog::Model) -> String {
+fn model_facts(m: &ulo_core::providers::catalog::Model) -> String {
     let mut facts = Vec::new();
     if m.context_window > 0 {
         facts.push(token_fact(m.context_window, "context"));

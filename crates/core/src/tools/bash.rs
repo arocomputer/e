@@ -102,7 +102,7 @@ fn untrack_group(pid: u32) {
     }
 }
 
-/// Kill every live shell process group before the owning e process exits.
+/// Kill every live shell process group before the owning ulo process exits.
 pub fn kill_tracked_processes() {
     let mut groups = lock(&PROCESS_GROUPS);
     for pid in groups.take().unwrap_or_default() {
@@ -871,13 +871,13 @@ fn drain_complete_utf8(carry: &mut Vec<u8>) -> String {
                 carry.clear();
                 return out;
             }
-            Err(e) => {
-                let valid = e.valid_up_to();
+            Err(ulo) => {
+                let valid = ulo.valid_up_to();
                 // valid_up_to() proves the prefix decodes; lossy is byte-
                 // identical there and degrades instead of panicking if a
                 // future refactor breaks that proof.
                 out.push_str(&String::from_utf8_lossy(&carry[..valid]));
-                match e.error_len() {
+                match ulo.error_len() {
                     Some(bad) => {
                         out.push('\u{FFFD}');
                         carry.drain(..valid + bad);
@@ -896,7 +896,7 @@ fn drain_complete_utf8(carry: &mut Vec<u8>) -> String {
 
 /// Lock a mutex, recovering the data if a panicking holder poisoned it.
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex.lock().unwrap_or_else(|ulo| ulo.into_inner())
 }
 
 fn failure(message: &str) -> ToolOutput {

@@ -6,10 +6,10 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 
-use e::core::tools;
+use ulo::core::tools;
 
 fn workspace(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("e-toolsafety-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ulo-toolsafety-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -107,11 +107,11 @@ fn edit_fails_when_the_file_changed_on_disk_since_e_saw_it() {
     let file = ws.join("config.txt");
     std::fs::write(&file, "alpha = 1\n").unwrap();
 
-    // e reads the file (recording its on-disk state)…
+    // ulo reads the file (recording its on-disk state)…
     let read = tools::run("read", r#"{"path":"config.txt"}"#, &ws);
     assert!(!read.is_error());
 
-    // …then something else rewrites it behind e's back.
+    // …then something else rewrites it behind ulo's back.
     std::fs::write(&file, "alpha = 1\nbeta = 2\n").unwrap();
 
     let stale = tools::run(

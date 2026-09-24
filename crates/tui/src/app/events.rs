@@ -7,8 +7,8 @@
 //! open (a late tool, an idle /compact) touch only what they can.
 
 use super::*;
-use e_core::agent::ToolCallPresentation;
-use e_core::providers::catalog::Pricing;
+use ulo_core::agent::ToolCallPresentation;
+use ulo_core::providers::catalog::Pricing;
 
 impl App {
     /// The single session stream, in order. Turn bookkeeping hangs off it.
@@ -85,7 +85,7 @@ impl App {
                     Kind::System,
                     format!(
                         "the device was asleep for {} — continuing",
-                        e_core::output::format_elapsed(duration_secs)
+                        ulo_core::output::format_elapsed(duration_secs)
                     ),
                 ));
             }
@@ -119,7 +119,7 @@ impl App {
         &mut self,
         summary: String,
         context_tokens: u64,
-        usage: Option<e_core::providers::Usage>,
+        usage: Option<ulo_core::providers::Usage>,
         pricing: Option<Pricing>,
     ) {
         self.compacting = false;
@@ -243,7 +243,7 @@ impl App {
     fn on_tool_end(
         &mut self,
         id: u64,
-        outcome: e_core::tools::ToolOutcome,
+        outcome: ulo_core::tools::ToolOutcome,
         summary: String,
         content: String,
     ) {
@@ -280,7 +280,7 @@ impl App {
         }
         let detail = self.remember_output(
             title.unwrap_or_else(|| "tool output".into()),
-            e_core::tools::sanitize_display(&content),
+            ulo_core::tools::sanitize_display(&content),
         );
         // An extension that renders this tool's results gets
         // the stored output to rewrite.
@@ -303,7 +303,7 @@ impl App {
     }
 
     /// A usage frame: the context gauge, the turn's cost, and its tokens.
-    fn on_usage(&mut self, usage: e_core::providers::Usage, pricing: Option<Pricing>) {
+    fn on_usage(&mut self, usage: ulo_core::providers::Usage, pricing: Option<Pricing>) {
         let prompt = usage.prompt_tokens();
         self.context_tokens = prompt.saturating_add(usage.output);
         let Some(s) = &mut self.active else { return };
@@ -361,7 +361,7 @@ impl App {
             Kind::System,
             format!(
                 "run stopped — the device was asleep for {}",
-                e_core::output::format_elapsed(duration_secs)
+                ulo_core::output::format_elapsed(duration_secs)
             ),
         ));
     }
@@ -457,7 +457,7 @@ fn turn_trailer(s: &ActiveTurn) -> String {
     let cost = s
         .cost_usd
         .filter(|cost| *cost > 0.0)
-        .map(|cost| format!(" {}", e_core::output::format_cost(cost)))
+        .map(|cost| format!(" {}", ulo_core::output::format_cost(cost)))
         .unwrap_or_default();
     format!(
         "{}{}{}",

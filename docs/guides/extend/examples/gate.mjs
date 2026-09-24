@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-/** gate — the tool_call hook as a guard, in the fail-open shape e expects:
+/** gate — the tool_call hook as a guard, in the fail-open shape ulo expects:
  *  only an explicit block stops a call; anything else — including a slow or
  *  crashed extension — lets the tool through. Denies a few clearly
  *  destructive bash patterns while allowing everything else.
  *
- * Copy scaffold.mjs + gate.mjs into ~/.e/extensions/ (chmod +x) and restart
- * e, then ask the model to `rm -rf` something and watch it be refused.
+ * Copy scaffold.mjs + gate.mjs into ~/.ulo/extensions/ (chmod +x) and restart
+ * ulo, then ask the model to `rm -rf` something and watch it be refused.
  */
 
 import { connect } from "./scaffold.mjs";

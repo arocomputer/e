@@ -1,15 +1,15 @@
 //! The provider seam: one harness, every dialect, the catalog, the registry.
 //!
 //! Adding a dialect is a case in the table, not a new file. The mock server,
-//! `E_HOME` lock, and request collector live in `common/` so the pins stay
+//! `ULO_HOME` lock, and request collector live in `common/` so the pins stay
 //! about wire shape and event grammar — not fixture boilerplate.
 
 mod common;
 
 use common::{clear_env_keys, env_lock, read_tool, request_json, serve_sse, test_model, Home};
 
-use e::core::providers::catalog::{self, Api, Model, Thinking};
-use e::core::providers::{
+use ulo::core::providers::catalog::{self, Api, Model, Thinking};
+use ulo::core::providers::{
     self, ChatMessage, Event, FailureCause, FinishReason, ImageInput, Request, SseSplitter,
     SseStream, ToolCall, Usage, MAX_SSE_EVENT_BYTES,
 };
@@ -495,7 +495,7 @@ async fn collect_stream(
     (text, reasoning, calls, usage, finish)
 }
 
-async fn collect_error(request: Request) -> e::core::providers::ProviderError {
+async fn collect_error(request: Request) -> ulo::core::providers::ProviderError {
     let (mut rx, _handle) = providers::stream(request);
     while let Some(event) = rx.recv().await {
         match event {
@@ -649,7 +649,7 @@ async fn semantic_tool_progress_preserves_interleaved_call_identity() {
     server.join().unwrap();
 }
 
-// The env lock is held across awaits: E_HOME must stay ours and each
+// The env lock is held across awaits: ULO_HOME must stay ours and each
 // #[tokio::test] runs on its own runtime.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
@@ -817,7 +817,7 @@ async fn completions_retries_without_rejected_stream_options() {
     assert!(request_json(&sent[1]).get("stream_options").is_none());
 }
 
-/// OpenCode's gateways (go and zen) opt into attribution headers: e sends the
+/// OpenCode's gateways (go and zen) opt into attribution headers: ulo sends the
 /// stable session id as `x-opencode-session` and its client name as
 /// `x-opencode-client`. No other provider receives them — the id is never sent
 /// to a provider that did not opt in, so it cannot correlate a conversation
@@ -846,8 +846,8 @@ async fn opencode_gateways_get_session_and_client_headers() {
             "{provider} must send the stable session id: {sent}"
         );
         assert!(
-            sent.contains("x-opencode-client: e"),
-            "{provider} must identify e as the client: {sent}"
+            sent.contains("x-opencode-client: ulo"),
+            "{provider} must identify ulo as the client: {sent}"
         );
     }
 
@@ -947,7 +947,7 @@ async fn responses_codex_oauth_mount_sends_prompt_cache_key() {
 
     let mut model = test_model(case.provider, port, case.api);
     model.thinking = case.thinking;
-    model.responses_mount = e::core::providers::registry::ResponsesMount::Codex;
+    model.responses_mount = ulo::core::providers::registry::ResponsesMount::Codex;
     let request = Request {
         model,
         system: "sys".into(),
@@ -1042,7 +1042,7 @@ async fn responses_refusal_text_is_delivered_with_a_refusal_finish() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn responses_leaves_out_a_reasoning_item_nothing_followed() {
-    use e::core::agent::{Agent, SessionEvent};
+    use ulo::core::agent::{Agent, SessionEvent};
 
     let _lock = env_lock();
     let first = concat!(
@@ -1499,7 +1499,7 @@ async fn small_max_output_clamps_max_tokens_below_the_dialect_default() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn responses_replays_reasoning_items_ahead_of_their_calls() {
-    use e::core::agent::{Agent, SessionEvent};
+    use ulo::core::agent::{Agent, SessionEvent};
 
     let _lock = env_lock();
     let first = concat!(
@@ -1620,8 +1620,8 @@ async fn unexpected_eof_is_an_error_not_a_silent_done() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unanswered_request_fails_instead_of_hanging() {
-    use e::core::providers::{http, send_request_within, FailureCause};
     use std::time::Duration;
+    use ulo::core::providers::{http, send_request_within, FailureCause};
 
     // The gap between connect (client-bounded) and body reads (chunk-bounded):
     // the server accepts the request and never sends response headers.
@@ -1667,7 +1667,7 @@ fn registry_and_catalog_match_the_embedded_data() {
     clear_env_keys();
     let _home = Home::new("registry");
 
-    let all = e::core::providers::registry::all();
+    let all = ulo::core::providers::registry::all();
     assert!(all.len() >= 17);
     let catalog = catalog::catalog();
 
@@ -1727,18 +1727,18 @@ fn registry_and_catalog_match_the_embedded_data() {
 
     // Panel contents, from data: two account flows, fourteen key providers
     // (the keyless locals appear in neither panel).
-    assert_eq!(e::core::providers::registry::oauth_providers().len(), 2);
-    assert_eq!(e::core::providers::registry::key_providers().len(), 14);
+    assert_eq!(ulo::core::providers::registry::oauth_providers().len(), 2);
+    assert_eq!(ulo::core::providers::registry::key_providers().len(), 14);
 
-    let vercel = e::core::providers::registry::find("vercel").expect("vercel is a built-in");
+    let vercel = ulo::core::providers::registry::find("vercel").expect("vercel is a built-in");
     assert_eq!(vercel.auth.key_env.as_deref(), Some("AI_GATEWAY_API_KEY"));
     assert!(vercel.auth.oauth.is_none(), "gateway is API-key only");
 
-    let google = e::core::providers::registry::find("google").expect("google is a built-in");
+    let google = ulo::core::providers::registry::find("google").expect("google is a built-in");
     assert_eq!(google.api(), Api::Google);
     assert_eq!(google.auth.key_env.as_deref(), Some("GEMINI_API_KEY"));
 
-    let ollama = e::core::providers::registry::find("ollama").expect("ollama is a built-in");
+    let ollama = ulo::core::providers::registry::find("ollama").expect("ollama is a built-in");
     assert!(ollama.auth.none && !ollama.auth.key);
 
     assert!(
@@ -1822,8 +1822,8 @@ fn registry_and_catalog_match_the_embedded_data() {
 
 #[test]
 fn native_support_tier_is_explicit_and_narrow() {
-    use e::core::providers::registry::SupportTier;
-    let native = e::core::providers::registry::all()
+    use ulo::core::providers::registry::SupportTier;
+    let native = ulo::core::providers::registry::all()
         .iter()
         .filter(|provider| provider.tier == SupportTier::Native)
         .map(|provider| provider.name.as_str())
@@ -1839,7 +1839,7 @@ fn native_support_tier_is_explicit_and_narrow() {
 #[test]
 fn image_input_uses_magic_bytes_not_a_trusting_extension() {
     let root = std::env::temp_dir().join(format!(
-        "e-image-input-{}-{}",
+        "ulo-image-input-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));
@@ -2255,7 +2255,7 @@ fn env_keys_sign_providers_in() {
 
     // Every key_env the registry declares is a real sign-in, not just
     // Anthropic's. Walk them so a new provider is covered by this test.
-    for provider in e::core::providers::registry::all() {
+    for provider in ulo::core::providers::registry::all() {
         let Some(env) = &provider.auth.key_env else {
             continue;
         };
@@ -2277,8 +2277,8 @@ fn env_keys_sign_providers_in() {
     // auth.json still wins over the environment.
     std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-env");
     home.auth(r#"{"anthropic":{"key":"sk-file"}}"#);
-    match e::core::auth::load().get("anthropic").unwrap() {
-        e::core::auth::Credential::ApiKey { key } => assert_eq!(key, "sk-file"),
+    match ulo::core::auth::load().get("anthropic").unwrap() {
+        ulo::core::auth::Credential::ApiKey { key } => assert_eq!(key, "sk-file"),
         _ => panic!("wrong credential kind"),
     }
     std::env::remove_var("ANTHROPIC_API_KEY");
@@ -2295,11 +2295,11 @@ fn keyless_local_providers_are_signed_in_without_credentials() {
     let _home = Home::new("keyless");
     clear_env_keys();
 
-    let auth = e::core::auth::load();
+    let auth = ulo::core::auth::load();
     assert!(auth.is_empty(), "no phantom credentials for keyless locals");
-    assert!(e::core::auth::signed_in(&auth, "ollama"));
-    assert!(e::core::auth::signed_in(&auth, "lmstudio"));
-    assert!(!e::core::auth::signed_in(&auth, "anthropic"));
+    assert!(ulo::core::auth::signed_in(&auth, "ollama"));
+    assert!(ulo::core::auth::signed_in(&auth, "lmstudio"));
+    assert!(!ulo::core::auth::signed_in(&auth, "anthropic"));
     assert!(catalog::available().is_empty());
 }
 
@@ -2310,9 +2310,9 @@ fn legacy_opencode_auth_keys_still_sign_in() {
     clear_env_keys();
 
     home.auth(r#"{"opencode":{"key":"sk-old"}}"#);
-    let auth = e::core::auth::load();
+    let auth = ulo::core::auth::load();
     assert!(
-        matches!(auth.get("opencode-zen"), Some(e::core::auth::Credential::ApiKey { key }) if key == "sk-old"),
+        matches!(auth.get("opencode-zen"), Some(ulo::core::auth::Credential::ApiKey { key }) if key == "sk-old"),
         "legacy key not honored"
     );
     assert!(catalog::available()
@@ -2453,7 +2453,7 @@ async fn chatgpt_backends_picklist_becomes_codex_models() {
     catalog::refresh_remote().await;
     let sent = server.join().unwrap();
     assert!(sent.contains("GET /backend-api/models"));
-    assert!(sent.contains("originator: e"));
+    assert!(sent.contains("originator: ulo"));
     assert!(sent.to_lowercase().contains("openai-beta"));
 
     let catalog = catalog::catalog();

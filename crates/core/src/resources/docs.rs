@@ -1,7 +1,7 @@
 //! The built-in documentation, embedded in the binary and served by
-//! `e docs [topic]` — a single binary has no package directory to point at,
+//! `ulo docs [topic]` — a single binary has no package directory to point at,
 //! so the binary itself is the docs carrier. The system prompt tells the
-//! agent to run it when asked about e's own surfaces.
+//! agent to run it when asked about ulo's own surfaces.
 //!
 //! The topics are not listed here: `build.rs` generates them from `docs/guides/`,
 //! where the folder is the nav group, the file stem is the topic, and front
@@ -24,7 +24,7 @@ const THEME_TOPICS: &[(&str, &str)] = &[
     ("theme-light", "The built-in light theme, as JSON."),
 ];
 
-/// Every topic `e docs` serves, in the order the folders and front matter give.
+/// Every topic `ulo docs` serves, in the order the folders and front matter give.
 pub fn topics() -> impl Iterator<Item = (&'static str, &'static str)> {
     TOPICS.iter().copied().chain(THEME_TOPICS.iter().copied())
 }

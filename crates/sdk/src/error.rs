@@ -9,15 +9,15 @@ use crate::Reply;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The requested model is not among those e can serve: its provider has
+    /// The requested model is not among those ulo can serve: its provider has
     /// no credential in this home, or the name matches nothing.
-    #[error("model `{0}` is unavailable — sign in to its provider (run `e`, then /login) or declare it in models.json")]
+    #[error("model `{0}` is unavailable — sign in to its provider (run `ulo`, then /login) or declare it in models.json")]
     ModelUnavailable(String),
     /// No model was requested and no provider is signed in, so there is no
     /// sensible default. The terminal warns and lets you sign in; an
     /// embedding has no such moment, so this is refused up front.
     #[error(
-        "no provider is signed in — pass `.model()` for a declared provider, or run `e` and /login"
+        "no provider is signed in — pass `.model()` for a declared provider, or run `ulo` and /login"
     )]
     NoProvider,
     /// The requested reasoning effort is not one the model declares.

@@ -1,4 +1,4 @@
-//! Prompt history across sessions: `~/.e/history.jsonl`, one JSON string
+//! Prompt history across sessions: `~/.ulo/history.jsonl`, one JSON string
 //! per line, newest last. The composer seeds its up-arrow recall from the
 //! tail at launch and every submitted prompt is appended. Prompts are the
 //! user's own words, so the file is private (0600) and never read by the
@@ -7,7 +7,7 @@
 
 use std::io::Write as _;
 
-use e_core::config::home;
+use ulo_core::config::home;
 
 /// Entries the composer recalls; older ones stay in the file until a trim.
 pub const RECALL: usize = 1000;

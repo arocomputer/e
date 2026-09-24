@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/** Delegate one isolated turn to another e process over `e rpc`. A
- *  self-contained extension: it speaks e's JSONL protocol directly (see the
+/** Delegate one isolated turn to another ulo process over `ulo rpc`. A
+ *  self-contained extension: it speaks ulo's JSONL protocol directly (see the
  *  loop at the bottom), so it is a single file with nothing to install beside
  *  it. */
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-const E_BIN = process.env.E_BIN || "e";
+const ULO_BIN = process.env.ULO_BIN || "ulo";
 
 // The agents this extension offers. Each is a tool/model envelope, not a
-// character: a delegated turn runs e's ordinary prompt and is shaped only by
+// character: a delegated turn runs ulo's ordinary prompt and is shaped only by
 // which tools it may use and which model runs it. `tools` is the built-in
 // allowlist (omit for the full set); `model` selects the model.
 const AGENTS = [
@@ -37,7 +37,7 @@ const agentNames = AGENTS.map((a) => a.name);
 const agentList = `Available agents: ${AGENTS.map((a) => `${a.name} (${a.description})`).join("; ")}.`;
 
 // A model counts only once the {provider/model} filler is replaced with a real
-// slug. Otherwise the child uses e rpc's normal model resolution.
+// slug. Otherwise the child uses ulo rpc's normal model resolution.
 const realModel = (model) => (model && !model.includes("{") ? model : undefined);
 
 const children = new Set();
@@ -60,7 +60,7 @@ const MANIFEST = {
   tools: [
     {
       name: "delegate",
-      description: `Delegate a bounded task to an isolated e turn and return its final answer. ${agentList}`,
+      description: `Delegate a bounded task to an isolated ulo turn and return its final answer. ${agentList}`,
       parameters: {
         type: "object",
         properties: {
@@ -95,11 +95,11 @@ async function runDelegate(input, update) {
     }
     update(`delegating${agent ? ` to ${agent.name}` : ""}\n`);
 
-    // A single-shot `e rpc` child: one request line in, one response object
+    // A single-shot `ulo rpc` child: one request line in, one response object
     // out, then EOF shuts it down. --no-extensions keeps the turn hermetic
     // and, crucially, bounds recursion — the child has no delegate tool of
     // its own, so a delegation is never a chain.
-    const child = spawn(E_BIN, ["rpc", "--no-extensions"], {
+    const child = spawn(ULO_BIN, ["rpc", "--no-extensions"], {
       cwd: process.cwd(),
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -125,7 +125,7 @@ async function runDelegate(input, update) {
     // than crash the extension.
     child.stdin.on("error", () => {});
     // An agent selects tools and a model. Omitting tools grants the full set,
-    // and a model argument overrides the agent's model. The turn uses e's
+    // and a model argument overrides the agent's model. The turn uses ulo's
     // ordinary system prompt. save:true keeps the full transcript available
     // through `session`.
     const request = { id: 1, prompt: input.prompt, save: true };
@@ -182,7 +182,7 @@ async function runDelegate(input, update) {
     return { content: answer + trailer };
 }
 
-// e's extension protocol: one JSON request per line on stdin, one response per
+// ulo's extension protocol: one JSON request per line on stdin, one response per
 // line on stdout. We answer `initialize` with the manifest, run `delegate` for
 // `tool_call` (streaming progress with `tool.update`), and exit on `shutdown`.
 // Ignore methods this extension does not implement.

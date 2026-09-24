@@ -1,4 +1,4 @@
-//! The extension process host: discovers extensions in `~/.e/extensions/` — a
+//! The extension process host: discovers extensions in `~/.ulo/extensions/` — a
 //! top-level executable file, or a subdirectory bundling its own files (its
 //! executable plus helpers like a scaffold or data) — keeps one long-lived
 //! process per extension, and routes tools, commands, hooks, and events over
@@ -150,11 +150,11 @@ impl Link {
         // `Ok(Err(_)) => extension exited` path instead of its long timeout.
         self.pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clear();
         self.progress
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .clear();
         true
     }
@@ -164,7 +164,10 @@ impl Link {
     /// first, and only after the handshake.
     fn exited(&self) {
         if self.retire() {
-            let mut state = self.exit_notice.lock().unwrap_or_else(|e| e.into_inner());
+            let mut state = self
+                .exit_notice
+                .lock()
+                .unwrap_or_else(|ulo| ulo.into_inner());
             state.1 = true;
             if let Some(notice) = &state.0 {
                 let _ = self.notices.try_send(notice.clone());
@@ -174,7 +177,10 @@ impl Link {
 
     /// Install the manifest's notice, including an EOF that beat the handshake.
     fn install_exit_notice(&self, notice: String) {
-        let mut state = self.exit_notice.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self
+            .exit_notice
+            .lock()
+            .unwrap_or_else(|ulo| ulo.into_inner());
         if state.1 {
             let _ = self.notices.try_send(notice.clone());
         }
@@ -183,7 +189,7 @@ impl Link {
 
     /// Kill the child if it still runs and wait it, so it never lingers as
     /// a zombie — for the session, or (on the relaunch path) across the
-    /// exec into the next e, where nothing could reap it any more. A child
+    /// exec into the next ulo, where nothing could reap it any more. A child
     /// that outlives `REAP_TIMEOUT` is dropped to tokio's orphan reaper.
     /// The slot stays locked across the wait so a second reaper (the
     /// reader task on EOF, `shutdown` a beat later) blocks until the first
@@ -224,7 +230,7 @@ impl Drop for StartupGuard {
             for link in self
                 .spawned
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .iter()
             {
                 link.kill_now();
@@ -302,7 +308,7 @@ fn drop_duplicate_tools(extensions: &mut [Extension], notices: &mpsc::Sender<Str
 }
 
 /// Shortcuts resolve the same way as tools: one owner per chord, first wins —
-/// and only chords e leaves unbound are offered at all.
+/// and only chords ulo leaves unbound are offered at all.
 fn drop_unavailable_shortcuts(extensions: &mut [Extension], notices: &mpsc::Sender<String>) {
     let mut seen_keys: std::collections::HashSet<String> = Default::default();
     for ext in extensions {
@@ -375,7 +381,7 @@ impl ExtensionHost {
     /// directory and command line are the extensions'. `notices` receives
     /// extension `notify` messages and startup diagnostics for the transcript.
     /// `requests` receives the extensions' own `ui.*` / `session.*`
-    /// requests; `None` is a headless host (`e -p`, the SDK, tests) where
+    /// requests; `None` is a headless host (`ulo -p`, the SDK, tests) where
     /// every such request is answered "no ui" at once and `initialize` says so.
     pub async fn start(
         notices: mpsc::Sender<String>,
@@ -393,14 +399,14 @@ impl ExtensionHost {
     /// `start` for an embedding whose workspace is not the process's: every
     /// extension runs in `cwd` and is told so at `initialize`, and `argv` is
     /// what typed extension flags are parsed from — pass an empty vector when
-    /// the host's command line has nothing to do with e.
+    /// the host's command line has nothing to do with ulo.
     pub async fn start_in(
         notices: mpsc::Sender<String>,
         cwd: PathBuf,
         argv: Vec<String>,
         requests: Option<mpsc::Sender<HostRequest>>,
     ) -> Arc<ExtensionHost> {
-        // Extensions under `~/.e/extensions/`, then each installed package's
+        // Extensions under `~/.ulo/extensions/`, then each installed package's
         // `extensions/` in settings order. A top-level executable is one
         // extension; a subdirectory bundles an entry point with helper files,
         // chosen as the first `index.*` executable in path order, a file
@@ -408,7 +414,7 @@ impl ExtensionHost {
         let paths = discover();
         for spec in crate::resources::packages::missing() {
             let _ = notices
-                .send(format!("package {spec}: not installed — run `e install`"))
+                .send(format!("package {spec}: not installed — run `ulo install`"))
                 .await;
         }
         let mut guard = StartupGuard {
@@ -594,7 +600,7 @@ impl ExtensionHost {
         serde_json::Value::Object(parsed)
     }
 
-    /// Remove typed extension flags before e parses subcommands and the initial
+    /// Remove typed extension flags before ulo parses subcommands and the initial
     /// prompt. Startup hooks still receive raw argv and may rewrite it first;
     /// this final pass prevents a tool-only string flag's separated value from
     /// becoming an accidental user message.
@@ -722,15 +728,15 @@ impl ExtensionHost {
     pub fn owns_tool(&self, name: &str) -> bool {
         self.extensions
             .iter()
-            .any(|e| e.manifest.tools.iter().any(|t| t.name == name))
+            .any(|ulo| ulo.manifest.tools.iter().any(|t| t.name == name))
     }
 
     /// `(name, description)` of every extension command, for the / picker.
     pub fn commands(&self) -> Vec<(String, String)> {
         self.extensions
             .iter()
-            .flat_map(|e| {
-                e.manifest
+            .flat_map(|ulo| {
+                ulo.manifest
                     .commands
                     .iter()
                     .map(|c| (c.name.clone(), c.description.clone()))
@@ -742,7 +748,7 @@ impl ExtensionHost {
     pub fn command_hint(&self, name: &str) -> Option<String> {
         self.extensions
             .iter()
-            .flat_map(|e| e.manifest.commands.iter())
+            .flat_map(|ulo| ulo.manifest.commands.iter())
             .find(|c| c.name == name)
             .and_then(|c| c.arguments.clone())
     }
@@ -751,15 +757,15 @@ impl ExtensionHost {
     pub fn has_completions(&self, name: &str) -> bool {
         self.extensions
             .iter()
-            .flat_map(|e| e.manifest.commands.iter())
+            .flat_map(|ulo| ulo.manifest.commands.iter())
             .any(|c| c.name == name && c.completions)
     }
 
     /// Ask the owning extension what could follow `/name prefix`. Empty on
     /// any failure: completions are a convenience, never a gate.
     pub async fn complete_command(&self, name: &str, prefix: &str) -> Vec<Completion> {
-        let Some(ext) = self.extensions.iter().find(|e| {
-            e.manifest
+        let Some(ext) = self.extensions.iter().find(|ulo| {
+            ulo.manifest
                 .commands
                 .iter()
                 .any(|c| c.name == name && c.completions)
@@ -792,8 +798,8 @@ impl ExtensionHost {
     pub fn flags(&self) -> Vec<(String, String)> {
         self.extensions
             .iter()
-            .flat_map(|e| {
-                e.manifest
+            .flat_map(|ulo| {
+                ulo.manifest
                     .flags
                     .iter()
                     .map(|f| (f.help_token(), f.description.clone()))
@@ -805,8 +811,8 @@ impl ExtensionHost {
     pub fn shortcuts(&self) -> Vec<(String, String)> {
         self.extensions
             .iter()
-            .flat_map(|e| {
-                e.manifest
+            .flat_map(|ulo| {
+                ulo.manifest
                     .shortcuts
                     .iter()
                     .map(|s| (normalize_chord(&s.key), s.description.clone()))
@@ -816,8 +822,8 @@ impl ExtensionHost {
 
     pub fn has_shortcut(&self, chord: &str) -> bool {
         let chord = normalize_chord(chord);
-        self.extensions.iter().any(|e| {
-            e.manifest
+        self.extensions.iter().any(|ulo| {
+            ulo.manifest
                 .shortcuts
                 .iter()
                 .any(|s| normalize_chord(&s.key) == chord)
@@ -827,8 +833,8 @@ impl ExtensionHost {
     /// Run the extension that owns `chord`; answered like a command.
     pub async fn run_shortcut(&self, chord: &str) -> CommandResult {
         let chord = normalize_chord(chord);
-        let Some(ext) = self.extensions.iter().find(|e| {
-            e.manifest
+        let Some(ext) = self.extensions.iter().find(|ulo| {
+            ulo.manifest
                 .shortcuts
                 .iter()
                 .any(|s| normalize_chord(&s.key) == chord)
@@ -854,7 +860,7 @@ impl ExtensionHost {
     pub fn tool_label(&self, name: &str) -> Option<ToolLabel> {
         self.extensions
             .iter()
-            .flat_map(|e| e.manifest.tools.iter())
+            .flat_map(|ulo| ulo.manifest.tools.iter())
             .find(|t| t.name == name)
             .and_then(|t| t.label.clone())
     }
@@ -862,7 +868,7 @@ impl ExtensionHost {
     pub fn has_command(&self, name: &str) -> bool {
         self.extensions
             .iter()
-            .any(|e| e.manifest.commands.iter().any(|c| c.name == name))
+            .any(|ulo| ulo.manifest.commands.iter().any(|c| c.name == name))
     }
 
     pub async fn call_tool(&self, name: &str, arguments: &str) -> ToolResult {
@@ -887,7 +893,7 @@ impl ExtensionHost {
         let Some(ext) = self
             .extensions
             .iter()
-            .find(|e| e.manifest.tools.iter().any(|t| t.name == name))
+            .find(|ulo| ulo.manifest.tools.iter().any(|t| t.name == name))
         else {
             return ToolResult {
                 content: format!("no extension owns tool {name}"),
@@ -924,7 +930,7 @@ impl ExtensionHost {
         let Some(ext) = self
             .extensions
             .iter()
-            .find(|e| e.manifest.commands.iter().any(|c| c.name == name))
+            .find(|ulo| ulo.manifest.commands.iter().any(|c| c.name == name))
         else {
             return CommandResult {
                 notice: Some(format!("no extension owns /{name}")),
@@ -993,13 +999,13 @@ impl ExtensionHost {
         ext.link
             .pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .insert(id, tx);
         if let Some(progress) = progress {
             ext.link
                 .progress
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|ulo| ulo.into_inner())
                 .insert(id, progress);
         }
         // Whatever ends this call — response, timeout, or the caller
@@ -1053,17 +1059,17 @@ impl Drop for PendingGuard {
         self.link
             .pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .remove(&self.id);
         self.link
             .progress
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .remove(&self.id);
     }
 }
 
-/// Chords e keeps for itself: interrupt and quit, the viewer and model
+/// Chords ulo keeps for itself: interrupt and quit, the viewer and model
 /// pickers, the external editor, clipboard paste and copy, the scoped-models
 /// save, the terminal's own suspend and clear. Everything else
 /// with a ctrl or alt modifier is an extension's to declare; bare keys and
@@ -1149,7 +1155,7 @@ mod tests {
 
         fn tmp(label: &str) -> std::path::PathBuf {
             let dir = std::env::temp_dir().join(format!(
-                "e-entrypoint-{label}-{}-{}",
+                "ulo-entrypoint-{label}-{}-{}",
                 std::process::id(),
                 uuid::Uuid::now_v7()
             ));
@@ -1171,7 +1177,7 @@ mod tests {
         #[test]
         fn a_file_named_for_the_bundle_is_the_entry_point() {
             let dir = tmp("subagent");
-            // The bundle directory is named "e-entrypoint-subagent-…"; use a file
+            // The bundle directory is named "ulo-entrypoint-subagent-…"; use a file
             // whose stem matches the directory name exactly.
             let name = dir.file_name().unwrap().to_string_lossy().into_owned();
             write(&dir, &format!("{name}.mjs"), true);

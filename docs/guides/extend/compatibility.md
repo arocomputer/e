@@ -1,12 +1,18 @@
 ---
 title: Compatibility
-description: The contracts e keeps stable across releases.
+description: The contracts ulo keeps stable across releases.
 order: 4
 ---
 
 # Compatibility
 
-e is still pre-1.0. This page names the surfaces you can persist or build
+The ulo rename changes command, environment, package, and Rust import names.
+The diagnostic JSON home field is now `ulo_home`. Session, configuration,
+RPC, and extension message formats keep their existing versions. See
+[installation migration](../start/install.md#migrate-an-existing-installation)
+for existing homes and workspace resources.
+
+ulo is still pre-1.0. This page names the surfaces you can persist or build
 against, so changes to them are deliberate, not accidental.
 
 ## Supported contracts
@@ -24,12 +30,12 @@ CLI one-shot commands return these exit statuses:
 | `1` | An operational or provider failure. |
 | `2` | Invalid arguments, or an unknown requested resource. |
 
-`e doctor` is a local-only diagnostic command. It returns 0 after producing
+`ulo doctor` is a local-only diagnostic command. It returns 0 after producing
 its report. It never turns provider reachability into a network side effect.
 
 ### Sessions
 
-Session JSONL headers carry `format_version`. e reads these versions:
+Session JSONL headers carry `format_version`. ulo reads these versions:
 
 - Version 0, the unmarked pre-release format.
 - Version 1.
@@ -46,12 +52,12 @@ Writes to `settings.json`, `auth.json`, and `trust.json` carry
 - Readers accept unversioned files.
 - Readers preserve unknown keys.
 - Readers quarantine corrupt input before creating a replacement.
-- An older e will not write over a file that carries a newer or invalid
+- An older ulo will not write over a file that carries a newer or invalid
   format version.
 
 ### Layout
 
-`~/.e/layout.json` is documented in [Layout](../customize/layout.md). Its
+`~/.ulo/layout.json` is documented in [Layout](../customize/layout.md). Its
 keys are `panes`, `split_min`, `focus`, `banner`, `status.left`, and
 `status.right`. Unknown keys are ignored, and a malformed file falls back to
 the defaults.
@@ -69,14 +75,14 @@ source is one of:
 An entry can also be an object that carries a `source` plus per-kind filter
 lists: `extensions`, `skills`, `prompts`, and `themes`.
 
-npm packages live under `~/.e/packages/npm/node_modules/<name>`. Git
-packages live under `~/.e/packages/<host>/<path>`.
+npm packages live under `~/.ulo/packages/npm/node_modules/<name>`. Git
+packages live under `~/.ulo/packages/<host>/<path>`.
 
 All of this is documented in [Packages](packages.md) and pinned by
 `crates/cli/tests/fixtures/config/settings-v1-packages.json`. A reader that meets an
 entry it cannot parse reports it and loads the rest.
 
-### `e rpc`
+### `ulo rpc`
 
 The headless session protocol reports `protocol: 2` in `hello`. A line
 without `method` is the version-1 one-shot request and keeps its flat
@@ -94,7 +100,7 @@ refusals. Valid requests still speak protocol 2.
 
 ### Extensions
 
-The extension JSONL protocol is versioned independently. e sends its
+The extension JSONL protocol is versioned independently. ulo sends its
 protocol number during `initialize`. Additive fields do not change the
 number. Incompatible wire changes require a new protocol version.
 
@@ -118,7 +124,7 @@ internal. They are not a persisted compatibility contract.
 
 ## Session locks
 
-Session sidecars now use OS-held locks. Stop older e processes before you
+Session sidecars now use OS-held locks. Stop older ulo processes before you
 resume their sessions with the new writer. Writers that use PID locks and
 writers that use OS locks must not open the same session concurrently.
 
@@ -142,18 +148,18 @@ Each kind of build has its own home directory:
 
 | Build | Home |
 | --- | --- |
-| Production | `~/.e` |
-| Local (`./x dev`) | `~/.e-dev` |
-| PR builds | `~/.e-pr/COMMIT` |
+| Production | `~/.ulo` |
+| Local (`./x dev`) | `~/.ulo-dev` |
+| PR builds | `~/.ulo-pr/COMMIT` |
 
-`E_HOME` overrides the channel default. Use a dedicated directory for
-`E_HOME`. It is private application state, not a shared workspace. Files
+`ULO_HOME` overrides the channel default. Use a dedicated directory for
+`ULO_HOME`. It is private application state, not a shared workspace. Files
 copied outside that directory are not migrated.
 
-On Unix, e creates its state directories with `0700` and session logs with
+On Unix, ulo creates its state directories with `0700` and session logs with
 `0600`.
 
-- Configuration writes and session creation or reopening also tighten the e
+- Configuration writes and session creation or reopening also tighten the ulo
   home directory to `0700`. This protects older files underneath it without
   rewriting their contents.
 - Reopening an older session sets its file to `0600`.
@@ -207,10 +213,10 @@ Files and saved sessions need no migration.
 ## Not a supported contract
 
 The workspace crates under `crates/` share code between the binary, the
-integration tests, and the SDK. Their public Rust items, in `aro-e-core`
+integration tests, and the SDK. Their public Rust items, in `ulo-core`
 and the frontend crates, are not a stable third-party API in themselves.
 
-The supported Rust SDK is the separate `aro-e-sdk` crate in `crates/sdk/`.
+The supported Rust SDK is the separate `ulo-sdk` crate in `crates/sdk/`.
 See [SDK](sdk.md). The API it consumes is its documented contract. It
 follows semantic versioning from its first published release. Before 1.0, a
 breaking change moves the minor version and is named in the changelog.

@@ -31,7 +31,7 @@ pub(super) async fn spawn(
         // orphan queue instead.
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("failed to start: {e}"))?;
+        .map_err(|ulo| format!("failed to start: {ulo}"))?;
 
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
@@ -58,7 +58,7 @@ pub(super) async fn spawn(
     if let Some(registry) = startup_registry {
         registry
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .push(link.clone());
     }
 
@@ -158,7 +158,7 @@ async fn read_stdout(stdout: ChildStdout, link: Arc<Link>, mut router: Router) {
                 let target = link
                     .progress
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|ulo| ulo.into_inner())
                     .get(&id)
                     .cloned();
                 if let Some(tx) = target {
@@ -178,7 +178,7 @@ async fn read_stdout(stdout: ChildStdout, link: Arc<Link>, mut router: Router) {
 }
 
 /// Send `initialize` and accept the manifest it answers with. `ui` says
-/// whether `ui.*` requests can reach someone; false under `e -p`.
+/// whether `ui.*` requests can reach someone; false under `ulo -p`.
 async fn handshake(ext: &Extension, cwd: &Path, ui: bool) -> Result<Manifest, String> {
     let host_shim = ExtensionHost {
         extensions: Vec::new(),
@@ -188,18 +188,18 @@ async fn handshake(ext: &Extension, cwd: &Path, ui: bool) -> Result<Manifest, St
         "protocol": protocol::PROTOCOL_VERSION,
         "capabilities": protocol::CAPABILITIES,
         "ui": ui,
-        "e_version": crate::VERSION,
+        "ulo_version": crate::VERSION,
         "cwd": cwd.display().to_string(),
-        // Namespaced extension config from ~/.e/settings.json:
+        // Namespaced extension config from ~/.ulo/settings.json:
         // {"extensions":{"<name>":{…}}} — each extension reads its own key.
         "extensions_config": crate::config::settings::extensions_config(),
     });
     let value = host_shim
         .request(ext, "initialize", init, INIT_TIMEOUT)
         .await
-        .map_err(|e| format!("initialize {e}"))?;
+        .map_err(|ulo| format!("initialize {ulo}"))?;
     let manifest: Manifest =
-        serde_json::from_value(value).map_err(|e| format!("bad manifest: {e}"))?;
+        serde_json::from_value(value).map_err(|ulo| format!("bad manifest: {ulo}"))?;
     if manifest.name.is_empty() {
         return Err("manifest has no name".into());
     }
@@ -251,7 +251,7 @@ impl Router {
         if let Some(tx) = link
             .pending
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|ulo| ulo.into_inner())
             .remove(&id)
         {
             let _ = tx.send(result);

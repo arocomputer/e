@@ -1,10 +1,10 @@
 //! Model facts from the models.dev community catalog. A provider's `/models` list is
 //! the truth of *which* ids it serves, but most report nothing beyond the
 //! id; models.dev carries the rest — context window, effort levels, image
-//! and tool support, pricing — for every provider e speaks to. Fetched in
+//! and tool support, pricing — for every provider ulo speaks to. Fetched in
 //! the same background refresh as the providers' lists, trimmed to the
-//! providers in the registry, and cached in `~/.e/models-dev.json`, so a
-//! model released today is usable today with no e release. Seeds are the
+//! providers in the registry, and cached in `~/.ulo/models-dev.json`, so a
+//! model released today is usable today with no ulo release. Seeds are the
 //! offline fallback; explicit `models.json` values win over both.
 
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ fn store_path() -> std::path::PathBuf {
     crate::config::home::home().join("models-dev.json")
 }
 
-/// What models.dev knows about one model, in e's own vocabulary. Every
+/// What models.dev knows about one model, in ulo's own vocabulary. Every
 /// field is optional so the overlay only touches what the feed states.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Facts {
@@ -94,9 +94,9 @@ pub(super) fn apply(model: &mut Model, facts: &Facts) {
     }
 }
 
-/// Cut the feed down to the registry's providers, keyed by e's provider
+/// Cut the feed down to the registry's providers, keyed by ulo's provider
 /// names, in `Facts` shape. models.dev describes every provider it knows
-/// (hundreds); e caches only what it can serve.
+/// (hundreds); ulo caches only what it can serve.
 pub(super) fn trim(feed: &Value) -> Map<String, Value> {
     let mut out = Map::new();
     for provider in crate::providers::registry::all() {
@@ -123,7 +123,7 @@ pub(super) fn trim(feed: &Value) -> Map<String, Value> {
     out
 }
 
-/// One models.dev model record into e's facts. Rates on models.dev are USD
+/// One models.dev model record into ulo's facts. Rates on models.dev are USD
 /// per million tokens, the same unit as `Pricing`; its single cache-write
 /// rate is the five-minute one.
 fn facts_of(entry: &Value) -> Facts {
@@ -244,7 +244,7 @@ mod tests {
                     "reasoning_options": [{ "type": "budget_tokens", "min": 1024 }]
                 }
             }},
-            // Together is `togetherai` on models.dev; the cache uses e's name.
+            // Together is `togetherai` on models.dev; the cache uses ulo's name.
             "togetherai": { "models": { "vendor/model": { "limit": { "context": 65536 } } } },
             // The codex deployment opts out of the feed entirely.
             "openai": { "models": { "gpt-x": { "limit": { "context": 1050000 } } } },

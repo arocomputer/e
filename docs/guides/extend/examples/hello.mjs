@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /** hello — every extension surface at once, built on the scaffold.
  *
- * Copy scaffold.mjs + hello.mjs into ~/.e/extensions/ (chmod +x) and
- * restart e:
+ * Copy scaffold.mjs + hello.mjs into ~/.ulo/extensions/ (chmod +x) and
+ * restart ulo:
  *
  *   /hello            — a notice from the command
  *   /hello world      — names the session "world" and echoes a greeting
  *   type: magical     — the input hook rewrites it to "the magic words"
  *   ask the model to call say_hello
  *
- * Config lives in ~/.e/settings.json under the extension's own name:
+ * Config lives in ~/.ulo/settings.json under the extension's own name:
  *   {"extensions":{"hello":{"name":"friend"}}}
  */
 

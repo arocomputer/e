@@ -1,15 +1,15 @@
-//! The result of one headless turn: what `e -p --json` prints last and what
-//! `e rpc` answers a prompt with. Folded from the session event stream so
+//! The result of one headless turn: what `ulo -p --json` prints last and what
+//! `ulo rpc` answers a prompt with. Folded from the session event stream so
 //! every headless consumer reports a turn the same way.
 
-use e_core::agent::SessionEvent;
-use e_core::providers;
+use ulo_core::agent::SessionEvent;
+use ulo_core::providers;
 
 #[derive(Default)]
 pub struct TurnAccumulator {
     pub output: String,
     pub error: Option<String>,
-    pub error_details: Option<e_core::agent::failure::ErrorDetails>,
+    pub error_details: Option<ulo_core::agent::failure::ErrorDetails>,
     pub warnings: Vec<String>,
     pub aborted: bool,
     /// `TurnEnd` arrived; the run has stopped.

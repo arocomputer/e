@@ -1,6 +1,6 @@
 //! The extension API: executable subprocesses over a line protocol.
 //!
-//! An extension is any executable in `~/.e/extensions/` — a top-level file, or
+//! An extension is any executable in `~/.ulo/extensions/` — a top-level file, or
 //! the entry point of a subdirectory that bundles its own files — in any
 //! language, speaking the line protocol in `protocol.rs`. Extensions can add tools the
 //! model calls (overriding built-ins by name), add slash commands, observe

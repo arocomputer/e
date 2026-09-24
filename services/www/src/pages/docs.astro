@@ -1,0 +1,14 @@
+---
+/**
+ * The docs root shows ulo's `getting-started` guide, so the first page a reader
+ * lands on is the repository's own text rather than a copy of it. The guide's
+ * slug is not a second URL for the same page.
+ */
+import Guide from "@/components/docs/Guide.astro";
+import { home } from "@/components/docs/data";
+import DevelopmentNotice from "@/components/DevelopmentNotice.astro";
+---
+
+<Guide entry={home()} slotSection="install">
+  <DevelopmentNotice slot="before" />
+</Guide>
