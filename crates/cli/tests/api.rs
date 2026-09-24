@@ -460,7 +460,7 @@ done
     let host = start_host(notices).await;
     let options = ulo::core::agent::AgentOptions {
         save_session: false,
-        tool_mode: ulo::core::cli::ToolMode::None,
+        tool_mode: ulo::core::run::ToolMode::None,
         ..ulo::core::agent::AgentOptions::default()
     };
     let (mut agent, mut events) = ulo::core::agent::Agent::with_options(

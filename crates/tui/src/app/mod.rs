@@ -367,7 +367,7 @@ struct App {
     widgets: std::collections::BTreeMap<String, Vec<Vec<extui::Span>>>,
     /// Where the regions go and what the status row says
     /// (`~/.ulo/layout.json`), reread with the theme and keymap.
-    layout: ulo_core::config::layout::Layout,
+    layout: crate::layout::Layout,
     /// ctrl+g was pressed: the frame loop hands the terminal to the
     /// external editor before its next select.
     external_edit: bool,
@@ -841,7 +841,7 @@ impl App {
     /// open to no overrides — never an error that blocks typing.
     fn apply_keymap(&mut self) {
         self.keymap = crate::keybindings::load();
-        self.layout = ulo_core::config::layout::load();
+        self.layout = crate::layout::load();
     }
 
     /// Refresh cached sign-in, effort, and layout preferences from disk.

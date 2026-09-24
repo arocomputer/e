@@ -7,7 +7,7 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-use crate::cli::ToolMode;
+use crate::run::ToolMode;
 
 mod bash;
 pub mod diffview;
@@ -1057,7 +1057,7 @@ mod tests {
     use super::{
         failure_summary, filter_schemas, is_builtin, restrict_to, schemas, stable_path_key,
     };
-    use crate::cli::ToolMode;
+    use crate::run::ToolMode;
 
     fn names(mode: ToolMode) -> Vec<String> {
         filter_schemas(schemas(), mode)

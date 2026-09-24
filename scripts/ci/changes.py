@@ -18,7 +18,7 @@ def classify(paths):
             gates['channels'] = True
         if (path.startswith(('scripts/packaging/', 'scripts/release/', 'scripts/ci/')) or workflow
                 or path in ('crates/core/build.rs', 'install.sh', 'LICENSE',
-                            'crates/core/src/update.rs', 'crates/cli/tests/update.rs',
+                            'crates/core/src/update.rs', 'crates/cli/src/update.rs', 'crates/cli/tests/update.rs',
                             'scripts/release-check.sh', 'x')):
             gates['packages'] = True
         if path in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml') or (

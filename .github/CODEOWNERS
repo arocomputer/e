@@ -15,6 +15,7 @@
 /crates/core/src/session.rs  @fschrhunt
 /crates/core/src/tools/      @fschrhunt
 /crates/core/src/update.rs   @fschrhunt
+/crates/cli/src/update.rs    @fschrhunt
 /services/www/                @fschrhunt
 # The guides are the source for three readers — GitHub, the website, and the
 # binary's `ulo docs` — so their structure, front matter, and links are reviewed

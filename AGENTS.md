@@ -65,14 +65,17 @@ crates/core/ the harness, terminal-free (`ulo_core`)
                   runtime keeps the whole text) — the whole surface;
                   directory listing and file-finding go through bash, and
                   skills load through read (the catalog carries their paths)
+  run.rs          frontend-neutral execution preferences and model validation
+  update.rs       shared release discovery, verification, and package installation
   session.rs · output.rs · workspace.rs — SessionLog is a tree, not just a
                   line: id/parent per message, `/tree` branches in place,
                   `create_with` seeds a `/fork`; `responses_in` feeds usage.rs
                   (the /usage fold) · export.rs (a branch as one HTML page)
 crates/tui/  the terminal frontend (`ulo_tui`; short paths re-export from the groups)
   paint/          render · screen · theme · background · highlight
-  content/        markdown · transcript · composer · keybindings (the
-                  ~/.ulo/keybindings.json keymap) · statusline · history
+  content/        markdown · transcript · composer · layout (pane placement
+                  and status templates) · keybindings (the ~/.ulo/keybindings.json
+                  keymap) · statusline · history
                   (prompts across sessions, ~/.ulo/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
   app/            mod.rs (App state and shared actions) · runtime.rs (startup
@@ -91,8 +94,9 @@ docs/        guides/: the guides, one folder per nav group, with front matter
              `ulo docs` embeds them, and the website (`services/www/`) renders
              them at ulo.sh/docs. contributing/ is the
              repository's own documentation, never published.
-crates/cli/  the `ulo` binary, published as ulo: src/main.rs (flags,
-             rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `ulo`
+crates/cli/  the `ulo` binary, published as ulo: src/args.rs parses flags;
+             src/update.rs owns self-update and its launch policy; src/main.rs
+             dispatches rpc/docs/auth/update, then tui::app::run · src/lib.rs (the `ulo`
              library, re-exporting core, tui, and rpc for the binary and tests)
              · tests/ (the integration suites, fixtures,
              and the ui/ PTY scenarios)

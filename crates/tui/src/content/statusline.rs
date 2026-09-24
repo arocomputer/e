@@ -190,12 +190,12 @@ impl Turn {
                 _ => String::new(),
             }
         };
-        ulo_core::config::layout::expand(template, &lookup)
+        crate::layout::expand(template, &lookup)
     }
 
     /// The row as ulo's default template paints it.
     pub fn label(&self, elapsed_secs: u64) -> Option<String> {
-        self.label_with(elapsed_secs, ulo_core::config::layout::DEFAULT_ACTIVITY, "")
+        self.label_with(elapsed_secs, crate::layout::DEFAULT_ACTIVITY, "")
     }
 }
 

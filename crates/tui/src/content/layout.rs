@@ -149,7 +149,7 @@ struct Raw {
 /// Load `~/.ulo/layout.json`. A missing or malformed file fails open to the
 /// defaults — a layout typo must never hide the conversation.
 pub fn load() -> Layout {
-    let Ok(json) = std::fs::read_to_string(crate::config::home::layout_path()) else {
+    let Ok(json) = std::fs::read_to_string(ulo_core::config::home::layout_path()) else {
         return Layout::default();
     };
     parse(&json).unwrap_or_default()
@@ -164,7 +164,7 @@ pub fn parse(json: &str) -> Option<Layout> {
         layout.split_min = usize::try_from(min).unwrap_or(usize::MAX).max(60);
     }
     if let Some(focus) = raw.focus {
-        let chord = crate::config::chord::normalize_chord(&focus);
+        let chord = ulo_core::config::chord::normalize_chord(&focus);
         if !chord.is_empty() {
             layout.focus = chord;
         }

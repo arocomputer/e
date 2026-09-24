@@ -7,11 +7,12 @@
 //! `pane.closed`); a selection attaches to the composer as a snapshot.
 //!
 //! Where the pane sits and how wide it is come from `~/.ulo/layout.json`
-//! (`core/config/layout.rs`); the extension only proposes a side.
+//! (`tui/content/layout.rs`); the extension only proposes a side.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::Value;
 
+use crate::layout::{Layout, Side};
 use crate::{
     markdown::{clip_styled, render_markdown, visible_width, wrap_styled},
     panel,
@@ -19,7 +20,6 @@ use crate::{
     theme::Theme,
     transcript::diff_row_style,
 };
-use ulo_core::config::layout::{Layout, Side};
 use ulo_core::tools::sanitize_display;
 
 /// Most bytes a pane's sections may carry together; past it the rest is
@@ -1007,7 +1007,7 @@ mod tests {
     fn unknown_keys_go_to_the_owner_and_the_split_obeys_the_layout() {
         let mut pane = pane();
         assert_eq!(pane.key(key(KeyCode::Char('x'))), Action::Key("x".into()));
-        let layout = ulo_core::config::layout::parse(
+        let layout = crate::layout::parse(
             r#"{"panes":{"diff":{"side":"right","width":30}},"split_min":100}"#,
         )
         .unwrap();

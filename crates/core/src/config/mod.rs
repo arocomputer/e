@@ -4,7 +4,6 @@
 
 pub mod chord;
 pub mod home;
-pub mod layout;
 pub mod settings;
 pub mod store;
 pub mod trust;

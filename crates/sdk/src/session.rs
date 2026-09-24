@@ -14,11 +14,11 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use ulo_core::agent::{Agent, AgentOptions, SessionEvent};
-use ulo_core::cli::ToolMode;
 use ulo_core::config::home;
 use ulo_core::extensions::ExtensionHost;
 use ulo_core::providers::catalog::{self, Model};
 use ulo_core::providers::{ChatMessage, ImageInput};
+use ulo_core::run::ToolMode;
 use ulo_core::session::{self as log, SessionLog};
 
 use crate::turn::{Start, Turn};

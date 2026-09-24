@@ -1,7 +1,6 @@
 //! Built-in command-line options.
 //!
-//! Parsing lives in the terminal-free core so the binary, tests, and future
-//! machine protocol all share one contract. Long descriptive names are the
+//! Parsing belongs to the executable. Long descriptive names are the
 //! canonical surface; compact aliases normalize to the same fields.
 //!
 //! Unknown flags are errors, not prompt text: extensions consume their
@@ -9,30 +8,7 @@
 //! `--` remains the escape hatch that turns flag-spelling text into a
 //! prompt, and near misses get a did-you-mean suggestion.
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ToolMode {
-    #[default]
-    All,
-    None,
-}
-
-impl ToolMode {
-    /// Whether tools run at all this turn. A coding agent acts, so the default
-    /// is the full toolset; `--no-tools` is the one deliberate opt-out.
-    pub fn allows(self) -> bool {
-        matches!(self, ToolMode::All)
-    }
-
-    /// Combine a process-wide ceiling with a per-request preference. A
-    /// nested protocol may remove capabilities, but must never restore ones
-    /// disabled by the process that owns it.
-    pub fn restrict(self, requested: Self) -> Self {
-        match (self, requested) {
-            (Self::None, _) | (_, Self::None) => Self::None,
-            (Self::All, Self::All) => Self::All,
-        }
-    }
-}
+use ulo_core::run::ToolMode;
 
 /// Built-in flags that consume the following token when one is present.
 const VALUE_FLAGS: &[&str] = &[
@@ -343,58 +319,39 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
     Ok(out)
 }
 
-use crate::providers::catalog;
+use ulo_core::providers::catalog;
 
 /// The model a run uses: the requested query, or the configured default;
 /// with an explicit effort checked against what that model declares.
 /// Shared by the terminal, `ulo -p`, and `ulo rpc` so one message describes an
 /// unavailable model everywhere.
 pub fn resolve_model(options: &Options) -> Result<catalog::Model, String> {
-    let selected = match options.model.as_deref() {
-        Some(query) => catalog::resolve(query).ok_or_else(|| {
-            format!(
-                "model `{query}` is unavailable; sign in to its provider or choose a model from /model"
-            )
-        })?,
-        None => catalog::default_model(),
-    };
-    if let Some(effort) = options.effort.as_deref() {
-        if !selected.effort.iter().any(|level| level == effort) {
-            let supported = if selected.effort.is_empty() {
-                "none".to_string()
-            } else {
-                selected.effort.join(", ")
-            };
-            return Err(format!(
-                "model `{}` does not support effort `{effort}` (supported: {supported})",
-                catalog::slug(&selected)
-            ));
-        }
-    }
-    Ok(selected)
+    ulo_core::run::resolve_model(&options.run_options())
 }
 
-pub fn agent_options(options: &Options) -> crate::agent::AgentOptions {
-    crate::agent::AgentOptions {
-        save_session: !options.no_save,
-        tool_mode: options.tool_mode,
-        effort_override: options.effort.clone(),
-        allowed_tools: None,
-        ..crate::agent::AgentOptions::default()
-    }
+/// Convert parsed flags to the agent's execution preferences.
+pub fn agent_options(options: &Options) -> ulo_core::agent::AgentOptions {
+    ulo_core::run::agent_options(&options.run_options())
 }
 
 pub fn load_images(
     options: &Options,
     model: &catalog::Model,
-) -> Result<Vec<crate::providers::ImageInput>, String> {
-    if !options.images.is_empty() && !model.image_input {
-        return Err(format!(
-            "model `{}` is not declared image-capable",
-            catalog::slug(model)
-        ));
+) -> Result<Vec<ulo_core::providers::ImageInput>, String> {
+    ulo_core::run::load_images(&options.run_options(), model)
+}
+
+impl Options {
+    /// Pass only execution preferences to a frontend, never parsing or display flags.
+    pub fn run_options(&self) -> ulo_core::run::Options {
+        ulo_core::run::Options {
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            images: self.images.clone(),
+            no_save: self.no_save,
+            tool_mode: self.tool_mode,
+        }
     }
-    crate::providers::ImageInput::from_paths(&options.images)
 }
 
 #[cfg(test)]
@@ -445,13 +402,6 @@ mod tests {
             "world",
         ]);
         assert_eq!(long, short);
-    }
-
-    #[test]
-    fn nested_tool_modes_can_only_become_more_restrictive() {
-        assert_eq!(ToolMode::None.restrict(ToolMode::All), ToolMode::None);
-        assert_eq!(ToolMode::All.restrict(ToolMode::None), ToolMode::None);
-        assert_eq!(ToolMode::All.restrict(ToolMode::All), ToolMode::All);
     }
 
     #[test]

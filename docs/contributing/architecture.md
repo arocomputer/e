@@ -30,19 +30,20 @@ extract a module, not a crate.
 root. Its targets span core parsing and TUI text handling and depend on those
 libraries directly. It is not owned by the CLI and never ships with it.
 
-## Crate ownership review
+## Module ownership
 
-Directory placement follows the responsibility and actual consumers, not a
-goal of minimizing top-level folders. The current dependency direction is
-sound, but these module boundaries need follow-up:
+Directory placement follows responsibility and actual consumers.
 
-| Location | Finding | Intended ownership |
-| --- | --- | --- |
-| `core/src/cli.rs` | Mixes argv parsing, flag suggestions, subcommand usage, and shared runtime options. RPC consumes `Options`; core and SDK use `ToolMode`. | CLI owns argv parsing. Core retains frontend-neutral execution policy; RPC gets explicit startup options instead of a CLI flag structure. Split the consumers before moving the parser. |
-| `core/src/config/layout.rs` | Pane sides, widths, responsive thresholds, and status templates are consumed only by TUI modules. | TUI owns layout parsing and defaults, using core's home and store APIs for persistence. |
-| `core/src/update.rs` | Combines replacing the running executable with generic verified release-package installation, which core resource packages use. | Application startup owns self-update policy. Core retains shared download, verification, and resource-installation functions. Do not move the entire module into CLI and make TUI depend on CLI. |
-
-The other crate contents have identifiable owners:
+- `cli/src/args.rs` owns argv parsing, suggestions, and subcommand usage.
+  `core/src/run.rs` holds model, effort, attachment, persistence, and tool
+  preferences shared by frontends. RPC accepts these execution preferences
+  without depending on CLI parsing or display flags.
+- `tui/src/content/layout.rs` owns pane placement, responsive thresholds,
+  and status templates. It reads the path supplied by core's home API.
+- `cli/src/update.rs` owns executable replacement and launch-time update
+  policy. TUI receives a successful version through a one-shot channel and
+  displays it. `core/src/update.rs` retains release discovery, checksum
+  verification, platform selection, and resource-package installation.
 
 - `cli` owns the executable and composition of the frontends. Its cross-crate
   integration suites test the assembled product, so their location is deliberate.
@@ -54,7 +55,7 @@ The other crate contents have identifiable owners:
   state. Its production dependency is core, not RPC or SDK.
 - `rpc` owns JSONL requests, session routing, and wire results. The result
   accumulator is shared with the binary's JSON print mode without depending
-  on TUI. Its use of CLI options is covered by the parser finding above.
+  on TUI.
 - `sdk` owns the public embedding API, examples, and consumer tests. Its
   production dependency is core alone. The CLI dev-dependency supports shared
   test fixtures and is not linked by SDK consumers.

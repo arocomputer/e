@@ -147,7 +147,7 @@ async fn install_follows_asset_redirects_and_swaps_the_binary_atomically() {
     let dest = dest_dir.join("ulo");
     std::fs::write(&dest, "old-binary").unwrap();
 
-    let version = ulo::core::update::install_from(&base, "v9.9.9", &dest)
+    let version = ulo::update::install_from(&base, "v9.9.9", &dest)
         .await
         .unwrap();
     assert_eq!(version, "9.9.9");
@@ -166,7 +166,7 @@ async fn poisoned_checksum_refuses_to_install() {
     let dest = dest_dir.join("ulo");
     std::fs::write(&dest, "old-binary").unwrap();
 
-    let err = ulo::core::update::install_from(&base, "v9.9.9", &dest)
+    let err = ulo::update::install_from(&base, "v9.9.9", &dest)
         .await
         .unwrap_err();
     assert!(err.contains("checksum mismatch"));
@@ -207,7 +207,7 @@ async fn latest_tag_reads_the_published_tag() {
 
 #[test]
 fn package_ownership_survives_binary_symlinks() {
-    use ulo::core::update::package_update_hint;
+    use ulo::update::package_update_hint;
     let _lock = common::env_lock();
     let home = common::Home::new("package-ownership");
     let binary = home.dir.join("ulo");

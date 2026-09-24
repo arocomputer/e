@@ -40,10 +40,10 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::mpsc;
 
 use ulo_core::agent::{Agent, AgentOptions, SessionEvent};
-use ulo_core::cli::{self, Options, ToolMode};
 use ulo_core::extensions::{ExtensionHost, HostRequest};
 use ulo_core::providers::catalog::{self as catalog, Model, Pricing};
 use ulo_core::providers::{ChatMessage, ImageInput};
+use ulo_core::run::{self, Options, ToolMode};
 use ulo_core::session::{self as log, SessionLog};
 
 mod params;
@@ -584,9 +584,9 @@ impl Server {
         if request.prompt.trim().is_empty() {
             return Err("prompt is empty".into());
         }
-        let model = cli::resolve_model(&options)?;
-        let images = cli::load_images(&options, &model)?;
-        let mut agent_opts = cli::agent_options(&options);
+        let model = run::resolve_model(&options)?;
+        let images = run::load_images(&options, &model)?;
+        let mut agent_opts = run::agent_options(&options);
         agent_opts.allowed_tools = request.tools.clone();
         let slot = self.open(model, agent_opts, true);
         let mut agent = slot.agent.lock().unwrap_or_else(|ulo| ulo.into_inner());
@@ -639,7 +639,7 @@ impl Server {
         options.tool_mode = self.defaults.tool_mode.restrict(requested);
         let save = params.save.unwrap_or(false);
         options.no_save = self.defaults.no_save || !save;
-        let model = cli::resolve_model(&options)?;
+        let model = run::resolve_model(&options)?;
         let resume = params.resume.map(PathBuf::from);
         let resumed = match &resume {
             Some(path) => {
@@ -655,7 +655,7 @@ impl Server {
             }
             None => None,
         };
-        let mut agent_opts = cli::agent_options(&options);
+        let mut agent_opts = run::agent_options(&options);
         agent_opts.cwd = Some(cwd);
         agent_opts.allowed_tools = tools;
         let slot = self.open(model, agent_opts, false);

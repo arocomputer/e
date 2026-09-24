@@ -29,11 +29,11 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
-use crate::cli::ToolMode;
 use crate::providers::catalog::{slug, Model};
 use crate::providers::{
     self, ChatMessage, Event as ProviderEvent, FailureCause, FinishReason, Request, ToolCall,
 };
+use crate::run::ToolMode;
 use crate::session::SessionLog;
 use crate::tools;
 

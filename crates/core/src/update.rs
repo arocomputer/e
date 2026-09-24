@@ -1,20 +1,7 @@
-//! Self-update: fetch the latest release binary for this platform, verify
-//! its checksum, and swap it in place — `ulo update` runs it by hand, and the
-//! TUI runs it in the background at launch (opt out with the Auto-update
-//! setting). The swap is an atomic rename next to the running binary; the
-//! new version takes effect on the next start, which the notice says.
-//!
-//! Local Cargo builds are exempt: a binary living under a `target/` directory is a
-//! cargo artifact, and auto-update must never stomp one. So is any platform
-//! off the release matrix (`target()` is `None`): a `cargo install` on musl,
-//! armv7, FreeBSD, … must never be overwritten with a tarball its host
-//! cannot run. Package-managed installs carry an ownership marker beside the
-//! executable; both manual and automatic updates stop before any network request.
+//! Shared release discovery, verification, and resource-package installation.
+//! The CLI owns executable replacement and automatic-update policy.
 
 use std::path::Path;
-
-const RELEASES: &str = "https://github.com/arocomputer/ulo/releases";
-const API_LATEST: &str = "https://api.github.com/repos/arocomputer/ulo/releases/latest";
 
 /// Release assets redirect to GitHub's download hosts. This client carries
 /// no provider credentials and must not be reused for authenticated requests.
@@ -67,31 +54,6 @@ pub fn release_target(os: &str, arch: &str, gnu_libc: bool) -> Option<&'static s
     })
 }
 
-/// True when the running binary is a cargo build, not an installed release.
-pub fn is_dev_build() -> bool {
-    std::env::current_exe()
-        .map(|p| p.components().any(|c| c.as_os_str() == "target"))
-        .unwrap_or(true)
-}
-
-/// Package installers leave ownership beside the real executable, including behind symlinks.
-/// A present but unreadable or unknown marker still prevents self-update.
-pub fn package_update_hint(executable: &Path) -> Option<&'static str> {
-    let executable = executable
-        .canonicalize()
-        .unwrap_or_else(|_| executable.to_owned());
-    let marker = executable.parent()?.join(".ulo-install-method");
-    match std::fs::read_to_string(marker) {
-        Ok(method) => Some(match method.trim() {
-            "homebrew" => "Installed with Homebrew. Update with: brew upgrade arocomputer/tap/ulo",
-            "npm" => "Installed with npm or bun. Update with: npm install -g @arocomputer/ulo or bun add -g @arocomputer/ulo",
-            _ => "This installation is package-managed. Update it with its package manager.",
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => Some("Cannot read installation ownership. Update with your package manager."),
-    }
-}
-
 /// Parse supported release identities without crossing channels or accepting arbitrary tags.
 fn release_parts(version: &str) -> Option<([u64; 3], &str, u64)> {
     let version = version.strip_prefix('v').unwrap_or(version);
@@ -133,17 +95,7 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
-/// The latest release tag ("v0.4.1"), from the GitHub API.
-/// `None` — no release published — means nothing to update to, which the
-/// flow reads as already current, not a failure.
-pub async fn latest_tag() -> Result<Option<String>, String> {
-    match crate::CHANNEL {
-        "production" => latest_tag_from(API_LATEST).await,
-        _ => Ok(None),
-    }
-}
-
-/// `latest_tag` against an explicit API URL, so tests can serve the API.
+/// Discover the latest release at an API URL; an unpublished repository returns `None`.
 pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
     let response = crate::providers::http()
         .map_err(|ulo| ulo.message)?
@@ -166,44 +118,9 @@ pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
         .ok_or_else(|| "release has no tag".into())
 }
 
-/// Download `tag` for this platform from `base`, verify its checksum, and
-/// atomically replace `dest`. Returns the installed version. `base` is a
-/// parameter so tests can serve a fake release.
-pub async fn install_from(base: &str, tag: &str, dest: &Path) -> Result<String, String> {
-    let target = target().ok_or(NO_RELEASE)?;
-    let tarball = fetch_verified(base, tag, &format!("ulo-{target}.tar.gz")).await?;
-
-    // Unpack next to the destination so the final rename stays on one
-    // filesystem; the system tar does the extraction (no archive deps).
-    let dir = dest.parent().ok_or("binary has no parent directory")?;
-    let staging = dir.join(format!(".ulo-update-{tag}"));
-    std::fs::create_dir_all(&staging).map_err(|ulo| ulo.to_string())?;
-    let archive = staging.join("ulo.tar.gz");
-    std::fs::write(&archive, &tarball).map_err(|ulo| ulo.to_string())?;
-    let unpacked = std::process::Command::new("tar")
-        .arg("xzf")
-        .arg(&archive)
-        .current_dir(&staging)
-        .status()
-        .map_err(|ulo| format!("tar failed: {ulo}"))?;
-    if !unpacked.success() {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err("tar failed to unpack the update".into());
-    }
-    let new_binary = staging.join("ulo");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&new_binary, std::fs::Permissions::from_mode(0o755));
-    }
-    std::fs::rename(&new_binary, dest).map_err(|ulo| format!("install failed: {ulo}"))?;
-    let _ = std::fs::remove_dir_all(&staging);
-    Ok(tag.trim_start_matches('v').to_string())
-}
-
 /// Download one asset of a release and check it against the release's
 /// `checksums.txt`; a missing or mismatched sum refuses the bytes.
-async fn fetch_verified(base: &str, tag: &str, asset: &str) -> Result<Vec<u8>, String> {
+pub async fn fetch_verified(base: &str, tag: &str, asset: &str) -> Result<Vec<u8>, String> {
     let tarball = fetch(&format!("{base}/download/{tag}/{asset}")).await?;
     let sums = String::from_utf8(fetch(&format!("{base}/download/{tag}/checksums.txt")).await?)
         .map_err(|ulo| ulo.to_string())?;
@@ -316,29 +233,3 @@ async fn fetch(url: &str) -> Result<Vec<u8>, String> {
 /// Why an off-matrix platform cannot self-update; `ulo update` prints it.
 pub const NO_RELEASE: &str =
     "no release is published for this platform — update from source, not ulo update";
-
-/// The whole flow for the running binary: check, install if newer. Ok(None)
-/// means already current (or not applicable).
-pub async fn self_update() -> Result<Option<String>, String> {
-    let dest = std::env::current_exe().map_err(|ulo| ulo.to_string())?;
-    if let Some(hint) = package_update_hint(&dest) {
-        return Err(hint.into());
-    }
-    // Local and PR builds stay pinned. Published builds follow the release
-    // channel, and unsupported platforms never download another target.
-    if crate::CHANNEL != "production"
-        || is_dev_build()
-        || !is_release_version(crate::VERSION)
-        || target().is_none()
-    {
-        return Ok(None);
-    }
-    // No published release: nothing exists to update to — already current.
-    let Some(tag) = latest_tag().await? else {
-        return Ok(None);
-    };
-    if !is_newer(&tag, crate::VERSION) {
-        return Ok(None);
-    }
-    install_from(RELEASES, &tag, &dest).await.map(Some)
-}

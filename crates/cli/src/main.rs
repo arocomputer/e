@@ -15,8 +15,8 @@
 
 use std::io::IsTerminal as _;
 
+use ulo::args::{self as cli, Options};
 use ulo::core::agent::{Agent, SessionEvent};
-use ulo::core::cli::{self, Options};
 use ulo::core::providers::catalog::{self as model};
 use ulo::tui::app;
 
@@ -373,7 +373,7 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
     if args.first().map(String::as_str) == Some("rpc") {
-        return ulo::rpc::serve(host, &options, requests_rx, jobs_rx).await;
+        return ulo::rpc::serve(host, &options.run_options(), requests_rx, jobs_rx).await;
     }
     if options.print {
         print_command(host, &options).await;
@@ -662,7 +662,7 @@ async fn print_command(
 /// `ulo update`: replace this release build with the latest one. Every
 /// one-shot exit owes extensions their shutdown notification.
 async fn update_command(host: &ulo::core::extensions::ExtensionHost) {
-    if ulo::core::update::is_dev_build() {
+    if ulo::update::is_dev_build() {
         println!("this is a dev build (under target/) — update with cargo, not ulo update");
         host.shutdown().await;
         return;
@@ -682,7 +682,7 @@ async fn update_command(host: &ulo::core::extensions::ExtensionHost) {
         host.shutdown().await;
         return;
     }
-    match ulo::core::update::self_update().await {
+    match ulo::update::self_update().await {
         Ok(Some(version)) => println!("updated to ulo {version} — restart to use it"),
         Ok(None) => println!("ulo {} is already the latest", ulo::VERSION),
         Err(err) => {
@@ -774,6 +774,7 @@ async fn run_interactive(
     };
     let outcome = app::run(
         app::RunOptions {
+            update: ulo::update::background(),
             initial,
             continue_session: options.continue_session,
             resume_session: options.resume_session,

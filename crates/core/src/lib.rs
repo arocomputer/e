@@ -29,12 +29,12 @@
 
 pub mod agent;
 pub mod auth;
-pub mod cli;
 pub mod config;
 pub mod export;
 pub mod extensions;
 pub mod providers;
 pub mod resources;
+pub mod run;
 pub mod session;
 pub mod text;
 pub mod tools;

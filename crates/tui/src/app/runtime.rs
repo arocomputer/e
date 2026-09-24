@@ -18,6 +18,8 @@ use ulo_core::extensions::{ExtensionHost, HostRequest};
 
 /// Launch inputs after extension startup hooks have rewritten arguments and cwd.
 pub struct RunOptions {
+    /// Successful application update supplied by the executable's launch policy.
+    pub update: Option<tokio::sync::oneshot::Receiver<String>>,
     pub initial: String,
     pub continue_session: bool,
     pub resume_session: bool,
@@ -64,6 +66,7 @@ pub(super) async fn run_scoped(
 ) -> std::io::Result<()> {
     let (requests_tx, requests_rx) = requests;
     let RunOptions {
+        update,
         initial,
         continue_session,
         resume_session,
@@ -89,6 +92,14 @@ pub(super) async fn run_scoped(
     let (mut agent, session_events) = Agent::with_options(model, agent_options.clone());
     let (logins_tx, logins_rx) = tokio::sync::mpsc::channel::<LoginOutcome>(4);
     let (results_tx, results_rx) = tokio::sync::mpsc::channel::<AppJob>(16);
+    if let Some(update) = update {
+        let results = results_tx.clone();
+        ulo_core::config::home::spawn(async move {
+            if let Ok(version) = update.await {
+                let _ = results.send(AppJob::Updated(version)).await;
+            }
+        });
+    }
     agent.set_host(host.clone());
     let senders = Senders {
         jobs: jobs_tx,
@@ -461,7 +472,7 @@ impl App {
             pane: None,
             pane_hidden: false,
             widgets: std::collections::BTreeMap::new(),
-            layout: ulo_core::config::layout::load(),
+            layout: crate::layout::load(),
             external_edit: false,
         }
     }
@@ -485,7 +496,7 @@ impl App {
                 .push(Block::new(Kind::Banner, ulo_core::VERSION));
         }
         self.launch_notices(options);
-        spawn_launch_refreshes(&self.results);
+        ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
         self.check_sign_in();
         if resume_session {
             // The reference behavior: launch straight into the session picker.
@@ -512,10 +523,10 @@ impl App {
             self.notice("session saving disabled for this run".into());
         }
         match options.tool_mode {
-            ulo_core::cli::ToolMode::None => {
+            ulo_core::run::ToolMode::None => {
                 self.notice("no-tools mode — provider requests contain no tool schemas".into())
             }
-            ulo_core::cli::ToolMode::All => {}
+            ulo_core::run::ToolMode::All => {}
         }
         if ulo_core::config::trust::status(&self.agent.cwd()).is_none() {
             self.trust = Some(TrustStage::new(&self.agent.cwd()));
@@ -1209,24 +1220,6 @@ impl App {
             }
         }
     }
-}
-
-/// The harness pattern: check for a newer release in the background at
-/// launch, install it silently, and say so — the running session is
-/// untouched until a restart. Dev builds and the opt-out are exempt.
-/// Providers' model lists refresh in the background too (the reference
-/// behavior, sourced from each gateway's own /models): a model a provider
-/// ships today shows in /models today, no ulo release involved.
-fn spawn_launch_refreshes(results: &Sender<AppJob>) {
-    if !ulo_core::update::is_dev_build() && ulo_core::config::settings::auto_update() {
-        let results = results.clone();
-        ulo_core::config::home::spawn(async move {
-            if let Ok(Some(version)) = ulo_core::update::self_update().await {
-                let _ = results.send(AppJob::Updated(version)).await;
-            }
-        });
-    }
-    ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
 }
 
 /// The last 20 lines of a shell command's output, with a count of what was

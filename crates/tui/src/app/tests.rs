@@ -895,7 +895,7 @@ fn session_app() -> App {
         pane: None,
         pane_hidden: false,
         widgets: std::collections::BTreeMap::new(),
-        layout: ulo_core::config::layout::Layout::default(),
+        layout: crate::layout::Layout::default(),
         external_edit: false,
     }
 }
@@ -1093,10 +1093,9 @@ fn picking_an_argument_completion_replaces_the_typed_prefix() {
 #[test]
 fn a_pane_splits_the_frame_where_the_layout_says_and_answers_its_owner() {
     let mut app = session_app();
-    app.layout = ulo_core::config::layout::parse(
-        r#"{"panes":{"diff":{"side":"left","width":40}},"split_min":100}"#,
-    )
-    .unwrap();
+    app.layout =
+        crate::layout::parse(r#"{"panes":{"diff":{"side":"left","width":40}},"split_min":100}"#)
+            .unwrap();
     let (request, reply) = fake_request(
         "diff",
         "ui.pane",
