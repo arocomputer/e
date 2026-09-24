@@ -12,7 +12,7 @@ from changes import changed_paths, classify, main
 
 class ChangesTests(unittest.TestCase):
     def test_website_changes_do_not_publish_native_packages(self):
-        gates = classify(['crates/www/src/worker.ts', '.github/workflows/www.yml'])
+        gates = classify(['services/www/src/worker.ts', '.github/workflows/www.yml'])
         self.assertFalse(any(gates.values()))
 
     def test_readme_artwork_does_not_build_or_publish(self):
@@ -26,6 +26,13 @@ class ChangesTests(unittest.TestCase):
         gates = classify(['new-runtime/input.dat'])
         self.assertTrue(gates['build'])
         self.assertTrue(gates['publish'])
+
+    def test_channel_services_check_clients_without_publishing_the_binary(self):
+        for path in ['services/slack/src/index.ts', 'services/github/ulo.yml']:
+            gates = classify([path])
+            self.assertTrue(gates['channels'])
+            self.assertFalse(gates['build'])
+            self.assertFalse(gates['publish'])
 
     def test_embedded_theme_is_runtime_data(self):
         gates = classify(['crates/core/themes/dark.json'])

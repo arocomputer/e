@@ -1,0 +1,47 @@
+---
+/**
+ * One guide as a page. The docs root and `/docs/<slug>` render this same
+ * article inside the docs shell, so the markdown rendering and the page
+ * metadata live here once. The `before` slot passes through to the article.
+ * `slotSection` places extra content before a named section's Markdown.
+ */
+import Docs from "@/layouts/Docs.astro";
+import DocArticle from "./DocArticle.astro";
+import { neighbours, type Doc } from "./data";
+import { renderMarkdown } from "./markdown";
+
+interface Props {
+  entry: Doc;
+  slotSection?: string;
+}
+
+const { entry, slotSection } = Astro.props;
+const { previous, next } = neighbours(entry.route);
+---
+
+<Docs
+  title={entry.title}
+  description={entry.description}
+  canonical={`https://ulo.sh${entry.route}`}
+  current={entry.route}
+>
+  <DocArticle
+    title={entry.title}
+    leadHtml={renderMarkdown(entry.lead || entry.description)}
+    sections={entry.sections.map((section) => ({
+      id: section.id,
+      title: section.title,
+      html: renderMarkdown(section.body),
+      subsections: section.subsections.map((sub) => ({
+        id: sub.id,
+        title: sub.title,
+        html: renderMarkdown(sub.body),
+      })),
+    }))}
+    previous={previous && { href: previous.route, title: previous.title }}
+    next={next && { href: next.route, title: next.title }}
+    slotSection={slotSection}
+  >
+    <slot name="before" slot="before" />
+  </DocArticle>
+</Docs>

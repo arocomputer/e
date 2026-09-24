@@ -168,7 +168,6 @@ fn topics_are_unique_and_served_without_front_matter() {
 fn every_relative_link_resolves() {
     let manifest = repo();
     let mut files = walk(&docs());
-    files.extend(walk(&manifest.join("contributing")));
     // A reader starts at the repository root, so its guides are checked too.
     for name in [
         "docs/README.md",

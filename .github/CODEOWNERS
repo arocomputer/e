@@ -15,13 +15,13 @@
 /crates/core/src/session.rs  @fschrhunt
 /crates/core/src/tools/      @fschrhunt
 /crates/core/src/update.rs   @fschrhunt
-/crates/www/                @fschrhunt
+/services/www/                @fschrhunt
 # The guides are the source for three readers — GitHub, the website, and the
 # binary's `ulo docs` — so their structure, front matter, and links are reviewed
 # like code. docs/README.md is the contract and crates/cli/tests/docs.rs enforces it; a new
 # folder is a navigation change, not an edit.
 /docs/                @fschrhunt
-/contributing/        @fschrhunt
+/docs/contributing/   @fschrhunt
 /.github/             @fschrhunt
 /scripts/guard.sh     @fschrhunt
 /install.sh           @fschrhunt

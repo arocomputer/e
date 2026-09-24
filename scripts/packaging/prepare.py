@@ -100,7 +100,7 @@ def prepare(tag, assets, output):
     )
     # Slack versions its own content and publishes only with production releases.
     # Preview application channels must not change the bot's immutable package.
-    source = ROOT / "channels/slack"
+    source = ROOT / "services/slack"
     folder = output / "slack"
     folder.mkdir()
     for kind in ("bin", "src"):

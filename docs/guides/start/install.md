@@ -78,7 +78,7 @@ try an unreviewed change before it merges:
 
 The build is pinned to the PR's commit and installs as `ulo-pr-123` with its own
 home, `~/.ulo-pr/<commit>`, kept apart from production. PR code is unreviewed; use
-a disposable project. [Releases and testing](../../../contributing/releases.md)
+a disposable project. [Releases and testing](../../contributing/releases.md)
 covers the preview workflow and the local `./x dev` build.
 
 To install a specific production version with the shell installer, pass
@@ -93,7 +93,7 @@ On an older distribution, build from source or use the published image. The
 image carries its own runtime:
 
 ```sh
-docker run --rm --entrypoint ulo ghcr.io/intuitums/ulo-slack:latest --version
+docker run --rm --entrypoint ulo ghcr.io/arocomputer/ulo-slack:latest --version
 ```
 
 ## Build from source

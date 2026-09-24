@@ -88,22 +88,22 @@ crates/rpc/  the headless frontend (`ulo_rpc`): `ulo rpc`, a JSONL session serve
              `-p --json` and rpc both report)
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
-             `ulo docs` embeds them, and the website (`crates/www/`) renders
+             `ulo docs` embeds them, and the website (`services/www/`) renders
              them at ulo.sh/docs. contributing/ is the
              repository's own documentation, never published.
 crates/cli/  the `ulo` binary, published as ulo: src/main.rs (flags,
              rpc/docs/auth/update, then tui::app::run) · src/lib.rs (the `ulo`
              library, re-exporting core, tui, and rpc for the binary, tests,
              and fuzz targets) · tests/ (the integration suites, fixtures,
-             and the ui/ PTY scenarios)
+             and the ui/ PTY scenarios) · fuzz/ (three scheduled fuzz targets)
 crates/sdk/  ulo-sdk, the in-process Rust surface (docs/guides/extend/sdk.md): session.rs
              (builder, Session) · turn.rs (Turn, Event, Reply) · error.rs;
              a frontend over core alone, with its own release boundary
-crates/www/  the Astro website at ulo.sh, deployed as a Cloudflare Worker;
+services/www/  the Astro website at ulo.sh, deployed as a Cloudflare Worker;
              reads docs/guides/ and install.sh from this checkout
-channels/    reference clients of `ulo rpc` (docs/guides/usage/channels.md): slack/ (a Bolt
-             bot, TypeScript) · github/ (an Actions workflow). Not compiled
-             into ulo; a channel is a program that spawns it, never a module
+services/slack/ · services/github/  reference clients of `ulo rpc`
+             (docs/guides/usage/channels.md): a Bolt bot in TypeScript and an
+             Actions workflow. A channel spawns ulo; it is not compiled into it.
 ```
 
 ## Running one thing, not everything

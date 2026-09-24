@@ -5,8 +5,8 @@
 - **GitHub** — the files themselves, as you see them here.
 - **`ulo docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **ulo.sh/docs** — the website, in `crates/www/`, renders each guide as
-  a page. Its `scripts/ulo/docs/docs.mjs` is the one place that adapts the guides
+- **ulo.sh/docs** — the website, in `services/www/`, renders each guide as
+  a page. Its `scripts/docs/docs.mjs` is the one place that adapts the guides
   to it: the sidebar, link routes, and alerts.
 
 Write once, and all three follow. Never paste a guide's text into another
@@ -31,7 +31,7 @@ docs/
     extend/
       README.md
       examples/          assets a guide links to (code, images); not topics
-contributing/          the repository's own documentation: architecture,
+  contributing/        the repository's own documentation: architecture,
                        rendering, releases. Never on the website, never in
                        `ulo docs`.
 ```
@@ -106,7 +106,7 @@ YAML dependency.
   this folder, or `themes.md` from beside it. GitHub resolves either, and the
   site rewrites it to the page's route. Do not write repository-absolute
   paths like `/docs/guides/customize/themes.md`: they break on GitHub.
-- **Anything outside `docs/guides/`** — `contributing/`, `crates/`, an example file —
+- **Anything outside `docs/guides/`** — `docs/contributing/`, `crates/`, an example file —
   link it relatively too. The site points those at GitHub, since they are
   not pages.
 - **Fragments work** (`extensions.md#results-by-method`) and the site keeps
@@ -119,7 +119,7 @@ topic names are unique, every relative link resolves, and `ulo docs` serves ever
 topic. No network, no build.
 
 To read the pages as they will appear, run `npm ci` and `npm run preview` in
-`crates/www/`. The build reads this checkout's guides. Merging a guide to
+`services/www/`. The build reads this checkout's guides. Merging a guide to
 `main` redeploys the website through `.github/workflows/www.yml`.
 
 ## Adding a guide

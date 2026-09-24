@@ -1,0 +1,37 @@
+---
+/** Direct contact details; this website does not collect or send form submissions. */
+import Site from "@/layouts/Site.astro";
+import SiteFrame from "@/components/SiteFrame.astro";
+import "@/styles/contact.css";
+
+const canonical = "https://ulo.sh/contact";
+---
+
+<Site
+  title="Contact"
+  description="Questions, feedback, and bug reports for ulo. Get in touch with Aro."
+  canonical={canonical}
+  og={{ title: "Contact | ulo", url: canonical }}
+>
+  <SiteFrame>
+    <div class="ulo-contact">
+      <header>
+        <h1>Contact</h1>
+        <p>Questions, feedback, or something broken in ulo?</p>
+      </header>
+      <div class="ulo-contact-grid">
+        <aside class="ulo-contact-details">
+          <h2>Email us</h2>
+          <a href="mailto:contact@aro.computer">contact@aro.computer</a>
+          <p>
+            For security issues, use{" "}
+            <a href="/legal/report-vulnerability">
+              private vulnerability reporting
+            </a>
+            . Please leave credentials and private code out of your message.
+          </p>
+        </aside>
+      </div>
+    </div>
+  </SiteFrame>
+</Site>

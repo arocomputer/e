@@ -2,10 +2,10 @@ name: Website
 
 on:
   pull_request:
-    paths: ["crates/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
+    paths: ["services/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
   push:
     branches: [main]
-    paths: ["crates/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
+    paths: ["services/www/**", "docs/**", "install.sh", ".github/workflows/www.yml"]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: crates/www
+    working-directory: services/www
 
 jobs:
   check:
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: crates/www/package-lock.json
+          cache-dependency-path: services/www/package-lock.json
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
@@ -49,6 +49,16 @@ jobs:
             sleep 1
           done
           npm run test:routes
+      - name: Development hot reload
+        run: |
+          npm run dev -- --port 4321 > "$RUNNER_TEMP/ulo-dev.log" 2>&1 &
+          dev=$!
+          trap 'npx astro dev stop; kill "$dev" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://localhost:4321/ > /dev/null; then break; fi
+            sleep 1
+          done
+          DEV_TEST_LOG="$RUNNER_TEMP/ulo-dev.log" npm run test:dev
   deploy:
     name: Deploy website
     needs: check

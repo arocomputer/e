@@ -1,0 +1,122 @@
+---
+import Site from "@/layouts/Site.astro";
+import LegalDocument, {
+  type LegalSection,
+} from "@/components/legal/LegalDocument.astro";
+import SiteFrame from "@/components/SiteFrame.astro";
+import { LEGAL_ENTITY } from "@/data/operator";
+import "@/styles/legal.css";
+
+const sections: LegalSection[] = [
+  {
+    heading: "Scope",
+    body: [
+      "This policy covers ulo.sh and ulo, collectively the Services. It does not cover third-party websites, tools, or models we link to or integrate with. Each is governed by its own policy.",
+    ],
+  },
+  {
+    heading: "Using ulo locally",
+    body: [
+      "ulo stores its configuration and sessions locally under ~/.ulo/. Requests go to the model provider you select and may include prompts, file contents, and tool results. That provider's retention and training policies apply. Review extensions before installing them: they run as local processes with your permissions.",
+    ],
+  },
+  {
+    heading: "What we collect",
+    body: [
+      "Information you give us. When you email us, we receive your email address and the contents of your message. This website has no contact form or mailing-list signup.",
+      "Information we collect automatically. Our hosting and security providers generate basic technical logs, such as IP address, device and browser type, requested URL, and request time. We do not currently run product analytics on ulo.sh, and we do not build advertising profiles or sell personal information.",
+    ],
+  },
+  {
+    heading: "How we use it",
+    body: [
+      "We use information to operate, secure, and improve the Services; to respond to you; to understand what is and is not working; and to meet our legal obligations. We use it only for the purpose it was collected for, or a purpose compatible with that one.",
+    ],
+  },
+  {
+    heading: "Model training and improvement",
+    body: [
+      "We do not currently use the content you submit — including code processed by ulo — to train or improve our models. If that changes, we will ask for your affirmative opt-in consent before any such use begins; continuing to use the Services without opting in will not affect your access.",
+    ],
+  },
+  {
+    heading: "Legal bases",
+    body: [
+      "Where the GDPR or a similar law applies, we process personal information on the basis of our legitimate interest in running the Services, your consent, the performance of a contract with you, or compliance with a legal obligation.",
+    ],
+  },
+  {
+    heading: "Sharing and disclosure",
+    body: [
+      "We share personal information only with vendors who process it on our behalf under contract, when the law requires it, or as part of a merger or acquisition. Every processor is held to protection no weaker than our own. We do not sell your information.",
+    ],
+  },
+  {
+    heading: "Cookies and tracking",
+    body: [
+      "The Services do not set cookies. If we introduce cookies for essential functionality in the future, we will not use them for advertising or cross-site tracking, and we will update this policy first.",
+    ],
+  },
+  {
+    heading: "Retention",
+    body: [
+      "We keep personal information only as long as the purpose requires or the law demands, and then we delete or anonymize it.",
+    ],
+  },
+  {
+    heading: "Security",
+    body: [
+      "We protect information with encryption in transit, strict access controls, and the principle of least privilege. No system is perfectly secure, so we design so that a single failure does not become a catastrophe.",
+    ],
+  },
+  {
+    heading: "Your choices and rights",
+    body: [
+      "Depending on where you live, you may have the right to access, correct, export, or delete your personal information, and to object to or limit certain processing. Reach out and we will honor these rights as the law provides.",
+    ],
+  },
+  {
+    heading: "California residents",
+    body: [
+      "If you are a California resident, the California Consumer Privacy Act (as amended by the CPRA) gives you the right to know what personal information we have collected about you, to request its correction or deletion, to receive a portable copy, and to opt out of the sale or sharing of your personal information. We do not sell personal information and do not share it for cross-context behavioral advertising. You can exercise these rights using the contact details below, and we will not discriminate against you for doing so.",
+    ],
+  },
+  {
+    heading: "International transfers",
+    body: [
+      "We may process information in countries other than your own. When we do, we rely on appropriate safeguards — such as standard contractual clauses — to protect it in transit and at rest.",
+    ],
+  },
+  {
+    heading: "Children",
+    body: [
+      "The Services are not directed to children under 13, or the age of digital consent where you live, and we do not knowingly collect their information. If you believe a child has given us data, tell us and we will remove it.",
+    ],
+  },
+  {
+    heading: "Changes to this policy",
+    body: [
+      "We will update this policy as the Services evolve. Material changes will appear here with a new effective date, and where the law requires, we will tell you directly.",
+    ],
+  },
+];
+---
+
+<Site
+  title="Privacy"
+  canonical="https://ulo.sh/legal/privacy"
+  og={{
+    title: "Privacy | ulo",
+    url: "https://ulo.sh/legal/privacy",
+  }}
+>
+  <SiteFrame>
+    <LegalDocument
+      title="Privacy Policy"
+      updated="September 24, 2026"
+      intro={`This policy explains how ${LEGAL_ENTITY} handles information when you use ulo and ulo.sh.`}
+      sections={sections}
+      contactEmail="legal@aro.computer"
+    />
+  </SiteFrame>
+</Site>

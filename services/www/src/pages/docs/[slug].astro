@@ -1,0 +1,68 @@
+---
+/**
+ * One guide, rendered from arocomputer/ulo's `docs/`, or a group's own page (what
+ * the sidebar's heading links to). The prose, the headings, and the anchors
+ * are the repository's; the page adds only the frame, the code blocks, and
+ * the previous/next links the index gives it.
+ */
+import type { GetStaticPaths } from "astro";
+import Docs from "@/layouts/Docs.astro";
+import DocArticle from "@/components/docs/DocArticle.astro";
+import Guide from "@/components/docs/Guide.astro";
+import {
+  HOME_ROUTE,
+  docs,
+  groupDocs,
+  groups,
+  type Doc,
+  type Group,
+} from "@/components/docs/data";
+
+export const getStaticPaths = (() => [
+  // The docs root renders the home guide, so its own slug is not a page.
+  ...docs
+    .filter((entry) => entry.route !== HOME_ROUTE)
+    .map((entry) => ({ params: { slug: entry.slug }, props: { entry } })),
+  ...groups.map((group) => ({
+    params: { slug: group.slug },
+    props: { group },
+  })),
+]) satisfies GetStaticPaths;
+
+type Props = { entry: Doc; group?: never } | { group: Group; entry?: never };
+
+const { entry, group } = Astro.props;
+const escape = (text: string) =>
+  text.replace(
+    /[&<>"]/g,
+    (char) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[char]};`,
+  );
+---
+
+{entry ? (
+  <Guide entry={entry} />
+) : (
+  <Docs
+    title={group.title}
+    description={group.description}
+    canonical={`https://ulo.sh/docs/${group.slug}`}
+    current={`/docs/${group.slug}`}
+  >
+    <DocArticle
+      title={group.title}
+      lead={group.description}
+      sections={[
+        {
+          id: "guides",
+          title: "Guides",
+          html: `<ul>${groupDocs(group.slug)
+            .map(
+              (doc) =>
+                `<li><a href="${escape(doc.route)}">${escape(doc.title)}</a> — ${escape(doc.description)}</li>`,
+            )
+            .join("")}</ul>`,
+        },
+      ]}
+    />
+  </Docs>
+)}

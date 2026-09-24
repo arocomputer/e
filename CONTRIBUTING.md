@@ -51,7 +51,7 @@ theme reaches other users without a release of ulo.
 
 ## Finding your way around
 
-[contributing/architecture.md](contributing/architecture.md) is the guided tour.
+[docs/contributing/architecture.md](docs/contributing/architecture.md) is the guided tour.
 [AGENTS.md](AGENTS.md) is the working guide: the code map, the fast test
 loops, how the look stays consistent, and the conventions every change
 follows. It is written for the agents that open most PRs here, and it is the
@@ -150,7 +150,7 @@ By contributing, you agree that your work is released under the repository's
 
 Run `./x dev /path/to/project` to use the current checkout with development state.
 Run `./x scenario streaming` for a repeatable local terminal session without a
-provider account. See [releases and testing](contributing/releases.md) for PR builds,
+provider account. See [releases and testing](docs/contributing/releases.md) for PR builds,
 package installation, and publishing.
 
 Provider regressions can use reviewed response fixtures under

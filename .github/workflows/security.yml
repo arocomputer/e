@@ -13,8 +13,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "crates/**/Cargo.toml"
-      - "fuzz/Cargo.toml"
-      - "fuzz/Cargo.lock"
+      - "crates/cli/fuzz/Cargo.toml"
+      - "crates/cli/fuzz/Cargo.lock"
       - ".github/workflows/security.yml"
   workflow_dispatch:
 
@@ -58,4 +58,5 @@ jobs:
           cargo +nightly-2026-08-20 install cargo-fuzz --version 0.11.0 --locked
 
       - name: Fuzz - ${{ matrix.target }}
+        working-directory: crates/cli
         run: cargo +nightly-2026-08-20 fuzz run "${{ matrix.target }}" -- -max_total_time=120 -rss_limit_mb=2048

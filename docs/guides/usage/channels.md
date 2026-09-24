@@ -19,12 +19,12 @@ binary every developer installs. It also lets a company write its channel in
 whatever language its glue code already uses.
 
 Channels speak the protocol described in [Automation](automation.md). The
-reference channels live under [`channels/`](../../../channels/) in the
+reference channels live under [`services/`](../../../services/) in the
 repository:
 
 ```
-channels/slack/     a Slack bot: one thread, one session (TypeScript)
-channels/github/    a GitHub Actions workflow answering `/ulo` on issues and PRs
+services/slack/     a Slack bot: one thread, one session (TypeScript)
+services/github/    a GitHub Actions workflow answering `/ulo` on issues and PRs
 ```
 
 ## How a channel works
@@ -61,7 +61,7 @@ HTML export to attach.
 
 ## Slack
 
-`channels/slack/` is the reference channel. It is a Bolt app in socket mode,
+`services/slack/` is the reference channel. It is a Bolt app in socket mode,
 so it needs no public URL.
 
 The bot answers when mentioned in a channel and continues in the thread.
@@ -74,15 +74,16 @@ and how to run it.
 
 ### Run with npx
 
-The channel publishes with ulo's releases as `@arocomputer/ulo-slack`. Run
+Package publication is paused during development; use the source checkout for
+now. When releases resume, the channel publishes as `@arocomputer/ulo-slack`. Run
 `npx @arocomputer/ulo-slack` against any checkout without cloning this
 repository. Its version matches the release it came from.
 
 ### Run on a server
 
-`channels/slack/Dockerfile` builds an image that carries ulo from the release
+`services/slack/Dockerfile` builds an image that carries ulo from the release
 and the bot from the repository. Each release publishes the image as
-`ghcr.io/intuitums/ulo-slack`, so the usual case needs neither Node nor a
+`ghcr.io/arocomputer/ulo-slack`, so the usual case needs neither Node nor a
 checkout.
 
 To deploy it:
@@ -96,7 +97,7 @@ answer the panel that gates the repository's own instructions.
 
 ## GitHub
 
-`channels/github/ulo.yml` is a workflow that runs on issue and pull-request
+`services/github/ulo.yml` is a workflow that runs on issue and pull-request
 comments containing `/ulo`.
 
 The workflow first verifies that the commenter has write, maintain, or admin
@@ -117,4 +118,4 @@ A Linear channel is the Slack channel with a webhook instead of a socket. An
 issue is a session, a comment is a prompt, and the reply is a comment.
 
 Nothing in ulo distinguishes the platforms. The difference is entirely in the
-adapter. Use `channels/slack/` as the pattern when you write one.
+adapter. Use `services/slack/` as the pattern when you write one.

@@ -1,0 +1,57 @@
+---
+/** Summarize the repository's license without creating additional software terms. */
+import Site from "@/layouts/Site.astro";
+import SiteFrame from "@/components/SiteFrame.astro";
+import LegalArticle from "@/components/legal/LegalArticle.astro";
+import "@/styles/legal.css";
+
+const canonical = "https://ulo.sh/legal/license";
+---
+
+<Site
+  title="License"
+  description="ulo is distributed under the MIT license."
+  canonical={canonical}
+  og={{ title: "License | ulo", url: canonical }}
+>
+  <SiteFrame>
+    <LegalArticle
+      title="Software license"
+      lead="ulo is open-source software under the MIT license."
+      sections={[
+        { id: "permissions", title: "Using and distributing ulo" },
+        { id: "third-parties", title: "Providers and dependencies" },
+      ]}
+    >
+      <Fragment slot="permissions">
+        <p>
+          The MIT license permits use, modification, copying, distribution, and
+          sale of the software. Copies or substantial portions must include the
+          copyright and permission notices.
+        </p>
+        <p>
+          The software is provided without warranty. Read the{" "}
+          <a
+            href="https://github.com/arocomputer/ulo/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            full license in the repository
+          </a>{" "}
+          for its terms and liability disclaimer. The license accompanying your
+          version is the authoritative text.
+        </p>
+      </Fragment>
+      <Fragment slot="third-parties">
+        <p>
+          The license does not include a model subscription or provider credits.
+          Your provider's terms and fees apply separately.
+        </p>
+        <p>
+          Dependencies and extensions may use different licenses. Check their
+          notices before redistributing them.
+        </p>
+      </Fragment>
+    </LegalArticle>
+  </SiteFrame>
+</Site>

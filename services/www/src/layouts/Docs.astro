@@ -1,0 +1,63 @@
+---
+/**
+ * The documentation shell: ulo's document with its own header, search, and a
+ * workspace of sidebar, article, and page index. Documentation fills its own
+ * workspace, independent of the landing-page frame. `current` is the internal
+ * route (`/docs/...`) the navigation marks as the page; `title` is the
+ * page's own name, and the share card repeats it.
+ */
+import Site from "./Site.astro";
+import { Logo } from "@/components/logo";
+import DocsSidebar from "@/components/docs/DocsSidebar.astro";
+import { DocsSearch } from "@/components/docs/search";
+import { MobileDocsMenu } from "@/components/docs/mobile-menu";
+import { sidebar } from "@/components/docs/data";
+import "@/styles/docs.css";
+import "@/styles/search.css";
+
+interface Props {
+  title: string;
+  description: string;
+  canonical: string;
+  current: string;
+}
+
+const { title, description, canonical, current } = Astro.props;
+const groups = sidebar();
+---
+
+<Site
+  title={title}
+  description={description}
+  canonical={canonical}
+  og={{ title: `${title} | ulo`, description, url: canonical }}
+>
+  <div class="ulo-site ulo-doc-site">
+    <a class="ulo-skip" href="#main">
+      {" "}
+      Skip to content{" "}
+    </a>
+    <header class="ulo-doc-header">
+      <a class="ulo-mark" aria-label="ulo home" href="/">
+        <Logo />
+      </a>
+      <DocsSearch client:load groups={groups} />
+      <nav aria-label="Main">
+        <a href="/">Home</a>
+        <a href="/changelog">Changelog</a>
+        <a
+          href="https://github.com/arocomputer/ulo"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>
+      </nav>
+      <MobileDocsMenu client:load groups={groups} current={current} />
+    </header>
+    <div class="ulo-doc-workspace">
+      <DocsSidebar groups={groups} current={current} />
+      <slot />
+    </div>
+  </div>
+</Site>

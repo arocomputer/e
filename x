@@ -77,14 +77,14 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     # The reference channels, which are consumers of `ulo rpc` rather than part
     # of the binary.
-    (cd channels/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
-    python3 -m unittest discover -s channels/github -p 'test_*.py'
+    (cd services/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
+    python3 -m unittest discover -s services/github -p 'test_*.py'
     ;;
   container)
     [ "$#" -eq 0 ] || usage
     # The check builds without a published release, so it installs a stub `ulo`.
     # The release workflow builds the real image with the release it published.
-    docker build --tag ulo-slack --build-arg ULO_RELEASE_STUB=1 channels/slack
+    docker build --tag ulo-slack --build-arg ULO_RELEASE_STUB=1 services/slack
     ;;
   guard)
     [ "$#" -eq 0 ] || usage
@@ -114,7 +114,7 @@ case "$command" in
     ;;
   fmt)
     cargo fmt "$@"
-    cargo fmt --manifest-path fuzz/Cargo.toml "$@"
+    cargo fmt --manifest-path crates/cli/fuzz/Cargo.toml "$@"
     ;;
   lint)
     cargo clippy --workspace --all-targets "$@" -- -D warnings

@@ -47,7 +47,7 @@ if [ "$os" = Linux ]; then
   if [ -n "$present" ] && [ "$(printf '%s\n%s\n' "$required" "$present" | sort -V | head -1)" != "$required" ]; then
     echo "ulo's Linux binaries need glibc $required or newer; this system has $present." >&2
     echo 'Debian 11+, Ubuntu 22.04+, and RHEL 9+ have it. Otherwise run the published image,' >&2
-    echo 'which carries its own runtime: docker run --rm --entrypoint ulo ghcr.io/intuitums/ulo-slack:latest --version' >&2
+    echo 'which carries its own runtime: docker run --rm --entrypoint ulo ghcr.io/arocomputer/ulo-slack:latest --version' >&2
     exit 1
   fi
 fi

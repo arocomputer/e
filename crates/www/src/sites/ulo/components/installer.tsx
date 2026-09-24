@@ -1,9 +1,0 @@
-/** Public installation guidance while package distribution is paused. */
-export function Installer() {
-  return (
-    <p>
-      ulo is in development. Public packages are not available yet.{" "}
-      <a href="/docs/install">Build from source</a> to try it locally.
-    </p>
-  );
-}
