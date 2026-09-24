@@ -209,6 +209,125 @@ impl Link {
     }
 }
 
+/// Kills every child a dropped startup already spawned. If an embedding drops
+/// the startup future during a handshake, each started child is killed and
+/// its wait handed to the runtime. Each child registers in `spawned` as soon
+/// as its link exists; disarm the guard once the host owns them.
+struct StartupGuard {
+    spawned: Arc<Mutex<Vec<Arc<Link>>>>,
+    armed: bool,
+}
+
+impl Drop for StartupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            for link in self
+                .spawned
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+            {
+                link.kill_now();
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    let link = link.clone();
+                    runtime.spawn(async move { link.reap().await });
+                }
+            }
+        }
+    }
+}
+
+/// Spawn and hand-shake every extension concurrently: a slow (or
+/// timing-out) child must not delay the ones after it, so startup costs one
+/// handshake, not their sum. Results are collected in discovery order —
+/// tool-clash resolution is first-declaration-wins and must stay
+/// deterministic. A failure becomes a notice and leaves that extension out.
+async fn spawn_all(
+    paths: &[PathBuf],
+    cwd: &Path,
+    notices: &mpsc::Sender<String>,
+    spawned: &Arc<Mutex<Vec<Arc<Link>>>>,
+    requests: &Option<mpsc::Sender<HostRequest>>,
+) -> Vec<Extension> {
+    let started = futures::future::join_all(paths.iter().map(|path| {
+        let notices = notices.clone();
+        let requests = requests.clone();
+        async move {
+            (
+                path,
+                spawn(path, cwd, notices, Some(spawned), requests).await,
+            )
+        }
+    }))
+    .await;
+    let mut extensions = Vec::new();
+    for (path, result) in started {
+        match result {
+            Ok(ext) => extensions.push(ext),
+            Err(reason) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                // Nobody drains the notices until the frontend runs (or
+                // ever, headless): an awaited send on a channel a
+                // chatty extension's stderr already filled would hold
+                // startup forever. Post-spawn notices never block.
+                let _ = notices.try_send(format!("extension {name}: {reason}"));
+            }
+        }
+    }
+    extensions
+}
+
+/// Tool names must be unambiguous: schema merging and call routing both
+/// resolve first-declaration-wins, and a duplicate would advertise one
+/// contract while executing another owner. Later duplicates are dropped
+/// with a visible notice.
+fn drop_duplicate_tools(extensions: &mut [Extension], notices: &mpsc::Sender<String>) {
+    let mut seen_tools: std::collections::HashSet<String> = Default::default();
+    for ext in extensions {
+        let name = ext.manifest.name.clone();
+        ext.manifest.tools.retain(|tool| {
+            let fresh = seen_tools.insert(tool.name.clone());
+            if !fresh {
+                let _ = notices.try_send(format!(
+                    "extension {name}: tool {} already provided by another extension — ignored",
+                    tool.name
+                ));
+            }
+            fresh
+        });
+    }
+}
+
+/// Shortcuts resolve the same way as tools: one owner per chord, first wins —
+/// and only chords e leaves unbound are offered at all.
+fn drop_unavailable_shortcuts(extensions: &mut [Extension], notices: &mpsc::Sender<String>) {
+    let mut seen_keys: std::collections::HashSet<String> = Default::default();
+    for ext in extensions {
+        let name = ext.manifest.name.clone();
+        ext.manifest.shortcuts.retain(|shortcut| {
+            let key = normalize_chord(&shortcut.key);
+            if !shortcut_allowed(&key) {
+                let _ = notices.try_send(format!(
+                    "extension {name}: shortcut {} is not available to extensions — ignored",
+                    shortcut.key
+                ));
+                return false;
+            }
+            let fresh = seen_keys.insert(key.clone());
+            if !fresh {
+                let _ = notices.try_send(format!(
+                    "extension {name}: shortcut {} already taken — ignored",
+                    shortcut.key
+                ));
+            }
+            fresh
+        });
+    }
+}
+
 pub struct ExtensionHost {
     extensions: Vec<Extension>,
     ids: AtomicU64,
@@ -281,142 +400,52 @@ impl ExtensionHost {
         argv: Vec<String>,
         requests: Option<mpsc::Sender<HostRequest>>,
     ) -> Arc<ExtensionHost> {
-        // Spawn and hand-shake every extension concurrently: a slow (or
-        // timing-out) child must not delay the ones after it, so startup
-        // costs one handshake, not their sum. Results are collected in
-        // discovery order — tool-clash resolution below is
-        // first-declaration-wins and must stay deterministic.
+        // Extensions under `~/.e/extensions/`, then each installed package's
+        // `extensions/` in settings order. A top-level executable is one
+        // extension; a subdirectory bundles an entry point with helper files,
+        // chosen as the first `index.*` executable in path order, a file
+        // matching the directory name, then a sole executable.
         let paths = discover();
         for spec in crate::resources::packages::missing() {
             let _ = notices
                 .send(format!("package {spec}: not installed — run `e install`"))
                 .await;
         }
-        // If an embedding drops this future during a handshake, kill every
-        // child that has started and hand its wait to the runtime. Each child
-        // registers as soon as its link exists.
-        let spawned_links: Arc<Mutex<Vec<Arc<Link>>>> = Arc::new(Mutex::new(Vec::new()));
-        struct StartupGuard {
-            spawned: Arc<Mutex<Vec<Arc<Link>>>>,
-            armed: bool,
-        }
-        impl Drop for StartupGuard {
-            fn drop(&mut self) {
-                if self.armed {
-                    for link in self
-                        .spawned
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .iter()
-                    {
-                        link.kill_now();
-                        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                            let link = link.clone();
-                            runtime.spawn(async move { link.reap().await });
-                        }
-                    }
-                }
-            }
-        }
         let mut guard = StartupGuard {
-            spawned: spawned_links.clone(),
+            spawned: Arc::new(Mutex::new(Vec::new())),
             armed: true,
         };
-        let started = futures::future::join_all(paths.iter().map(|path| {
-            let notices = notices.clone();
-            let cwd = cwd.clone();
-            let spawned = &spawned_links;
-            let requests = requests.clone();
-            async move {
-                (
-                    path,
-                    spawn(path, &cwd, notices, Some(spawned), requests).await,
-                )
-            }
-        }))
-        .await;
-        let mut extensions = Vec::new();
-        for (path, result) in started {
-            match result {
-                Ok(ext) => extensions.push(ext),
-                Err(reason) => {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    // Nobody drains the notices until the frontend runs (or
-                    // ever, headless): an awaited send on a channel a
-                    // chatty extension's stderr already filled would hold
-                    // startup forever. Post-spawn notices never block.
-                    let _ = notices.try_send(format!("extension {name}: {reason}"));
-                }
-            }
-        }
-        // Tool names must be unambiguous: schema merging and call routing
-        // both resolve first-declaration-wins, and a duplicate would
-        // advertise one contract while executing another owner. Later
-        // duplicates are dropped with a visible notice.
-        let mut seen_tools: std::collections::HashSet<String> = Default::default();
-        for ext in &mut extensions {
-            let name = ext.manifest.name.clone();
-            ext.manifest.tools.retain(|tool| {
-                let fresh = seen_tools.insert(tool.name.clone());
-                if !fresh {
-                    let _ = notices.try_send(format!(
-                        "extension {name}: tool {} already provided by another extension — ignored",
-                        tool.name
-                    ));
-                }
-                fresh
-            });
-        }
-        // Shortcuts resolve the same way: one owner per chord, first wins —
-        // and only chords e leaves unbound are offered at all.
-        let mut seen_keys: std::collections::HashSet<String> = Default::default();
-        for ext in &mut extensions {
-            let name = ext.manifest.name.clone();
-            ext.manifest.shortcuts.retain(|shortcut| {
-                let key = normalize_chord(&shortcut.key);
-                if !shortcut_allowed(&key) {
-                    let _ = notices.try_send(format!(
-                        "extension {name}: shortcut {} is not available to extensions — ignored",
-                        shortcut.key
-                    ));
-                    return false;
-                }
-                let fresh = seen_keys.insert(key.clone());
-                if !fresh {
-                    let _ = notices.try_send(format!(
-                        "extension {name}: shortcut {} already taken — ignored",
-                        shortcut.key
-                    ));
-                }
-                fresh
-            });
-        }
+        let mut extensions = spawn_all(&paths, &cwd, &notices, &guard.spawned, &requests).await;
+        drop_duplicate_tools(&mut extensions, &notices);
+        drop_unavailable_shortcuts(&mut extensions, &notices);
         let host = Arc::new(ExtensionHost {
             extensions,
             ids: AtomicU64::new(1),
         });
-        // Every extension that declares typed flags gets them now, before any
-        // startup hook — a tool-only extension can read its flags anytime, not
-        // just during startup. `flags` is a notification (no reply expected).
-        let parsed = host.parse_flags(&argv);
-        if !parsed.as_object().map(|m| m.is_empty()).unwrap_or(true) {
-            for ext in &host.extensions {
-                if ext.manifest.flags.iter().any(|f| f.long_form().is_some()) {
-                    let line = json!({
-                        "method": "flags",
-                        "params": { "flags": parsed },
-                    })
-                    .to_string();
-                    let _ = ext.writer.try_send(line);
-                }
-            }
-        }
+        host.send_flags(&argv);
         // The host now owns every link and handles normal shutdown.
         guard.armed = false;
         host
+    }
+
+    /// Every extension that declares typed flags gets them now, before any
+    /// startup hook — a tool-only extension can read its flags anytime, not
+    /// just during startup. `flags` is a notification (no reply expected).
+    fn send_flags(&self, argv: &[String]) {
+        let parsed = self.parse_flags(argv);
+        if parsed.as_object().map(|m| m.is_empty()).unwrap_or(true) {
+            return;
+        }
+        for ext in &self.extensions {
+            if ext.manifest.flags.iter().any(|f| f.long_form().is_some()) {
+                let line = json!({
+                    "method": "flags",
+                    "params": { "flags": parsed },
+                })
+                .to_string();
+                let _ = ext.writer.try_send(line);
+            }
+        }
     }
 
     /// An empty host, for sessions with no extensions (and for tests).

@@ -95,9 +95,7 @@ impl App {
             .as_ref()
             .map(|turn| (turn.started.elapsed().as_millis() / 500) % 2 == 0)
             .unwrap_or(true);
-        let mut lines = self
-            .transcript
-            .render_animated(&self.theme, width, blink_on);
+        let mut lines = self.transcript.render(&self.theme, width);
         let dock_start = lines.len();
         let activity = self
             .ext_activity
@@ -119,40 +117,7 @@ impl App {
                 &activity,
             ) {
                 lines.push(String::new());
-                if s.turn.recovered.is_some() {
-                    // A brief, non-blinking confirmation — not an ongoing
-                    // wait, so no dot animation.
-                    lines.push(self.theme.fg("success", &format!("✓ {label}")));
-                } else if s.turn.phase == TurnPhase::Retrying {
-                    // Keep the activity row's blinking dot, toned as a
-                    // warning so a struggling provider
-                    // reads distinctly from ordinary thinking.
-                    let dot = if blink_on { "•" } else { " " };
-                    lines.push(self.theme.fg("warning", &format!("{dot} {label}")));
-                } else if matches!(
-                    s.turn.phase,
-                    TurnPhase::Waiting
-                        | TurnPhase::Thinking
-                        | TurnPhase::ToolCall
-                        | TurnPhase::Tool
-                        | TurnPhase::AssistantText
-                ) {
-                    // The activity dot runs on the same column as the user
-                    // rail. Once reply text is visible, the answer itself
-                    // carries the turn and the label sits where the dot was.
-                    if s.turn.phase == TurnPhase::AssistantText {
-                        lines.push(self.theme.fg("dim", &label));
-                    } else {
-                        let dot = if blink_on {
-                            self.theme.fg("accent", "•")
-                        } else {
-                            " ".to_string()
-                        };
-                        lines.push(format!("{dot} {}", self.theme.fg("dim", &label)));
-                    }
-                } else {
-                    lines.push(label);
-                }
+                lines.push(self.activity_row(s, label, blink_on));
             }
         }
         if self.active.is_some() {
@@ -165,120 +130,154 @@ impl App {
         lines
     }
 
-    /// One full-width editor and status band, shared beneath both review panes.
+    /// The turn's activity label, styled by phase.
+    fn activity_row(&self, s: &ActiveTurn, label: String, blink_on: bool) -> String {
+        if s.turn.recovered.is_some() {
+            // A brief, non-blinking confirmation — not an ongoing
+            // wait, so no dot animation.
+            return self.theme.fg("success", &format!("✓ {label}"));
+        }
+        match s.turn.phase {
+            TurnPhase::Retrying => {
+                // Keep the activity row's blinking dot, toned as a
+                // warning so a struggling provider
+                // reads distinctly from ordinary thinking.
+                let dot = if blink_on { "•" } else { " " };
+                self.theme.fg("warning", &format!("{dot} {label}"))
+            }
+            // The activity dot runs on the same column as the user
+            // rail. Once reply text is visible, the answer itself
+            // carries the turn and the label sits where the dot was.
+            TurnPhase::AssistantText => self.theme.fg("dim", &label),
+            TurnPhase::Waiting | TurnPhase::Thinking | TurnPhase::ToolCall | TurnPhase::Tool => {
+                let dot = if blink_on {
+                    self.theme.fg("accent", "•")
+                } else {
+                    " ".to_string()
+                };
+                format!("{dot} {}", self.theme.fg("dim", &label))
+            }
+            _ => label,
+        }
+    }
+
+    /// One full-width editor and status band, shared beneath both review
+    /// panes: the composer (unless a secret is being entered), the open
+    /// footer surface, and the status row.
     pub(super) fn composer_frame(&mut self, width: usize, height: usize) -> Vec<String> {
         let mut lines = Vec::new();
-
         let entering_key = matches!(self.auth, Some(AuthStage::ApiKey { .. }));
         if !entering_key {
-            // The reference caps the composer at half the frame plus one
-            // row; a longer draft scrolls behind the ┃↑ marker.
-            let cap = (height / 2 + 1).max(3);
-            let mut composer = self.editor.render(&self.theme, width, cap);
-            // Extensions' widget rows sit above everything the composer
-            // owns: chrome, like the attachment labels.
-            lines.extend(self.widget_rows(width));
-            if !self.attachments.images.is_empty() {
-                // Attachment labels are chrome, not editable prompt text.
-                // The existing dim token is the palette's light gray.
-                lines.push(
-                    self.theme
-                        .fg("dim", &image_labels(self.attachments.images.len())),
-                );
-            }
-
-            // The queued banner band: the collapsed summary (ink-bright),
-            // the review's hint line while it edits the queue, a gap row —
-            // and with chrome above it the composer trades its leading
-            // blank for its top divider, the reference's rule.
-            let steering = self.agent.queued_count();
-            let total = steering + self.held_prompts.len();
-            if total > 0 && self.active.is_some() {
-                let paused = self.queue_review.is_some();
-                // Held prompts (compaction, a `!` command) can't be edited
-                // into the composer — only queued steering prompts can — so
-                // the affordance appears only when the edit target exists.
-                let affordance = if paused || steering == 0 {
-                    ""
-                } else {
-                    " · ↑ to edit"
-                };
-                let ordinary = total - steering;
-                let label = if ordinary == 0 && steering == 1 {
-                    format!("1 steering message{affordance}")
-                } else if ordinary == 0 {
-                    format!("{steering} steering messages{affordance}")
-                } else if steering > 0 {
-                    format!("{total} pending messages · {steering} steering{affordance}")
-                } else if total == 1 {
-                    format!("1 queued message{affordance}")
-                } else {
-                    format!("{total} queued messages{affordance}")
-                };
-                lines.push(self.theme.fg("userMessageText", &label));
-                if let Some(review) = &self.queue_review {
-                    let hint = if !review.visible {
-                        "reviewing the queue · enter to apply"
-                    } else if self.editor.is_empty() {
-                        "delete again to remove the queued prompt · enter to send unchanged"
-                    } else {
-                        "enter to apply the edit"
-                    };
-                    lines.push(self.theme.fg("dim", hint));
-                }
-                lines.push(String::new());
-                composer[0] = self.theme.fg("border", &"─".repeat(width));
-            }
-            lines.extend(composer);
+            lines.extend(self.editor_rows(width, height));
         }
+        lines.extend(self.footer_surface(width, height));
+        lines.extend(self.status_row(width));
+        lines
+    }
+
+    /// The composer and the chrome directly above it: extension widgets,
+    /// attachment labels, and the queued-prompt banner.
+    fn editor_rows(&mut self, width: usize, height: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        // The reference caps the composer at half the frame plus one
+        // row; a longer draft scrolls behind the ┃↑ marker.
+        let cap = (height / 2 + 1).max(3);
+        let mut composer = self.editor.render(&self.theme, width, cap);
+        // Extensions' widget rows sit above everything the composer
+        // owns: chrome, like the attachment labels.
+        lines.extend(self.widget_rows(width));
+        if !self.attachments.images.is_empty() {
+            // Attachment labels are chrome, not editable prompt text.
+            // The existing dim token is the palette's light gray.
+            lines.push(
+                self.theme
+                    .fg("dim", &image_labels(self.attachments.images.len())),
+            );
+        }
+        // With the queued banner above it the composer trades its leading
+        // blank for its top divider, the reference's rule.
+        if let Some(banner) = self.queue_banner() {
+            lines.extend(banner);
+            composer[0] = self.theme.fg("border", &"─".repeat(width));
+        }
+        lines.extend(composer);
+        lines
+    }
+
+    /// The queued banner band while a turn runs with prompts waiting: the
+    /// collapsed summary (ink-bright), the review's hint line while it edits
+    /// the queue, and a gap row.
+    fn queue_banner(&self) -> Option<Vec<String>> {
+        let steering = self.agent.queued_count();
+        let total = steering + self.held_prompts.len();
+        if total == 0 || self.active.is_none() {
+            return None;
+        }
+        let paused = self.queue_review.is_some();
+        // Held prompts (compaction, a `!` command) can't be edited
+        // into the composer — only queued steering prompts can — so
+        // the affordance appears only when the edit target exists.
+        let affordance = if paused || steering == 0 {
+            ""
+        } else {
+            " · ↑ to edit"
+        };
+        let ordinary = total - steering;
+        let label = if ordinary == 0 && steering == 1 {
+            format!("1 steering message{affordance}")
+        } else if ordinary == 0 {
+            format!("{steering} steering messages{affordance}")
+        } else if steering > 0 {
+            format!("{total} pending messages · {steering} steering{affordance}")
+        } else if total == 1 {
+            format!("1 queued message{affordance}")
+        } else {
+            format!("{total} queued messages{affordance}")
+        };
+        let mut lines = vec![self.theme.fg("userMessageText", &label)];
+        if let Some(review) = &self.queue_review {
+            let hint = if !review.visible {
+                "reviewing the queue · enter to apply"
+            } else if self.editor.is_empty() {
+                "delete again to remove the queued prompt · enter to send unchanged"
+            } else {
+                "enter to apply the edit"
+            };
+            lines.push(self.theme.fg("dim", hint));
+        }
+        lines.push(String::new());
+        Some(lines)
+    }
+
+    /// The one framed surface below the composer, by precedence: trust,
+    /// sign-in, settings, a picker, an extension's input, its panel.
+    fn footer_surface(&mut self, width: usize, height: usize) -> Vec<String> {
         if let Some(stage) = &mut self.trust {
             let dir = self.agent.cwd().to_string_lossy().into_owned();
-            lines.extend(trustpanel::render_view(
-                stage,
-                &self.theme,
-                width,
-                height.saturating_sub(1),
-                &dir,
-            ));
+            trustpanel::render_view(stage, &self.theme, width, height.saturating_sub(1), &dir)
         } else if let Some(stage) = &self.auth {
-            lines.extend(authpanel::render(
+            authpanel::render(
                 stage,
                 &self.theme,
                 width,
                 self.editor.text().chars().count(),
-            ));
+            )
         } else if let Some(panel) = &self.settings {
-            lines.extend(panel.render(&self.theme, width));
+            panel.render(&self.theme, width)
         } else if let Some(menu) = &self.menu {
-            lines.extend(menu.render(&self.theme, width));
+            menu.render(&self.theme, width)
         } else if self.ui_input_open() {
-            lines.extend(self.render_ui_input(width));
+            self.render_ui_input(width)
         } else if let Some(panel) = &self.ext_panel {
-            lines.extend(panel.render(&self.theme, width));
+            panel.render(&self.theme, width)
+        } else {
+            Vec::new()
         }
-        let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
-            if p.interactive {
-                extui::HINT_PANEL_INTERACTIVE
-            } else {
-                extui::HINT_PANEL
-            }
-        });
-        let hint = self
-            .settings
-            .as_ref()
-            .map(|_| crate::settingspanel::HINT)
-            .or_else(|| self.menu.as_ref().map(|m| m.hint))
-            .or_else(|| {
-                self.ui_input_open().then(|| {
-                    if self.ui_editor_open() {
-                        extui::HINT_EDITOR
-                    } else {
-                        extui::HINT_INPUT
-                    }
-                })
-            })
-            .or(ext_panel_hint)
-            .map(|h| crate::menu::degrade_hint(h, width));
+    }
+
+    /// The status row: the layout's segments, the open surface's key hint,
+    /// and whichever transient overlay is showing.
+    fn status_row(&self, width: usize) -> Vec<String> {
         // A framed surface's bottom divider sits directly above the hint
         // row — the blank spacer belongs only to the bare-composer layout.
         let panel_open = self.trust.is_some()
@@ -306,17 +305,40 @@ impl App {
             .or(hidden_pane)
             .or_else(|| self.conversation_scroll.map(|_| self.scroll_hint.clone()))
             .or(right);
-        let footer = statusline(
+        statusline(
             &self.theme,
             &left,
             overlay.as_deref(),
-            hint,
+            self.surface_hint(width),
             panel_open,
             width,
-        );
-        lines.extend(footer);
+        )
+    }
 
-        lines
+    /// The open surface's key hint, degraded to fit `width`.
+    fn surface_hint(&self, width: usize) -> Option<&'static str> {
+        let ext_panel_hint = self.ext_panel.as_ref().map(|p| {
+            if p.interactive {
+                extui::HINT_PANEL_INTERACTIVE
+            } else {
+                extui::HINT_PANEL
+            }
+        });
+        self.settings
+            .as_ref()
+            .map(|_| crate::settingspanel::HINT)
+            .or_else(|| self.menu.as_ref().map(|m| m.hint))
+            .or_else(|| {
+                self.ui_input_open().then(|| {
+                    if self.ui_editor_open() {
+                        extui::HINT_EDITOR
+                    } else {
+                        extui::HINT_INPUT
+                    }
+                })
+            })
+            .or(ext_panel_hint)
+            .map(|h| crate::menu::degrade_hint(h, width))
     }
 
     /// The status row's segments, left and right, from the layout's

@@ -9,7 +9,9 @@
 
 ### Fixes
 
-- Nothing yet.
+- Attaching a selection from an extension's Markdown pane takes the rendered rows you selected, not whichever source lines had the same numbers.
+- Attaching from an extension's text pane wraps at the pane's width, not the whole terminal's, so the attached lines match the ones you selected.
+- A foreground `bash` command whose exit status can't be read no longer leaves a reader thread spinning when a child process still holds the output pipe open.
 
 ## 0.0.2
 

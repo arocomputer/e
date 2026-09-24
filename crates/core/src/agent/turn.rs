@@ -1,7 +1,20 @@
 //! Provider requests, tool batches, steering, and context maintenance for one run.
 //! The supervisor owns terminal events; this worker stops only at a safe boundary.
+//!
+//! A run is a loop of steps, and [`Turn::step`] reads as the whole story:
+//! steer, compact if needed, stream one reply, commit it, run its tools.
+//! Every phase returns a [`Flow`]: `Continue` carries on and `Break` ends the
+//! run with its [`Outcome`], so `?` is how a phase stops the run.
+
+use std::collections::HashSet;
+use std::iter::Peekable;
+use std::ops::ControlFlow::{self, Break, Continue};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
+
+/// Keep going with a `T`, or end the run with this outcome.
+type Flow<T = ()> = ControlFlow<Outcome, T>;
 
 /// A worker failure cannot restart just because prompts arrived during shutdown.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,723 +62,798 @@ pub(super) struct Context {
 /// Execute requests until an answer, cancellation, or failure. Compaction
 /// happens after complete tool batches and never requires frontend intervention.
 pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
-    let Context {
-        log,
-        events,
-        history,
-        cancel,
-        model,
-        cwd,
-        effort,
-        pending,
-        host,
-        tool_seq,
-        active_tools,
-        wake,
-        system,
-        allowed_tools,
-        compact_requested,
-        compact_focus,
-        instructions_loaded,
-        tool_runtime,
-        tool_mode,
-    } = context;
-    // Extensions may append to the system prompt for this turn.
-    let mut system = system;
-    let window_secs = wake::policy::window_secs();
-    let max_continuations = wake::policy::max_continuations();
-    let mut sleep_continuations = 0u32;
-    // One free retry for a blank success per turn: an empty stream is
-    // the most transient failure there is, and ending the turn on the
-    // first one traded a 1s pause for a dead turn.
-    let mut empty_retried = false;
-    // Steps this turn has run (one request each). The cap is a
-    // runaway backstop far above real work, not a working budget.
-    let mut steps = 0u32;
-    let mut settled_tools = 0usize;
-    let mut failed_tools = 0usize;
-    let outcome = 'turn: loop {
-        if cancel.load(Ordering::SeqCst) {
-            break Outcome::Cancelled;
+    let mut turn = Turn::new(context, compact_only);
+    loop {
+        if let Break(outcome) = turn.step().await {
+            return outcome;
         }
-        if compact_requested.swap(false, Ordering::SeqCst) {
-            let focus = take_focus(&compact_focus);
-            match compact_log(&log, &system, &cancel, host.as_ref(), focus).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    let _ = events
-                        .send(SessionEvent::Warning(
-                            "recent context already fits; nothing to compact".into(),
-                        ))
-                        .await;
-                }
-                Err(error) => {
-                    let _ = events.send(SessionEvent::Error(error)).await;
-                    break Outcome::stopped(&cancel);
-                }
+    }
+}
+
+/// A run's state across its steps.
+struct Turn {
+    ctx: Context,
+    compact_only: bool,
+    /// This run's system prompt; a `before_turn` hook may extend it.
+    system: String,
+    /// Steps taken, one provider request each. [`MAX_STEPS`] is a runaway
+    /// backstop far above real work, not a working budget.
+    steps: u32,
+    /// The sleep policy, read once per run.
+    window_secs: u64,
+    max_continuations: u32,
+    sleep_continuations: u32,
+    /// Whether this run spent its one quiet retry of a blank reply.
+    empty_retried: bool,
+    settled_tools: usize,
+    failed_tools: usize,
+    /// The current step's context size in tokens: an estimate until the
+    /// provider reports usage, then grown by each tool result. Drives
+    /// compaction after a tool batch.
+    context_tokens: u64,
+}
+
+/// What one step's stream produced, and why it stopped early if it did.
+#[derive(Default)]
+struct Reply {
+    text: String,
+    calls: Vec<ToolCall>,
+    reasoning: Vec<String>,
+    /// Thought deltas arrived. A dialect can stream thoughts without ever
+    /// committing a reasoning item (Gemini's empty-text thought chunks), so
+    /// this alone still counts as output: a thinking-only reply is neither
+    /// replayed by a retry nor called empty.
+    reasoning_streamed: bool,
+    /// The stream's last usage frame. Dialects may report usage cumulatively
+    /// mid-stream, so only the final frame is this step's.
+    usage: Option<providers::Usage>,
+    interrupted: Option<Interruption>,
+}
+
+impl Reply {
+    /// Nothing reached the user or the model: no text, calls, or reasoning.
+    fn is_blank(&self) -> bool {
+        self.text.is_empty()
+            && self.calls.is_empty()
+            && self.reasoning.is_empty()
+            && !self.reasoning_streamed
+    }
+}
+
+/// Why a step's stream stopped before the provider finished it.
+enum Interruption {
+    /// Esc mid-stream.
+    Cancelled,
+    /// The provider failed; the error is already reported.
+    Failed,
+    /// The device slept past the resume window or the continuation cap. The
+    /// stop is already reported, so the run ends as a stop, not an error.
+    SleptTooLong,
+    /// The device slept mid-reply within the window: the run continues and
+    /// asks the model to finish its own sentence.
+    SleptMidReply(Duration),
+}
+
+/// One provider request in flight for the current step.
+struct Attempt {
+    /// 1-based: attempt 1 is the first try.
+    number: u32,
+    /// Requests allowed for the step, the first included
+    /// (`retry_max_attempts`). A request budget, not a retry budget.
+    limit: u32,
+    /// When this stream opened. A sleep that ended after it happened with
+    /// the request in flight, so the loss is the sleep's, not the provider's.
+    started: Instant,
+    rx: mpsc::Receiver<ProviderEvent>,
+    handle: tokio::task::JoinHandle<()>,
+    /// Tool-argument bytes streamed so far, for the liveness row.
+    assembly_bytes: u64,
+    /// A retried attempt already reported that it recovered.
+    recovered: bool,
+}
+
+impl Attempt {
+    fn open(request: &Request) -> Self {
+        let limit = retry::max_attempts();
+        let started = Instant::now();
+        let (rx, handle) = providers::stream(clone_request(request));
+        Self {
+            number: 1,
+            limit,
+            started,
+            rx,
+            handle,
+            assembly_bytes: 0,
+            recovered: false,
+        }
+    }
+
+    /// Send the same request again. The new stream starts its tool arguments
+    /// and usage from scratch: counts the dead stream reported aren't its own.
+    fn reopen(&mut self, request: &Request, reply: &mut Reply) {
+        self.started = Instant::now();
+        (self.rx, self.handle) = providers::stream(clone_request(request));
+        self.assembly_bytes = 0;
+        reply.usage = None;
+    }
+
+    /// Nothing streamed this attempt, not even part of a tool call, so
+    /// replaying the request can't duplicate anything.
+    fn nothing_produced(&self, reply: &Reply) -> bool {
+        reply.is_blank() && self.assembly_bytes == 0
+    }
+}
+
+impl Turn {
+    fn new(ctx: Context, compact_only: bool) -> Self {
+        Self {
+            system: ctx.system.clone(),
+            ctx,
+            compact_only,
+            steps: 0,
+            window_secs: wake::policy::window_secs(),
+            max_continuations: wake::policy::max_continuations(),
+            sleep_continuations: 0,
+            empty_retried: false,
+            settled_tools: 0,
+            failed_tools: 0,
+            context_tokens: 0,
+        }
+    }
+
+    /// One provider request and whatever it asks for. `Continue` means the
+    /// run needs another step.
+    async fn step(&mut self) -> Flow {
+        if self.cancelled() {
+            return Break(Outcome::Cancelled);
+        }
+        self.compact_on_request().await?;
+        self.steps += 1;
+        if self.steps > MAX_STEPS {
+            self.fail(format!(
+                "turn stopped after {MAX_STEPS} steps — send a message to continue"
+            ))
+            .await;
+            return Break(Outcome::Failed);
+        }
+        self.take_steering().await;
+        // The first request is the extensions' moment. Continuations and
+        // compaction-only runs are not turns.
+        if self.steps == 1 && !self.compact_only {
+            self.start_turn().await;
+        }
+        let active_tools = lock(&self.ctx.active_tools).clone().map(Arc::new);
+        let request = self.build_request(&active_tools).await?;
+
+        let mut reply = self.stream_reply(&request).await?;
+        let response = providers::ResponseMeta::new(
+            &self.ctx.model,
+            providers::ResponsePurpose::Turn,
+            reply.usage,
+        );
+        self.count_reply(&reply).await;
+        if let Some(interruption) = reply.interrupted.take() {
+            return self.end_interrupted(interruption, reply, response).await;
+        }
+        if reply.is_blank() && !self.has_pending() {
+            return self.retry_blank(response).await;
+        }
+
+        let answered = !reply.text.trim().is_empty();
+        let calls = reply.calls.clone();
+        self.commit_reply(reply, response).await;
+        if calls.is_empty() {
+            return self.end_without_tools(answered).await;
+        }
+        self.run_tool_batch(&calls, active_tools).await?;
+        // Nested instructions for the paths the batch touched join after its
+        // results, so the provider's call/result pairing holds.
+        load_nested_instructions(
+            &calls,
+            &self.ctx.cwd,
+            &self.ctx.instructions_loaded,
+            &self.ctx.log,
+            &self.ctx.events,
+        )
+        .await;
+        self.compact_after_tools().await
+    }
+
+    /// Run the compaction `/compact` asked for. A compaction-only run ends here.
+    async fn compact_on_request(&mut self) -> Flow {
+        if !self.ctx.compact_requested.swap(false, Ordering::SeqCst) {
+            return Continue(());
+        }
+        match self.compact().await {
+            Ok(true) => {}
+            Ok(false) => {
+                self.warn("recent context already fits; nothing to compact")
+                    .await
             }
-            if compact_only && steps == 0 {
-                break Outcome::Complete;
+            Err(error) => {
+                self.fail(error).await;
+                return Break(Outcome::stopped(&self.ctx.cancel));
             }
         }
-        steps += 1;
-        if steps > MAX_STEPS {
-            let _ = events
-                .send(SessionEvent::Error(format!(
-                    "turn stopped after {MAX_STEPS} steps — send a message to continue"
-                )))
-                .await;
-            break Outcome::Failed;
+        if self.compact_only && self.steps == 0 {
+            return Break(Outcome::Complete);
         }
-        // Steer: fold any pending messages into this turn between
-        // steps. The queue review edits these entries by key
-        // concurrently; whatever the loop takes here is gone to it.
-        let steered: Vec<ChatMessage> = {
-            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
-            pending
-                .items
-                .drain(..)
-                .map(|(_, message)| message)
-                .collect()
-        };
-        for message in steered {
-            // An extension's internal message rides the queue too; the
-            // transcript never sees it, the model does.
+        Continue(())
+    }
+
+    /// Fold messages queued while the run worked into the conversation. The
+    /// queue review edits entries by key concurrently; whatever is taken
+    /// here is gone from it.
+    async fn take_steering(&self) {
+        let steered: Vec<ChatMessage> = lock(&self.ctx.pending)
+            .items
+            .drain(..)
+            .map(|(_, message)| message)
+            .collect();
+        for mut message in steered {
+            // An extension's internal message rides the queue too: the model
+            // sees it, the transcript doesn't. Images stay attached either
+            // way; a steering message is the user's intent, not a text echo.
             if !message.is_internal() {
-                let _ = events
-                    .send(SessionEvent::Steered(message.content.clone()))
+                self.emit(SessionEvent::Steered(message.content.clone()))
                     .await;
             }
-            // Queued whole, images included: a steering message is the
-            // user's intent, not a text-only echo.
-            let mut recorded = message;
-            recorded.mark_internal();
-            log.commit_async(recorded).await;
+            message.mark_internal();
+            self.ctx.log.commit_async(message).await;
         }
+    }
 
-        // The first request of a run is the extensions' moment: the
-        // `before_turn` hook may add a system paragraph and a message,
-        // and `turn_start` carries the prompt. Continuations (later
-        // steps) and compaction-only runs are not turns.
-        if steps == 1 && !compact_only {
-            if let Some(h) = &host {
-                let prompt = history
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .iter()
-                    .rev()
-                    .find(|m| {
-                        matches!(m.kind, crate::providers::MessageKind::User { .. })
-                            && !m.is_internal()
-                    })
-                    .map(|m| m.content.clone())
-                    .unwrap_or_default();
-                if h.has_hook("before_turn") {
-                    let added = h.hook_before_turn(&prompt).await;
-                    for suffix in added.system_suffixes {
-                        system.push_str("\n\n");
-                        system.push_str(&suffix);
-                    }
-                    for message in added.messages {
-                        let mut recorded = ChatMessage::user(message.content.clone());
-                        if message.internal {
-                            recorded.mark_internal();
-                        } else {
-                            let _ = events.send(SessionEvent::Steered(message.content)).await;
-                        }
-                        log.commit_async(recorded).await;
-                    }
+    /// The run's first request: `before_turn` hooks may extend the system
+    /// prompt and add messages, and `turn_start` carries the prompt.
+    async fn start_turn(&mut self) {
+        let Some(host) = self.ctx.host.clone() else {
+            return;
+        };
+        let prompt = lock(&self.ctx.history)
+            .iter()
+            .rev()
+            .find(|m| {
+                matches!(m.kind, crate::providers::MessageKind::User { .. }) && !m.is_internal()
+            })
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        if host.has_hook("before_turn") {
+            let added = host.hook_before_turn(&prompt).await;
+            for suffix in added.system_suffixes {
+                self.system.push_str("\n\n");
+                self.system.push_str(&suffix);
+            }
+            for message in added.messages {
+                let mut recorded = ChatMessage::user(message.content.clone());
+                if message.internal {
+                    recorded.mark_internal();
+                } else {
+                    self.emit(SessionEvent::Steered(message.content)).await;
                 }
-                h.event("turn_start", serde_json::json!({"prompt": prompt}))
-                    .await;
+                self.ctx.log.commit_async(recorded).await;
             }
         }
-        let active_now: Option<Arc<Vec<String>>> = active_tools
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .map(Arc::new);
+        host.event("turn_start", serde_json::json!({"prompt": prompt}))
+            .await;
+    }
 
-        let mut messages = { history.lock().unwrap_or_else(|e| e.into_inner()).clone() };
-        // Some compatible gateways omit usage entirely. Keep a local,
-        // conservative fallback so the mid-turn safety guard still
-        // exists there; a real Usage frame replaces it below. Sized
-        // against history before the image strip below, so it stays
-        // the conservative side of what's actually sent.
-        let mut last_context = compact::estimate_request_tokens(&system, &messages);
-        if compact::should_compact(last_context, model.context_window) {
-            match compact_log(
-                &log,
-                &system,
-                &cancel,
-                host.as_ref(),
-                take_focus(&compact_focus),
-            )
-            .await
-            {
+    /// This step's request, compacting first if history no longer fits.
+    async fn build_request(&mut self, active_tools: &Option<Arc<Vec<String>>>) -> Flow<Request> {
+        let mut messages = self.history();
+        // Some gateways never report usage, so start from a conservative
+        // local estimate; a real usage frame replaces it. Sized before the
+        // image strip below, so it errs on the side of what's sent.
+        self.context_tokens = compact::estimate_request_tokens(&self.system, &messages);
+        if compact::should_compact(self.context_tokens, self.ctx.model.context_window) {
+            match self.compact().await {
                 Ok(true) => {
-                    messages = history
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .clone();
-                    last_context = compact::estimate_request_tokens(&system, &messages);
+                    messages = self.history();
+                    self.context_tokens = compact::estimate_request_tokens(&self.system, &messages);
                 }
                 result => {
                     let message = result.err().unwrap_or_else(|| {
                         "context is full and cannot be reduced; history was preserved".into()
                     });
-                    let _ = events.send(SessionEvent::Error(message)).await;
-                    break Outcome::stopped(&cancel);
+                    self.fail(message).await;
+                    return Break(Outcome::stopped(&self.ctx.cancel));
                 }
             }
         }
-        // A resumed session, or a mid-session model switch, can carry
-        // image-bearing turns forward from an earlier, image-capable
-        // model to one that isn't — this is the one place every
-        // frontend's outgoing request passes through, so it's the one
-        // place that needs to know. This only edits the local copy
-        // just cloned from `history` above; the session's own stored
-        // record keeps its images regardless of what model sends the
-        // next turn.
-        providers::strip_incompatible_images(&mut messages, &model);
-        // The stable per-conversation id, read from the live log the
-        // steering commits above just created (empty for an unsaved
-        // session). Providers that opt in send it as their session
-        // header — see `providers::with_attribution`.
-        let session_id = log
-            .session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        // A resumed session or a model switch can carry images to a model
+        // that can't take them. Every frontend's request passes here, so this
+        // is the one place to strip them — from this copy only; the session
+        // keeps its images.
+        providers::strip_incompatible_images(&mut messages, &self.ctx.model);
+        // The stable conversation id (empty for an unsaved session), sent as
+        // a session header by providers that opt in.
+        let session_id = lock(&self.ctx.log.session)
             .as_ref()
             .map(|s| s.id().to_string())
             .unwrap_or_default();
-        let request = Request {
-            model: model.clone(),
-            system: system.clone(),
+        Continue(Request {
+            model: self.ctx.model.clone(),
+            system: self.system.clone(),
             messages,
-            effort: effort.clone(),
+            effort: self.ctx.effort.clone(),
             session_id,
-            tools: tools::restrict_to(
-                tools::restrict_to(
-                    tools::filter_schemas(
-                        match (&host, tool_mode, allowed_tools.is_some()) {
-                            // A request allowlist names built-ins. Extension
-                            // tools and overrides stay outside that contract.
-                            (Some(h), ToolMode::All, false) => h.merged_tool_schemas(),
-                            _ => tools::schemas(),
-                        },
-                        tool_mode,
-                    ),
-                    allowed_tools.as_deref().map(Vec::as_slice),
-                ),
-                active_now.as_deref().map(Vec::as_slice),
-            ),
+            tools: self.tool_schemas(active_tools),
+        })
+    }
+
+    /// The tools a request offers: every schema the mode allows, narrowed by
+    /// the request allowlist, then by an extension's narrowing for this turn.
+    fn tool_schemas(&self, active_tools: &Option<Arc<Vec<String>>>) -> Vec<serde_json::Value> {
+        let ctx = &self.ctx;
+        // A request allowlist names built-ins, so extension tools and
+        // overrides stay out whenever one is set.
+        let all = match (&ctx.host, ctx.tool_mode, ctx.allowed_tools.is_some()) {
+            (Some(host), ToolMode::All, false) => host.merged_tool_schemas(),
+            _ => tools::schemas(),
         };
+        let allowed = tools::restrict_to(
+            tools::filter_schemas(all, ctx.tool_mode),
+            ctx.allowed_tools.as_deref().map(Vec::as_slice),
+        );
+        tools::restrict_to(allowed, active_tools.as_deref().map(Vec::as_slice))
+    }
 
-        // Total provider requests made for this step, including the
-        // initial request. The budget is a request budget, not a
-        // retry budget, and is file-backed (`retry_max_attempts`).
-        let max_attempts = retry::max_attempts();
-        let mut attempt = 1u32;
-        // When this attempt's stream opened. A sleep gap whose wake
-        // came after this instant happened with the attempt in
-        // flight, so a loss from it is attributable to the sleep.
-        let mut attempt_started = Instant::now();
-        let (mut rx, mut handle) = providers::stream(clone_request(&request));
-
-        let mut text = String::new();
-        let mut calls: Vec<ToolCall> = Vec::new();
-        let mut reasoning_items: Vec<String> = Vec::new();
-        // Set when a mid-reply loss should resume via a continuation
-        // over the committed partial; when the window or the
-        // continuation cap is exhausted, the stop flag is set instead.
-        let mut sleep_resume: Option<Duration> = None;
-        let mut sleep_stopped = false;
-        // A dialect can stream thought deltas without ever
-        // committing a ReasoningItem (e.g. Gemini's empty-text
-        // thought chunks), so a thinking-only stream must still
-        // count as produced by this flag alone: otherwise a
-        // retryable error after a long thinking phase would retry
-        // (replaying the thoughts on screen) and a thinking-only
-        // stream ending without text would be called an empty
-        // response.
-        let mut reasoning_streamed = false;
-        // Latest usage frame this step; emitted once after the stream
-        // ends. Dialects may report usage cumulatively mid-stream
-        // (Gemini sends usageMetadata per chunk), so forwarding every
-        // frame would let a consumer that sums per-step usage count
-        // the same tokens more than once.
-        let mut step_usage: Option<providers::Usage> = None;
-        // Cumulative argument bytes this attempt, for the liveness
-        // row. Deliberately not part of the retry-safety check: a
-        // partial call never left the dialect, so replaying the
-        // request commits nothing twice.
-        let mut assembly_bytes = 0u64;
-        let mut errored = false;
-        // True once this attempt has streamed anything at all — the
-        // signal both for "recovered" (first content after a retry)
-        // and for whether a fresh failure is still safe to retry.
-        let mut recovered_notified = false;
-        // Cancel must win even when the provider yields nothing: a
-        // prior `while let Some(event) = rx.recv()` only checked Esc
-        // after the next byte arrived, so a stalled SSE left the
-        // spinner running and Esc inert until the socket moved.
-        // Esc mid-stream falls through to the partial-commit path
-        // below instead of breaking the turn here: text the user
-        // watched stream must reach history, or the next turn's model
-        // has no memory of words the user is replying to.
-        let mut stream_cancelled = false;
-        'stream: loop {
+    /// Stream one reply, retrying failures that are safe to replay. Esc wins
+    /// even when the provider goes silent: a stalled stream never yields
+    /// another event to check it on.
+    async fn stream_reply(&mut self, request: &Request) -> Flow<Reply> {
+        let mut reply = Reply::default();
+        let mut attempt = Attempt::open(request);
+        loop {
             let event = tokio::select! {
-                event = rx.recv() => event,
-                _ = wait_cancelled(&cancel) => {
-                    handle.abort();
-                    stream_cancelled = true;
-                    break 'stream;
+                event = attempt.rx.recv() => event,
+                _ = wait_cancelled(&self.ctx.cancel) => {
+                    attempt.handle.abort();
+                    reply.interrupted = Some(Interruption::Cancelled);
+                    break;
                 }
             };
             let Some(event) = event else {
-                break 'stream;
+                break;
             };
-            // The new stream (after one or more retries) just
-            // produced its first non-error event — the retry
-            // worked. An immediate second failure is not a recovery,
-            // so this excludes Error and lets that arm decide
-            // whether to retry again instead. `attempt` is 1-based:
-            // 1 is the first try, so only attempt 2+ ever recovered.
-            if attempt > 1 && !recovered_notified && !matches!(event, ProviderEvent::Error(_)) {
-                recovered_notified = true;
-                let _ = events
-                    .send(SessionEvent::Recovered {
-                        attempt,
-                        limit: max_attempts,
-                    })
-                    .await;
-            }
-            match event {
-                ProviderEvent::TextDelta(d) => {
-                    text.push_str(&d);
-                    let _ = events.send(SessionEvent::TextDelta(d)).await;
-                }
-                ProviderEvent::ReasoningDelta(d) => {
-                    reasoning_streamed = true;
-                    let _ = events.send(SessionEvent::ReasoningDelta(d)).await;
-                }
-                ProviderEvent::ToolArgumentsDelta { delta, .. } => {
-                    assembly_bytes += delta.len() as u64;
-                    let _ = events
-                        .send(SessionEvent::ToolCallAssembly {
-                            bytes: assembly_bytes,
-                        })
-                        .await;
-                }
-                ProviderEvent::ToolCallStart { .. } | ProviderEvent::ToolCallEnd { .. } => {}
-                ProviderEvent::ToolCall(call) => calls.push(call),
-                ProviderEvent::ReasoningItem(item) => reasoning_items.push(item),
-                ProviderEvent::Usage(usage) => {
-                    step_usage = Some(usage);
-                }
-                ProviderEvent::Error(err) => {
-                    // A suspension that outlived the resume window
-                    // stops the run whatever the provider call died
-                    // of: partial work is committed below, and the
-                    // stop is reported as a stop, not an error.
-                    if let Some(gap) = wake::gap_since(&wake, attempt_started)
-                        .filter(|gap| gap.duration.as_secs() >= window_secs)
-                    {
-                        let _ = events
-                            .send(SessionEvent::SleepStopped {
-                                duration_secs: gap.duration.as_secs(),
-                            })
-                            .await;
-                        let _ = events
-                            .send(SessionEvent::Warning(format!(
-                        "run stopped — the device was asleep for {} (window {window_secs}s)",
-                        gap.label()
-                    )))
-                            .await;
-                        handle.abort();
-                        errored = true;
-                        sleep_stopped = true;
-                        break 'stream;
-                    }
-                    let nothing_produced = text.is_empty()
-                        && calls.is_empty()
-                        && reasoning_items.is_empty()
-                        && !reasoning_streamed
-                        && assembly_bytes == 0;
-                    // The attempt was in flight across a sleep that
-                    // fits the window: the run keeps going. Nothing
-                    // streamed means an immediate replay — not
-                    // charged to the attempt budget, since the loss
-                    // was the machine's, not the provider's.
-                    let slept_through = wake::gap_since(&wake, attempt_started).is_some();
-                    if nothing_produced && slept_through {
-                        let duration = wake::gap_since(&wake, attempt_started)
-                            .map(|gap| gap.duration.as_secs())
-                            .unwrap_or(0);
-                        let _ = events
-                            .send(SessionEvent::Slept {
-                                duration_secs: duration,
-                            })
-                            .await;
-                        // No artificial backoff — the machine just
-                        // woke; let the connect decide.
-                        attempt_started = Instant::now();
-                        let (nrx, nhandle) = providers::stream(clone_request(&request));
-                        rx = nrx;
-                        handle = nhandle;
-                        assembly_bytes = 0;
-                        step_usage = None;
-                        continue 'stream;
-                    }
-                    // Safe to retry only when the cause itself is
-                    // retryable (never Auth or Rejected) AND nothing
-                    // has streamed yet this attempt: a delivered
-                    // request that already produced output or ran
-                    // tools cannot be replayed without risking a
-                    // duplicate.
-                    if err.cause.is_retryable() && nothing_produced && attempt < max_attempts {
-                        let retry_number = attempt;
-                        attempt += 1;
-                        let delay = retry::delay_for(retry_number, err.retry_after);
-                        let _ = events
-                            .send(SessionEvent::Retry {
-                                attempt,
-                                limit: max_attempts,
-                                delay_secs: delay.as_secs(),
-                                cause: err.cause,
-                                reason: err.short.clone(),
-                            })
-                            .await;
-                        if !sleep_cancellable(delay, &cancel).await {
-                            handle.abort();
-                            break 'turn Outcome::Cancelled;
-                        }
-                        attempt_started = Instant::now();
-                        let (nrx, nhandle) = providers::stream(clone_request(&request));
-                        rx = nrx;
-                        handle = nhandle;
-                        // A fresh attempt streams its arguments from
-                        // scratch; the liveness counter follows, and so
-                        // does usage — a count the failed attempt
-                        // reported before dying is not this attempt's.
-                        assembly_bytes = 0;
-                        step_usage = None;
-                        continue 'stream;
-                    }
-                    // A mid-reply loss under the window resumes
-                    // differently: the partial reply is committed
-                    // below, and a continuation request lets the
-                    // model finish its own sentence — bounded by the
-                    // continuation cap so lid-flapping cannot chain
-                    // turns unattended.
-                    if !nothing_produced {
-                        if let Some(gap) = wake::gap_since(&wake, attempt_started) {
-                            if sleep_continuations < max_continuations {
-                                sleep_resume = Some(gap.duration);
-                                errored = true;
-                                break 'stream;
-                            }
-                            let _ = events
-                                .send(SessionEvent::SleepStopped {
-                                    duration_secs: gap.duration.as_secs(),
-                                })
-                                .await;
-                            let _ = events
-                        .send(SessionEvent::Warning(format!(
-                            "run stopped — the device was asleep for {} (continuation cap {max_continuations} reached)",
-                            gap.label()
-                        )))
-                        .await;
-                            handle.abort();
-                            // Enter the cancel-family stop path (like
-                            // the past-window branch above): commit the
-                            // partial once, synthesize results for any
-                            // unrun calls, and end the turn. Without
-                            // `errored` the stop block is skipped and
-                            // the half-streamed reply is committed as a
-                            // normal turn — running its tool calls after
-                            // the run was already reported stopped.
-                            errored = true;
-                            sleep_stopped = true;
-                            break 'stream;
-                        }
-                    }
-                    let retry_decision = failure::ErrorDetails::retry_decision(
-                        &err,
-                        !nothing_produced,
-                        max_attempts,
-                    );
-                    let details = failure::ErrorDetails {
-                        summary: failure::ErrorDetails::summary(&err).await,
-                        detail: err.diagnostic(),
-                        cause: err.cause,
-                        stage: err.stage,
-                        response: err.response.as_ref().clone(),
-                        provider_code: err.provider_code.clone(),
-                        provider: model.provider.clone(),
-                        model: model.id.clone(),
-                        timestamp_ms: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis()
-                            .min(u64::MAX as u128) as u64,
-                        attempt_elapsed_ms: attempt_started
-                            .elapsed()
-                            .as_millis()
-                            .min(u64::MAX as u128)
-                            as u64,
-                        step: steps,
-                        attempt,
-                        max_attempts,
-                        retry_after_secs: err.retry_after,
-                        partial_tool_argument_bytes: assembly_bytes,
-                        retry_decision,
-                        partial_text_bytes: text.len(),
-                        reasoning_received: reasoning_streamed || !reasoning_items.is_empty(),
-                        unexecuted_tool_calls: calls.len(),
-                        settled_tools,
-                        failed_tools,
-                        recovery: failure::ErrorDetails::recovery(err.cause, retry_decision),
-                    };
-                    log.record_error(details.clone()).await;
-                    let _ = events
-                        .send(SessionEvent::ErrorDetails(Box::new(details)))
-                        .await;
-                    // Distinguish genuine exhaustion (the cause was
-                    // retryable and nothing had streamed, but the
-                    // budget ran out) from a failure that simply
-                    // can't be retried at all — partial content
-                    // already produced this attempt, or a rejected
-                    // cause. Only the former earns "gave up after
-                    // N/M"; the latter would misreport why the
-                    // attempt stopped.
-                    let message =
-                        if max_attempts > 0 && err.cause.is_retryable() && nothing_produced {
-                            format!(
-                                "{} — gave up after {attempt}/{} attempts: {}",
-                                err.cause.label(),
-                                max_attempts,
-                                err.message
-                            )
-                        } else if err.cause == FailureCause::QuotaExhausted {
-                            // Lead with the why: the raw body behind it
-                            // is provider JSON the row will never show.
-                            format!("{} — {}", err.cause.label(), err.message)
-                        } else {
-                            err.message
-                        };
-                    let _ = events.send(SessionEvent::Error(message)).await;
-                    errored = true;
-                }
-                ProviderEvent::Done(end) => {
-                    // The stream completed, but not necessarily with
-                    // the full answer — a truncated, refused, or
-                    // filtered reply arrives as an HTTP success and
-                    // must not pass silently.
-                    let finish_warning = match &end.finish {
-                        FinishReason::Normal | FinishReason::ToolCalls => None,
-                        FinishReason::Length => {
-                            Some("reply truncated: the provider hit its output limit".into())
-                        }
-                        FinishReason::Refusal => Some("the model refused to answer".to_string()),
-                        FinishReason::ContentFilter => {
-                            Some("output blocked by the provider's content filter".to_string())
-                        }
-                        FinishReason::Other(reason) => {
-                            Some(format!("turn ended abnormally: {reason}"))
-                        }
-                    };
-                    if let Some(warning) = finish_warning {
-                        let _ = events.send(SessionEvent::Warning(warning)).await;
-                    }
-                    if end.malformed > 0 {
-                        let _ = events
-                            .send(SessionEvent::Warning(format!(
-                                "{} malformed stream event{} skipped",
-                                end.malformed,
-                                if end.malformed == 1 { "" } else { "s" }
-                            )))
-                            .await;
-                    }
-                }
-            }
-        }
-        // Mint response provenance once so a response with no replayable
-        // content can still be recorded, while ordinary replies attach the
-        // same envelope to their assistant message.
-        let response =
-            providers::ResponseMeta::new(&model, providers::ResponsePurpose::Turn, step_usage);
-        // One Usage per step, the stream's final frame. Emitted even
-        // when the stream then errored — the tokens were still consumed.
-        if let Some(usage) = step_usage {
-            last_context = usage.prompt_tokens().saturating_add(usage.output);
-            let _ = events
-                .send(SessionEvent::Usage {
-                    usage,
-                    pricing: model.pricing.clone(),
+            // A retry worked once its stream yields anything but another error.
+            if attempt.number > 1 && !attempt.recovered && !matches!(event, ProviderEvent::Error(_))
+            {
+                attempt.recovered = true;
+                self.emit(SessionEvent::Recovered {
+                    attempt: attempt.number,
+                    limit: attempt.limit,
                 })
                 .await;
-        } else {
-            let provisional = ChatMessage::assistant(text.clone(), calls.clone());
-            last_context =
-                last_context.saturating_add(compact::estimate_message_tokens(&provisional));
-        }
-        // A cancelled or failed stream still commits what it already
-        // produced: the user watched that text arrive, and a history
-        // missing it would have the model contradict its own visible
-        // words next turn. Calls that never ran get a synthetic
-        // result — a dangling tool_use without its tool_result fails
-        // the next request on every dialect.
-        if stream_cancelled || errored {
-            if !text.is_empty() || !calls.is_empty() {
-                for item in reasoning_items.drain(..) {
-                    log.commit_async(ChatMessage::reasoning(item)).await;
+            }
+            match event {
+                ProviderEvent::TextDelta(delta) => {
+                    reply.text.push_str(&delta);
+                    self.emit(SessionEvent::TextDelta(delta)).await;
                 }
-                let (note, outcome, summary) = if stream_cancelled {
-                    (
-                        "not executed — the turn was cancelled before this call ran",
-                        tools::ToolOutcome::Cancelled,
-                        "cancelled",
-                    )
-                } else {
-                    (
-                        "not executed — the provider stream failed before this call ran",
-                        tools::ToolOutcome::Failed,
-                        "error",
-                    )
-                };
-                let unrun = calls.clone();
-                let final_message = ChatMessage::assistant(std::mem::take(&mut text), calls)
-                    .with_response(response.clone());
-                log.commit_async(final_message).await;
-                for call in unrun {
-                    log.commit_async(ChatMessage::tool_result_with_meta(
+                ProviderEvent::ReasoningDelta(delta) => {
+                    reply.reasoning_streamed = true;
+                    self.emit(SessionEvent::ReasoningDelta(delta)).await;
+                }
+                ProviderEvent::ToolArgumentsDelta { delta, .. } => {
+                    attempt.assembly_bytes += delta.len() as u64;
+                    self.emit(SessionEvent::ToolCallAssembly {
+                        bytes: attempt.assembly_bytes,
+                    })
+                    .await;
+                }
+                ProviderEvent::ToolCallStart { .. } | ProviderEvent::ToolCallEnd { .. } => {}
+                ProviderEvent::ToolCall(call) => reply.calls.push(call),
+                ProviderEvent::ReasoningItem(item) => reply.reasoning.push(item),
+                ProviderEvent::Usage(usage) => reply.usage = Some(usage),
+                ProviderEvent::Done(end) => self.warn_abnormal_finish(&end).await,
+                // The provider sends an error as its last event, so a
+                // reported failure ends the stream.
+                ProviderEvent::Error(error) => {
+                    match self
+                        .on_stream_error(error, &mut attempt, &mut reply, request)
+                        .await?
+                    {
+                        None => continue,
+                        Some(interruption) => {
+                            reply.interrupted = Some(interruption);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Continue(reply)
+    }
+
+    /// Decide what a provider error means: `None` when the stream was
+    /// reopened, otherwise how the stream ends. Esc during a retry backoff
+    /// ends the run.
+    async fn on_stream_error(
+        &mut self,
+        err: providers::ProviderError,
+        attempt: &mut Attempt,
+        reply: &mut Reply,
+        request: &Request,
+    ) -> Flow<Option<Interruption>> {
+        let nothing_produced = attempt.nothing_produced(reply);
+        if let Some(gap) = wake::gap_since(&self.ctx.wake, attempt.started) {
+            let slept = gap.duration.as_secs();
+            // Past the window the run stops, whatever the request died of.
+            if slept >= self.window_secs {
+                let reason = format!("window {}s", self.window_secs);
+                return Continue(Some(self.stop_for_sleep(&gap, &reason, attempt).await));
+            }
+            // Nothing streamed: replay at once. The machine lost the
+            // request, so it costs no attempt and gets no backoff.
+            if nothing_produced {
+                self.emit(SessionEvent::Slept {
+                    duration_secs: slept,
+                })
+                .await;
+                attempt.reopen(request, reply);
+                return Continue(None);
+            }
+            // Mid-reply: commit the partial and let the model finish its
+            // sentence, up to the cap, so a flapping lid can't chain turns
+            // unattended.
+            if self.sleep_continuations < self.max_continuations {
+                return Continue(Some(Interruption::SleptMidReply(gap.duration)));
+            }
+            let reason = format!("continuation cap {} reached", self.max_continuations);
+            return Continue(Some(self.stop_for_sleep(&gap, &reason, attempt).await));
+        }
+        // Replay only a retryable cause (never auth or a rejection) when
+        // nothing streamed: a request that produced output or ran tools
+        // can't be replayed without risking a duplicate.
+        if err.cause.is_retryable() && nothing_produced && attempt.number < attempt.limit {
+            let delay = retry::delay_for(attempt.number, err.retry_after);
+            attempt.number += 1;
+            self.emit(SessionEvent::Retry {
+                attempt: attempt.number,
+                limit: attempt.limit,
+                delay_secs: delay.as_secs(),
+                cause: err.cause,
+                reason: err.short.clone(),
+            })
+            .await;
+            if !sleep_cancellable(delay, &self.ctx.cancel).await {
+                attempt.handle.abort();
+                return Break(Outcome::Cancelled);
+            }
+            attempt.reopen(request, reply);
+            return Continue(None);
+        }
+        self.report_failure(err, attempt, reply, nothing_produced)
+            .await;
+        Continue(Some(Interruption::Failed))
+    }
+
+    /// Stop the run over a sleep it can't resume from, reported as a stop
+    /// rather than an error. The partial reply is still committed.
+    async fn stop_for_sleep(
+        &self,
+        gap: &wake::SleepGap,
+        reason: &str,
+        attempt: &Attempt,
+    ) -> Interruption {
+        self.emit(SessionEvent::SleepStopped {
+            duration_secs: gap.duration.as_secs(),
+        })
+        .await;
+        self.warn(format!(
+            "run stopped — the device was asleep for {} ({reason})",
+            gap.label()
+        ))
+        .await;
+        attempt.handle.abort();
+        Interruption::SleptTooLong
+    }
+
+    /// Record and report a failure the step can't recover from.
+    async fn report_failure(
+        &self,
+        err: providers::ProviderError,
+        attempt: &Attempt,
+        reply: &Reply,
+        nothing_produced: bool,
+    ) {
+        let retry_decision =
+            failure::ErrorDetails::retry_decision(&err, !nothing_produced, attempt.limit);
+        let details = failure::ErrorDetails {
+            summary: failure::ErrorDetails::summary(&err).await,
+            detail: err.diagnostic(),
+            cause: err.cause,
+            stage: err.stage,
+            response: err.response.as_ref().clone(),
+            provider_code: err.provider_code.clone(),
+            provider: self.ctx.model.provider.clone(),
+            model: self.ctx.model.id.clone(),
+            timestamp_ms: millis(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default(),
+            ),
+            attempt_elapsed_ms: millis(attempt.started.elapsed()),
+            step: self.steps,
+            attempt: attempt.number,
+            max_attempts: attempt.limit,
+            retry_after_secs: err.retry_after,
+            partial_tool_argument_bytes: attempt.assembly_bytes,
+            retry_decision,
+            partial_text_bytes: reply.text.len(),
+            reasoning_received: reply.reasoning_streamed || !reply.reasoning.is_empty(),
+            unexecuted_tool_calls: reply.calls.len(),
+            settled_tools: self.settled_tools,
+            failed_tools: self.failed_tools,
+            recovery: failure::ErrorDetails::recovery(err.cause, retry_decision),
+        };
+        self.ctx.log.record_error(details.clone()).await;
+        self.emit(SessionEvent::ErrorDetails(Box::new(details)))
+            .await;
+        // "Gave up after N/M" only when retries were genuinely exhausted; a
+        // failure that could never be retried would misreport why it stopped.
+        let message = if attempt.limit > 0 && err.cause.is_retryable() && nothing_produced {
+            format!(
+                "{} — gave up after {}/{} attempts: {}",
+                err.cause.label(),
+                attempt.number,
+                attempt.limit,
+                err.message
+            )
+        } else if err.cause == FailureCause::QuotaExhausted {
+            // Lead with the why: the raw body behind it is provider JSON the
+            // row never shows.
+            format!("{} — {}", err.cause.label(), err.message)
+        } else {
+            err.message
+        };
+        self.fail(message).await;
+    }
+
+    /// A finished stream isn't necessarily a full answer: a truncated,
+    /// refused, or filtered reply arrives as an HTTP success and must not
+    /// pass silently.
+    async fn warn_abnormal_finish(&self, end: &providers::StreamEnd) {
+        let warning = match &end.finish {
+            FinishReason::Normal | FinishReason::ToolCalls => None,
+            FinishReason::Length => {
+                Some("reply truncated: the provider hit its output limit".to_string())
+            }
+            FinishReason::Refusal => Some("the model refused to answer".to_string()),
+            FinishReason::ContentFilter => {
+                Some("output blocked by the provider's content filter".to_string())
+            }
+            FinishReason::Other(reason) => Some(format!("turn ended abnormally: {reason}")),
+        };
+        if let Some(warning) = warning {
+            self.warn(warning).await;
+        }
+        if end.malformed > 0 {
+            let plural = if end.malformed == 1 { "" } else { "s" };
+            self.warn(format!(
+                "{} malformed stream event{plural} skipped",
+                end.malformed
+            ))
+            .await;
+        }
+    }
+
+    /// Report the step's usage once, from the stream's final frame, even when
+    /// the stream then failed: the tokens were still spent. Without a frame,
+    /// grow the estimate by the reply itself.
+    async fn count_reply(&mut self, reply: &Reply) {
+        if let Some(usage) = reply.usage {
+            self.context_tokens = usage.prompt_tokens().saturating_add(usage.output);
+            self.emit(SessionEvent::Usage {
+                usage,
+                pricing: self.ctx.model.pricing.clone(),
+            })
+            .await;
+        } else {
+            let provisional = ChatMessage::assistant(reply.text.clone(), reply.calls.clone());
+            self.context_tokens = self
+                .context_tokens
+                .saturating_add(compact::estimate_message_tokens(&provisional));
+        }
+    }
+
+    /// End a stream that didn't finish. What already streamed is committed —
+    /// the user watched it arrive, and the model must not contradict its own
+    /// visible words — and each call that never ran gets a synthetic result,
+    /// since a dangling tool call fails the next request on every dialect.
+    /// A sleep within the window continues the run instead of ending it.
+    async fn end_interrupted(
+        &mut self,
+        interruption: Interruption,
+        reply: Reply,
+        response: providers::ResponseMeta,
+    ) -> Flow {
+        if !reply.text.is_empty() || !reply.calls.is_empty() {
+            for item in reply.reasoning {
+                self.ctx
+                    .log
+                    .commit_async(ChatMessage::reasoning(item))
+                    .await;
+            }
+            let (note, outcome, summary) = match interruption {
+                Interruption::Cancelled => (
+                    "not executed — the turn was cancelled before this call ran",
+                    tools::ToolOutcome::Cancelled,
+                    "cancelled",
+                ),
+                _ => (
+                    "not executed — the provider stream failed before this call ran",
+                    tools::ToolOutcome::Failed,
+                    "error",
+                ),
+            };
+            let unrun = reply.calls.clone();
+            let partial = ChatMessage::assistant(reply.text, reply.calls).with_response(response);
+            self.ctx.log.commit_async(partial).await;
+            for call in unrun {
+                self.ctx
+                    .log
+                    .commit_async(ChatMessage::tool_result_with_meta(
                         call.id, note, outcome, summary,
                     ))
                     .await;
-                }
             }
-            if stream_cancelled {
-                break Outcome::Cancelled;
-            }
-            // A sleep past the window (or the continuation cap) is a
-            // stop in the cancel family: the stop line already went
-            // out, so end aborted without a second row.
-            if sleep_stopped {
-                break Outcome::Cancelled;
-            }
-            // A sleep under the window resumes: the continuation
-            // message is committed and shown, and the next step asks
-            // the model to finish its own sentence.
-            if let Some(duration) = sleep_resume {
-                sleep_continuations += 1;
-                let _ = events
-                    .send(SessionEvent::Slept {
-                        duration_secs: duration.as_secs(),
-                    })
-                    .await;
-                // Harness-authored: the wake continuation fills
-                // the history but is not a user turn.
+        }
+        match interruption {
+            // A sleep stop already reported itself, so it ends quietly, as
+            // Esc does.
+            Interruption::Cancelled | Interruption::SleptTooLong => Break(Outcome::Cancelled),
+            Interruption::Failed => Break(Outcome::Failed),
+            Interruption::SleptMidReply(duration) => {
+                self.sleep_continuations += 1;
+                self.emit(SessionEvent::Slept {
+                    duration_secs: duration.as_secs(),
+                })
+                .await;
+                // Harness-authored: it fills the history but is not a user turn.
                 let mut recorded = ChatMessage::user(SLEEP_CONTINUATION.to_string());
                 recorded.mark_internal();
-                log.commit_async(recorded).await;
-                let _ = events
-                    .send(SessionEvent::Steered(SLEEP_CONTINUATION.to_string()))
+                self.ctx.log.commit_async(recorded).await;
+                self.emit(SessionEvent::Steered(SLEEP_CONTINUATION.to_string()))
                     .await;
-                continue 'turn;
+                Continue(())
             }
-            break Outcome::Failed;
         }
+    }
 
-        // A stream that ends with no text, no calls, no reasoning,
-        // and no error is a blank success — committing it would strand
-        // the turn in silence. It is also the most transient failure
-        // a provider produces, so it gets one quiet re-request per
-        // turn when the configured attempt budget permits. Abnormal
-        // finishes and skipped frames
-        // were already surfaced as warnings above; past the retry we
-        // guarantee the user at least sees that something went wrong.
-        if text.is_empty()
-            && calls.is_empty()
-            && reasoning_items.is_empty()
-            && !reasoning_streamed
-            && pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .items
-                .is_empty()
-        {
-            // The request completed and may have been billed even though it
-            // produced nothing safe to replay. Keep its response envelope out
-            // of model history before either retrying or surfacing the error.
-            log.record_response(response.clone()).await;
-            if !empty_retried && max_attempts > 1 {
-                empty_retried = true;
-                let _ = events
-                    .send(SessionEvent::Retry {
-                        attempt: 2,
-                        limit: max_attempts,
-                        delay_secs: 1,
-                        cause: FailureCause::ProviderUnavailable,
-                        reason: "empty response".into(),
-                    })
-                    .await;
-                if !sleep_cancellable(Duration::from_secs(1), &cancel).await {
-                    break 'turn Outcome::Cancelled;
-                }
-                continue 'turn;
+    /// A reply with no text, calls, reasoning, or error. Committing it would
+    /// strand the run in silence, and it's the most transient failure a
+    /// provider produces, so it gets one quiet retry per run when the attempt
+    /// budget allows. The request may still have been billed, so its response
+    /// is recorded outside model history either way.
+    async fn retry_blank(&mut self, response: providers::ResponseMeta) -> Flow {
+        self.ctx.log.record_response(response).await;
+        let limit = retry::max_attempts();
+        if !self.empty_retried && limit > 1 {
+            self.empty_retried = true;
+            self.emit(SessionEvent::Retry {
+                attempt: 2,
+                limit,
+                delay_secs: 1,
+                cause: FailureCause::ProviderUnavailable,
+                reason: "empty response".into(),
+            })
+            .await;
+            if !sleep_cancellable(Duration::from_secs(1), &self.ctx.cancel).await {
+                return Break(Outcome::Cancelled);
             }
-            let _ = events
-                .send(SessionEvent::Error(
-                    "the model returned an empty response".into(),
-                ))
+            return Continue(());
+        }
+        self.fail("the model returned an empty response").await;
+        Break(Outcome::Failed)
+    }
+
+    /// Commit a finished reply. Reasoning goes first: the dialect that
+    /// produced it replays it ahead of the assistant message. The response
+    /// metadata rides along; compaction carries it forward without sending
+    /// it back to the provider.
+    async fn commit_reply(&self, reply: Reply, response: providers::ResponseMeta) {
+        for item in reply.reasoning {
+            self.ctx
+                .log
+                .commit_async(ChatMessage::reasoning(item))
                 .await;
-            break Outcome::Failed;
         }
+        let message = ChatMessage::assistant(reply.text, reply.calls).with_response(response);
+        self.ctx.log.commit_async(message).await;
+    }
 
-        // Reasoning items commit first — the dialect that produced
-        // them must replay them ahead of the assistant turn.
-        for item in reasoning_items.drain(..) {
-            log.commit_async(ChatMessage::reasoning(item)).await;
+    /// A reply without tool calls ends the run, unless a message landed
+    /// mid-reply: then one more step delivers it.
+    async fn end_without_tools(&self, answered: bool) -> Flow {
+        if self.has_pending() {
+            return Continue(());
         }
-        // Commit the assistant turn with response provenance and any
-        // reported usage; compaction carries this metadata forward without
-        // putting it back into provider history.
-        let no_answer = text.trim().is_empty();
-        let final_message = ChatMessage::assistant(text, calls.clone()).with_response(response);
-        log.commit_async(final_message).await;
+        if !answered {
+            let message =
+                crate::config::settings::get_string("no_answer_message").unwrap_or_else(|| {
+                    "The model finished without an answer. Retry or ask it to continue.".into()
+                });
+            self.warn(message).await;
+        }
+        Break(Outcome::Complete)
+    }
 
-        if calls.is_empty() {
-            // A plain reply would end the turn — but a message that
-            // landed mid-reply must still be delivered, so continue
-            // the turn to pick it up rather than stranding it.
-            if !pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .items
-                .is_empty()
-            {
-                continue 'turn;
+    /// Run a reply's tool calls and commit a result for each, in provider
+    /// order. Calls run concurrently in waves of up to `tool_concurrency`.
+    async fn run_tool_batch(
+        &mut self,
+        calls: &[ToolCall],
+        active_tools: Option<Arc<Vec<String>>>,
+    ) -> Flow {
+        let batch = self.announce_batch(calls).await;
+        let concurrency = crate::config::settings::get_u64("tool_concurrency")
+            .unwrap_or(8)
+            .clamp(1, 64) as usize;
+        let mut remaining = batch.into_iter().peekable();
+        while remaining.peek().is_some() {
+            if self.cancelled() {
+                // Every advertised call needs a result, even if it never ran.
+                for (_, call) in remaining.by_ref() {
+                    self.ctx
+                        .log
+                        .commit_async(ChatMessage::tool_result_with_meta(
+                            call.id,
+                            "tool cancelled before execution",
+                            tools::ToolOutcome::Cancelled,
+                            "cancelled",
+                        ))
+                        .await;
+                }
+                break;
             }
-            if no_answer {
-                let message = crate::config::settings::get_string("no_answer_message")
-                    .unwrap_or_else(|| {
-                        "The model finished without an answer. Retry or ask it to continue.".into()
-                    });
-                let _ = events.send(SessionEvent::Warning(message)).await;
+            let wave = self.next_wave(&mut remaining, concurrency).await;
+            let tasks: Vec<_> = wave
+                .into_iter()
+                .map(|(id, call)| {
+                    let context = self.tool_context(id, &active_tools);
+                    (call.clone(), tokio::spawn(execute_tool(context, call)))
+                })
+                .collect();
+            for (call, task) in tasks {
+                let output = settle_tool(task, &self.ctx.cancel).await;
+                self.settled_tools += 1;
+                self.failed_tools += usize::from(output.outcome.is_error());
+                // About four characters per token.
+                self.context_tokens = self
+                    .context_tokens
+                    .saturating_add((output.content.chars().count() as u64).div_ceil(4));
+                self.ctx
+                    .log
+                    .commit_async(ChatMessage::tool_result_with_meta(
+                        call.id,
+                        output.content,
+                        output.outcome,
+                        output.summary,
+                    ))
+                    .await;
             }
-            break 'turn Outcome::Complete;
         }
+        if self.cancelled() {
+            return Break(Outcome::Cancelled);
+        }
+        Continue(())
+    }
 
-        // Resolve the complete batch before concurrent execution so the
-        // transcript has one stable group from the first call.
+    /// Number the batch and announce it whole before anything runs, so the
+    /// transcript shows one stable group from the first call.
+    async fn announce_batch(&self, calls: &[ToolCall]) -> Vec<(u64, ToolCall)> {
         let mut batch = Vec::with_capacity(calls.len());
-        for call in &calls {
+        let mut shown = Vec::with_capacity(calls.len());
+        for call in calls {
             let args: serde_json::Value =
                 serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-            let presentation = match host.as_ref().and_then(|h| h.tool_label(&call.name)) {
+            let presentation = match self
+                .ctx
+                .host
+                .as_ref()
+                .and_then(|h| h.tool_label(&call.name))
+            {
                 Some(label) => tools::present_labeled(
                     &call.name,
                     &label.category,
@@ -776,229 +864,216 @@ pub(super) async fn run(context: Context, compact_only: bool) -> Outcome {
                 ),
                 None => tools::present(&call.name, &args),
             };
-            let id = tool_seq.fetch_add(1, Ordering::SeqCst) + 1;
-            batch.push((
+            let id = self.ctx.tool_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            shown.push(ToolCallPresentation {
                 id,
-                call.clone(),
-                ToolCallPresentation {
-                    id,
-                    name: call.name.clone(),
-                    arguments: call.arguments.clone(),
-                    category: presentation.category,
-                    running: presentation.running,
-                    completed: presentation.completed,
-                    target: presentation.target,
-                },
-            ));
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                category: presentation.category,
+                running: presentation.running,
+                completed: presentation.completed,
+                target: presentation.target,
+            });
+            batch.push((id, call.clone()));
         }
-        let _ = events
-            .send(SessionEvent::ToolBatchStart {
-                calls: batch.iter().map(|(_, _, shown)| shown.clone()).collect(),
-            })
+        self.emit(SessionEvent::ToolBatchStart { calls: shown })
             .await;
+        batch
+    }
 
-        // Bound each wave before spawning tasks. Calls naming the same file
-        // start in separate waves so their mutations follow provider order.
-        let concurrency = crate::config::settings::get_u64("tool_concurrency")
-            .unwrap_or(8)
-            .clamp(1, 64) as usize;
-        let mut remaining = batch.into_iter().peekable();
-        while remaining.peek().is_some() {
-            if cancel.load(Ordering::SeqCst) {
-                // Every advertised call needs a result, even if it never ran.
-                for (_, call, _) in remaining.by_ref() {
-                    log.commit_async(ChatMessage::tool_result_with_meta(
-                        call.id,
-                        "tool cancelled before execution",
-                        tools::ToolOutcome::Cancelled,
-                        "cancelled",
-                    ))
-                    .await;
-                }
+    /// Take up to `limit` calls off the batch, stopping before a call whose
+    /// file an earlier call in the wave already names, so mutations of one
+    /// file follow provider order.
+    async fn next_wave(
+        &self,
+        remaining: &mut Peekable<std::vec::IntoIter<(u64, ToolCall)>>,
+        limit: usize,
+    ) -> Vec<(u64, ToolCall)> {
+        let mut files = HashSet::new();
+        let mut wave = Vec::new();
+        while wave.len() < limit {
+            let Some((_, call)) = remaining.peek() else {
                 break;
-            }
-            let mut paths = std::collections::HashSet::new();
-            let mut wave = Vec::new();
-            while wave.len() < concurrency {
-                let Some((_, call, _)) = remaining.peek() else {
+            };
+            if let Some(file) = file_target(call, &self.ctx.cwd, &self.ctx.cancel).await {
+                if !files.insert(file) {
                     break;
-                };
-                if let Some(path) = file_target(call, &cwd, &cancel).await {
-                    if !paths.insert(path) {
-                        break;
-                    }
-                }
-                if let Some(call) = remaining.next() {
-                    wave.push(call);
                 }
             }
-            let mut handles = Vec::with_capacity(wave.len());
-            for (id, call, _) in wave {
-                let host = host.clone();
-                let cancel = cancel.clone();
-                let events = events.clone();
-                let cwd = cwd.clone();
-                let allowed_tools = allowed_tools.clone();
-                let active_tools = active_now.clone();
-                let tool_runtime = tool_runtime.clone();
-                handles.push((
-                    call.clone(),
-                    tokio::spawn(async move {
-                        let _ = events.send(SessionEvent::ToolStart { id }).await;
-                        let args: serde_json::Value = serde_json::from_str(&call.arguments)
-                            .unwrap_or(serde_json::Value::Null);
-                        if let Some(h) = &host {
-                            h.event(
-                                "tool_start",
-                                serde_json::json!({"id": id, "name": call.name, "arguments": args}),
-                            )
-                            .await;
-                        }
-                        let mut output = run_tool(
-                            ToolRunContext {
-                                tools: tool_runtime,
-                                host: host.clone(),
-                                tool_mode,
-                                allowed_tools,
-                                active_tools,
-                                cwd,
-                                cancel,
-                                id,
-                                events: events.clone(),
-                            },
-                            &call.name,
-                            &call.arguments,
-                        )
-                        .await;
-                        if let Some(h) = &host {
-                            // Redaction and trimming happen before the
-                            // result is shown, stored, or sent anywhere.
-                            // The hook sees `content` only, so a rewrite
-                            // also retires the richer `display` text: what
-                            // the viewer shows must never say more than
-                            // what the hook let through.
-                            if h.has_hook("tool_result") {
-                                if let Some(content) = h
-                                    .hook_tool_result(
-                                        &call.name,
-                                        &output.content,
-                                        output.is_error(),
-                                    )
-                                    .await
-                                {
-                                    if content != output.content {
-                                        output.display = None;
-                                    }
-                                    output.content = content;
-                                }
-                            }
-                            h.event(
-                                "tool_end",
-                                serde_json::json!({
-                                    "id": id,
-                                    "name": call.name,
-                                    "outcome": format!("{:?}", output.outcome).to_lowercase(),
-                                    "content": output.content,
-                                }),
-                            )
-                            .await;
-                        }
-                        let _ = events
-                            .send(SessionEvent::ToolEnd {
-                                id,
-                                outcome: output.outcome,
-                                summary: output.summary.clone(),
-                                // The viewer gets the rich detail (full
-                                // diffs); history keeps the lean content.
-                                content: output.display_text().to_string(),
-                            })
-                            .await;
-                        output
-                    }),
-                ));
-            }
+            wave.extend(remaining.next());
+        }
+        wave
+    }
 
-            for (call, handle) in handles {
-                // A blocked filesystem operation cannot be interrupted in
-                // place; on Esc, stop waiting, record the call as
-                // cancelled, and detach the task — the turn must end
-                // promptly even over a stalled FIFO or NFS mount.
-                let output = tokio::select! {
-                    biased;
-                    joined = handle => match joined {
-                        Ok(output) => output,
-                        Err(_) => tools::ToolOutput {
-                            content: "tool panicked".into(),
-                            outcome: tools::ToolOutcome::Failed,
-                            summary: "error".into(),
-                            display: None,
-                        },
-                    },
-                    _ = wait_cancelled(&cancel) => tools::ToolOutput {
-                        // Honest record: the blocked operation is only
-                        // detached, so it may still complete after this.
-                        content: "tool cancelled — the underlying operation \
-                                  may still complete in the background"
-                            .into(),
-                        outcome: tools::ToolOutcome::Cancelled,
-                        summary: "cancelled".into(),
-                        display: None,
-                    },
-                };
-                settled_tools += 1;
-                failed_tools += usize::from(output.outcome.is_error());
-                last_context = last_context
-                    .saturating_add((output.content.chars().count() as u64).div_ceil(4));
-                log.commit_async(ChatMessage::tool_result_with_meta(
-                    call.id,
-                    output.content,
-                    output.outcome,
-                    output.summary,
-                ))
-                .await;
+    fn tool_context(&self, id: u64, active_tools: &Option<Arc<Vec<String>>>) -> ToolRunContext {
+        ToolRunContext {
+            tools: self.ctx.tool_runtime.clone(),
+            host: self.ctx.host.clone(),
+            tool_mode: self.ctx.tool_mode,
+            allowed_tools: self.ctx.allowed_tools.clone(),
+            active_tools: active_tools.clone(),
+            cwd: self.ctx.cwd.clone(),
+            cancel: self.ctx.cancel.clone(),
+            id,
+            events: self.ctx.events.clone(),
+        }
+    }
+
+    /// Compact once a whole tool batch is committed, if the context is nearly
+    /// full. The next step continues on the same event stream.
+    async fn compact_after_tools(&mut self) -> Flow {
+        if self.context_tokens == 0
+            || !compact::should_compact(self.context_tokens, self.ctx.model.context_window)
+        {
+            return Continue(());
+        }
+        self.warn("context nearly full — compacting before continuing")
+            .await;
+        match self.compact().await {
+            Ok(true) => Continue(()),
+            Ok(false) => {
+                self.fail("context is full and cannot be reduced; history was preserved")
+                    .await;
+                Break(Outcome::Failed)
+            }
+            Err(error) => {
+                self.fail(error).await;
+                Break(Outcome::stopped(&self.ctx.cancel))
             }
         }
-        if cancel.load(Ordering::SeqCst) {
-            break 'turn Outcome::Cancelled;
-        }
-        // Nested instructions for the paths this batch touched join the
-        // conversation now — after the batch's results, so the provider's
-        // call/result pairing holds — and shape the next request.
-        load_nested_instructions(&calls, &cwd, &instructions_loaded, &log, &events).await;
-        // Compact after committing the complete tool batch. The next
-        // request continues this run through the same event stream.
-        if last_context > 0 && compact::should_compact(last_context, model.context_window) {
-            let _ = events
-                .send(SessionEvent::Warning(
-                    "context nearly full — compacting before continuing".into(),
-                ))
-                .await;
-            match compact_log(
-                &log,
-                &system,
-                &cancel,
-                host.as_ref(),
-                take_focus(&compact_focus),
-            )
-            .await
+    }
+
+    async fn compact(&self) -> Result<bool, String> {
+        compact_log(
+            &self.ctx.log,
+            &self.system,
+            &self.ctx.cancel,
+            self.ctx.host.as_ref(),
+            take_focus(&self.ctx.compact_focus),
+        )
+        .await
+    }
+
+    /// Send one event to the frontend. A closed receiver means nobody is
+    /// listening, which never stops the run.
+    async fn emit(&self, event: SessionEvent) {
+        let _ = self.ctx.events.send(event).await;
+    }
+
+    async fn warn(&self, message: impl Into<String>) {
+        self.emit(SessionEvent::Warning(message.into())).await;
+    }
+
+    async fn fail(&self, message: impl Into<String>) {
+        self.emit(SessionEvent::Error(message.into())).await;
+    }
+
+    fn cancelled(&self) -> bool {
+        self.ctx.cancel.load(Ordering::SeqCst)
+    }
+
+    fn history(&self) -> Vec<ChatMessage> {
+        lock(&self.ctx.history).clone()
+    }
+
+    fn has_pending(&self) -> bool {
+        !lock(&self.ctx.pending).items.is_empty()
+    }
+}
+
+/// Run one tool call as its own task: announce it, run it, let a
+/// `tool_result` hook redact the result, then report the end.
+async fn execute_tool(context: ToolRunContext, call: ToolCall) -> tools::ToolOutput {
+    let id = context.id;
+    let host = context.host.clone();
+    let events = context.events.clone();
+    let _ = events.send(SessionEvent::ToolStart { id }).await;
+    if let Some(host) = &host {
+        let args: serde_json::Value =
+            serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        host.event(
+            "tool_start",
+            serde_json::json!({"id": id, "name": call.name, "arguments": args}),
+        )
+        .await;
+    }
+    let mut output = run_tool(context, &call.name, &call.arguments).await;
+    if let Some(host) = &host {
+        // Redaction and trimming happen before the result is shown, stored,
+        // or sent anywhere. The hook sees only `content`, so a rewrite also
+        // drops the richer `display`: the viewer must never show more than
+        // the hook let through.
+        if host.has_hook("tool_result") {
+            if let Some(content) = host
+                .hook_tool_result(&call.name, &output.content, output.is_error())
+                .await
             {
-                Ok(true) => {}
-                Ok(false) => {
-                    let _ = events
-                        .send(SessionEvent::Error(
-                            "context is full and cannot be reduced; history was preserved".into(),
-                        ))
-                        .await;
-                    break Outcome::Failed;
+                if content != output.content {
+                    output.display = None;
                 }
-                Err(error) => {
-                    let _ = events.send(SessionEvent::Error(error)).await;
-                    break Outcome::stopped(&cancel);
-                }
+                output.content = content;
             }
         }
-    };
-    outcome
+        host.event(
+            "tool_end",
+            serde_json::json!({
+                "id": id,
+                "name": call.name,
+                "outcome": format!("{:?}", output.outcome).to_lowercase(),
+                "content": output.content,
+            }),
+        )
+        .await;
+    }
+    let _ = events
+        .send(SessionEvent::ToolEnd {
+            id,
+            outcome: output.outcome,
+            summary: output.summary.clone(),
+            // The viewer gets the rich detail (full diffs); history keeps the
+            // lean content.
+            content: output.display_text().to_string(),
+        })
+        .await;
+    output
+}
+
+/// Wait for a tool task. A blocked filesystem call can't be interrupted in
+/// place, so on Esc stop waiting, record the call as cancelled, and detach
+/// the task: the run must end promptly even over a stalled FIFO or NFS mount.
+async fn settle_tool(
+    task: tokio::task::JoinHandle<tools::ToolOutput>,
+    cancel: &AtomicBool,
+) -> tools::ToolOutput {
+    tokio::select! {
+        biased;
+        joined = task => joined.unwrap_or_else(|_| tools::ToolOutput {
+            content: "tool panicked".into(),
+            outcome: tools::ToolOutcome::Failed,
+            summary: "error".into(),
+            display: None,
+        }),
+        _ = wait_cancelled(cancel) => tools::ToolOutput {
+            // Honest record: the blocked operation is only detached, so it
+            // may still complete after this.
+            content: "tool cancelled — the underlying operation \
+                      may still complete in the background"
+                .into(),
+            outcome: tools::ToolOutcome::Cancelled,
+            summary: "cancelled".into(),
+            display: None,
+        },
+    }
+}
+
+/// Lock a mutex, recovering the data if a panicking holder poisoned it.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whole milliseconds, saturating at `u64::MAX`.
+fn millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
 }
 
 /// The focus a `/compact <focus>` left for the next compaction, whichever

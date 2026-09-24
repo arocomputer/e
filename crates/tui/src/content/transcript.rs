@@ -118,7 +118,6 @@ pub enum Kind {
 /// version so full-document Markdown parsing stays within a fixed work rate.
 struct RenderCache {
     width: usize,
-    phase: bool,
     generation: u64,
     rendered_at: std::time::Instant,
     lines: Vec<String>,
@@ -420,18 +419,17 @@ impl Block {
 
     /// Render for tests: the same rows lines() caches, without the cache.
     pub fn lines_for_test(&self, theme: &Theme, width: usize) -> Vec<String> {
-        self.render(theme, width, true)
+        self.render(theme, width)
     }
 
-    fn lines(&mut self, theme: &Theme, width: usize, blink_on: bool) -> &[String] {
-        // Only a running tool row renders differently across blink phases.
-        // Pin every other block to one phase so the blink tick can't
-        // invalidate the whole transcript's caches during a turn.
-        let phase = blink_on && self.animates();
+    /// This block's rows at `width`, cached. Nothing in the transcript
+    /// blinks (the activity row below it does), so the blink tick never
+    /// invalidates a cache.
+    fn lines(&mut self, theme: &Theme, width: usize) -> &[String] {
         let geometry_matches = self
             .cache
             .as_ref()
-            .is_some_and(|cache| cache.width == width && cache.phase == phase);
+            .is_some_and(|cache| cache.width == width);
         let current = self
             .cache
             .as_ref()
@@ -442,10 +440,9 @@ impl Block {
                 cache.rendered_at.elapsed() < stream_render_interval(self.text.len())
             });
         if !geometry_matches || (!current && !within_stream_budget) {
-            let lines = self.render(theme, width, phase);
+            let lines = self.render(theme, width);
             self.cache = Some(RenderCache {
                 width,
-                phase,
                 generation: self.generation,
                 rendered_at: std::time::Instant::now(),
                 lines,
@@ -484,15 +481,13 @@ impl Block {
             // The cached path: the projection pays only for blocks whose
             // content actually changed, sharing the main transcript's cache.
             return self
-                .lines(theme, width, false)
+                .lines(theme, width)
                 .iter()
                 .cloned()
                 .map(|row| (row, None))
                 .collect();
         }
-        let marker = theme.fg("muted", "●");
-        let header = clip_plain(&self.text, width.saturating_sub(2));
-        let mut rows = vec![(format!("{marker} {}", theme.fg("muted", &header)), None)];
+        let mut rows = vec![(self.group_header(theme, width), None)];
         if self.tool_children.is_empty() {
             for child in &self.children {
                 rows.extend(
@@ -509,14 +504,9 @@ impl Block {
             }
             if child.state == ToolState::Pending {
                 rows.extend(
-                    tree_rows(
-                        theme,
-                        width,
-                        "├",
-                        &theme.fg("muted", "Tool completion was not reported"),
-                    )
-                    .into_iter()
-                    .map(|row| (row, None)),
+                    unreported_rows(theme, width)
+                        .into_iter()
+                        .map(|row| (row, None)),
                 );
                 continue;
             }
@@ -540,218 +530,16 @@ impl Block {
         rows
     }
 
-    /// Tool status is steady; only the separate activity row blinks.
-    fn animates(&self) -> bool {
-        false
-    }
-
-    fn render(&self, theme: &Theme, width: usize, _blink_on: bool) -> Vec<String> {
+    /// This block's rows at `width`, uncached; [`Block::lines`] caches them.
+    fn render(&self, theme: &Theme, width: usize) -> Vec<String> {
         match self.kind {
-            // `𝑒 {VERSION} · Run /help for commands` — name bold ink, the rest
-            // in the reference's dim (247 on light, one step lighter than the
-            // statusline gray).
-            Kind::Banner => vec![format!(
-                "{}{}",
-                bold(&theme.fg("userMessageText", "𝑒")),
-                theme.fg("dim", &format!(" {} · Run /help for commands", self.text))
-            )],
-            Kind::User => {
-                let rail = format!("{} ", theme.fg("userMessageText", "┃"));
-                let mut rows = Vec::new();
-                for line in self.text.split('\n') {
-                    if line.trim().is_empty() {
-                        rows.push(theme.fg("userMessageText", "┃"));
-                        continue;
-                    }
-                    let line = style_image_labels(line, self.image_count, theme);
-                    for row in wrap_styled(&line, width.saturating_sub(2).max(8)) {
-                        rows.push(format!("{rail}{}", bold(&row)));
-                    }
-                }
-                rows
-            }
-            Kind::Assistant => {
-                let text = self.text.trim();
-                if text.is_empty() {
-                    return Vec::new();
-                }
-                render_markdown(theme, text, width.saturating_sub(2).max(8))
-                    .into_iter()
-                    .map(|l| if l.is_empty() { l } else { format!("  {l}") })
-                    .collect()
-            }
-            Kind::Thinking => {
-                if let Some(hint) = &self.collapsed {
-                    if self.text.trim().is_empty() {
-                        return Vec::new();
-                    }
-                    let hint = e_core::tools::sanitize_display(hint).replace('\n', " ");
-                    return vec![theme.fg(
-                        "thinkingText",
-                        &format!("  {}", clip_plain(&hint, width.saturating_sub(2))),
-                    )];
-                }
-                thinking_rows(&self.text, theme, width)
-            }
-            Kind::Tool => {
-                // The reference shape: a finished row is just the row — no
-                // "(done)". Failure turns the marker to the error token and
-                // adds a `│ <outcome>` continuation beneath. A finished row's
-                // `●` wears the system-notice text gray; a cancelled row
-                // brightens its summary and asks what to do differently.
-                let marker = if self.cancelled {
-                    theme.fg("warning", "■")
-                } else if !self.done {
-                    dim("●")
-                } else if self.is_error {
-                    theme.fg("error", "●")
-                } else {
-                    theme.fg("customMessageText", "●")
-                };
-                let mut rows = vec![if self.cancelled {
-                    let plain = match &self.detail {
-                        Some(target) if !target.is_empty() => {
-                            format!("{} {}", self.text, target)
-                        }
-                        _ => self.text.clone(),
-                    };
-                    format!(
-                        "{marker} {} · What can e do differently?",
-                        theme.fg("userMessageText", &plain)
-                    )
-                } else {
-                    match &self.detail {
-                        Some(target) if !target.is_empty() => {
-                            format!("{marker} {} {}", self.text, theme.fg("muted", target))
-                        }
-                        _ => format!("{marker} {}", self.text),
-                    }
-                }];
-                if self.done {
-                    // The reference's command-output shape: the first lines
-                    // as `│` rows, an exit line ("│ exit code 7") when the
-                    // command failed, and an elision row for the rest.
-                    for line in &self.preview {
-                        rows.push(theme.fg("dim", &format!("│ {line}")));
-                    }
-                    if self.is_error {
-                        if let Some(result) = &self.result {
-                            let shown =
-                                clip_plain(&display_outcome(result), width.saturating_sub(2));
-                            rows.push(theme.fg("dim", &format!("│ {shown}")));
-                        }
-                    }
-                    if self.more > 0 {
-                        rows.push(theme.fg("dim", &elision_row(self.more, width)));
-                    }
-                }
-                rows
-            }
-            Kind::ToolGroup => {
-                // The tool family runs flush left at the user rail's column.
-                // Markers, tallies, branches, and labels stay muted. Diff
-                // counts retain their added/removed colors.
-                let marker = theme.fg("muted", "●");
-                let header = clip_plain(&self.text, width.saturating_sub(2));
-                let mut rows = vec![format!("{marker} {}", theme.fg("muted", &header))];
-                if self.tool_children.is_empty() {
-                    for child in &self.children {
-                        rows.extend(label_rows(theme, width, "├", child, self.tool_label_rows));
-                    }
-                    if !self.children.is_empty() {
-                        rows.extend(tree_rows(
-                            theme,
-                            width,
-                            "└",
-                            &theme.fg("muted", "ctrl+o to view"),
-                        ));
-                    }
-                    return rows;
-                }
-                let hidden = self
-                    .tool_children
-                    .iter()
-                    .filter(|child| child.state == ToolState::Completed)
-                    .count()
-                    .saturating_sub(self.tool_history_limit);
-                if hidden > 0 {
-                    let hint = e_core::tools::sanitize_display(&self.tool_history_hint)
-                        .replace("{count}", &hidden.to_string())
-                        .replace('\n', " ");
-                    rows.extend(tree_rows(theme, width, "├", &theme.fg("muted", &hint)));
-                }
-                let mut skip = hidden;
-                let visible: Vec<_> = self
-                    .tool_children
-                    .iter()
-                    .filter(|child| child.state != ToolState::Pending || self.done)
-                    .filter(|child| {
-                        if child.state == ToolState::Completed && skip > 0 {
-                            skip -= 1;
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .collect();
-                for child in &visible {
-                    if child.state == ToolState::Pending {
-                        // Mid-run, a pending call has no row yet. In a sealed
-                        // group the call is on record and its result never
-                        // came — say so, the reference's own fallback line.
-                        if !self.done {
-                            continue;
-                        }
-                        rows.extend(tree_rows(
-                            theme,
-                            width,
-                            "├",
-                            &theme.fg("muted", "Tool completion was not reported"),
-                        ));
-                        continue;
-                    }
-                    let live_command =
-                        child.state == ToolState::Running && child.category == "command";
-                    rows.extend(child_rows(
-                        theme,
-                        width,
-                        child,
-                        "├",
-                        Some(self.tool_label_rows),
-                    ));
-                    if live_command {
-                        append_tool_preview(&mut rows, child, theme, width, self.live_preview_rows);
-                    }
-                }
-                if !visible.is_empty() || hidden > 0 {
-                    rows.extend(tree_rows(
-                        theme,
-                        width,
-                        "└",
-                        &theme.fg("muted", "ctrl+o to view"),
-                    ));
-                }
-                rows
-            }
-            Kind::Shell => {
-                // The reference look: the command in the bash-mode color, the
-                // output tail muted beneath it.
-                let header = if self.done {
-                    theme.fg(
-                        "bashMode",
-                        &crate::render::bold(&format!("$ {}", self.text)),
-                    )
-                } else {
-                    dim(&format!("$ {}", self.text))
-                };
-                let mut rows = vec![format!("  {header}")];
-                if let Some(output) = &self.detail {
-                    for line in output.lines() {
-                        rows.push(format!("  {}", theme.fg("muted", line)));
-                    }
-                }
-                rows
-            }
+            Kind::Banner => self.banner_rows(theme),
+            Kind::User => self.user_rows(theme, width),
+            Kind::Assistant => self.assistant_rows(theme, width),
+            Kind::Thinking => self.thinking_block_rows(theme, width),
+            Kind::Tool => self.tool_rows(theme, width),
+            Kind::ToolGroup => self.tool_group_rows(theme, width),
+            Kind::Shell => self.shell_rows(theme),
             Kind::Summary => vec![theme.fg("dim", &format!("  {}", self.text))],
             Kind::Notice => wrap_styled(&self.text, width.saturating_sub(2).max(8))
                 .into_iter()
@@ -769,37 +557,255 @@ impl Block {
                 &self.text,
                 width,
             ),
-            Kind::Show => {
-                use e_core::extensions::Format;
-                let mut rows = Vec::new();
-                if !self.text.trim().is_empty() {
-                    rows.push(bold(
-                        &theme.fg("customMessageLabel", &format!("● {}", self.text)),
-                    ));
-                }
-                let body = self.detail.as_deref().unwrap_or("");
-                let inner = width.saturating_sub(2).max(8);
-                match self.show_format {
-                    Format::Markdown => rows.extend(
-                        crate::markdown::render_markdown(theme, body, inner)
-                            .into_iter()
-                            .map(|l| format!("  {l}")),
-                    ),
-                    Format::Diff => rows.extend(body.lines().map(|line| {
-                        let styled = diff_row_style(theme, line)
-                            .unwrap_or_else(|| theme.fg("customMessageText", line));
-                        crate::markdown::clip_styled(&format!("  {styled}"), width)
-                    })),
-                    Format::Text => rows.extend(
-                        wrap_styled(body, inner)
-                            .into_iter()
-                            .map(|l| format!("  {}", theme.fg("customMessageText", &l))),
-                    ),
-                }
-                rows
-            }
+            Kind::Show => self.show_rows(theme, width),
         }
     }
+
+    /// `𝑒 {VERSION} · Run /help for commands` — name bold ink, the rest in the
+    /// reference's dim (247 on light, one step lighter than the statusline gray).
+    fn banner_rows(&self, theme: &Theme) -> Vec<String> {
+        vec![format!(
+            "{}{}",
+            bold(&theme.fg("userMessageText", "𝑒")),
+            theme.fg("dim", &format!(" {} · Run /help for commands", self.text))
+        )]
+    }
+
+    /// The prompt in bold behind a `┃` rail, image labels in light gray; a
+    /// blank source line keeps a bare rail.
+    fn user_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        let rail = format!("{} ", theme.fg("userMessageText", "┃"));
+        let mut rows = Vec::new();
+        for line in self.text.split('\n') {
+            if line.trim().is_empty() {
+                rows.push(theme.fg("userMessageText", "┃"));
+                continue;
+            }
+            let line = style_image_labels(line, self.image_count, theme);
+            for row in wrap_styled(&line, width.saturating_sub(2).max(8)) {
+                rows.push(format!("{rail}{}", bold(&row)));
+            }
+        }
+        rows
+    }
+
+    /// The reply as markdown, indented two columns.
+    fn assistant_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        let text = self.text.trim();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        render_markdown(theme, text, width.saturating_sub(2).max(8))
+            .into_iter()
+            .map(|l| if l.is_empty() { l } else { format!("  {l}") })
+            .collect()
+    }
+
+    /// Retained thinking: its one-line collapsed hint when set, else expanded.
+    fn thinking_block_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        let Some(hint) = &self.collapsed else {
+            return thinking_rows(&self.text, theme, width);
+        };
+        if self.text.trim().is_empty() {
+            return Vec::new();
+        }
+        let hint = e_core::tools::sanitize_display(hint).replace('\n', " ");
+        vec![theme.fg(
+            "thinkingText",
+            &format!("  {}", clip_plain(&hint, width.saturating_sub(2))),
+        )]
+    }
+
+    /// The reference shape: a finished row is just the row — no "(done)".
+    /// Failure turns the marker to the error token and adds a `│ <outcome>`
+    /// continuation beneath. A finished row's `●` wears the system-notice
+    /// text gray; a cancelled row brightens its summary and asks what to do
+    /// differently.
+    fn tool_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        let marker = if self.cancelled {
+            theme.fg("warning", "■")
+        } else if !self.done {
+            dim("●")
+        } else if self.is_error {
+            theme.fg("error", "●")
+        } else {
+            theme.fg("customMessageText", "●")
+        };
+        let target = self.detail.as_deref().filter(|target| !target.is_empty());
+        let mut rows = vec![if self.cancelled {
+            let plain = match target {
+                Some(target) => format!("{} {}", self.text, target),
+                None => self.text.clone(),
+            };
+            format!(
+                "{marker} {} · What can e do differently?",
+                theme.fg("userMessageText", &plain)
+            )
+        } else {
+            match target {
+                Some(target) => format!("{marker} {} {}", self.text, theme.fg("muted", target)),
+                None => format!("{marker} {}", self.text),
+            }
+        }];
+        if self.done {
+            // The reference's command-output shape: the first lines as `│`
+            // rows, an exit line ("│ exit code 7") when the command failed,
+            // and an elision row for the rest.
+            for line in &self.preview {
+                rows.push(theme.fg("dim", &format!("│ {line}")));
+            }
+            if self.is_error {
+                if let Some(result) = &self.result {
+                    let shown = clip_plain(&display_outcome(result), width.saturating_sub(2));
+                    rows.push(theme.fg("dim", &format!("│ {shown}")));
+                }
+            }
+            if self.more > 0 {
+                rows.push(theme.fg("dim", &elision_row(self.more, width)));
+            }
+        }
+        rows
+    }
+
+    /// The group's `● N tool calls · …` header row, clipped to the frame.
+    fn group_header(&self, theme: &Theme, width: usize) -> String {
+        let marker = theme.fg("muted", "●");
+        let header = clip_plain(&self.text, width.saturating_sub(2));
+        format!("{marker} {}", theme.fg("muted", &header))
+    }
+
+    /// The tool family runs flush left at the user rail's column. Markers,
+    /// tallies, branches, and labels stay muted; diff counts retain their
+    /// added/removed colors. Completed children past the history limit fold
+    /// into one hint row, and a single review hint closes the tree.
+    fn tool_group_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        let mut rows = vec![self.group_header(theme, width)];
+        if self.tool_children.is_empty() {
+            for child in &self.children {
+                rows.extend(label_rows(theme, width, "├", child, self.tool_label_rows));
+            }
+            if !self.children.is_empty() {
+                rows.extend(review_hint_rows(theme, width));
+            }
+            return rows;
+        }
+        let hidden = self
+            .tool_children
+            .iter()
+            .filter(|child| child.state == ToolState::Completed)
+            .count()
+            .saturating_sub(self.tool_history_limit);
+        if hidden > 0 {
+            let hint = e_core::tools::sanitize_display(&self.tool_history_hint)
+                .replace("{count}", &hidden.to_string())
+                .replace('\n', " ");
+            rows.extend(tree_rows(theme, width, "├", &theme.fg("muted", &hint)));
+        }
+        let mut skip = hidden;
+        // Mid-run, a pending call has no row yet.
+        let visible: Vec<_> = self
+            .tool_children
+            .iter()
+            .filter(|child| child.state != ToolState::Pending || self.done)
+            .filter(|child| {
+                if child.state == ToolState::Completed && skip > 0 {
+                    skip -= 1;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        for child in &visible {
+            if child.state == ToolState::Pending {
+                // In a sealed group the call is on record and its result
+                // never came — say so, the reference's own fallback line.
+                rows.extend(unreported_rows(theme, width));
+                continue;
+            }
+            rows.extend(child_rows(
+                theme,
+                width,
+                child,
+                "├",
+                Some(self.tool_label_rows),
+            ));
+            if child.state == ToolState::Running && child.category == "command" {
+                append_tool_preview(&mut rows, child, theme, width, self.live_preview_rows);
+            }
+        }
+        if !visible.is_empty() || hidden > 0 {
+            rows.extend(review_hint_rows(theme, width));
+        }
+        rows
+    }
+
+    /// The reference look: the command in the bash-mode color, the output
+    /// tail muted beneath it.
+    fn shell_rows(&self, theme: &Theme) -> Vec<String> {
+        let header = if self.done {
+            theme.fg(
+                "bashMode",
+                &crate::render::bold(&format!("$ {}", self.text)),
+            )
+        } else {
+            dim(&format!("$ {}", self.text))
+        };
+        let mut rows = vec![format!("  {header}")];
+        if let Some(output) = &self.detail {
+            for line in output.lines() {
+                rows.push(format!("  {}", theme.fg("muted", line)));
+            }
+        }
+        rows
+    }
+
+    /// An extension's `show`: an optional bold `● title` over the body in its
+    /// format — markdown, diff rows, or wrapped text.
+    fn show_rows(&self, theme: &Theme, width: usize) -> Vec<String> {
+        use e_core::extensions::Format;
+        let mut rows = Vec::new();
+        if !self.text.trim().is_empty() {
+            rows.push(bold(
+                &theme.fg("customMessageLabel", &format!("● {}", self.text)),
+            ));
+        }
+        let body = self.detail.as_deref().unwrap_or("");
+        let inner = width.saturating_sub(2).max(8);
+        match self.show_format {
+            Format::Markdown => rows.extend(
+                crate::markdown::render_markdown(theme, body, inner)
+                    .into_iter()
+                    .map(|l| format!("  {l}")),
+            ),
+            Format::Diff => rows.extend(body.lines().map(|line| {
+                let styled = diff_row_style(theme, line)
+                    .unwrap_or_else(|| theme.fg("customMessageText", line));
+                crate::markdown::clip_styled(&format!("  {styled}"), width)
+            })),
+            Format::Text => rows.extend(
+                wrap_styled(body, inner)
+                    .into_iter()
+                    .map(|l| format!("  {}", theme.fg("customMessageText", &l))),
+            ),
+        }
+        rows
+    }
+}
+
+/// A sealed group's row for a call whose completion never arrived.
+fn unreported_rows(theme: &Theme, width: usize) -> Vec<String> {
+    tree_rows(
+        theme,
+        width,
+        "├",
+        &theme.fg("muted", "Tool completion was not reported"),
+    )
+}
+
+/// The closing `└ ctrl+o to view` elbow a tool tree ends with.
+fn review_hint_rows(theme: &Theme, width: usize) -> Vec<String> {
+    tree_rows(theme, width, "└", &theme.fg("muted", "ctrl+o to view"))
 }
 
 /// Color a row in the diff row grammar: the number-and-sign column takes
@@ -1173,37 +1179,7 @@ fn child_rows(
         String::new()
     };
     if let Some(budget) = budget {
-        let target = if child.category == "command" {
-            heredoc_header(&child.target)
-                .map(|header| format!("{header} …"))
-                .unwrap_or_else(|| child.target.clone())
-        } else {
-            child.target.clone()
-        };
-        let label = format!("{action} {target}");
-        let mut rows = label_rows(theme, width, connector, label.trim_end(), budget);
-        // Outcome details are not arguments: truncating a path must not hide
-        // its failure reason or the colored counts from a completed edit.
-        if !suffix.is_empty() {
-            if let Some(last) = rows.last_mut().filter(|last| {
-                crate::markdown::visible_width(last) + crate::markdown::visible_width(&suffix)
-                    <= width
-            }) {
-                last.push_str(&suffix);
-            } else {
-                rows.extend(tree_rows(theme, width, "│", suffix.trim_start()));
-            }
-        }
-        if child.state == ToolState::Failed && child.category != "command" {
-            if let Some(reason) = child
-                .result
-                .as_deref()
-                .filter(|r| !r.is_empty() && *r != "error")
-            {
-                rows.extend(label_rows(theme, width, "│", reason, budget));
-            }
-        }
-        return rows;
+        return budgeted_child_rows(theme, width, child, connector, action, &suffix, budget);
     }
     // The reference's failed rows name the reason: `Failed path: preflight
     // failed`. A generic "error" summary adds nothing and stays off the row.
@@ -1226,6 +1202,50 @@ fn child_rows(
         connector,
         &format!("{}{suffix}", theme.fg("muted", &label)),
     )
+}
+
+/// The transcript's form of [`child_rows`]: the label capped at `budget`
+/// rows, a command abbreviated at its heredoc, and the outcome (diff counts,
+/// failure reason) kept visible past any truncation.
+fn budgeted_child_rows(
+    theme: &Theme,
+    width: usize,
+    child: &ToolChild,
+    connector: &str,
+    action: &str,
+    suffix: &str,
+    budget: usize,
+) -> Vec<String> {
+    let target = if child.category == "command" {
+        heredoc_header(&child.target)
+            .map(|header| format!("{header} …"))
+            .unwrap_or_else(|| child.target.clone())
+    } else {
+        child.target.clone()
+    };
+    let label = format!("{action} {target}");
+    let mut rows = label_rows(theme, width, connector, label.trim_end(), budget);
+    // Outcome details are not arguments: truncating a path must not hide
+    // its failure reason or the colored counts from a completed edit.
+    if !suffix.is_empty() {
+        if let Some(last) = rows.last_mut().filter(|last| {
+            crate::markdown::visible_width(last) + crate::markdown::visible_width(suffix) <= width
+        }) {
+            last.push_str(suffix);
+        } else {
+            rows.extend(tree_rows(theme, width, "│", suffix.trim_start()));
+        }
+    }
+    if child.state == ToolState::Failed && child.category != "command" {
+        if let Some(reason) = child
+            .result
+            .as_deref()
+            .filter(|r| !r.is_empty() && *r != "error")
+        {
+            rows.extend(label_rows(theme, width, "│", reason, budget));
+        }
+    }
+    rows
 }
 
 /// Show a bounded live tail and any omission count inside the tool branch.
@@ -1419,15 +1439,11 @@ impl Transcript {
     }
 
     pub fn render(&mut self, theme: &Theme, width: usize) -> Vec<String> {
-        self.render_animated(theme, width, true)
-    }
-
-    pub fn render_animated(&mut self, theme: &Theme, width: usize, blink_on: bool) -> Vec<String> {
         let mut out = Vec::new();
         let mut prev: Option<Kind> = None;
         for block in &mut self.blocks {
             let kind = block.kind;
-            let lines = block.lines(theme, width, blink_on);
+            let lines = block.lines(theme, width);
             if lines.is_empty() {
                 continue;
             }
@@ -1526,20 +1542,20 @@ mod tests {
         );
     }
 
-    /// The blink phase must not invalidate finished blocks: during a turn the
-    /// tick flips the phase twice a second, and re-rendering the whole
-    /// transcript's markdown on each flip is what made streaming lag.
+    /// A repaint must not invalidate finished blocks: during a turn the
+    /// tick repaints twice a second, and re-rendering the whole
+    /// transcript's markdown each time is what made streaming lag.
     #[test]
-    fn blink_flip_keeps_static_block_cache() {
+    fn a_repaint_keeps_static_block_cache() {
         let theme = theme();
         let mut block = Block::new(Kind::Assistant, "some **finished** reply");
-        block.lines(&theme, 80, true);
+        block.lines(&theme, 80);
         let cached = block.cache.as_ref().unwrap().lines.as_ptr();
-        block.lines(&theme, 80, false);
+        block.lines(&theme, 80);
         assert_eq!(
             block.cache.as_ref().unwrap().lines.as_ptr(),
             cached,
-            "a blink flip re-rendered a block with no running tool"
+            "a repaint re-rendered a finished block"
         );
     }
 
@@ -1564,7 +1580,7 @@ mod tests {
         let theme = theme();
         let mut block = Block::new(Kind::Assistant, "");
         block.append_streaming("first");
-        block.lines(&theme, 80, true);
+        block.lines(&theme, 80);
         let rendered_generation = block.cache.as_ref().unwrap().generation;
 
         block.append_streaming(" second");
@@ -1573,10 +1589,10 @@ mod tests {
 
         block.finish_streaming();
         assert!(block.cache.is_none(), "the final render was not forced");
-        assert!(block.lines(&theme, 80, true).join("\n").contains("second"));
+        assert!(block.lines(&theme, 80).join("\n").contains("second"));
     }
 
-    /// Running calls remain attached and blink ticks do not invalidate their cache.
+    /// Running calls remain attached and a repaint does not invalidate their cache.
     #[test]
     fn running_tool_paints_as_an_attached_steady_row() {
         let theme = theme();
@@ -1593,10 +1609,10 @@ mod tests {
         assert!(tree[1].contains("Running true"));
         assert!(tree[1].contains('├'));
         assert!(tree[2].contains('└'));
-        // The block's own cache is phase-stable.
-        block.lines(&theme, 80, true);
+        // A repaint reuses the block's own cache.
+        block.lines(&theme, 80);
         let cached = block.cache.as_ref().unwrap().lines.as_ptr();
-        block.lines(&theme, 80, false);
+        block.lines(&theme, 80);
         assert_eq!(block.cache.as_ref().unwrap().lines.as_ptr(), cached);
 
         block.finish_tool(1, ToolOutcome::Completed, "done".into(), "");

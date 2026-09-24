@@ -48,7 +48,6 @@ pub struct Editor {
 pub enum EditorResult {
     Consumed,
     Submit(String),
-    Ignored,
 }
 
 impl Default for Editor {
@@ -443,189 +442,151 @@ impl Editor {
         Some(position)
     }
 
-    /// Vertical arrows: move between visual rows of the draft when there is
-    /// one above/below — preserving the column where possible — otherwise
-    /// fall through to input history recall, the single-line behavior.
+    /// Vertical arrows: drop any selection, then move between visual rows of
+    /// the draft when there is one above/below — preserving the column where
+    /// possible — otherwise fall through to input history recall, the
+    /// single-line behavior.
     fn move_line(&mut self, direction: isize) {
+        self.selection_anchor = None;
         if let Some(target) = self.line_target(direction) {
             self.cursor = target;
             return;
         }
         // At the top or bottom edge: history recall.
         match direction {
-            -1 => {
-                if self.history.is_empty() {
-                    return;
-                }
-                match self.history_pos {
-                    None => {
-                        self.draft = self.text();
-                        self.draft_pastes = std::mem::take(&mut self.pastes);
-                        self.history_pos = Some(self.history.len() - 1);
-                    }
-                    Some(0) => {}
-                    Some(p) => self.history_pos = Some(p - 1),
-                }
-                if let Some(p) = self.history_pos {
-                    self.text = self.history[p].chars().collect();
-                    self.cursor = self.text.len();
-                    self.pastes.clear();
-                }
-            }
-            _ => match self.history_pos {
-                Some(p) if p + 1 < self.history.len() => {
-                    self.text = self.history[p + 1].chars().collect();
-                    self.cursor = self.text.len();
-                    self.pastes.clear();
-                    self.history_pos = Some(p + 1);
-                }
-                Some(_) => {
-                    self.text = std::mem::take(&mut self.draft).chars().collect();
-                    self.cursor = self.text.len();
-                    self.pastes = std::mem::take(&mut self.draft_pastes);
-                    self.history_pos = None;
-                }
-                None => {}
-            },
+            -1 => self.history_back(),
+            _ => self.history_forward(),
         }
     }
 
-    pub fn key(&mut self, key: Key) -> EditorResult {
-        use EditorResult::*;
-        match key {
-            Key::Char(c) => {
-                // Typing replaces an active selection — the reference rule.
-                self.delete_selection();
-                self.insert(c);
-                Consumed
+    /// Recall the previous history entry, saving the draft on the first step.
+    fn history_back(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        match self.history_pos {
+            None => {
+                self.draft = self.text();
+                self.draft_pastes = std::mem::take(&mut self.pastes);
+                self.history_pos = Some(self.history.len() - 1);
             }
+            Some(0) => {}
+            Some(p) => self.history_pos = Some(p - 1),
+        }
+        if let Some(p) = self.history_pos {
+            self.text = self.history[p].chars().collect();
+            self.cursor = self.text.len();
+            self.pastes.clear();
+        }
+    }
+
+    /// Recall the next history entry, restoring the saved draft past the newest.
+    fn history_forward(&mut self) {
+        match self.history_pos {
+            Some(p) if p + 1 < self.history.len() => {
+                self.text = self.history[p + 1].chars().collect();
+                self.cursor = self.text.len();
+                self.pastes.clear();
+                self.history_pos = Some(p + 1);
+            }
+            Some(_) => {
+                self.text = std::mem::take(&mut self.draft).chars().collect();
+                self.cursor = self.text.len();
+                self.pastes = std::mem::take(&mut self.draft_pastes);
+                self.history_pos = None;
+            }
+            None => {}
+        }
+    }
+
+    /// Apply one key. Enter submits the expanded draft and clears it; every
+    /// other key edits or moves and is consumed.
+    pub fn key(&mut self, key: Key) -> EditorResult {
+        match key {
             Key::Enter => {
                 let text = self.expanded_text();
                 self.set_text("");
-                Submit(text)
+                return EditorResult::Submit(text);
             }
-            Key::Newline => {
-                self.delete_selection();
-                self.insert('\n');
-                Consumed
-            }
-            Key::Backspace => {
-                if !self.delete_selection() && self.cursor > 0 {
-                    if let Some(paste) = self.pastes.iter().find(|paste| {
-                        paste.id == 0 && self.cursor > paste.start && self.cursor <= paste.end
-                    }) {
-                        // First Backspace selects the whole chip; the next deletes it.
-                        self.selection_anchor = Some(paste.start);
-                        self.cursor = paste.end;
-                    } else {
-                        self.replace_range(self.cursor - 1, self.cursor, "");
-                    }
-                }
-                Consumed
-            }
+            Key::Char(c) => self.type_char(c),
+            Key::Newline => self.type_char('\n'),
+            Key::Backspace => self.backspace(),
             Key::Delete => {
                 if !self.delete_selection() && self.cursor < self.text.len() {
                     self.replace_range(self.cursor, self.cursor + 1, "");
                 }
-                Consumed
             }
-            Key::Left => {
-                if !self.collapse_selection(false) {
-                    self.cursor = self.cursor.saturating_sub(1);
-                }
-                Consumed
-            }
-            Key::Right => {
-                if !self.collapse_selection(true) {
-                    self.cursor = (self.cursor + 1).min(self.text.len());
-                }
-                Consumed
-            }
-            Key::WordLeft => {
-                if !self.collapse_selection(false) {
-                    self.cursor = self.word_left();
-                }
-                Consumed
-            }
-            Key::WordRight => {
-                if !self.collapse_selection(true) {
-                    self.cursor = self.word_right();
-                }
-                Consumed
-            }
-            Key::Up => {
-                self.selection_anchor = None;
-                self.move_line(-1);
-                Consumed
-            }
-            Key::Down => {
-                self.selection_anchor = None;
-                self.move_line(1);
-                Consumed
-            }
-            Key::Home => {
-                self.selection_anchor = None;
-                self.cursor = 0;
-                Consumed
-            }
-            Key::End => {
-                self.selection_anchor = None;
-                self.cursor = self.text.len();
-                Consumed
-            }
-            Key::SelectLeft => {
-                self.extend_to(self.cursor.saturating_sub(1));
-                Consumed
-            }
-            Key::SelectRight => {
-                self.extend_to((self.cursor + 1).min(self.text.len()));
-                Consumed
-            }
-            Key::SelectWordLeft => {
-                self.extend_to(self.word_left());
-                Consumed
-            }
-            Key::SelectWordRight => {
-                self.extend_to(self.word_right());
-                Consumed
-            }
-            Key::SelectHome => {
-                self.extend_to(0);
-                Consumed
-            }
-            Key::SelectEnd => {
-                self.extend_to(self.text.len());
-                Consumed
-            }
-            Key::SelectUp => {
-                if let Some(target) = self.line_target(-1) {
-                    self.extend_to(target);
-                }
-                Consumed
-            }
-            Key::SelectDown => {
-                if let Some(target) = self.line_target(1) {
-                    self.extend_to(target);
-                }
-                Consumed
-            }
-            Key::KillToEnd => {
-                self.selection_anchor = None;
-                self.replace_range(self.cursor, self.text.len(), "");
-                Consumed
-            }
-            Key::KillToStart => {
-                self.selection_anchor = None;
-                self.replace_range(0, self.cursor, "");
-                Consumed
-            }
+            Key::Left => self.step(false, self.cursor.saturating_sub(1)),
+            Key::Right => self.step(true, (self.cursor + 1).min(self.text.len())),
+            Key::WordLeft => self.step(false, self.word_left()),
+            Key::WordRight => self.step(true, self.word_right()),
+            Key::Up => self.move_line(-1),
+            Key::Down => self.move_line(1),
+            Key::Home => self.jump(0),
+            Key::End => self.jump(self.text.len()),
+            Key::SelectLeft => self.extend_to(self.cursor.saturating_sub(1)),
+            Key::SelectRight => self.extend_to((self.cursor + 1).min(self.text.len())),
+            Key::SelectWordLeft => self.extend_to(self.word_left()),
+            Key::SelectWordRight => self.extend_to(self.word_right()),
+            Key::SelectHome => self.extend_to(0),
+            Key::SelectEnd => self.extend_to(self.text.len()),
+            Key::SelectUp => self.extend_line(-1),
+            Key::SelectDown => self.extend_line(1),
+            Key::KillToEnd => self.replace_range(self.cursor, self.text.len(), ""),
+            Key::KillToStart => self.replace_range(0, self.cursor, ""),
             Key::KillWord => {
                 if !self.delete_selection() {
                     let start = self.word_left();
                     self.replace_range(start, self.cursor, "");
                 }
-                Consumed
             }
+        }
+        EditorResult::Consumed
+    }
+
+    /// Typing replaces an active selection — the reference rule.
+    fn type_char(&mut self, c: char) {
+        self.delete_selection();
+        self.insert(c);
+    }
+
+    /// Delete the selection, else the character before the cursor. Inside a
+    /// diff attachment the first Backspace selects the whole chip and the
+    /// next deletes it.
+    fn backspace(&mut self) {
+        if self.delete_selection() || self.cursor == 0 {
+            return;
+        }
+        if let Some(paste) = self
+            .pastes
+            .iter()
+            .find(|paste| paste.id == 0 && self.cursor > paste.start && self.cursor <= paste.end)
+        {
+            self.selection_anchor = Some(paste.start);
+            self.cursor = paste.end;
+        } else {
+            self.replace_range(self.cursor - 1, self.cursor, "");
+        }
+    }
+
+    /// A plain horizontal motion to `to`, unless an active selection
+    /// collapses to its start (or its end, with `to_end`) instead.
+    fn step(&mut self, to_end: bool, to: usize) {
+        if !self.collapse_selection(to_end) {
+            self.cursor = to;
+        }
+    }
+
+    /// Move the cursor to `to`, dropping any selection.
+    fn jump(&mut self, to: usize) {
+        self.selection_anchor = None;
+        self.cursor = to;
+    }
+
+    /// Extend the selection one visual row up or down, when there is one.
+    fn extend_line(&mut self, direction: isize) {
+        if let Some(target) = self.line_target(direction) {
+            self.extend_to(target);
         }
     }
 
@@ -693,8 +654,6 @@ impl Editor {
         let cursor_row = row_of(&rows, cursor);
         let gutter_cursor = shell && self.cursor < rows[0].start;
         let last = rows.len() - 1;
-        // While a selection is live the range itself is the highlight —
-        // reverse video across its rows, no separate cursor cell.
         let selection = self.selection();
         let mut body: Vec<String> = Vec::with_capacity(rows.len() + 1);
         for (index, row) in rows.iter().enumerate() {
@@ -702,33 +661,14 @@ impl Editor {
                 && self.cursor == self.text.len()
                 && self.cursor == row.end
                 && row_width(&chars, row) >= inner;
-            let cursor_here = cursor_row == Some(index) && !gutter_cursor;
-
-            let rendered = if let Some((start, end)) = selection
-                .map(|(a, b)| (a.max(row.start), b.min(row.end)))
-                .filter(|(a, b)| a < b)
-            {
-                let before = self.styled_slice(theme, &chars, row.start, start);
-                let span = self.styled_slice(theme, &chars, start, end);
-                let after = self.styled_slice(theme, &chars, end, row.end);
-                format!("{before}\x1b[7m{span}\x1b[27m{after}")
-            } else if selection.is_some() {
-                self.styled_slice(theme, &chars, row.start, row.end)
-            } else if cursor_here && !full_final_row {
-                let at = cursor.min(row.end).max(row.start);
-                let before = self.styled_slice(theme, &chars, row.start, at);
-                let cursor_char = if at < row.end {
-                    self.styled_slice(theme, &chars, at, at + 1)
-                } else {
-                    " ".into()
-                };
-                let after = self.styled_slice(theme, &chars, (at + 1).min(row.end), row.end);
-
-                format!("{before}\x1b[7m{cursor_char}\x1b[27m{after}")
-            } else {
-                self.styled_slice(theme, &chars, row.start, row.end)
-            };
-            body.push(rendered);
+            let cursor_here = cursor_row == Some(index) && !gutter_cursor && !full_final_row;
+            body.push(self.render_row(
+                theme,
+                &chars,
+                row,
+                selection,
+                cursor_here.then_some(cursor),
+            ));
         }
         // A cursor resting past a full final row needs one extra empty row.
         let trailing_cursor = rows.last().is_some_and(|row| {
@@ -741,53 +681,98 @@ impl Editor {
             body.push("\x1b[7m \x1b[27m".to_string());
         }
 
-        // The cursor-following window: the draft keeps its share of the
-        // frame, older rows scroll behind a `┃↑` marker on the first
-        // visible row instead of shoving the transcript off screen.
         let cap = max_body_rows.max(1);
         let focus = if trailing_cursor {
             body.len() - 1
         } else {
             cursor_row.unwrap_or(0)
         };
-        if body.len() <= cap {
-            self.scroll = 0;
-        } else {
-            if self.scroll > focus {
-                self.scroll = focus;
-            }
-            if focus >= self.scroll + cap {
-                self.scroll = focus + 1 - cap;
-            }
-            if self.scroll + cap > body.len() {
-                self.scroll = body.len() - cap;
-            }
-        }
+        self.follow(body.len(), focus, cap);
         for (i, rendered) in body.iter().enumerate().skip(self.scroll).take(cap) {
             if i == self.scroll && self.scroll > 0 {
                 out.push(format!("{}{rendered}", theme.fg("userMessageText", "┃↑")));
             } else if i == 0 && shell {
-                let marker = if self.cursor == 0 && selection.is_none()
-                    || selection.is_some_and(|(start, end)| start == 0 && end > 0)
-                {
-                    "\x1b[7m!\x1b[27m"
-                } else {
-                    "!"
-                };
-                let gap = if self.text.get(1) == Some(&' ')
-                    && (self.cursor == 1 && selection.is_none()
-                        || selection.is_some_and(|(start, end)| start <= 1 && end > 1))
-                {
-                    "\x1b[7m \x1b[27m"
-                } else {
-                    " "
-                };
-                out.push(format!("{}{gap}{rendered}", theme.fg("bashMode", marker)));
+                out.push(format!("{}{rendered}", self.shell_gutter(theme, selection)));
             } else {
                 out.push(format!("{rail}{rendered}"));
             }
         }
         out
+    }
+
+    /// One visual row's styled text. While a selection is live the range
+    /// itself is the highlight — reverse video across its rows, no separate
+    /// cursor cell; otherwise `cursor`, when this row paints it, is a
+    /// reverse-video cell (a space past the row's end).
+    fn render_row(
+        &self,
+        theme: &Theme,
+        chars: &[char],
+        row: &VisualRow,
+        selection: Option<(usize, usize)>,
+        cursor: Option<usize>,
+    ) -> String {
+        if let Some((start, end)) = selection
+            .map(|(a, b)| (a.max(row.start), b.min(row.end)))
+            .filter(|(a, b)| a < b)
+        {
+            let before = self.styled_slice(theme, chars, row.start, start);
+            let span = self.styled_slice(theme, chars, start, end);
+            let after = self.styled_slice(theme, chars, end, row.end);
+            return format!("{before}\x1b[7m{span}\x1b[27m{after}");
+        }
+        let Some(cursor) = cursor.filter(|_| selection.is_none()) else {
+            return self.styled_slice(theme, chars, row.start, row.end);
+        };
+        let at = cursor.min(row.end).max(row.start);
+        let before = self.styled_slice(theme, chars, row.start, at);
+        let cursor_char = if at < row.end {
+            self.styled_slice(theme, chars, at, at + 1)
+        } else {
+            " ".into()
+        };
+        let after = self.styled_slice(theme, chars, (at + 1).min(row.end), row.end);
+        format!("{before}\x1b[7m{cursor_char}\x1b[27m{after}")
+    }
+
+    /// The cursor-following window: the draft keeps its share of the frame
+    /// (`cap` rows of `rows`), older rows scroll behind a `┃↑` marker on the
+    /// first visible row instead of shoving the transcript off screen.
+    fn follow(&mut self, rows: usize, focus: usize, cap: usize) {
+        if rows <= cap {
+            self.scroll = 0;
+            return;
+        }
+        if self.scroll > focus {
+            self.scroll = focus;
+        }
+        if focus >= self.scroll + cap {
+            self.scroll = focus + 1 - cap;
+        }
+        if self.scroll + cap > rows {
+            self.scroll = rows - cap;
+        }
+    }
+
+    /// A shell draft's first gutter: the `!` and its optional space, each in
+    /// reverse video while the cursor or selection covers it.
+    fn shell_gutter(&self, theme: &Theme, selection: Option<(usize, usize)>) -> String {
+        let marker = if self.cursor == 0 && selection.is_none()
+            || selection.is_some_and(|(start, end)| start == 0 && end > 0)
+        {
+            "\x1b[7m!\x1b[27m"
+        } else {
+            "!"
+        };
+        let gap = if self.text.get(1) == Some(&' ')
+            && (self.cursor == 1 && selection.is_none()
+                || selection.is_some_and(|(start, end)| start <= 1 && end > 1))
+        {
+            "\x1b[7m \x1b[27m"
+        } else {
+            " "
+        };
+        format!("{}{gap}", theme.fg("bashMode", marker))
     }
 }
 

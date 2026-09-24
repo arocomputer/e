@@ -6,7 +6,8 @@
 //! offline launch does not care.
 
 use super::modelsdev::{self, FactsMap};
-use super::{catalog, Model, Thinking};
+use super::{catalog, Deployment, Model};
+use crate::providers::registry::CatalogStrategy;
 
 /// How long a provider's fetched model list stays fresh (the reference's
 /// refresh interval).
@@ -29,39 +30,10 @@ pub(super) fn remote_overlay(
 ) {
     let object = crate::config::store::read_object(&store_path()).unwrap_or_default();
     for (provider, entry) in object {
-        // Transport from an existing model of the provider (models.json
-        // overrides included), else from the registry — a keyless local's
-        // whole catalog is this overlay, so it has no model to copy from.
-        let Some((base, api, catalog_strategy, responses_mount, supports_tools, image_input)) =
-            models
-                .iter()
-                .find(|m| m.provider == provider)
-                .map(|m| {
-                    (
-                        m.base_url.clone(),
-                        m.api,
-                        m.catalog,
-                        m.responses_mount,
-                        m.provider_supports_tools,
-                        m.provider_image_input,
-                    )
-                })
-                .or_else(|| {
-                    crate::providers::registry::find(&provider).map(|p| {
-                        (
-                            p.base_url.clone(),
-                            p.api(),
-                            p.catalog,
-                            p.responses_mount,
-                            p.supports_tools,
-                            p.image_input,
-                        )
-                    })
-                })
-        else {
+        let Some(deployment) = known_deployment(models, &provider) else {
             continue; // only providers e knows how to speak to
         };
-        if catalog_strategy == crate::providers::registry::CatalogStrategy::None {
+        if deployment.catalog == CatalogStrategy::None {
             // The provider's live discovery is off. A cache entry can
             // outlive that setting (written before it changed, or left
             // over from a prior config) — never resurrect it into the
@@ -69,62 +41,36 @@ pub(super) fn remote_overlay(
             // discovered models.
             continue;
         }
-        let listed = entry.get("models").and_then(|v| v.as_array()).cloned();
-        let legacy = entry.get("ids").and_then(|v| v.as_array()).map(|ids| {
-            ids.iter()
-                .filter_map(|v| v.as_str())
-                .map(|id| serde_json::json!({ "id": id }))
-                .collect::<Vec<_>>()
-        });
-        for item in listed.or(legacy).unwrap_or_default() {
+        for item in cached_models(&entry) {
             let Some(id) = item["id"].as_str() else {
                 continue;
             };
-            // A gateway report corrects a built-in seed. An explicit user
-            // value remains final because it may describe a deployment limit
-            // the provider's generic catalog cannot express.
-            let user_overrode_window =
-                context_overrides.contains(&(provider.clone(), id.to_string()));
+            let window = item["context_window"].as_u64();
             match models
                 .iter_mut()
                 .find(|m| m.provider == provider && m.id == id)
             {
                 Some(existing) => {
-                    if !user_overrode_window {
-                        if let Some(w) = item["context_window"].as_u64() {
+                    // A gateway report corrects a built-in seed. An explicit
+                    // user value remains final because it may describe a
+                    // deployment limit the provider's generic catalog cannot
+                    // express.
+                    if !context_overrides.contains(&(provider.clone(), id.to_string())) {
+                        if let Some(w) = window {
                             existing.context_window = w;
                         }
                     }
                 }
                 None => {
-                    let mut model = Model {
-                        provider: provider.clone(),
-                        id: id.to_string(),
-                        base_url: base.clone(),
-                        api,
-                        catalog: catalog_strategy,
-                        responses_mount,
-                        provider_supports_tools: supports_tools,
-                        provider_image_input: image_input,
-                        effort: Vec::new(),
-                        thinking: Thinking::Manual,
-                        context_window: 200_000,
-                        max_output: None,
-                        // The endpoint reports only id/window, so start from
-                        // the deployment-wide defaults retained independently
-                        // from any declared sibling model's override; the
-                        // feed's facts refine them.
-                        supports_tools,
-                        image_input,
-                        pricing: None,
-                    };
-                    if let Some(facts) = facts.get(&(provider.clone(), id.to_string())) {
-                        modelsdev::apply(&mut model, facts);
-                    }
+                    // The endpoint reports only id/window, so start from
+                    // the deployment-wide defaults retained independently
+                    // from any declared sibling model's override; the
+                    // feed's facts refine them.
+                    let mut model = deployment.new_model(&provider, id, facts);
                     if let Some(image_input) = image_overrides.get(&provider) {
                         model.image_input = *image_input;
                     }
-                    if let Some(window) = item["context_window"].as_u64() {
+                    if let Some(window) = window {
                         model.context_window = window;
                     }
                     models.push(model);
@@ -132,6 +78,29 @@ pub(super) fn remote_overlay(
             }
         }
     }
+}
+
+/// Transport from an existing model of the provider (models.json overrides
+/// included), else from the registry — a keyless local's whole catalog is
+/// this overlay, so it has no model to copy from.
+fn known_deployment(models: &[Model], provider: &str) -> Option<Deployment> {
+    models
+        .iter()
+        .find(|m| m.provider == provider)
+        .map(Deployment::from_model)
+        .or_else(|| crate::providers::registry::find(provider).map(Deployment::from_builtin))
+}
+
+/// One provider's cached listing: `models` entries, or the legacy bare `ids`.
+fn cached_models(entry: &serde_json::Value) -> Vec<serde_json::Value> {
+    let listed = entry.get("models").and_then(|v| v.as_array()).cloned();
+    let legacy = entry.get("ids").and_then(|v| v.as_array()).map(|ids| {
+        ids.iter()
+            .filter_map(|v| v.as_str())
+            .map(|id| serde_json::json!({ "id": id }))
+            .collect::<Vec<_>>()
+    });
+    listed.or(legacy).unwrap_or_default()
 }
 
 /// Refresh the cached model lists from every signed-in provider that serves
@@ -157,37 +126,19 @@ pub async fn refresh_remote_within(max_age_ms: u64) {
     // kind; catalog entries first so models.json base_url overrides win.
     // Registry providers follow so a keyless local with an empty seed list
     // (its models come only from this refresh) still gets polled.
-    let mut providers: Vec<(
-        String,
-        String,
-        super::Api,
-        crate::providers::registry::CatalogStrategy,
-        crate::providers::registry::ResponsesMount,
-    )> = Vec::new();
+    let mut providers: Vec<(String, Deployment)> = Vec::new();
     for m in catalog() {
         if crate::auth::signed_in(&auth, &m.provider)
-            && !providers.iter().any(|(p, _, _, _, _)| *p == m.provider)
+            && !providers.iter().any(|(p, _)| *p == m.provider)
         {
-            providers.push((
-                m.provider.clone(),
-                m.base_url.clone(),
-                m.api,
-                m.catalog,
-                m.responses_mount,
-            ));
+            providers.push((m.provider.clone(), Deployment::from_model(&m)));
         }
     }
     for p in crate::providers::registry::all() {
         if crate::auth::signed_in(&auth, &p.name)
-            && !providers.iter().any(|(name, _, _, _, _)| *name == p.name)
+            && !providers.iter().any(|(name, _)| *name == p.name)
         {
-            providers.push((
-                p.name.clone(),
-                p.base_url.clone(),
-                p.api(),
-                p.catalog,
-                p.responses_mount,
-            ));
+            providers.push((p.name.clone(), Deployment::from_builtin(p)));
         }
     }
     // The facts feed is worth fetching only when there is a provider to
@@ -195,8 +146,8 @@ pub async fn refresh_remote_within(max_age_ms: u64) {
     if !providers.is_empty() {
         modelsdev::refresh(max_age_ms).await;
     }
-    for (provider, base, api, catalog_strategy, responses_mount) in providers {
-        if catalog_strategy == crate::providers::registry::CatalogStrategy::None {
+    for (provider, deployment) in providers {
+        if deployment.catalog == CatalogStrategy::None {
             continue;
         }
         let fresh = stored
@@ -208,9 +159,7 @@ pub async fn refresh_remote_within(max_age_ms: u64) {
         if fresh {
             continue;
         }
-        if let Some(models) =
-            fetch_models(&provider, &base, api, catalog_strategy, responses_mount).await
-        {
+        if let Some(models) = fetch_models(&provider, &deployment).await {
             let listed: Vec<serde_json::Value> = models
                 .iter()
                 .map(|(id, window)| match window {
@@ -283,37 +232,47 @@ fn dated_alias_of(id: &str) -> Option<&str> {
 /// its own auth header and payload shape (`models[].name`, not `data[].id`).
 async fn fetch_models(
     provider: &str,
-    base: &str,
-    api: super::Api,
-    catalog_strategy: crate::providers::registry::CatalogStrategy,
-    responses_mount: crate::providers::registry::ResponsesMount,
+    deployment: &Deployment,
 ) -> Option<Vec<(String, Option<u64>)>> {
-    let authorization =
-        crate::providers::runtime::authorize_provider(provider, api, responses_mount)
-            .await
-            .ok()?;
+    let request = models_request(provider, deployment).await?;
+    let body: serde_json::Value = request.send().await.ok()?.json().await.ok()?;
+    chat_models(deployment.catalog, &body)
+}
+
+/// The authorized list request for the provider's catalog strategy.
+async fn models_request(
+    provider: &str,
+    deployment: &Deployment,
+) -> Option<reqwest::RequestBuilder> {
+    let strategy = deployment.catalog;
+    let authorization = crate::providers::runtime::authorize_provider(
+        provider,
+        deployment.api,
+        deployment.responses_mount,
+    )
+    .await
+    .ok()?;
+    let base = &deployment.base_url;
     // Anthropic declares the bare host as its base (the dialect appends
     // /v1 for /v1/messages); the list endpoint lives under /v1 too, so
     // fetching `{base}/models` would 404 silently on every refresh. Its
     // default page is 20 entries and pagination is not followed, so ask
     // for the whole list at once.
-    let url = if catalog_strategy == crate::providers::registry::CatalogStrategy::Anthropic {
+    let url = if strategy == CatalogStrategy::Anthropic {
         format!("{base}/v1/models?limit=1000")
     } else {
         format!("{base}/models")
     };
-    let mut request = crate::providers::http()
+    let request = crate::providers::http()
         .ok()?
         .get(url)
         .timeout(std::time::Duration::from_secs(15));
-    request = match (authorization.credentialed, catalog_strategy) {
+    Some(match (authorization.credentialed, strategy) {
         (false, _) => request,
-        (true, crate::providers::registry::CatalogStrategy::Anthropic) => request
+        (true, CatalogStrategy::Anthropic) => request
             .header("x-api-key", &authorization.bearer)
             .header("anthropic-version", "2023-06-01"),
-        (true, crate::providers::registry::CatalogStrategy::Google) => {
-            request.header("x-goog-api-key", &authorization.bearer)
-        }
+        (true, CatalogStrategy::Google) => request.header("x-goog-api-key", &authorization.bearer),
         (true, _) => {
             let request = request.bearer_auth(&authorization.bearer);
             let request = match authorization.account_id {
@@ -323,7 +282,7 @@ async fn fetch_models(
             // The ChatGPT backend answers the picker endpoints only for
             // requests that name a client; the codex mount carries the same
             // pair on every inference call.
-            if catalog_strategy == crate::providers::registry::CatalogStrategy::Chatgpt {
+            if strategy == CatalogStrategy::Chatgpt {
                 request
                     .header("originator", "e")
                     .header("OpenAI-Beta", "responses=experimental")
@@ -331,62 +290,29 @@ async fn fetch_models(
                 request
             }
         }
-    };
-    let body: serde_json::Value = request.send().await.ok()?.json().await.ok()?;
-    let google = catalog_strategy == crate::providers::registry::CatalogStrategy::Google;
-    let chatgpt = catalog_strategy == crate::providers::registry::CatalogStrategy::Chatgpt;
-    let entries = if google || chatgpt {
-        body["models"].as_array()
-    } else {
-        body["data"].as_array()
+    })
+}
+
+/// The chat models in a list response, dated aliases of listed bases
+/// dropped; None when the payload lists none.
+fn chat_models(
+    strategy: CatalogStrategy,
+    body: &serde_json::Value,
+) -> Option<Vec<(String, Option<u64>)>> {
+    let entries = match strategy {
+        CatalogStrategy::Google | CatalogStrategy::Chatgpt => body["models"].as_array(),
+        _ => body["data"].as_array(),
     }?;
-    // The wire id: Gemini reports `models/gemini-…` and wants the bare id
-    // back; ChatGPT marks codex-usable entries with a `-wm` slug suffix
-    // that is the picker's own marker, not part of the model name.
-    let id_of = |entry: &serde_json::Value| -> Option<String> {
-        if google {
-            entry["name"]
-                .as_str()
-                .map(|n| n.strip_prefix("models/").unwrap_or(n).to_string())
-        } else if chatgpt {
-            entry["slug"]
-                .as_str()
-                .map(|s| s.strip_suffix("-wm").unwrap_or(s).to_string())
-        } else {
-            entry["id"].as_str().map(String::from)
-        }
-    };
-    let all_ids: Vec<String> = entries.iter().filter_map(id_of).collect();
+    let all_ids: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| wire_id(strategy, entry))
+        .collect();
     let mut out = Vec::new();
     for entry in entries {
-        let Some(id) = id_of(entry) else {
+        let Some(id) = wire_id(strategy, entry) else {
             continue;
         };
-        // Providers that report a type or capability list embeddings, images,
-        // video, and speech beside chat models. Keep the picker for language
-        // models: Gemini says so via supportedGenerationMethods, ChatGPT
-        // via the work-mode flag (the codex lane), OpenAI-style gateways via
-        // a `type` field, falling back to the id heuristic when the provider
-        // doesn't say. `type` is a deny-list of known non-chat kinds, not an
-        // allow-list: Anthropic tags every entry `model`, Together tags
-        // instruct models `chat` and base models `language`.
-        if chatgpt {
-            if !entry["is_work_mode_model"].as_bool().unwrap_or(false) {
-                continue;
-            }
-        } else if google {
-            let serves_chat = entry["supportedGenerationMethods"]
-                .as_array()
-                .is_some_and(|ms| ms.iter().any(|m| m.as_str() == Some("generateContent")));
-            if !serves_chat {
-                continue;
-            }
-        } else if let Some(kind) = entry["type"].as_str() {
-            if NON_CHAT_TYPES.contains(&kind) {
-                continue;
-            }
-        }
-        if !looks_like_chat_model(&id) {
+        if !serves_chat(strategy, entry) || !looks_like_chat_model(&id) {
             continue;
         }
         if let Some(base_id) = dated_alias_of(&id) {
@@ -394,21 +320,7 @@ async fn fetch_models(
                 continue;
             }
         }
-        // Some gateways report the window; keep it when they do. Gemini's
-        // inputTokenLimit is its context window as far as the picker cares,
-        // and ChatGPT's max_tokens is the codex lane's own window — kept
-        // strategy-scoped because an OpenAI-shaped gateway may report
-        // max_tokens as an output limit, not a context window.
-        let window = if chatgpt {
-            entry["max_tokens"].as_u64()
-        } else {
-            entry["context_length"]
-                .as_u64()
-                .or(entry["context_window"].as_u64())
-                .or(entry["max_context_length"].as_u64())
-                .or(entry["inputTokenLimit"].as_u64())
-        };
-        out.push((id, window));
+        out.push((id, reported_window(strategy, entry)));
     }
     if out.is_empty() {
         None
@@ -417,10 +329,61 @@ async fn fetch_models(
     }
 }
 
+/// The wire id: Gemini reports `models/gemini-…` and wants the bare id
+/// back; ChatGPT marks codex-usable entries with a `-wm` slug suffix
+/// that is the picker's own marker, not part of the model name.
+fn wire_id(strategy: CatalogStrategy, entry: &serde_json::Value) -> Option<String> {
+    match strategy {
+        CatalogStrategy::Google => entry["name"]
+            .as_str()
+            .map(|n| n.strip_prefix("models/").unwrap_or(n).to_string()),
+        CatalogStrategy::Chatgpt => entry["slug"]
+            .as_str()
+            .map(|s| s.strip_suffix("-wm").unwrap_or(s).to_string()),
+        _ => entry["id"].as_str().map(String::from),
+    }
+}
+
+/// Providers that report a type or capability list embeddings, images,
+/// video, and speech beside chat models. Keep the picker for language
+/// models: Gemini says so via supportedGenerationMethods, ChatGPT
+/// via the work-mode flag (the codex lane), OpenAI-style gateways via
+/// a `type` field, falling back to the id heuristic when the provider
+/// doesn't say. `type` is a deny-list of known non-chat kinds, not an
+/// allow-list: Anthropic tags every entry `model`, Together tags
+/// instruct models `chat` and base models `language`.
+fn serves_chat(strategy: CatalogStrategy, entry: &serde_json::Value) -> bool {
+    match strategy {
+        CatalogStrategy::Chatgpt => entry["is_work_mode_model"].as_bool().unwrap_or(false),
+        CatalogStrategy::Google => entry["supportedGenerationMethods"]
+            .as_array()
+            .is_some_and(|ms| ms.iter().any(|m| m.as_str() == Some("generateContent"))),
+        _ => entry["type"]
+            .as_str()
+            .is_none_or(|kind| !NON_CHAT_TYPES.contains(&kind)),
+    }
+}
+
+/// Some gateways report the window; keep it when they do. Gemini's
+/// inputTokenLimit is its context window as far as the picker cares,
+/// and ChatGPT's max_tokens is the codex lane's own window — kept
+/// strategy-scoped because an OpenAI-shaped gateway may report
+/// max_tokens as an output limit, not a context window.
+fn reported_window(strategy: CatalogStrategy, entry: &serde_json::Value) -> Option<u64> {
+    if strategy == CatalogStrategy::Chatgpt {
+        return entry["max_tokens"].as_u64();
+    }
+    entry["context_length"]
+        .as_u64()
+        .or(entry["context_window"].as_u64())
+        .or(entry["max_context_length"].as_u64())
+        .or(entry["inputTokenLimit"].as_u64())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::catalog::{Api, Model};
+    use crate::providers::catalog::{Api, Model, Thinking};
     use crate::providers::registry::{CatalogStrategy, ResponsesMount};
 
     // E_HOME is process-global; serialize tests that set it.
