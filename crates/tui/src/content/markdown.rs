@@ -7,12 +7,13 @@
 //!              of indent per level; ordered markers dim, source numbers kept
 //!   tasks      dim `☐` pending, accent `✓` done — the marker replaces the
 //!              bullet
-//!   code       dim horizontal rules `─ lang ─…` over flush-left code — no
-//!              side rails, no padding; unboxed below six columns
+//!   code       a dim box `┌─ lang ─┐` with `│` side rails around
+//!              flush-left code; unboxed below six columns
 //!   quotes     dim `│ ` rail per nesting level, body upright
 //!   rules      fixed 60 columns, SGR dim
-//!   tables     plain ` │ ` separators and `─┼─` junctions, bold header,
-//!              `:---:` alignment honored
+//!   tables     a boxed `┌┬┐` grid with a bold header and `:---:`
+//!              alignment honored; a vertical `header: value` box when the
+//!              grid doesn't fit
 //!   inline     bold/italic/strike as SGR; code spans in the palette's
 //!              inline-code gray; links underline-only with OSC 8; bare
 //!              http(s) URLs autolink with trailing punctuation trimmed
@@ -20,7 +21,7 @@
 //! Parsing uses pulldown-cmark; rendering owns the width, so blocks land on
 //! their final lines directly.
 
-use pulldown_cmark::{Alignment, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, Event, Options, Parser, Tag, TagEnd};
 use unicode_width::UnicodeWidthChar;
 
 use crate::highlight::highlight_block;
@@ -292,6 +293,7 @@ impl StyleState {
     }
 }
 
+/// One word of a hard line, measured once for the row assignment.
 struct WrapTok {
     text: String,
     width: usize,
@@ -309,103 +311,124 @@ struct WrapTok {
 pub fn wrap_styled(styled: &str, width: usize) -> Vec<String> {
     let mut rows = Vec::new();
     for hard in styled.split('\n') {
-        // Tokenize: words, with over-long words pre-split into row pieces.
-        let mut toks: Vec<WrapTok> = Vec::new();
-        for word in hard.split(' ') {
-            let w = visible_width(word);
-            if w > width && width > 0 {
-                let pieces = hard_wrap(word, width);
-                let count = pieces.len();
-                for (k, piece) in pieces.into_iter().enumerate() {
-                    toks.push(WrapTok {
-                        width: visible_width(&piece),
-                        text: piece,
-                        breaks_after: k + 1 < count,
-                        glue: k > 0,
-                    });
-                }
-            } else {
-                toks.push(WrapTok {
-                    text: word.to_string(),
-                    width: w,
-                    breaks_after: false,
-                    glue: false,
-                });
-            }
-        }
-        // Greedy assignment of token indices to rows.
-        let mut lines: Vec<Vec<usize>> = Vec::new();
-        let mut current: Vec<usize> = Vec::new();
-        let mut cur_width = 0usize;
-        for (i, tok) in toks.iter().enumerate() {
-            let needed = if current.is_empty() || tok.glue {
-                tok.width
-            } else {
-                1 + tok.width
-            };
-            if !current.is_empty() && !tok.glue && cur_width + needed > width {
-                lines.push(std::mem::take(&mut current));
-                cur_width = 0;
-            }
-            cur_width += if current.is_empty() {
-                tok.width
-            } else {
-                needed
-            };
-            current.push(i);
-            if tok.breaks_after {
-                lines.push(std::mem::take(&mut current));
-                cur_width = 0;
-            }
-        }
-        lines.push(current);
-        if lines.last().map(|l| l.is_empty()).unwrap_or(false) && lines.len() > 1 {
-            lines.pop();
-        }
-        // Orphan avoidance: a lone word on the last row pulls the previous
-        // row's final word down when the pair fits.
-        if lines.len() >= 2 {
-            let last = lines.len() - 1;
-            let lone =
-                lines[last].len() == 1 && !toks[lines[last][0]].glue && lines[last - 1].len() >= 2;
-            if lone {
-                if let Some(&moved) = lines[last - 1].last() {
-                    let orphan = lines[last][0];
-                    if !toks[moved].breaks_after
-                        && !toks[moved].glue
-                        && toks[moved].width + 1 + toks[orphan].width <= width
-                    {
-                        lines[last - 1].pop();
-                        lines[last].insert(0, moved);
-                    }
-                }
-            }
-        }
-        // Emit, carrying the style state across seams.
-        let mut state = StyleState::default();
-        let line_count = lines.len();
-        for (r, line) in lines.into_iter().enumerate() {
-            let mut row = String::new();
-            if r > 0 {
-                row.push_str(&state.opens());
-            }
-            for (j, ti) in line.into_iter().enumerate() {
-                if j > 0 && !toks[ti].glue {
-                    row.push(' ');
-                }
-                row.push_str(&toks[ti].text);
-                state.advance(&toks[ti].text);
-            }
-            if r + 1 < line_count {
-                row.push_str(&state.closes());
-            }
-            rows.push(row);
-        }
+        let toks = wrap_tokens(hard, width);
+        let mut lines = assign_rows(&toks, width);
+        avoid_orphan(&mut lines, &toks, width);
+        emit_rows(&mut rows, &toks, lines);
     }
     if rows.is_empty() {
         rows.push(String::new());
     }
     rows
+}
+
+/// Split one hard line into words, with over-long words pre-split into
+/// row pieces.
+fn wrap_tokens(hard: &str, width: usize) -> Vec<WrapTok> {
+    let mut toks: Vec<WrapTok> = Vec::new();
+    for word in hard.split(' ') {
+        let w = visible_width(word);
+        if w > width && width > 0 {
+            let pieces = hard_wrap(word, width);
+            let count = pieces.len();
+            for (k, piece) in pieces.into_iter().enumerate() {
+                toks.push(WrapTok {
+                    width: visible_width(&piece),
+                    text: piece,
+                    breaks_after: k + 1 < count,
+                    glue: k > 0,
+                });
+            }
+        } else {
+            toks.push(WrapTok {
+                text: word.to_string(),
+                width: w,
+                breaks_after: false,
+                glue: false,
+            });
+        }
+    }
+    toks
+}
+
+/// Greedy assignment of token indices to rows of at most `width` columns.
+fn assign_rows(toks: &[WrapTok], width: usize) -> Vec<Vec<usize>> {
+    let mut lines: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut cur_width = 0usize;
+    for (i, tok) in toks.iter().enumerate() {
+        let needed = if current.is_empty() || tok.glue {
+            tok.width
+        } else {
+            1 + tok.width
+        };
+        if !current.is_empty() && !tok.glue && cur_width + needed > width {
+            lines.push(std::mem::take(&mut current));
+            cur_width = 0;
+        }
+        cur_width += if current.is_empty() {
+            tok.width
+        } else {
+            needed
+        };
+        current.push(i);
+        if tok.breaks_after {
+            lines.push(std::mem::take(&mut current));
+            cur_width = 0;
+        }
+    }
+    lines.push(current);
+    if lines.last().map(|l| l.is_empty()).unwrap_or(false) && lines.len() > 1 {
+        lines.pop();
+    }
+    lines
+}
+
+/// Orphan avoidance: a lone word on the last row pulls the previous row's
+/// final word down when the pair fits.
+fn avoid_orphan(lines: &mut [Vec<usize>], toks: &[WrapTok], width: usize) {
+    if lines.len() < 2 {
+        return;
+    }
+    let last = lines.len() - 1;
+    let lone = lines[last].len() == 1 && !toks[lines[last][0]].glue && lines[last - 1].len() >= 2;
+    if !lone {
+        return;
+    }
+    if let Some(&moved) = lines[last - 1].last() {
+        let orphan = lines[last][0];
+        if !toks[moved].breaks_after
+            && !toks[moved].glue
+            && toks[moved].width + 1 + toks[orphan].width <= width
+        {
+            lines[last - 1].pop();
+            lines[last].insert(0, moved);
+        }
+    }
+}
+
+/// Join each row's tokens onto `rows`, carrying the style state across
+/// seams: every row but the last closes it, every row but the first reopens it.
+fn emit_rows(rows: &mut Vec<String>, toks: &[WrapTok], lines: Vec<Vec<usize>>) {
+    let mut state = StyleState::default();
+    let line_count = lines.len();
+    for (r, line) in lines.into_iter().enumerate() {
+        let mut row = String::new();
+        if r > 0 {
+            row.push_str(&state.opens());
+        }
+        for (j, ti) in line.into_iter().enumerate() {
+            if j > 0 && !toks[ti].glue {
+                row.push(' ');
+            }
+            row.push_str(&toks[ti].text);
+            state.advance(&toks[ti].text);
+        }
+        if r + 1 < line_count {
+            row.push_str(&state.closes());
+        }
+        rows.push(row);
+    }
 }
 
 /// Hard-wrap one code line, closing and reopening any open color at the seam.
@@ -560,69 +583,6 @@ pub fn code_panel(theme: &Theme, code: &str, language: &str, cols: usize) -> Vec
     out
 }
 
-struct ListState {
-    ordered: Option<u64>,
-    /// The item number as written in the source — the reference echoes the
-    /// author's markers instead of renumbering.
-    source: Option<u64>,
-}
-
-/// Emit the current item's inline text as glyph-prefixed, hanging-indented rows.
-fn flush_item(
-    theme: &Theme,
-    rows: &mut Vec<String>,
-    lists: &mut [ListState],
-    inline: &mut String,
-    task: Option<bool>,
-    width: usize,
-) {
-    let depth = lists.len().saturating_sub(1);
-    let pad = "  ".repeat(depth);
-    let Some(state) = lists.last_mut() else {
-        return;
-    };
-    let checkbox = task.map(|done| {
-        if done {
-            format!("{} ", theme.fg("accent", "✓"))
-        } else {
-            format!("{DIM_ON}☐ {WEIGHT_OFF}")
-        }
-    });
-    let (glyph, glyph_width) = match &mut state.ordered {
-        Some(n) => {
-            let shown = state.source.take().unwrap_or(*n);
-            let marker = format!("{shown}.");
-            let w = marker.chars().count() + 1;
-            *n = shown + 1;
-            let lead = format!("{DIM_ON}{marker}{WEIGHT_OFF} ");
-            match &checkbox {
-                Some(mark) => (format!("{lead}{mark}"), w + 2),
-                None => (lead, w),
-            }
-        }
-        // The reference's checkbox replaces the bullet glyph outright.
-        None => match &checkbox {
-            Some(mark) => (mark.clone(), 2),
-            None => (format!("{DIM_ON}• {WEIGHT_OFF}"), 2),
-        },
-    };
-    let hanging = format!("{pad}{}", " ".repeat(glyph_width));
-    let body_width = width
-        .saturating_sub(pad.chars().count() + glyph_width)
-        .max(8);
-    for (i, row) in wrap_styled(inline.trim_end(), body_width)
-        .into_iter()
-        .enumerate()
-    {
-        if i == 0 {
-            rows.push(format!("{pad}{glyph}{row}"));
-        } else {
-            rows.push(format!("{hanging}{row}"));
-        }
-    }
-    inline.clear();
-}
-
 /// Append text to the inline run, autolinking bare http(s) URLs the
 /// reference way: underline + OSC 8, trailing `.,;:!?` left outside.
 fn push_text_autolinked(inline: &mut String, text: &str, link_seq: &mut u64) {
@@ -679,6 +639,22 @@ fn push_block(out: &mut Vec<String>, lines: Vec<String>) {
     out.extend(lines);
 }
 
+/// One open list: its numbering when ordered.
+struct ListState {
+    ordered: Option<u64>,
+    /// The item number as written in the source — the reference echoes the
+    /// author's markers instead of renumbering.
+    source: Option<u64>,
+}
+
+/// A table being collected cell by cell until its end renders it whole.
+struct TableState {
+    header: Vec<String>,
+    rows: Vec<Vec<String>>,
+    aligns: Vec<Alignment>,
+    in_header: bool,
+}
+
 /// Render a markdown document to lines at `width`, one blank row between blocks.
 pub fn render_markdown(theme: &Theme, markdown: &str, width: usize) -> Vec<String> {
     let mut opts = Options::empty();
@@ -689,149 +665,81 @@ pub fn render_markdown(theme: &Theme, markdown: &str, width: usize) -> Vec<Strin
     // the author wrote and `[^a]: note` as an ordinary paragraph. The
     // reference's footnote grammar was ported once and retired — a coding
     // session's prose doesn't carry academic apparatus.
-    let parser = Parser::new_ext(markdown, opts);
+    let mut doc = Document::new(theme, markdown, width);
+    for (event, range) in Parser::new_ext(markdown, opts).into_offset_iter() {
+        doc.event(event, range.start);
+    }
+    doc.out
+}
 
-    let mut out: Vec<String> = Vec::new();
+/// One document's rendering state as parser events stream through it.
+/// Inline events accumulate styled text in `inline`; a block's end wraps
+/// that text at `width` and pushes the finished block onto `out`.
+struct Document<'a> {
+    theme: &'a Theme,
+    source: &'a str,
+    width: usize,
+    out: Vec<String>,
+    inline: String,
+    heading: Option<u8>,
+    lists: Vec<ListState>,
+    /// Rendered rows of the current top-level list block.
+    list_rows: Vec<String>,
+    /// One flag per open item: has its own inline text been emitted yet?
+    item_stack: Vec<bool>,
+    current_task: Option<bool>,
+    quote_depth: usize,
+    /// Each open link or image keeps its OSC 8 opener. Images may nest inside
+    /// links, so closing one must restore the parent's hyperlink and inline state.
+    link_stack: Vec<Option<String>>,
+    link_seq: u64,
+    image_mark: Option<usize>,
+    /// The open code block's language and buffered source.
+    code: Option<(String, String)>,
+    table: Option<TableState>,
+}
 
-    // Inline accumulation state.
-    let mut inline = String::new();
-    let mut heading: Option<u8> = None;
-    let mut lists: Vec<ListState> = Vec::new();
-    let mut item_first_lines: Vec<String> = Vec::new(); // rendered rows of current list block
-                                                        // One flag per open item: has its own inline text been emitted yet?
-    let mut item_stack: Vec<bool> = Vec::new();
-    let mut current_task: Option<bool> = None;
-    let mut quote_depth = 0usize;
-    // Each open link or image keeps its OSC 8 opener. Images may nest inside
-    // links, so closing one must restore the parent's hyperlink and inline state.
-    let mut link_stack: Vec<Option<String>> = Vec::new();
-    let mut link_seq = 0u64;
-    let mut image_mark: Option<usize> = None;
-    let mut code: Option<(String, String)> = None; // (lang, buffer)
-    #[allow(clippy::type_complexity)]
-    let mut table: Option<(Vec<String>, Vec<Vec<String>>, Vec<Alignment>, bool)> = None;
+impl<'a> Document<'a> {
+    fn new(theme: &'a Theme, source: &'a str, width: usize) -> Self {
+        Self {
+            theme,
+            source,
+            width,
+            out: Vec::new(),
+            inline: String::new(),
+            heading: None,
+            lists: Vec::new(),
+            list_rows: Vec::new(),
+            item_stack: Vec::new(),
+            current_task: None,
+            quote_depth: 0,
+            link_stack: Vec::new(),
+            link_seq: 0,
+            image_mark: None,
+            code: None,
+            table: None,
+        }
+    }
 
-    for (event, range) in parser.into_offset_iter() {
+    /// Fold one parser event in; `start` is its byte offset in the source.
+    fn event(&mut self, event: Event, start: usize) {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
-                heading = Some(match level {
-                    HeadingLevel::H1 => 1,
-                    HeadingLevel::H2 => 2,
-                    HeadingLevel::H3 => 3,
-                    HeadingLevel::H4 => 4,
-                    HeadingLevel::H5 => 5,
-                    HeadingLevel::H6 => 6,
-                });
-                inline.clear();
+                self.heading = Some(level as u8);
+                self.inline.clear();
             }
-            Event::End(TagEnd::Heading(_)) => {
-                // Headings wrap with the level SGR reopened on every row.
-                let level = heading.take().unwrap_or(2);
-                let rows = wrap_styled(&inline, width)
-                    .into_iter()
-                    .map(|row| heading_style(level, &row))
-                    .collect();
-                push_block(&mut out, rows);
-                inline.clear();
-            }
-            Event::Start(Tag::Paragraph) => {
-                // A loose item's later paragraphs continue the item: its
-                // text waits for `End(Item)`, so clearing here would drop
-                // every paragraph but the last.
-                if item_stack.is_empty() {
-                    inline.clear();
-                } else if !inline.trim().is_empty() {
-                    inline.push('\n');
-                }
-            }
-            Event::End(TagEnd::Paragraph) => {
-                if !item_stack.is_empty() {
-                    // handled at item end via `inline`
-                } else if quote_depth > 0 {
-                    // One dim rail per nesting level, the reference way.
-                    let rail = quote_rail().repeat(quote_depth);
-                    let body_width = width.saturating_sub(2 * quote_depth).max(8);
-                    let rows: Vec<String> = wrap_styled(&inline, body_width)
-                        .into_iter()
-                        .map(|r| format!("{rail}{r}"))
-                        .collect();
-                    push_block(&mut out, rows);
-                    inline.clear();
-                } else if table.is_none() {
-                    push_block(&mut out, wrap_styled(&inline, width));
-                    inline.clear();
-                }
-            }
-            Event::Start(Tag::BlockQuote(_)) => {
-                quote_depth += 1;
-            }
+            Event::End(TagEnd::Heading(_)) => self.end_heading(),
+            Event::Start(Tag::Paragraph) => self.start_paragraph(),
+            Event::End(TagEnd::Paragraph) => self.end_paragraph(),
+            Event::Start(Tag::BlockQuote(_)) => self.quote_depth += 1,
             Event::End(TagEnd::BlockQuote(_)) => {
-                quote_depth = quote_depth.saturating_sub(1);
+                self.quote_depth = self.quote_depth.saturating_sub(1)
             }
-            Event::Start(Tag::List(start)) => {
-                // A list opening inside an item means the item's own text is
-                // done — emit it now so children render below their parent.
-                if let Some(flushed) = item_stack.last_mut() {
-                    if !*flushed {
-                        flush_item(
-                            theme,
-                            &mut item_first_lines,
-                            &mut lists,
-                            &mut inline,
-                            current_task.take(),
-                            width,
-                        );
-                        *flushed = true;
-                    }
-                }
-                lists.push(ListState {
-                    ordered: start,
-                    source: None,
-                });
-                if lists.len() == 1 {
-                    item_first_lines.clear();
-                }
-            }
-            Event::End(TagEnd::List(_)) => {
-                lists.pop();
-                if lists.is_empty() {
-                    let lines = std::mem::take(&mut item_first_lines);
-                    push_block(&mut out, lines);
-                }
-            }
-            Event::Start(Tag::Item) => {
-                item_stack.push(false);
-                current_task = None;
-                // The reference echoes the source's ordered markers; read the
-                // number as the author wrote it.
-                if let Some(state) = lists.last_mut() {
-                    if state.ordered.is_some() {
-                        let digits: String = markdown[range.start..]
-                            .chars()
-                            .take_while(|c| c.is_ascii_digit())
-                            .collect();
-                        state.source = digits.parse().ok();
-                    }
-                }
-                inline.clear();
-            }
-            Event::End(TagEnd::Item) => {
-                let flushed = item_stack.pop().unwrap_or(false);
-                if !flushed {
-                    flush_item(
-                        theme,
-                        &mut item_first_lines,
-                        &mut lists,
-                        &mut inline,
-                        current_task.take(),
-                        width,
-                    );
-                }
-                inline.clear();
-            }
-            Event::TaskListMarker(done) => {
-                current_task = Some(done);
-            }
+            Event::Start(Tag::List(first)) => self.start_list(first),
+            Event::End(TagEnd::List(_)) => self.end_list(),
+            Event::Start(Tag::Item) => self.start_item(start),
+            Event::End(TagEnd::Item) => self.end_item(),
+            Event::TaskListMarker(done) => self.current_task = Some(done),
             Event::Start(Tag::CodeBlock(kind)) => {
                 let lang = match kind {
                     pulldown_cmark::CodeBlockKind::Fenced(l) => {
@@ -839,149 +747,301 @@ pub fn render_markdown(theme: &Theme, markdown: &str, width: usize) -> Vec<Strin
                     }
                     _ => String::new(),
                 };
-                code = Some((lang, String::new()));
+                self.code = Some((lang, String::new()));
             }
             Event::End(TagEnd::CodeBlock) => {
-                if let Some((lang, buffer)) = code.take() {
-                    let lines = code_panel(theme, &buffer, &lang, width);
-                    push_block(&mut out, lines);
+                if let Some((lang, buffer)) = self.code.take() {
+                    let lines = code_panel(self.theme, &buffer, &lang, self.width);
+                    push_block(&mut self.out, lines);
                 }
             }
             Event::Start(Tag::Table(aligns)) => {
-                table = Some((Vec::new(), Vec::new(), aligns, false));
+                self.table = Some(TableState {
+                    header: Vec::new(),
+                    rows: Vec::new(),
+                    aligns,
+                    in_header: false,
+                });
             }
-            Event::Start(Tag::TableHead) => {
-                if let Some(t) = &mut table {
-                    t.3 = true;
-                }
-            }
-            Event::End(TagEnd::TableHead) => {
-                if let Some(t) = &mut table {
-                    t.3 = false;
-                }
-            }
+            Event::Start(Tag::TableHead) => self.set_table_head(true),
+            Event::End(TagEnd::TableHead) => self.set_table_head(false),
             Event::Start(Tag::TableRow) => {
-                if let Some(t) = &mut table {
-                    if !t.3 {
-                        t.1.push(Vec::new());
+                if let Some(t) = &mut self.table {
+                    if !t.in_header {
+                        t.rows.push(Vec::new());
                     }
                 }
             }
-            Event::Start(Tag::TableCell) => inline.clear(),
-            Event::End(TagEnd::TableCell) => {
-                if let Some((header, rows, _, in_header)) = &mut table {
-                    if *in_header {
-                        header.push(std::mem::take(&mut inline));
-                    } else if let Some(last) = rows.last_mut() {
-                        last.push(std::mem::take(&mut inline));
-                    }
-                }
-            }
+            Event::Start(Tag::TableCell) => self.inline.clear(),
+            Event::End(TagEnd::TableCell) => self.end_table_cell(),
             Event::End(TagEnd::Table) => {
-                if let Some((header, rows, aligns, _)) = table.take() {
-                    push_block(&mut out, render_table(&header, &rows, &aligns, width));
+                if let Some(t) = self.table.take() {
+                    let lines = render_table(&t.header, &t.rows, &t.aligns, self.width);
+                    push_block(&mut self.out, lines);
                 }
             }
-            Event::Rule => push_block(&mut out, vec![rule()]),
+            Event::Rule => push_block(&mut self.out, vec![rule()]),
             // The reference strips bold/italic markers inside a heading
             // rather than nesting SGR into the level style.
-            Event::Start(Tag::Strong) if heading.is_some() => {}
-            Event::End(TagEnd::Strong) if heading.is_some() => {}
-            Event::Start(Tag::Emphasis) if heading.is_some() => {}
-            Event::End(TagEnd::Emphasis) if heading.is_some() => {}
-            Event::Start(Tag::Strong) => inline.push_str(BOLD_ON),
-            Event::End(TagEnd::Strong) => inline.push_str(WEIGHT_OFF),
-            Event::Start(Tag::Emphasis) => inline.push_str(ITALIC_ON),
-            Event::End(TagEnd::Emphasis) => inline.push_str(ITALIC_OFF),
-            Event::Start(Tag::Strikethrough) => inline.push_str(STRIKE_ON),
-            Event::End(TagEnd::Strikethrough) => inline.push_str(STRIKE_OFF),
-            Event::Start(Tag::Link { dest_url, .. }) => {
-                // An oversized or control-laden URL never enters an OSC 8
-                // sequence; its label renders as plain underlined text.
-                let opener = if valid_link_url(&dest_url) {
-                    link_seq += 1;
-                    Some(osc8_id(link_seq, &dest_url))
-                } else {
-                    None
-                };
-                if link_stack.last().is_some_and(Option::is_some) {
-                    inline.push_str(OSC8_CLOSE);
-                }
-                if let Some(open) = &opener {
-                    inline.push_str(open);
-                }
-                inline.push_str(UNDERLINE_ON);
-                link_stack.push(opener);
-            }
+            Event::Start(Tag::Strong)
+            | Event::End(TagEnd::Strong)
+            | Event::Start(Tag::Emphasis)
+            | Event::End(TagEnd::Emphasis)
+                if self.heading.is_some() => {}
+            Event::Start(Tag::Strong) => self.inline.push_str(BOLD_ON),
+            Event::End(TagEnd::Strong) => self.inline.push_str(WEIGHT_OFF),
+            Event::Start(Tag::Emphasis) => self.inline.push_str(ITALIC_ON),
+            Event::End(TagEnd::Emphasis) => self.inline.push_str(ITALIC_OFF),
+            Event::Start(Tag::Strikethrough) => self.inline.push_str(STRIKE_ON),
+            Event::End(TagEnd::Strikethrough) => self.inline.push_str(STRIKE_OFF),
+            Event::Start(Tag::Link { dest_url, .. }) => self.open_link(&dest_url),
             Event::End(TagEnd::Link) => {
-                inline.push_str(UNDERLINE_OFF);
-                if link_stack.pop().flatten().is_some() {
-                    inline.push_str(OSC8_CLOSE);
-                }
-                if let Some(parent) = link_stack.last() {
-                    if let Some(open) = parent {
-                        inline.push_str(open);
-                    }
-                    inline.push_str(UNDERLINE_ON);
-                } else if matches!(heading, Some(1) | Some(3) | Some(5)) {
+                if !self.close_link() && matches!(self.heading, Some(1) | Some(3) | Some(5)) {
                     // An underlined heading level reopens its underline after
                     // the link closes its own.
-                    inline.push_str(UNDERLINE_ON);
+                    self.inline.push_str(UNDERLINE_ON);
                 }
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
-                let opener = if valid_link_url(&dest_url) {
-                    link_seq += 1;
-                    Some(osc8_id(link_seq, &dest_url))
-                } else {
-                    None
-                };
-                if link_stack.last().is_some_and(Option::is_some) {
-                    inline.push_str(OSC8_CLOSE);
-                }
-                if let Some(open) = &opener {
-                    inline.push_str(open);
-                }
-                inline.push_str(UNDERLINE_ON);
-                link_stack.push(opener);
-                inline.push_str("▧ ");
-                image_mark = Some(inline.len());
+                self.open_link(&dest_url);
+                self.inline.push_str("▧ ");
+                self.image_mark = Some(self.inline.len());
             }
             Event::End(TagEnd::Image) => {
                 // Empty alt text names the thing for what it is.
-                if image_mark.take() == Some(inline.len()) {
-                    inline.push_str("image");
+                if self.image_mark.take() == Some(self.inline.len()) {
+                    self.inline.push_str("image");
                 }
-                inline.push_str(UNDERLINE_OFF);
-                if link_stack.pop().flatten().is_some() {
-                    inline.push_str(OSC8_CLOSE);
-                }
-                if let Some(parent) = link_stack.last() {
-                    if let Some(open) = parent {
-                        inline.push_str(open);
-                    }
-                    inline.push_str(UNDERLINE_ON);
-                }
+                self.close_link();
             }
-            Event::Code(text) => inline.push_str(&theme.fg("mdCode", &text)),
-            Event::Text(text) => {
-                if let Some((_, buffer)) = &mut code {
-                    buffer.push_str(&text);
-                } else if !link_stack.is_empty() || heading.is_some() {
-                    inline.push_str(&text);
-                } else {
-                    push_text_autolinked(&mut inline, &text, &mut link_seq);
-                }
-            }
+            Event::Code(text) => self.inline.push_str(&self.theme.fg("mdCode", &text)),
+            Event::Text(text) => self.text(&text),
             // The reference preserves the author's line breaks: a soft break
             // is a real row boundary, not a joining space.
-            Event::SoftBreak => inline.push('\n'),
-            Event::HardBreak => inline.push('\n'),
-            Event::Html(html) | Event::InlineHtml(html) => inline.push_str(&html),
+            Event::SoftBreak => self.inline.push('\n'),
+            Event::HardBreak => self.inline.push('\n'),
+            Event::Html(html) | Event::InlineHtml(html) => self.inline.push_str(&html),
             _ => {}
         }
     }
-    out
+
+    /// Headings wrap with the level SGR reopened on every row.
+    fn end_heading(&mut self) {
+        let level = self.heading.take().unwrap_or(2);
+        let rows = wrap_styled(&self.inline, self.width)
+            .into_iter()
+            .map(|row| heading_style(level, &row))
+            .collect();
+        push_block(&mut self.out, rows);
+        self.inline.clear();
+    }
+
+    /// A loose item's later paragraphs continue the item: its text waits for
+    /// `End(Item)`, so clearing here would drop every paragraph but the last.
+    fn start_paragraph(&mut self) {
+        if self.item_stack.is_empty() {
+            self.inline.clear();
+        } else if !self.inline.trim().is_empty() {
+            self.inline.push('\n');
+        }
+    }
+
+    /// A paragraph becomes a block of its own, railed inside a quote; inside
+    /// an item it waits for the item's end, and inside a table for its cell.
+    fn end_paragraph(&mut self) {
+        if !self.item_stack.is_empty() {
+            // handled at item end via `inline`
+        } else if self.quote_depth > 0 {
+            // One dim rail per nesting level, the reference way.
+            let rail = quote_rail().repeat(self.quote_depth);
+            let body_width = self.width.saturating_sub(2 * self.quote_depth).max(8);
+            let rows: Vec<String> = wrap_styled(&self.inline, body_width)
+                .into_iter()
+                .map(|r| format!("{rail}{r}"))
+                .collect();
+            push_block(&mut self.out, rows);
+            self.inline.clear();
+        } else if self.table.is_none() {
+            push_block(&mut self.out, wrap_styled(&self.inline, self.width));
+            self.inline.clear();
+        }
+    }
+
+    /// A list opening inside an item means the item's own text is done —
+    /// emit it now so children render below their parent.
+    fn start_list(&mut self, first: Option<u64>) {
+        if self.item_stack.last() == Some(&false) {
+            self.flush_item();
+            if let Some(flushed) = self.item_stack.last_mut() {
+                *flushed = true;
+            }
+        }
+        self.lists.push(ListState {
+            ordered: first,
+            source: None,
+        });
+        if self.lists.len() == 1 {
+            self.list_rows.clear();
+        }
+    }
+
+    /// The outermost list's end pushes every row its items rendered as one block.
+    fn end_list(&mut self) {
+        self.lists.pop();
+        if self.lists.is_empty() {
+            let lines = std::mem::take(&mut self.list_rows);
+            push_block(&mut self.out, lines);
+        }
+    }
+
+    /// The reference echoes the source's ordered markers; read the number as
+    /// the author wrote it at the item's `start` offset.
+    fn start_item(&mut self, start: usize) {
+        self.item_stack.push(false);
+        self.current_task = None;
+        if let Some(state) = self.lists.last_mut() {
+            if state.ordered.is_some() {
+                let digits: String = self.source[start..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                state.source = digits.parse().ok();
+            }
+        }
+        self.inline.clear();
+    }
+
+    fn end_item(&mut self) {
+        let flushed = self.item_stack.pop().unwrap_or(false);
+        if !flushed {
+            self.flush_item();
+        }
+        self.inline.clear();
+    }
+
+    /// Emit the current item's inline text as glyph-prefixed, hanging-indented
+    /// rows, consuming its task marker.
+    fn flush_item(&mut self) {
+        let task = self.current_task.take();
+        let depth = self.lists.len().saturating_sub(1);
+        let pad = "  ".repeat(depth);
+        let Some(state) = self.lists.last_mut() else {
+            return;
+        };
+        let (glyph, glyph_width) = item_marker(self.theme, state, task);
+        let hanging = format!("{pad}{}", " ".repeat(glyph_width));
+        let body_width = self
+            .width
+            .saturating_sub(pad.chars().count() + glyph_width)
+            .max(8);
+        for (i, row) in wrap_styled(self.inline.trim_end(), body_width)
+            .into_iter()
+            .enumerate()
+        {
+            if i == 0 {
+                self.list_rows.push(format!("{pad}{glyph}{row}"));
+            } else {
+                self.list_rows.push(format!("{hanging}{row}"));
+            }
+        }
+        self.inline.clear();
+    }
+
+    fn set_table_head(&mut self, in_header: bool) {
+        if let Some(t) = &mut self.table {
+            t.in_header = in_header;
+        }
+    }
+
+    /// A finished cell moves the inline run into the header or the last body row.
+    fn end_table_cell(&mut self) {
+        if let Some(t) = &mut self.table {
+            if t.in_header {
+                t.header.push(std::mem::take(&mut self.inline));
+            } else if let Some(last) = t.rows.last_mut() {
+                last.push(std::mem::take(&mut self.inline));
+            }
+        }
+    }
+
+    /// Open a link or image: an oversized or control-laden URL never enters an
+    /// OSC 8 sequence, and its label renders as plain underlined text. An
+    /// enclosing link's hyperlink is closed first.
+    fn open_link(&mut self, url: &str) {
+        let opener = if valid_link_url(url) {
+            self.link_seq += 1;
+            Some(osc8_id(self.link_seq, url))
+        } else {
+            None
+        };
+        if self.link_stack.last().is_some_and(Option::is_some) {
+            self.inline.push_str(OSC8_CLOSE);
+        }
+        if let Some(open) = &opener {
+            self.inline.push_str(open);
+        }
+        self.inline.push_str(UNDERLINE_ON);
+        self.link_stack.push(opener);
+    }
+
+    /// Close the innermost link or image and reopen its parent's hyperlink
+    /// and underline. Returns whether a parent was open.
+    fn close_link(&mut self) -> bool {
+        self.inline.push_str(UNDERLINE_OFF);
+        if self.link_stack.pop().flatten().is_some() {
+            self.inline.push_str(OSC8_CLOSE);
+        }
+        let Some(parent) = self.link_stack.last() else {
+            return false;
+        };
+        if let Some(open) = parent {
+            self.inline.push_str(open);
+        }
+        self.inline.push_str(UNDERLINE_ON);
+        true
+    }
+
+    /// Text lands in the open code block, verbatim inside links and headings,
+    /// and autolinked everywhere else.
+    fn text(&mut self, text: &str) {
+        if let Some((_, buffer)) = &mut self.code {
+            buffer.push_str(text);
+        } else if !self.link_stack.is_empty() || self.heading.is_some() {
+            self.inline.push_str(text);
+        } else {
+            push_text_autolinked(&mut self.inline, text, &mut self.link_seq);
+        }
+    }
+}
+
+/// An item's leading marker and its width in columns: the dim source number
+/// or bullet, and any task checkbox. Advances an ordered list's count.
+fn item_marker(theme: &Theme, state: &mut ListState, task: Option<bool>) -> (String, usize) {
+    let checkbox = task.map(|done| {
+        if done {
+            format!("{} ", theme.fg("accent", "✓"))
+        } else {
+            format!("{DIM_ON}☐ {WEIGHT_OFF}")
+        }
+    });
+    match &mut state.ordered {
+        Some(n) => {
+            let shown = state.source.take().unwrap_or(*n);
+            let marker = format!("{shown}.");
+            let w = marker.chars().count() + 1;
+            *n = shown + 1;
+            let lead = format!("{DIM_ON}{marker}{WEIGHT_OFF} ");
+            match checkbox {
+                Some(mark) => (format!("{lead}{mark}"), w + 2),
+                None => (lead, w),
+            }
+        }
+        // The reference's checkbox replaces the bullet glyph outright.
+        None => match checkbox {
+            Some(mark) => (mark, 2),
+            None => (format!("{DIM_ON}• {WEIGHT_OFF}"), 2),
+        },
+    }
 }
 
 /// The header cell's bold, the reference way: the cell's own inline
@@ -1072,6 +1132,54 @@ fn table_vertical_lines(out: &mut Vec<String>, content: &str, inner_width: usize
     }
 }
 
+/// The boxed grid: `┌┬┐`, padded cells, `├┼┤` after the header and between
+/// every body row, `└┴┘`. Body cells honor their column's alignment; the
+/// header is always left and bold.
+fn table_grid(
+    out: &mut Vec<String>,
+    header: &[String],
+    rows: &[Vec<String>],
+    aligns: &[Alignment],
+    widths: &[usize],
+) {
+    out.push(table_border("┌", "┬", "┐", widths));
+    let all_rows: Vec<&[String]> = std::iter::once(header)
+        .chain(rows.iter().map(Vec::as_slice))
+        .collect();
+    for (row_index, row) in all_rows.iter().enumerate() {
+        let mut line = String::from("│");
+        for (col, width) in widths.iter().enumerate() {
+            let cell = row.get(col).map(String::as_str).unwrap_or("");
+            let pad = width.saturating_sub(visible_width(cell));
+            let align = if row_index == 0 {
+                Alignment::Left
+            } else {
+                aligns.get(col).copied().unwrap_or(Alignment::None)
+            };
+            let left_pad = match align {
+                Alignment::Right => pad,
+                Alignment::Center => pad / 2,
+                _ => 0,
+            };
+            line.push(' ');
+            line.push_str(&" ".repeat(left_pad));
+            if row_index == 0 {
+                line.push_str(&table_header_cell(cell));
+            } else {
+                line.push_str(cell);
+            }
+            line.push_str(&" ".repeat(pad - left_pad));
+            line.push_str(" │");
+        }
+        out.push(line);
+        let last = row_index + 1 == all_rows.len();
+        if (row_index == 0 && all_rows.len() > 1) || (row_index > 0 && !last) {
+            out.push(table_border("├", "┼", "┤", widths));
+        }
+    }
+    out.push(table_border("└", "┴", "┘", widths));
+}
+
 /// The reference's transcript table ladder: a boxed grid (`┌┬┐`, padded
 /// cells, `├┼┤` after the header and between every body row, `└┴┘`) when it
 /// fits the frame; a vertical `header: value` box at exactly the frame's
@@ -1105,42 +1213,7 @@ fn render_table(
     }
     let grid_width = ncols * 3 + 1 + widths.iter().sum::<usize>();
     if ncols > 0 && grid_width <= cols {
-        out.push(table_border("┌", "┬", "┐", &widths));
-        let all_rows: Vec<&[String]> = std::iter::once(header)
-            .chain(rows.iter().map(Vec::as_slice))
-            .collect();
-        for (row_index, row) in all_rows.iter().enumerate() {
-            let mut line = String::from("│");
-            for (col, width) in widths.iter().enumerate() {
-                let cell = row.get(col).map(String::as_str).unwrap_or("");
-                let pad = width.saturating_sub(visible_width(cell));
-                let align = if row_index == 0 {
-                    Alignment::Left
-                } else {
-                    aligns.get(col).copied().unwrap_or(Alignment::None)
-                };
-                let left_pad = match align {
-                    Alignment::Right => pad,
-                    Alignment::Center => pad / 2,
-                    _ => 0,
-                };
-                line.push(' ');
-                line.push_str(&" ".repeat(left_pad));
-                if row_index == 0 {
-                    line.push_str(&table_header_cell(cell));
-                } else {
-                    line.push_str(cell);
-                }
-                line.push_str(&" ".repeat(pad - left_pad));
-                line.push_str(" │");
-            }
-            out.push(line);
-            let last = row_index + 1 == all_rows.len();
-            if (row_index == 0 && all_rows.len() > 1) || (row_index > 0 && !last) {
-                out.push(table_border("├", "┼", "┤", &widths));
-            }
-        }
-        out.push(table_border("└", "┴", "┘", &widths));
+        table_grid(&mut out, header, rows, aligns, &widths);
         return out;
     }
     // Vertical fallback: one record per body row, `header: value` fields
