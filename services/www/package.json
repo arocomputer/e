@@ -24,7 +24,7 @@
     "social": "node scripts/social/render.mjs"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "14.3.2",
+    "@astrojs/cloudflare": "14.3.3",
     "@astrojs/react": "5.0.1",
     "@fontsource-variable/jetbrains-mono": "^5",
     "@fontsource-variable/montserrat": "^5",
