@@ -16,7 +16,6 @@
 /crates/core/src/tools/      @fschrhunt
 /crates/core/src/update.rs   @fschrhunt
 /crates/cli/src/update.rs    @fschrhunt
-/services/redirect/           @fschrhunt
 # The guides are the source for three readers — GitHub, the website, and the
 # binary's `e docs` — so their structure, front matter, and links are reviewed
 # like code. docs/README.md is the contract and crates/cli/tests/docs.rs enforces it; a new

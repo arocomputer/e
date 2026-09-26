@@ -10,9 +10,6 @@ def classify(paths):
     """Return independent gates; artwork/prose cannot trigger a native build or release."""
     gates = dict.fromkeys(('build', 'packages', 'channels', 'docs', 'lock', 'bench', 'publish'), False)
     for path in paths:
-        # The legacy-domain Worker has its own check and deployment workflow.
-        if path.startswith('services/redirect/') or path == '.github/workflows/redirect.yml':
-            continue
         workflow = path.startswith('.github/workflows/')
         if path.startswith(('services/slack/', 'services/github/', 'crates/cli/tests/fixtures/channels/')) or workflow:
             gates['channels'] = True

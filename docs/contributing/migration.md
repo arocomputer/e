@@ -17,7 +17,5 @@ update integrations that set `ULO_HOME` or launch `ulo`.
 
 The site in `arocomputer/web` imports guides from this repository. Merge the
 product code first, then deploy the `web` repository so `aro.computer/e` is
-live. Finally run the `Legacy domain redirect` workflow on `main` to move
-`ulo.sh` and `www.ulo.sh`. Deploying that redirect before the new site would
-create a loop with the current Aro Worker. The old `e.aro.computer` host
-redirects to `aro.computer/e` as part of the website deployment.
+live. The old `e.aro.computer` host redirects to `aro.computer/e` as part of
+the website deployment.

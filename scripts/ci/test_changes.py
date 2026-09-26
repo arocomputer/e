@@ -11,10 +11,6 @@ from changes import changed_paths, classify, main
 
 
 class ChangesTests(unittest.TestCase):
-    def test_legacy_redirect_does_not_publish_native_packages(self):
-        gates = classify(['services/redirect/worker.mjs', '.github/workflows/redirect.yml'])
-        self.assertFalse(any(gates.values()))
-
     def test_readme_artwork_does_not_build_or_publish(self):
         gates = classify(['README.md', 'assets/readme.png', 'assets/readme-window.html'])
         self.assertTrue(gates['docs'])

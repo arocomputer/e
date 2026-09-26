@@ -7,7 +7,6 @@ live in `crates/` and do not depend on these services.
 | --- | --- | --- |
 | [slack](slack/) | Slack bot, one e session per thread | Node.js or Docker |
 | [github](github/) | Respond to `/e` on issues and pull requests | Copy the Actions workflow |
-| [redirect](redirect/) | Send old `ulo.sh` links to `aro.computer/e` | Cloudflare Worker |
 
 The Slack and GitHub services spawn `e rpc` and speak its JSONL protocol.
 They are reference clients, not libraries. See the
