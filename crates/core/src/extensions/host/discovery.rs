@@ -48,7 +48,7 @@ pub(super) fn directory_entry_point(dir: &std::path::Path) -> Option<PathBuf> {
     let mut execs: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .flatten()
-        .map(|ulo| ulo.path())
+        .map(|e| e.path())
         .filter(|p| p.is_file() && is_executable(p))
         .collect();
     // read_dir order is filesystem-dependent. Sorting makes ambiguous bundles

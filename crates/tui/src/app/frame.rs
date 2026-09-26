@@ -350,7 +350,7 @@ impl App {
                 "model" => data
                     .model
                     .as_deref()
-                    .map(ulo_core::output::compact_model_label)
+                    .map(e_core::output::compact_model_label)
                     .unwrap_or_default(),
                 "effort" => data.effort.clone().unwrap_or_default(),
                 "context" => match data.context_total.filter(|t| *t > 0) {

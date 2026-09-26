@@ -8,7 +8,7 @@
 //! `--` remains the escape hatch that turns flag-spelling text into a
 //! prompt, and near misses get a did-you-mean suggestion.
 
-use ulo_core::run::ToolMode;
+use e_core::run::ToolMode;
 
 /// Built-in flags that consume the following token when one is present.
 const VALUE_FLAGS: &[&str] = &[
@@ -74,18 +74,18 @@ pub const SUBCOMMANDS: &[&str] = &[
 /// actionable instead of at generic help.
 pub fn subcommand_usage(sub: &str) -> Option<&'static str> {
     match sub {
-        "rpc" => Some("usage: ulo rpc"),
-        "docs" => Some("usage: ulo docs [topic]"),
-        "update" => Some("usage: ulo update"),
-        "install" => Some("usage: ulo install [source]"),
-        "remove" => Some("usage: ulo remove <source>"),
-        "packages" => Some("usage: ulo packages [init <dir>]"),
-        "trust" => Some("usage: ulo trust [dir]"),
-        "untrust" => Some("usage: ulo untrust [dir]"),
-        "auth" => Some("usage: ulo auth"),
-        "doctor" => Some("usage: ulo doctor [--no-network]"),
-        "providers" => Some("usage: ulo providers"),
-        "help" => Some("usage: ulo help"),
+        "rpc" => Some("usage: e rpc"),
+        "docs" => Some("usage: e docs [topic]"),
+        "update" => Some("usage: e update"),
+        "install" => Some("usage: e install [source]"),
+        "remove" => Some("usage: e remove <source>"),
+        "packages" => Some("usage: e packages [init <dir>]"),
+        "trust" => Some("usage: e trust [dir]"),
+        "untrust" => Some("usage: e untrust [dir]"),
+        "auth" => Some("usage: e auth"),
+        "doctor" => Some("usage: e doctor [--no-network]"),
+        "providers" => Some("usage: e providers"),
+        "help" => Some("usage: e help"),
         _ => None,
     }
 }
@@ -301,7 +301,7 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
                 }
                 return Err(match did_you_mean(name, &candidates) {
                     Some(near) => format!("unknown option {name} — did you mean {near}?"),
-                    None => format!("unknown option {name} (run `ulo --help` for the options)"),
+                    None => format!("unknown option {name} (run `e --help` for the options)"),
                 });
             }
             _ => out.positional.push(arg.clone()),
@@ -319,32 +319,32 @@ pub fn parse(args: Vec<String>, extension_flags: &[String]) -> Result<Options, S
     Ok(out)
 }
 
-use ulo_core::providers::catalog;
+use e_core::providers::catalog;
 
 /// The model a run uses: the requested query, or the configured default;
 /// with an explicit effort checked against what that model declares.
-/// Shared by the terminal, `ulo -p`, and `ulo rpc` so one message describes an
+/// Shared by the terminal, `e -p`, and `e rpc` so one message describes an
 /// unavailable model everywhere.
 pub fn resolve_model(options: &Options) -> Result<catalog::Model, String> {
-    ulo_core::run::resolve_model(&options.run_options())
+    e_core::run::resolve_model(&options.run_options())
 }
 
 /// Convert parsed flags to the agent's execution preferences.
-pub fn agent_options(options: &Options) -> ulo_core::agent::AgentOptions {
-    ulo_core::run::agent_options(&options.run_options())
+pub fn agent_options(options: &Options) -> e_core::agent::AgentOptions {
+    e_core::run::agent_options(&options.run_options())
 }
 
 pub fn load_images(
     options: &Options,
     model: &catalog::Model,
-) -> Result<Vec<ulo_core::providers::ImageInput>, String> {
-    ulo_core::run::load_images(&options.run_options(), model)
+) -> Result<Vec<e_core::providers::ImageInput>, String> {
+    e_core::run::load_images(&options.run_options(), model)
 }
 
 impl Options {
     /// Pass only execution preferences to a frontend, never parsing or display flags.
-    pub fn run_options(&self) -> ulo_core::run::Options {
-        ulo_core::run::Options {
+    pub fn run_options(&self) -> e_core::run::Options {
+        e_core::run::Options {
             model: self.model.clone(),
             effort: self.effort.clone(),
             images: self.images.clone(),
@@ -434,7 +434,7 @@ mod tests {
         assert!(error.contains("did you mean --model?"));
         assert_eq!(
             parse(args(&["-x"]), &[]).unwrap_err(),
-            "unknown option -x (run `ulo --help` for the options)"
+            "unknown option -x (run `e --help` for the options)"
         );
         // Anywhere in argv, not just in the leading position.
         assert!(parse(args(&["hello", "--junk"]), &[]).is_err());

@@ -1,16 +1,16 @@
 {
-  "name": "@arocomputer/ulo-slack",
+  "name": "@arocomputer/e-slack",
   "version": "0.0.2",
-  "description": "A Slack bot that runs ulo: one thread, one session, over `ulo rpc`",
+  "description": "A Slack bot that runs e: one thread, one session, over `e rpc`",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://ulo.sh",
+  "homepage": "https://aro.computer/e",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/arocomputer/ulo.git",
+    "url": "git+https://github.com/arocomputer/e.git",
     "directory": "services/slack"
   },
-  "bugs": "https://github.com/arocomputer/ulo/issues",
+  "bugs": "https://github.com/arocomputer/e/issues",
   "keywords": [
     "slack",
     "slack-bot",
@@ -18,7 +18,7 @@
     "agent"
   ],
   "bin": {
-    "ulo-slack": "bin/ulo-slack.js"
+    "e-slack": "bin/e-slack.js"
   },
   "engines": {
     "node": ">=22.6"

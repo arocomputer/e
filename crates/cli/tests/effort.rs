@@ -2,7 +2,7 @@
 /// xhigh and friends appear when a model exposes them — never a fixed
 /// low/medium/high ladder. Resolution falls back per model when the saved
 /// value belongs to another model.
-use ulo::core::agent::{effort, next_effort};
+use e::core::agent::{effort, next_effort};
 
 #[test]
 fn cycles_whatever_the_model_declares() {

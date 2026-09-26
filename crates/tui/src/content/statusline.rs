@@ -2,8 +2,8 @@
 
 use crate::markdown::visible_width;
 use crate::theme::Theme;
-use ulo_core::output::{compact_model_label, format_tokens};
-use ulo_core::providers::FailureCause;
+use e_core::output::{compact_model_label, format_tokens};
+use e_core::providers::FailureCause;
 
 /// How long a "recovered" flash stays up before reverting to normal turn
 /// activity — matches the reference client's brief, self-clearing confirm.
@@ -61,7 +61,7 @@ fn clip(s: &str, max_chars: usize) -> String {
 
 /// Elapsed time in the activity row grammar — the shared core formatter,
 /// re-exported under its long-standing name.
-pub use ulo_core::output::format_elapsed;
+pub use e_core::output::format_elapsed;
 
 /// Per-turn token flow and focused activity phase. The display moves only
 /// on real provider usage frames — streamed bytes and request size are never
@@ -193,7 +193,7 @@ impl Turn {
         crate::layout::expand(template, &lookup)
     }
 
-    /// The row as ulo's default template paints it.
+    /// The row as e's default template paints it.
     pub fn label(&self, elapsed_secs: u64) -> Option<String> {
         self.label_with(elapsed_secs, crate::layout::DEFAULT_ACTIVITY, "")
     }
@@ -309,7 +309,7 @@ mod tests {
             );
         }
     }
-    use ulo_core::providers::FailureCause;
+    use e_core::providers::FailureCause;
 
     #[test]
     fn activity_has_one_owner_per_phase() {

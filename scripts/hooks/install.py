@@ -26,13 +26,13 @@ def install():
     git('config', '--local', 'extensions.worktreeConfig', 'true')
     # Carry the prior product's hook chain forward in already configured worktrees.
     legacy = subprocess.run(['git', 'config', '--get', 'e.previousPreCommit'], capture_output=True, text=True)
-    current = subprocess.run(['git', 'config', '--get', 'ulo.previousPreCommit'], capture_output=True, text=True)
+    current = subprocess.run(['git', 'config', '--get', 'e.previousPreCommit'], capture_output=True, text=True)
     if legacy.returncode == 0 and current.returncode != 0:
-        git('config', '--worktree', 'ulo.previousPreCommit', legacy.stdout.strip())
+        git('config', '--worktree', 'e.previousPreCommit', legacy.stdout.strip())
     if previous != hooks:
         hook = previous / 'pre-commit'
         if hook.is_file() and os.access(hook, os.X_OK):
-            git('config', '--worktree', 'ulo.previousPreCommit', str(hook))
+            git('config', '--worktree', 'e.previousPreCommit', str(hook))
     git('config', '--worktree', 'core.hooksPath', '.githooks')
     print('Repository hooks enabled for this worktree.')
 

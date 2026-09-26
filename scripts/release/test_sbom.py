@@ -8,15 +8,15 @@ from sbom import application_bom
 class SbomTests(unittest.TestCase):
     def test_workspace_selects_cli_instead_of_root_or_sdk(self):
         metadata = {'packages': [
-            {'name': 'ulo-core', 'manifest_path': '/repo/crates/core/Cargo.toml'},
-            {'name': 'ulo-sdk', 'manifest_path': '/repo/crates/sdk/Cargo.toml'},
-            {'name': 'ulo', 'manifest_path': '/repo/crates/cli/Cargo.toml'},
+            {'name': 'e-core', 'manifest_path': '/repo/crates/core/Cargo.toml'},
+            {'name': 'e-sdk', 'manifest_path': '/repo/crates/sdk/Cargo.toml'},
+            {'name': 'e', 'manifest_path': '/repo/crates/cli/Cargo.toml'},
         ]}
-        self.assertEqual(application_bom(metadata), Path('/repo/crates/cli/ulo-release-sbom.json'))
+        self.assertEqual(application_bom(metadata), Path('/repo/crates/cli/e-release-sbom.json'))
 
     def test_root_package_remains_publishable(self):
-        metadata = {'packages': [{'name': 'ulo', 'manifest_path': '/repo/Cargo.toml'}]}
-        self.assertEqual(application_bom(metadata), Path('/repo/ulo-release-sbom.json'))
+        metadata = {'packages': [{'name': 'e', 'manifest_path': '/repo/Cargo.toml'}]}
+        self.assertEqual(application_bom(metadata), Path('/repo/e-release-sbom.json'))
 
     def test_no_application_fails_instead_of_shipping_another_crate(self):
         with self.assertRaisesRegex(ValueError, 'application'):

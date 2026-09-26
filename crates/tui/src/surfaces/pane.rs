@@ -1,12 +1,12 @@
 //! A side pane beside the conversation, opened by an extension with
-//! `ui.pane` and painted by ulo. The extension sends sections — a
-//! selectable list, a unified diff, text, markdown, or themed rows — and ulo
+//! `ui.pane` and painted by e. The extension sends sections — a
+//! selectable list, a unified diff, text, markdown, or themed rows — and e
 //! owns everything interactive: focus, scrolling, the cursor, selection,
 //! mouse, the split, and the narrow-terminal fallback. What the user does
 //! goes back as data (`pane.select`, `pane.activate`, `pane.key`,
 //! `pane.closed`); a selection attaches to the composer as a snapshot.
 //!
-//! Where the pane sits and how wide it is come from `~/.ulo/layout.json`
+//! Where the pane sits and how wide it is come from `~/.e/layout.json`
 //! (`tui/content/layout.rs`); the extension only proposes a side.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -20,7 +20,7 @@ use crate::{
     theme::Theme,
     transcript::diff_row_style,
 };
-use ulo_core::tools::sanitize_display;
+use e_core::tools::sanitize_display;
 
 /// Most bytes a pane's sections may carry together; past it the rest is
 /// dropped and the last row says so.
@@ -98,14 +98,14 @@ pub struct Item {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Content {
     List(Vec<Item>),
-    /// Rows already in ulo's diff grammar (`diffview::from_unified`).
+    /// Rows already in e's diff grammar (`diffview::from_unified`).
     Diff(Vec<String>),
     Text(String),
     Markdown(String),
     Rows(Vec<Vec<Span>>),
 }
 
-/// One section of a pane, with the interactive state ulo keeps for it.
+/// One section of a pane, with the interactive state e keeps for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Section {
     pub id: String,
@@ -266,7 +266,7 @@ impl Section {
             Content::Text(_) | Content::Markdown(_) => self
                 .wrapped
                 .iter()
-                .map(|row| ulo_core::tools::strip_ansi(row))
+                .map(|row| e_core::tools::strip_ansi(row))
                 .collect(),
         }
     }
@@ -307,12 +307,12 @@ fn item_of((i, item): (usize, &Value)) -> Item {
     }
 }
 
-/// A diff section's unified `body` in ulo's row grammar. The grammar names the
+/// A diff section's unified `body` in e's row grammar. The grammar names the
 /// file on its first row; a section titled with the same name would say it
 /// twice, so that row drops.
 fn diff_rows(value: &Value, body: &str) -> Vec<String> {
     let title = value.get("title").and_then(Value::as_str).map(flat);
-    let rows: Vec<String> = ulo_core::tools::diffview::from_unified(body)
+    let rows: Vec<String> = e_core::tools::diffview::from_unified(body)
         .lines()
         .map(str::to_string)
         .collect();
@@ -352,7 +352,7 @@ pub enum Action {
         section: String,
         id: String,
     },
-    /// A chord ulo did not use, for the owner.
+    /// A chord e did not use, for the owner.
     Key(String),
 }
 
@@ -784,7 +784,7 @@ impl Section {
         let mut shown = 0;
         for (i, row) in painted.iter().enumerate().skip(self.scroll).take(rows) {
             let mut text = if self.horizontal > 0 && !self.is_list() {
-                let skipped: String = ulo_core::tools::strip_ansi(row)
+                let skipped: String = e_core::tools::strip_ansi(row)
                     .chars()
                     .skip(self.horizontal)
                     .collect();
@@ -945,7 +945,7 @@ mod tests {
         let rows = pane.sections[0]
             .wrapped
             .iter()
-            .map(|row| ulo_core::tools::strip_ansi(row))
+            .map(|row| e_core::tools::strip_ansi(row))
             .collect();
         (content, rows)
     }
@@ -1031,10 +1031,7 @@ mod tests {
         let theme = crate::theme::resolve("dark", false);
         let rows = pane.render(&theme, 40, 14);
         assert_eq!(rows.len(), 14);
-        let plain: Vec<String> = rows
-            .iter()
-            .map(|r| ulo_core::tools::strip_ansi(r))
-            .collect();
+        let plain: Vec<String> = rows.iter().map(|r| e_core::tools::strip_ansi(r)).collect();
         assert!(
             plain[1].starts_with("Changes") && plain[1].ends_with('×'),
             "{:?}",
@@ -1069,7 +1066,7 @@ mod tests {
         let plain: Vec<String> = pane
             .render(&theme, 40, 12)
             .iter()
-            .map(|r| ulo_core::tools::strip_ansi(r))
+            .map(|r| e_core::tools::strip_ansi(r))
             .collect();
         assert!(
             plain.iter().any(|r| r.trim() == "line 31"),
@@ -1085,7 +1082,7 @@ mod tests {
         let plain: Vec<String> = pane
             .render(&theme, 40, 12)
             .iter()
-            .map(|r| ulo_core::tools::strip_ansi(r))
+            .map(|r| e_core::tools::strip_ansi(r))
             .collect();
         assert!(
             plain.iter().any(|r| r.trim() == "line 31"),

@@ -2,8 +2,8 @@
 #
 #   core  the terminal-free harness: agent, providers, tools, sessions
 #   tui   the terminal frontend
-#   rpc   the `ulo rpc` frontend, a JSONL session server
-#   cli   the `ulo` binary: arguments, subcommands, and which frontend runs
+#   rpc   the `e rpc` frontend, a JSONL session server
+#   cli   the `e` binary: arguments, subcommands, and which frontend runs
 #   sdk   the Rust library frontend, with its own version
 #
 # tui, rpc, and sdk depend on core and never on each other. fuzz/ stays its
@@ -12,7 +12,7 @@
 members = ["crates/core", "crates/tui", "crates/rpc", "crates/cli", "crates/sdk"]
 resolver = "2"
 
-# The application's version is the release version: the tag, `ulo --version`, the
+# The application's version is the release version: the tag, `e --version`, the
 # npm packages, the Homebrew formula, and the install channel all come from it.
 # core, tui, rpc, and cli share it. The SDK and the Slack channel version
 # themselves independently.
@@ -21,13 +21,13 @@ version = "0.0.2"
 edition = "2021"
 rust-version = "1.98"
 license = "MIT"
-homepage = "https://ulo.sh"
-repository = "https://github.com/arocomputer/ulo"
+homepage = "https://aro.computer/e"
+repository = "https://github.com/arocomputer/e"
 
 [workspace.dependencies]
-ulo-core = { package = "ulo-core", path = "crates/core", version = "=0.0.2" }
-ulo-tui = { package = "ulo-tui", path = "crates/tui", version = "=0.0.2" }
-ulo-rpc = { package = "ulo-rpc", path = "crates/rpc", version = "=0.0.2" }
+e-core = { package = "e-core", path = "crates/core", version = "=0.0.2" }
+e-tui = { package = "e-tui", path = "crates/tui", version = "=0.0.2" }
+e-rpc = { package = "e-rpc", path = "crates/rpc", version = "=0.0.2" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 unicode-width = "0.2"

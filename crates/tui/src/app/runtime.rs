@@ -4,7 +4,7 @@
 //! app, say what launch has to say, run the [`FrameLoop`] until something
 //! ends it, then shut down in order. Each select arm of the loop hands its
 //! event to one named handler; a key press walks [`App::on_key`]'s
-//! precedence from ulo's own chords down to the composer.
+//! precedence from e's own chords down to the composer.
 
 use std::ops::ControlFlow::{self, Break, Continue};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::*;
-use ulo_core::auth::login::Outcome as LoginOutcome;
-use ulo_core::extensions::{ExtensionHost, HostRequest};
+use e_core::auth::login::Outcome as LoginOutcome;
+use e_core::extensions::{ExtensionHost, HostRequest};
 
 /// Launch inputs after extension startup hooks have rewritten arguments and cwd.
 pub struct RunOptions {
@@ -25,14 +25,14 @@ pub struct RunOptions {
     pub resume_session: bool,
     pub model: Model,
     pub agent: AgentOptions,
-    pub images: Vec<ulo_core::providers::ImageInput>,
+    pub images: Vec<e_core::providers::ImageInput>,
 }
 
 /// The channel extensions' own requests travel on: created by the caller
 /// before the host starts (so `initialize` can promise a UI), consumed here.
 pub type Requests = (
-    tokio::sync::mpsc::Sender<ulo_core::extensions::HostRequest>,
-    tokio::sync::mpsc::Receiver<ulo_core::extensions::HostRequest>,
+    tokio::sync::mpsc::Sender<e_core::extensions::HostRequest>,
+    tokio::sync::mpsc::Receiver<e_core::extensions::HostRequest>,
 );
 
 /// Frame pacing: every select arm may change what's on screen, but frames
@@ -43,7 +43,7 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 /// Open the terminal session and restore terminal state when its loop ends.
 pub async fn run(
     options: RunOptions,
-    host: std::sync::Arc<ulo_core::extensions::ExtensionHost>,
+    host: std::sync::Arc<e_core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     jobs_rx: tokio::sync::mpsc::Receiver<String>,
     requests: Requests,
@@ -52,14 +52,14 @@ pub async fn run(
         .agent
         .home
         .clone()
-        .unwrap_or_else(ulo_core::config::home::home);
-    ulo_core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests)).await
+        .unwrap_or_else(e_core::config::home::home);
+    e_core::config::home::scope(home, run_scoped(options, host, jobs_tx, jobs_rx, requests)).await
 }
 
 /// Run the terminal and its configuration reads within the selected home.
 pub(super) async fn run_scoped(
     options: RunOptions,
-    host: std::sync::Arc<ulo_core::extensions::ExtensionHost>,
+    host: std::sync::Arc<e_core::extensions::ExtensionHost>,
     jobs_tx: tokio::sync::mpsc::Sender<String>,
     jobs_rx: tokio::sync::mpsc::Receiver<String>,
     requests: Requests,
@@ -79,11 +79,11 @@ pub(super) async fn run_scoped(
     // detect_light() probes the terminal background over OSC 11 (short
     // timeout) and falls back to COLORFGBG, then dark.
     let detected = crate::background::detect_light().unwrap_or(false);
-    let theme = crate::theme::resolve(&ulo_core::config::settings::theme(), detected);
+    let theme = crate::theme::resolve(&e_core::config::settings::theme(), detected);
     let keymap = crate::keybindings::load();
 
     let (cols, rows) = terminal::size()?;
-    // The launch anchor: the frame paints below where the user launched ulo,
+    // The launch anchor: the frame paints below where the user launched e,
     // never over what came before. A terminal that doesn't answer DSR 6n — a raw pty —
     // falls back to the screen's bottom row, the common launch spot.
     let anchor =
@@ -94,7 +94,7 @@ pub(super) async fn run_scoped(
     let (results_tx, results_rx) = tokio::sync::mpsc::channel::<AppJob>(16);
     if let Some(update) = update {
         let results = results_tx.clone();
-        ulo_core::config::home::spawn(async move {
+        e_core::config::home::spawn(async move {
             if let Ok(version) = update.await {
                 let _ = results.send(AppJob::Updated(version)).await;
             }
@@ -207,7 +207,7 @@ fn pop_terminal_modes() -> std::io::Result<()> {
 /// gives extensions their shutdown notification.
 async fn shut_down(app: &mut App, painter: &mut Painter, guard: TerminalGuard) {
     painter.shutdown();
-    ulo_core::tools::kill_tracked_processes();
+    e_core::tools::kill_tracked_processes();
     app.host
         .event("session_shutdown", serde_json::json!({"reason": "quit"}))
         .await;
@@ -225,7 +225,7 @@ async fn shut_down(app: &mut App, painter: &mut Painter, guard: TerminalGuard) {
             .to_string();
         let args = vec!["-c".to_string()];
         if let Err(error) = relaunch_self(&cwd, &args, &std::collections::BTreeMap::new()) {
-            eprintln!("relaunch failed: {error} — start ulo again by hand");
+            eprintln!("relaunch failed: {error} — start e again by hand");
         }
     }
 }
@@ -248,7 +248,7 @@ struct FrameLoop {
     anchor: usize,
     /// Terminal input is read on its own thread and can be paused: while an
     /// external editor owns the terminal (ctrl+g), nothing here may read
-    /// it, or the editor's keystrokes land in ulo instead.
+    /// it, or the editor's keystrokes land in e instead.
     input_paused: Arc<AtomicBool>,
     input: Receiver<std::io::Result<TermEvent>>,
     session_events: Receiver<SessionEvent>,
@@ -308,8 +308,8 @@ impl FrameLoop {
                 }
                 // Apply the whole burst before building one frame — a fast
                 // stream must not cost one paint per delta.
-                for ulo in self.event_buf.drain(..) {
-                    app.on_session_event(ulo);
+                for e in self.event_buf.drain(..) {
+                    app.on_session_event(e);
                 }
             }
             request = self.requests.recv() => {
@@ -405,7 +405,7 @@ impl App {
         theme: Theme,
         keymap: crate::keybindings::Keymap,
         light_background: bool,
-        images: Vec<ulo_core::providers::ImageInput>,
+        images: Vec<e_core::providers::ImageInput>,
         senders: Senders,
     ) -> Self {
         App {
@@ -425,7 +425,7 @@ impl App {
             staged_scope: None,
             auth: None,
             settings: None,
-            show_thinking: ulo_core::config::settings::show_thinking(),
+            show_thinking: e_core::config::settings::show_thinking(),
             thinking_hint: String::new(),
             jobs: senders.jobs,
             logins: senders.logins,
@@ -493,10 +493,10 @@ impl App {
         );
         if self.layout.banner {
             self.transcript
-                .push(Block::new(Kind::Banner, ulo_core::VERSION));
+                .push(Block::new(Kind::Banner, e_core::VERSION));
         }
         self.launch_notices(options);
-        ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
+        e_core::config::home::spawn(e_core::providers::catalog::refresh_remote());
         self.check_sign_in();
         if resume_session {
             // The reference behavior: launch straight into the session picker.
@@ -523,17 +523,17 @@ impl App {
             self.notice("session saving disabled for this run".into());
         }
         match options.tool_mode {
-            ulo_core::run::ToolMode::None => {
+            e_core::run::ToolMode::None => {
                 self.notice("no-tools mode — provider requests contain no tool schemas".into())
             }
-            ulo_core::run::ToolMode::All => {}
+            e_core::run::ToolMode::All => {}
         }
-        if ulo_core::config::trust::status(&self.agent.cwd()).is_none() {
+        if e_core::config::trust::status(&self.agent.cwd()).is_none() {
             self.trust = Some(TrustStage::new(&self.agent.cwd()));
         }
         // The trust lookup may be the first read of trust.json; drain afterward so
         // its recovery joins warnings collected while constructing the app.
-        for warning in ulo_core::config::store::take_warnings() {
+        for warning in e_core::config::store::take_warnings() {
             self.notice(format!("warning: {warning}"));
         }
     }
@@ -541,7 +541,7 @@ impl App {
     /// With no provider signed in, open sign-in; otherwise say when the
     /// saved model could not be used.
     fn check_sign_in(&mut self) {
-        if ulo_core::auth::load().is_empty() {
+        if e_core::auth::load().is_empty() {
             self.notice(
                 "no provider signed in — use /login to sign in with an account or API key".into(),
             );
@@ -549,7 +549,7 @@ impl App {
             // implied on the status bar. Yields to the trust panel above it,
             // if that's showing too — this still renders once trust is settled.
             self.open_login_menu();
-        } else if let Some(wanted) = ulo_core::config::settings::get_string("model") {
+        } else if let Some(wanted) = e_core::config::settings::get_string("model") {
             let current = self.agent.model_slug();
             if wanted != current {
                 self.notice(format!(
@@ -572,7 +572,7 @@ impl App {
         }
     }
 
-    /// Route one key press. The order is precedence: ulo's own chords first,
+    /// Route one key press. The order is precedence: e's own chords first,
     /// then an extension surface, then whichever panel or picker is open,
     /// and the composer last.
     fn on_key(&mut self, k: KeyEvent, cols: usize, rows: usize) {
@@ -591,7 +591,7 @@ impl App {
             && self.trust.is_none()
     }
 
-    /// ctrl+c, clipboard paste, and the ctrl+o viewer: ulo's before anything
+    /// ctrl+c, clipboard paste, and the ctrl+o viewer: e's before anything
     /// else sees the key. True when the key was taken.
     fn global_key(&mut self, k: KeyEvent, cols: usize, rows: usize) -> bool {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -621,7 +621,7 @@ impl App {
     }
 
     /// The side pane and the extension panel, when they own the keyboard.
-    /// ctrl+c never reaches here: [`App::global_key`] keeps it ulo's. True
+    /// ctrl+c never reaches here: [`App::global_key`] keeps it e's. True
     /// when the key was taken.
     fn extension_key(&mut self, k: KeyEvent) -> bool {
         let free = self.panels_closed() && !self.ui_input_open();
@@ -636,7 +636,7 @@ impl App {
                 pane.focused = !pane.focused;
             }
         } else if self.pane.as_ref().is_some_and(|p| p.focused) && free {
-            // The pane owns the keyboard: ulo navigates it,
+            // The pane owns the keyboard: e navigates it,
             // and chords it does not use go to the owner.
             if let Some(pane) = self.pane.as_mut() {
                 let action = pane.key(k);
@@ -703,17 +703,17 @@ impl App {
     fn answer_trust(&mut self, parent: Option<std::path::PathBuf>, trusted: bool) {
         let target = parent.unwrap_or_else(|| self.agent.cwd().to_path_buf());
         if !trusted {
-            // A decline is remembered nowhere: ulo
+            // A decline is remembered nowhere: e
             // runs only trusted, so the next
             // launch asks again.
-            if let Some(refusal) = ulo_core::config::trust::refusal(&target) {
+            if let Some(refusal) = e_core::config::trust::refusal(&target) {
                 self.notice(refusal);
             }
             self.should_quit = true;
             return;
         }
-        match ulo_core::config::trust::set(&target, true) {
-            Err(ulo) => self.notice(format!("trust: {ulo}")),
+        match e_core::config::trust::set(&target, true) {
+            Err(e) => self.notice(format!("trust: {e}")),
             Ok(()) => {
                 self.trust = None;
                 self.install_project_packages();
@@ -778,11 +778,11 @@ impl App {
                 self.auth_choose(choice);
             }
             (AuthStage::Account { selected }, KeyCode::Up | KeyCode::Down) => {
-                let n = ulo_core::providers::registry::oauth_providers().len();
+                let n = e_core::providers::registry::oauth_providers().len();
                 *selected = authpanel::step(*selected, n, k.code == KeyCode::Up);
             }
             (AuthStage::Key { selected }, KeyCode::Up | KeyCode::Down) => {
-                let n = ulo_core::providers::registry::key_providers().len();
+                let n = e_core::providers::registry::key_providers().len();
                 *selected = authpanel::step(*selected, n, k.code == KeyCode::Up);
             }
             (AuthStage::Account { selected }, KeyCode::Enter) => {
@@ -806,7 +806,7 @@ impl App {
                 let provider = provider.clone();
                 self.pending_key = None;
                 self.editor.mask = false;
-                let selected = ulo_core::providers::registry::key_providers()
+                let selected = e_core::providers::registry::key_providers()
                     .iter()
                     .position(|p| p.name == provider)
                     .unwrap_or(0);
@@ -1012,7 +1012,7 @@ impl App {
     }
 
     /// A declared extension shortcut, answered like
-    /// a command. Only a chord neither ulo nor the
+    /// a command. Only a chord neither e nor the
     /// composer (built in, or the user's
     /// keybindings.json) took reaches this —
     /// so unbinding a chord there frees it for an
@@ -1021,7 +1021,7 @@ impl App {
         let host = self.host.clone();
         let results = self.results.clone();
         let epoch = self.session_epoch;
-        ulo_core::config::home::spawn(async move {
+        e_core::config::home::spawn(async move {
             let result = host.run_shortcut(&chord).await;
             let _ = results.send(AppJob::Command { result, epoch }).await;
         });
@@ -1060,7 +1060,7 @@ impl App {
             AppJob::CatalogRefreshed => self.rebuild_model_menu(),
             AppJob::Updated(version) => {
                 self.notice(format!(
-                    "ulo {version} installed — /reload to switch to it now"
+                    "e {version} installed — /reload to switch to it now"
                 ));
                 self.update_installed = Some(version);
             }
@@ -1107,7 +1107,7 @@ impl App {
 
     /// A `!` command finished: fill its block, record it for the model, and
     /// submit the prompts held for it.
-    fn finish_shell(&mut self, cmd: String, output: ulo_core::tools::ToolOutput, epoch: u64) {
+    fn finish_shell(&mut self, cmd: String, output: e_core::tools::ToolOutput, epoch: u64) {
         // A result from a command started in an earlier
         // session must not be recorded into this one.
         if epoch != self.session_epoch {
@@ -1118,7 +1118,7 @@ impl App {
         }
         // Display a trimmed tail in the live block;
         // history gets the full (tool-truncated) output.
-        let display_output = ulo_core::tools::sanitize_display(&output.content);
+        let display_output = e_core::tools::sanitize_display(&output.content);
         let shown = shell_tail(&display_output);
         let output_id = (!output.content.trim().is_empty())
             .then(|| self.remember_output(format!("$ {cmd}"), display_output));
@@ -1178,22 +1178,22 @@ impl App {
         // land back on the account list.
         if let Some(AuthStage::Waiting { back }) = &self.auth {
             let back = back.unwrap_or(0);
-            let display = ulo_core::providers::catalog::display_name(provider);
+            let display = e_core::providers::catalog::display_name(provider);
             self.auth = Some(AuthStage::Done {
                 ok: true,
                 message: format!("{display} connected"),
                 back: authpanel::BackTarget::Account(back),
             });
         }
-        ulo_core::config::home::spawn(ulo_core::providers::catalog::refresh_remote());
+        e_core::config::home::spawn(e_core::providers::catalog::refresh_remote());
         // A fresh credential may make new models available:
         // if the current model's provider is still signed out,
         // fall back to the first available model.
-        if !ulo_core::auth::signed_in(&ulo_core::auth::load(), &self.agent.model.provider) {
-            if let Some(m) = ulo_core::providers::catalog::available().into_iter().next() {
+        if !e_core::auth::signed_in(&e_core::auth::load(), &self.agent.model.provider) {
+            if let Some(m) = e_core::providers::catalog::available().into_iter().next() {
                 self.notice(format!(
                     "model set to {}",
-                    ulo_core::providers::catalog::slug(&m)
+                    e_core::providers::catalog::slug(&m)
                 ));
                 self.agent.model = m;
             }
@@ -1281,7 +1281,7 @@ pub(super) async fn edit_externally(
     rows: u16,
     anchor: usize,
 ) {
-    let command = ulo_core::config::settings::external_editor();
+    let command = e_core::config::settings::external_editor();
     let Some(program) = command.first().cloned() else {
         app.notice("no editor: set `editor` in this channel's settings.json or $EDITOR".into());
         return;
@@ -1340,7 +1340,7 @@ pub(super) async fn edit_externally(
 /// temp directory is refused rather than followed.
 fn stage_draft(draft: &str) -> std::io::Result<std::path::PathBuf> {
     let path = std::env::temp_dir().join(format!(
-        "ulo-draft-{}-{}.md",
+        "e-draft-{}-{}.md",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));

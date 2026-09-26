@@ -7,7 +7,7 @@ order: 4
 # Prompt templates
 
 A prompt template is a reusable prompt you run as a slash command. The
-markdown file `~/.ulo/prompts/<name>.md` becomes the `/name` command.
+markdown file `~/.e/prompts/<name>.md` becomes the `/name` command.
 
 ```markdown
 ---
@@ -17,7 +17,7 @@ argument-hint: [path]
 Review ${1:-everything} carefully. Focus on $2.
 ```
 
-ulo reads templates on each use, so it picks up new files immediately.
+e reads templates on each use, so it picks up new files immediately.
 
 ## Front matter
 
@@ -26,7 +26,7 @@ ulo reads templates on each use, so it picks up new files immediately.
 
 ## Arguments
 
-ulo submits the body as the prompt after bash-style substitution. Quoted
+e submits the body as the prompt after bash-style substitution. Quoted
 arguments group as one word.
 
 | Syntax | Expands to |
@@ -45,8 +45,8 @@ same name.
 
 ## Repo-local templates
 
-A trusted repository can carry its own commands in `.ulo/prompts/`.
-`<repo>/.ulo/prompts/<name>.md` becomes `/name`, in the same format as above.
+A trusted repository can carry its own commands in `.e/prompts/`.
+`<repo>/.e/prompts/<name>.md` becomes `/name`, in the same format as above.
 
 These templates load only after `/trust`, like the repo's AGENTS.md. They
 shadow a global template of the same name, because the closer context wins.

@@ -1,5 +1,5 @@
-//! Where the regions of the frame go: `~/.ulo/layout.json`, file-backed like
-//! themes and keybindings, with a built-in default that reproduces ulo's
+//! Where the regions of the frame go: `~/.e/layout.json`, file-backed like
+//! themes and keybindings, with a built-in default that reproduces e's
 //! look. An extension opens a pane and proposes a side; the user's file
 //! outranks it. The status row is a template of tokens, so what it says is
 //! the user's choice too.
@@ -146,10 +146,10 @@ struct Raw {
     activity: Option<String>,
 }
 
-/// Load `~/.ulo/layout.json`. A missing or malformed file fails open to the
+/// Load `~/.e/layout.json`. A missing or malformed file fails open to the
 /// defaults — a layout typo must never hide the conversation.
 pub fn load() -> Layout {
-    let Ok(json) = std::fs::read_to_string(ulo_core::config::home::layout_path()) else {
+    let Ok(json) = std::fs::read_to_string(e_core::config::home::layout_path()) else {
         return Layout::default();
     };
     parse(&json).unwrap_or_default()
@@ -164,7 +164,7 @@ pub fn parse(json: &str) -> Option<Layout> {
         layout.split_min = usize::try_from(min).unwrap_or(usize::MAX).max(60);
     }
     if let Some(focus) = raw.focus {
-        let chord = ulo_core::config::chord::normalize_chord(&focus);
+        let chord = e_core::config::chord::normalize_chord(&focus);
         if !chord.is_empty() {
             layout.focus = chord;
         }

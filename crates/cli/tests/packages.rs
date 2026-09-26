@@ -1,8 +1,8 @@
-//! Packages: a git repository (or local directory) shaped like `~/.ulo/` —
+//! Packages: a git repository (or local directory) shaped like `~/.e/` —
 //! `extensions/`, `skills/`, `prompts/`, `themes/` — installs under
-//! `~/.ulo/packages/<host>/<path>`, is recorded in settings, and feeds every
+//! `~/.e/packages/<host>/<path>`, is recorded in settings, and feeds every
 //! loader after the home's own resources. Settings are the source of truth:
-//! a deleted clone is reported at startup and restored by `ulo install`.
+//! a deleted clone is reported at startup and restored by `e install`.
 //!
 //! These tests drive real `git` against a throwaway repository, the way a
 //! user's install does.
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{env_lock, serve_raw_bytes, Home};
-use ulo::core::resources::packages::{self, Source, Status};
+use e::core::resources::packages::{self, Source, Status};
 
 /// Package installs are async (release downloads); the git paths are
 /// synchronous underneath, so a current-thread runtime is enough.
@@ -34,7 +34,7 @@ struct Repo {
 impl Repo {
     fn new(label: &str) -> Repo {
         let dir = std::env::temp_dir().join(format!(
-            "ulo-pkg-{label}-{}-{}",
+            "e-pkg-{label}-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
@@ -143,22 +143,22 @@ fn install_clones_under_the_managed_root_and_every_loader_sees_the_package() {
         "pinned at v1, before the second commit"
     );
 
-    let skills = ulo::core::resources::skills::list(&cwd);
+    let skills = e::core::resources::skills::list(&cwd);
     let hello = skills.iter().find(|s| s.name == "hello").unwrap();
     assert_eq!(hello.description, "from a package");
     assert!(hello.dir.starts_with(&root));
     assert!(packages::is_packaged(&hello.dir));
 
-    let hi = ulo::core::resources::prompts::find("hi", &cwd).unwrap();
+    let hi = e::core::resources::prompts::find("hi", &cwd).unwrap();
     assert_eq!(hi.content, "hi $1");
 
-    assert!(ulo::core::config::settings::theme_names().contains(&"pkgtheme".to_string()));
-    assert!(ulo::tui::theme::load_user("pkgtheme").is_some());
+    assert!(e::core::config::settings::theme_names().contains(&"pkgtheme".to_string()));
+    assert!(e::tui::theme::load_user("pkgtheme").is_some());
 
     let (notices, _rx) = tokio::sync::mpsc::channel(16);
     let host = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(ulo::core::extensions::ExtensionHost::start(notices, None));
+        .block_on(e::core::extensions::ExtensionHost::start(notices, None));
     assert!(
         host.has_command("pkg"),
         "the package's extension is launched"
@@ -181,12 +181,12 @@ fn the_home_shadows_a_package_resource_of_the_same_name() {
     );
     write(&home.dir.join("prompts/hi.md"), "home hi\n");
 
-    let skills = ulo::core::resources::skills::list(&cwd);
+    let skills = e::core::resources::skills::list(&cwd);
     let hellos: Vec<_> = skills.iter().filter(|s| s.name == "hello").collect();
     assert_eq!(hellos.len(), 1);
     assert_eq!(hellos[0].description, "from the home");
     assert_eq!(
-        ulo::core::resources::prompts::find("hi", &cwd)
+        e::core::resources::prompts::find("hi", &cwd)
             .unwrap()
             .content,
         "home hi"
@@ -208,16 +208,16 @@ fn a_missing_clone_is_reported_at_startup_and_restored_by_install_all() {
     );
     let (notices, mut rx) = tokio::sync::mpsc::channel(16);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let host = runtime.block_on(ulo::core::extensions::ExtensionHost::start(notices, None));
+    let host = runtime.block_on(e::core::extensions::ExtensionHost::start(notices, None));
     let notice = rx.try_recv().unwrap();
     assert!(
         notice.starts_with("package git:file://")
-            && notice.ends_with("not installed — run `ulo install`"),
+            && notice.ends_with("not installed — run `e install`"),
         "{notice}"
     );
     runtime.block_on(host.shutdown());
 
-    // Startup never cloned; `ulo install` with no source does.
+    // Startup never cloned; `e install` with no source does.
     assert!(!root.exists());
     let results = block(packages::install_all());
     assert_eq!(results.len(), 1);
@@ -244,7 +244,7 @@ fn reinstalling_moves_the_pin_and_unpinning_follows_the_default_branch() {
     assert_eq!(settings_packages(&home), vec![repo.source(None)]);
     assert_eq!(counts[2], 2, "the tip of main carries both prompts");
 
-    // Unpinned, `ulo install` fast-forwards to new commits.
+    // Unpinned, `e install` fast-forwards to new commits.
     write(&repo.dir.join("prompts/third.md"), "third\n");
     repo.commit("third");
     let results = block(packages::install_all());
@@ -305,7 +305,7 @@ fn remove_deletes_a_managed_clone_but_leaves_a_local_directory_alone() {
 fn a_source_that_is_not_a_package_is_refused_before_anything_is_written() {
     let _lock = env_lock();
     let home = Home::new("pkg-refuse");
-    assert!(block(packages::install("intuitums/ulo-diff")).is_err());
+    assert!(block(packages::install("intuitums/e-diff")).is_err());
     assert!(block(packages::install("--upload-pack=touch")).is_err());
     assert!(block(packages::install("/definitely/not/a/directory")).is_err());
     assert!(!home.dir.join("settings.json").exists());
@@ -315,8 +315,8 @@ fn a_source_that_is_not_a_package_is_refused_before_anything_is_written() {
 /// A release asset served locally: the gzip tarball the workflow publishes
 /// plus a matching checksums.txt.
 fn release_server(name: &str) -> (u16, std::thread::JoinHandle<Vec<String>>, String) {
-    let target = ulo::core::update::target().expect("a release target for this machine");
-    let dir = std::env::temp_dir().join(format!("ulo-release-{name}-{}", std::process::id()));
+    let target = e::core::update::target().expect("a release target for this machine");
+    let dir = std::env::temp_dir().join(format!("e-release-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -359,14 +359,14 @@ fn a_release_package_installs_its_executable_under_extensions() {
     let _lock = env_lock();
     let home = Home::new("pkg-release");
     let (port, server, asset) = release_server("tool");
-    let source = Source::parse("release:arocomputer/ulo/tool@v9").unwrap();
+    let source = Source::parse("release:arocomputer/e/tool@v9").unwrap();
     let base = format!("http://127.0.0.1:{port}");
     block(packages::install_release_from(&source, &base, &base)).unwrap();
     let requests = server.join().unwrap();
     assert!(requests[0].contains(&format!("GET /download/v9/{asset}")));
     assert!(requests[1].contains("GET /download/v9/checksums.txt"));
 
-    let root = home.dir.join("packages/releases/arocomputer/ulo/tool");
+    let root = home.dir.join("packages/releases/arocomputer/e/tool");
     assert_eq!(source.root(), root);
     let binary = root.join("extensions/tool");
     assert!(binary.is_file());
@@ -379,7 +379,7 @@ fn a_release_package_installs_its_executable_under_extensions() {
         );
     }
     assert_eq!(
-        ulo::core::update::installed_release_tag(&root).as_deref(),
+        e::core::update::installed_release_tag(&root).as_deref(),
         Some("v9")
     );
     assert!(!root.join(".staging-v9").exists(), "staging is cleaned up");
@@ -393,16 +393,16 @@ fn a_release_package_installs_its_executable_under_extensions() {
 
     // The parse grammar and identity.
     assert_eq!(
-        Source::parse("release:Arocomputer/Ulo/tool@v9")
+        Source::parse("release:Arocomputer/E/tool@v9")
             .unwrap()
             .identity(),
-        Source::parse("release:arocomputer/ulo/tool")
+        Source::parse("release:arocomputer/e/tool")
             .unwrap()
             .identity()
     );
-    assert!(Source::parse("release:arocomputer/ulo").is_err());
-    assert!(Source::parse("release:arocomputer/../ulo/tool").is_err());
-    assert!(Source::parse("release:arocomputer/ulo/tool@-x").is_err());
+    assert!(Source::parse("release:arocomputer/e").is_err());
+    assert!(Source::parse("release:arocomputer/../e/tool").is_err());
+    assert!(Source::parse("release:arocomputer/e/tool@-x").is_err());
 }
 
 #[test]
@@ -411,9 +411,9 @@ fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
     let home = Home::new("pkg-project");
     let repo = Repo::new("project");
     let ws = home.dir.join("ws");
-    std::fs::create_dir_all(ws.join(".ulo")).unwrap();
+    std::fs::create_dir_all(ws.join(".e")).unwrap();
     std::fs::write(
-        ws.join(".ulo/packages"),
+        ws.join(".e/packages"),
         format!(
             "# team packages\n{}\n\n{}\n",
             repo.source(Some("v1")),
@@ -428,16 +428,16 @@ fn a_trusted_repository_lists_its_own_packages_and_once_roots_are_forgotten() {
         packages::configured().is_empty(),
         "untrusted: the list is ignored"
     );
-    ulo::core::config::trust::set(&ws, true).unwrap();
+    e::core::config::trust::set(&ws, true).unwrap();
     // The local directory line is not honoured: trust must not run code in
     // place. The git source is.
     let listed: Vec<String> = packages::configured()
         .into_iter()
-        .map(|ulo| ulo.source)
+        .map(|e| e.source)
         .collect();
     assert_eq!(listed, vec![repo.source(Some("v1"))]);
     assert_eq!(packages::missing(), vec![repo.source(Some("v1"))]);
-    // `ulo install` installs the project's packages into the user's roots.
+    // `e install` installs the project's packages into the user's roots.
     let results = block(packages::install_all());
     assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
     assert_eq!(packages::roots().len(), 1);
@@ -541,14 +541,12 @@ impl Drop for Registry {
 /// `package/…` tarball of a one-prompt, one-extension package, as `npm
 /// publish` would produce it.
 fn package_tarball(label: &str, version: &str) -> Vec<u8> {
-    let stage = std::env::temp_dir().join(format!("ulo-npm-{label}-{}", std::process::id()));
+    let stage = std::env::temp_dir().join(format!("e-npm-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&stage);
     let root = stage.join("package");
     write(
         &root.join("package.json"),
-        &format!(
-            r#"{{"name":"ulo-npm-{label}","version":"{version}","keywords":["ulo-package"]}}"#
-        ),
+        &format!(r#"{{"name":"e-npm-{label}","version":"{version}","keywords":["e-package"]}}"#),
     );
     write(
         &root.join("prompts/npmhi.md"),
@@ -593,19 +591,19 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
     let _lock = env_lock();
     let home = Home::new("pkg-npm");
     let cache = home.dir.join("npm-cache");
-    let registry = Registry::serve("ulo-npm-one", "1.0.0", package_tarball("one", "1.0.0"));
+    let registry = Registry::serve("e-npm-one", "1.0.0", package_tarball("one", "1.0.0"));
     std::env::set_var(
         "npm_config_registry",
         format!("http://127.0.0.1:{}/", registry.port),
     );
     std::env::set_var("npm_config_cache", &cache);
 
-    let (root, counts) = block(packages::install("npm:ulo-npm-one")).unwrap();
+    let (root, counts) = block(packages::install("npm:e-npm-one")).unwrap();
     assert_eq!(
         root,
         packages::npm_prefix()
             .join("node_modules")
-            .join("ulo-npm-one")
+            .join("e-npm-one")
     );
     assert_eq!(
         counts,
@@ -613,20 +611,17 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
         "the extension and the prompt are seen"
     );
     assert!(root.join("prompts/npmhi.md").is_file());
-    assert_eq!(
-        settings_packages(&home),
-        vec!["npm:ulo-npm-one".to_string()]
-    );
+    assert_eq!(settings_packages(&home), vec!["npm:e-npm-one".to_string()]);
     assert!(
         packages::npm_prefix().join("package.json").is_file(),
-        "the prefix is a project of ulo's own"
+        "the prefix is a project of e's own"
     );
-    let prompts = ulo::core::resources::prompts::list(&home.dir);
+    let prompts = e::core::resources::prompts::list(&home.dir);
     assert!(prompts.iter().any(|p| p.name == "npmhi"));
 
     // `--package npm:…`: the package itself is the root the loaders read,
     // not the throwaway prefix around it, and the prefix goes at exit.
-    let once = block(packages::use_once("npm:ulo-npm-one")).unwrap();
+    let once = block(packages::use_once("npm:e-npm-one")).unwrap();
     assert!(once.join("prompts/npmhi.md").is_file());
     assert!(
         packages::dirs("prompts")
@@ -640,9 +635,9 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
     assert!(!prefix.exists(), "the throwaway prefix is gone");
     assert!(root.join("prompts/npmhi.md").is_file(), "the install stays");
 
-    // A newer version on the registry: `ulo install` brings it current.
+    // A newer version on the registry: `e install` brings it current.
     drop(registry);
-    let registry = Registry::serve("ulo-npm-one", "1.1.0", package_tarball("one", "1.1.0"));
+    let registry = Registry::serve("e-npm-one", "1.1.0", package_tarball("one", "1.1.0"));
     std::env::set_var(
         "npm_config_registry",
         format!("http://127.0.0.1:{}/", registry.port),
@@ -650,7 +645,7 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
     let results = block(packages::install_all());
     assert_eq!(
         results,
-        vec![Ok("npm:ulo-npm-one: updated 1.0.0 → 1.1.0".to_string())]
+        vec![Ok("npm:e-npm-one: updated 1.0.0 → 1.1.0".to_string())]
     );
     assert!(
         registry
@@ -665,12 +660,12 @@ fn an_npm_package_installs_without_scripts_updates_and_removes() {
 
     // A pinned spec moves the entry, not duplicates it; remove deletes the
     // install and the entry.
-    block(packages::install("npm:ulo-npm-one@1.1.0")).unwrap();
+    block(packages::install("npm:e-npm-one@1.1.0")).unwrap();
     assert_eq!(
         settings_packages(&home),
-        vec!["npm:ulo-npm-one@1.1.0".to_string()]
+        vec!["npm:e-npm-one@1.1.0".to_string()]
     );
-    packages::remove("npm:ulo-npm-one").unwrap();
+    packages::remove("npm:e-npm-one").unwrap();
     assert!(!root.exists(), "npm uninstall removed it");
     assert!(settings_packages(&home).is_empty());
     std::env::remove_var("npm_config_registry");
@@ -689,18 +684,18 @@ fn a_filtered_entry_loads_only_what_it_names_and_survives_a_reinstall() {
         "prompts": ["!prompts/hi.md"],
         "skills": ["skills/nothing-*"],
     });
-    ulo::core::config::settings::set_array("packages", vec![entry]).unwrap();
-    let prompts = ulo::core::resources::prompts::list(&home.dir);
+    e::core::config::settings::set_array("packages", vec![entry]).unwrap();
+    let prompts = e::core::resources::prompts::list(&home.dir);
     assert!(!prompts.iter().any(|p| p.name == "hi"), "excluded prompt");
-    let skills = ulo::core::resources::skills::list(&home.dir);
+    let skills = e::core::resources::skills::list(&home.dir);
     assert!(!skills.iter().any(|s| s.name == "hello"), "not included");
     assert!(
-        ulo::core::config::settings::theme_names().contains(&"pkgtheme".to_string()),
+        e::core::config::settings::theme_names().contains(&"pkgtheme".to_string()),
         "an unfiltered kind loads"
     );
     // Moving the pin keeps the filters.
     block(packages::install(&repo.source(None))).unwrap();
-    let saved = ulo::core::config::settings::get_array("packages").unwrap();
+    let saved = e::core::config::settings::get_array("packages").unwrap();
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0]["source"], repo.source(None));
     assert_eq!(saved[0]["prompts"], serde_json::json!(["!prompts/hi.md"]));
@@ -716,7 +711,7 @@ fn init_starts_a_package_that_loads_in_place() {
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).unwrap()).unwrap();
     assert_eq!(manifest["name"], "my-pack");
-    assert_eq!(manifest["keywords"], serde_json::json!(["ulo-package"]));
+    assert_eq!(manifest["keywords"], serde_json::json!(["e-package"]));
     assert_eq!(
         packages::counts(&dir)[0],
         2,
@@ -729,7 +724,7 @@ fn init_starts_a_package_that_loads_in_place() {
 }
 
 /// The released shape of the `packages` list: strings, and objects with a
-/// `source` and per-kind filters, side by side. A future ulo keeps reading it.
+/// `source` and per-kind filters, side by side. A future e keeps reading it.
 #[test]
 fn the_settings_fixture_with_filtered_entries_still_reads() {
     let _lock = env_lock();
@@ -738,13 +733,13 @@ fn the_settings_fixture_with_filtered_entries_still_reads() {
         .join("tests/fixtures/config/settings-v1-packages.json");
     std::fs::copy(fixture, home.dir.join("settings.json")).unwrap();
     let entries = packages::settings_entries();
-    let sources: Vec<&str> = entries.iter().map(|ulo| ulo.source.as_str()).collect();
+    let sources: Vec<&str> = entries.iter().map(|e| e.source.as_str()).collect();
     assert_eq!(
         sources,
         [
-            "npm:@fschrhunt1/ulo-diff",
-            "git:github.com/fschrhunt/ulo-diff@v2",
-            "npm:@team/ulo-tools@1.4.0",
+            "npm:@fschrhunt1/e-diff",
+            "git:github.com/fschrhunt/e-diff@v2",
+            "npm:@team/e-tools@1.4.0",
             "/Users/me/src/local-pack"
         ]
     );
