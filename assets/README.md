@@ -1,13 +1,13 @@
 # ulo artwork
 
-`logo-dark.svg` is the supplied 150 by 30 white wordmark. `logo.svg` uses the
-same paths in black. `icon.svg` follows the viewer's color scheme. Scale the
-SVGs without changing their proportions or spacing.
+`logo.svg` is the 110 by 50 split-arc mark in black for the README header.
+`logo-dark.svg` uses the same paths in white. `icon.svg` is the existing app
+icon and follows the viewer's color scheme. Scale the SVGs without changing
+their proportions or spacing.
 
-The website uses the same paths in
-`services/www/src/components/logo.tsx` and its favicon. The wordmark
-inherits the surrounding ink color. `npm run social` in `services/www/`
-regenerates the share card from those paths.
+The website has separate artwork in `services/www/src/components/logo.tsx` and
+its favicon. Its wordmark inherits the surrounding ink color. `npm run social`
+in `services/www/` regenerates the share card from those paths.
 
 ## Themes
 

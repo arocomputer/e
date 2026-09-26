@@ -3,7 +3,7 @@
     <picture>
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)">
       <source srcset="assets/logo.svg" media="(prefers-color-scheme: light)">
-      <img src="assets/logo.svg" alt="ulo" height="40">
+      <img src="assets/logo.svg" alt="ulo" height="50">
     </picture>
   </a>
 </p>
