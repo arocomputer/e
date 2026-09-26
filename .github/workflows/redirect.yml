@@ -24,7 +24,8 @@ jobs:
   deploy:
     name: Deploy redirect
     needs: check
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # The Aro /e site must be live first or these domains would redirect in a loop.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     environment: Production
     runs-on: ubuntu-latest
     steps:
