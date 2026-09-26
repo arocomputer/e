@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- Replaced the README header wordmark with the split-arc logo.
 - Removed the leading bar from the ulo wordmark and gave the website a U-only squircle favicon that follows the system light/dark preference.
 - Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.
 - Moved the website to `services/www`, with native Astro routes and a direct email contact link instead of a shared form backend.
