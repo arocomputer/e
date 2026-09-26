@@ -4,7 +4,7 @@
 mod common;
 
 use common::{env_lock, Home};
-use ulo::tui::history;
+use e::tui::history;
 
 #[test]
 fn prompts_append_in_order_and_load_bounded() {

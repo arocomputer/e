@@ -1,5 +1,8 @@
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-<style>.tile{fill:#242424}.letter{fill:#fafafa}@media(prefers-color-scheme:dark){.tile{fill:#fafafa}.letter{fill:#242424}}</style>
+<style>.tile{fill:#242424}.mark{fill:#fafafa}@media(prefers-color-scheme:dark){.tile{fill:#fafafa}.mark{fill:#242424}}</style>
 <path class="tile" d="M32 2C56 2 62 8 62 32S56 62 32 62S2 56 2 32S8 2 32 2Z"/>
-<path class="letter" d="M16 44V20H24V36H40V20H48V44H16Z"/>
+<g class="mark" transform="translate(4 18) scale(.509)">
+<path d="M50 40C27.9086 40 10 22.0914 10 0H0V50H50V40Z"/>
+<path d="M60 40C82.0914 40 100 22.0914 100 0H110V50H60V40Z"/>
+</g>
 </svg>

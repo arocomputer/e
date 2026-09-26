@@ -1,5 +1,5 @@
 name: Feature
-description: Something ulo should do
+description: Something e should do
 labels: ["enhancement"]
 body:
   - type: textarea

@@ -11,7 +11,7 @@ fn download_client() -> Result<&'static reqwest::Client, String> {
     CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
-                .user_agent(format!("ulo/{}", crate::VERSION))
+                .user_agent(format!("e/{}", crate::VERSION))
                 .redirect(reqwest::redirect::Policy::custom(|attempt| {
                     let downgrade = attempt.previous().last().is_some_and(|previous| {
                         previous.scheme() == "https" && attempt.url().scheme() != "https"
@@ -98,20 +98,20 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 /// Discover the latest release at an API URL; an unpublished repository returns `None`.
 pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
     let response = crate::providers::http()
-        .map_err(|ulo| ulo.message)?
+        .map_err(|e| e.message)?
         .get(url)
         .header("accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|ulo| format!("update check failed: {ulo}"))?;
+        .map_err(|e| format!("update check failed: {e}"))?;
     if !response.status().is_success() {
         if response.status() == 404 {
             return Ok(None);
         }
         return Err(format!("update check failed: {}", response.status()));
     }
-    let body: serde_json::Value = response.json().await.map_err(|ulo| ulo.to_string())?;
+    let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
     body["tag_name"]
         .as_str()
         .map(|tag| Some(tag.to_string()))
@@ -123,7 +123,7 @@ pub async fn latest_tag_from(url: &str) -> Result<Option<String>, String> {
 pub async fn fetch_verified(base: &str, tag: &str, asset: &str) -> Result<Vec<u8>, String> {
     let tarball = fetch(&format!("{base}/download/{tag}/{asset}")).await?;
     let sums = String::from_utf8(fetch(&format!("{base}/download/{tag}/checksums.txt")).await?)
-        .map_err(|ulo| ulo.to_string())?;
+        .map_err(|e| e.to_string())?;
     let expected = sums
         .lines()
         .find(|l| l.ends_with(&format!(" {asset}")))
@@ -153,7 +153,7 @@ pub fn github_release_urls(owner: &str, repo: &str) -> (String, String) {
     )
 }
 
-/// Install a release package (`ulo install release:<owner>/<repo>/<name>`):
+/// Install a release package (`e install release:<owner>/<repo>/<name>`):
 /// fetch `<name>-<target>.tar.gz` for this platform from `base` at `tag`,
 /// verify it, and place the `<name>` executable at
 /// `<root>/extensions/<name>`, where the extension host finds it. `<root>/.tag`
@@ -170,12 +170,12 @@ pub async fn install_release_package(
     }
     let tarball = fetch_verified(base, tag, &format!("{name}-{target}.tar.gz")).await?;
     let extensions = root.join("extensions");
-    std::fs::create_dir_all(&extensions).map_err(|ulo| ulo.to_string())?;
+    std::fs::create_dir_all(&extensions).map_err(|e| e.to_string())?;
     let staging = root.join(format!(".staging-{tag}"));
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|ulo| ulo.to_string())?;
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     let archive = staging.join("asset.tar.gz");
-    std::fs::write(&archive, &tarball).map_err(|ulo| ulo.to_string())?;
+    std::fs::write(&archive, &tarball).map_err(|e| e.to_string())?;
     // `xf`, not `xzf`: the system tar detects gzip itself, and a plain tar
     // published under the same name still installs.
     let unpacked = std::process::Command::new("tar")
@@ -183,7 +183,7 @@ pub async fn install_release_package(
         .arg(&archive)
         .current_dir(&staging)
         .status()
-        .map_err(|ulo| format!("tar failed: {ulo}"))?;
+        .map_err(|e| format!("tar failed: {e}"))?;
     if !unpacked.success() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err("tar failed to unpack the release asset".into());
@@ -198,10 +198,9 @@ pub async fn install_release_package(
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755));
     }
-    std::fs::rename(&binary, extensions.join(name))
-        .map_err(|ulo| format!("install failed: {ulo}"))?;
+    std::fs::rename(&binary, extensions.join(name)).map_err(|e| format!("install failed: {e}"))?;
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::write(root.join(".tag"), tag).map_err(|ulo| ulo.to_string())?;
+    std::fs::write(root.join(".tag"), tag).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -219,7 +218,7 @@ async fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
-        .map_err(|ulo| format!("download failed: {ulo}"))?;
+        .map_err(|e| format!("download failed: {e}"))?;
     if !response.status().is_success() {
         return Err(format!("download failed: {}", response.status()));
     }
@@ -227,9 +226,9 @@ async fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|ulo| ulo.to_string())
+        .map_err(|e| e.to_string())
 }
 
-/// Why an off-matrix platform cannot self-update; `ulo update` prints it.
+/// Why an off-matrix platform cannot self-update; `e update` prints it.
 pub const NO_RELEASE: &str =
-    "no release is published for this platform — update from source, not ulo update";
+    "no release is published for this platform — update from source, not e update";

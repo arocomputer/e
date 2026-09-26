@@ -1,5 +1,5 @@
 [package]
-name = "ulo-fuzz"
+name = "e-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -10,8 +10,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 # Cross-crate fuzzing targets the libraries directly, not the command-line wrapper.
-ulo-core = { path = "../crates/core" }
-ulo-tui = { path = "../crates/tui" }
+e-core = { path = "../crates/core" }
+e-tui = { path = "../crates/tui" }
 
 [[bin]]
 name = "sse"

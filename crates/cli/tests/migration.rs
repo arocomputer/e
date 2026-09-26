@@ -5,13 +5,13 @@ use std::path::Path;
 
 /// Ask the real CLI to resolve its home without inheriting the fixture's override.
 fn reported_home(base: &Path, override_home: Option<&Path>) -> String {
-    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_ulo"));
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_e"));
     command
         .args(["doctor", "--json", "--no-network"])
         .env("HOME", base)
-        .env_remove("ULO_HOME");
+        .env_remove("E_HOME");
     if let Some(path) = override_home {
-        command.env("ULO_HOME", path);
+        command.env("E_HOME", path);
     }
     let output = command.output().unwrap();
     assert!(
@@ -20,24 +20,24 @@ fn reported_home(base: &Path, override_home: Option<&Path>) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    report["ulo_home"].as_str().unwrap().to_owned()
+    report["e_home"].as_str().unwrap().to_owned()
 }
 
 #[test]
 fn existing_home_survives_the_rename_and_explicit_home_wins() {
     let _guard = env_lock();
     let fixture = Home::new("rename-home");
-    let suffix = match ulo::core::CHANNEL {
+    let suffix = match e::core::CHANNEL {
         "local" => "-dev",
         "pr" => "-pr",
         _ => "",
     };
-    let legacy = fixture.dir.join(format!(".e{suffix}"));
-    let current = fixture.dir.join(format!(".ulo{suffix}"));
+    let legacy = fixture.dir.join(format!(".ulo{suffix}"));
+    let current = fixture.dir.join(format!(".e{suffix}"));
     std::fs::create_dir_all(&legacy).unwrap();
     let active = |path: &Path| {
-        if ulo::core::CHANNEL == "pr" {
-            path.join(ulo::core::COMMIT)
+        if e::core::CHANNEL == "pr" {
+            path.join(e::core::COMMIT)
         } else {
             path.to_owned()
         }
@@ -65,16 +65,16 @@ fn existing_home_survives_the_rename_and_explicit_home_wins() {
 fn workspace_resources_prefer_the_new_directory_without_merging_stores() {
     let _guard = env_lock();
     let fixture = Home::new("rename-workspace");
-    let legacy = fixture.dir.join(".e");
-    let current = fixture.dir.join(".ulo");
+    let legacy = fixture.dir.join(".ulo");
+    let current = fixture.dir.join(".e");
     std::fs::create_dir_all(&legacy).unwrap();
     assert_eq!(
-        ulo::core::config::home::workspace_directory(&fixture.dir),
+        e::core::config::home::workspace_directory(&fixture.dir),
         legacy
     );
     std::fs::create_dir_all(&current).unwrap();
     assert_eq!(
-        ulo::core::config::home::workspace_directory(&fixture.dir),
+        e::core::config::home::workspace_directory(&fixture.dir),
         current
     );
 }

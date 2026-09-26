@@ -1,0 +1,16 @@
+// Retain the existing ulo Worker and its custom domains for legacy redirects.
+{
+  "name": "ulo",
+  "account_id": "15a2d3f1e6ab03432b2037945113c421",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "routes": [
+    { "pattern": "ulo.sh", "custom_domain": true },
+    { "pattern": "www.ulo.sh", "custom_domain": true }
+  ],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RateLimiter"] },
+    { "tag": "v2", "deleted_classes": ["RateLimiter"] }
+  ],
+  "observability": { "enabled": true }
+}

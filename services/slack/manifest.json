@@ -3,13 +3,13 @@
     "major_version": 1
   },
   "display_information": {
-    "name": "ulo",
+    "name": "e",
     "description": "The coding agent you can put anywhere. Answers in a thread against the checkout it runs in.",
     "background_color": "#100F0C"
   },
   "features": {
     "bot_user": {
-      "display_name": "ulo",
+      "display_name": "e",
       "always_online": true
     }
   },

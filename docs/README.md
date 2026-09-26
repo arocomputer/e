@@ -1,12 +1,12 @@
-# Writing ulo's documentation
+# Writing e's documentation
 
-`docs/guides/` is the only copy of ulo's guides. Three readers render them:
+`docs/guides/` is the only copy of e's guides. Three readers render them:
 
 - **GitHub** — the files themselves, as you see them here.
-- **`ulo docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
+- **`e docs <topic>`** — the binary embeds the `.md` files, so a guide ships with
   the release it documents and the agent can read it without a network.
-- **ulo.sh/docs** — the website, in `services/www/`, renders each guide as
-  a page. Its `scripts/docs/docs.mjs` is the one place that adapts the guides
+- **aro.computer/e/docs** — the website in `arocomputer/web` renders each guide as
+  a page. Its `scripts/e/docs/docs.mjs` adapts the guides
   to it: the sidebar, link routes, and alerts.
 
 Write once, and all three follow. Never paste a guide's text into another
@@ -17,7 +17,6 @@ page, the README, or an issue: link to it.
 ```
 docs/
   README.md              this file — GitHub only, never a topic and never a page
-  src/                   the guides adapter, the palette, and site-only pages
   guides/
     start/               one folder per nav group
       README.md          the group's label and order, and nothing else
@@ -33,20 +32,20 @@ docs/
       examples/          assets a guide links to (code, images); not topics
   contributing/        the repository's own documentation: architecture,
                        rendering, releases. Never on the website, never in
-                       `ulo docs`.
+                       `e docs`.
 ```
 
 - **The folder is the nav group**, and its README.md's front matter names it
   and orders it: `docs/guides/usage/` is “Usage”, second in the sidebar. Nothing is
   numbered, so renaming a group is renaming a folder.
 - **A group has a subject.** `start/` is the first run, `usage/` is day-to-day
-  operation, `customize/` is the `~/.ulo` surface, and `extend/` is building
-  against ulo. Put a guide where a reader would look for it, and move it when
+  operation, `customize/` is the `~/.e` surface, and `extend/` is building
+  against e. Put a guide where a reader would look for it, and move it when
   that changes.
-- **The file stem is the `ulo docs` topic.** `docs/guides/customize/themes.md` is
-  `ulo docs themes`. Stems are unique across the whole folder tree.
+- **The file stem is the `e docs` topic.** `docs/guides/customize/themes.md` is
+  `e docs themes`. Stems are unique across the whole folder tree.
 - **The guide named `getting-started` is the website's landing page.**
-  `ulo.sh/docs` renders that file, so its first commands are the ones a
+  `aro.computer/e/docs` renders that file, so its first commands are the ones a
   new reader copies, and a change there needs the same care as a change to the
   install script.
 - **A folder may hold assets** beside its guides — an example, an image. They
@@ -69,7 +68,7 @@ order: 5
 
 - `title` — the label in the site's navigation and the page's heading.
 - `description` — one line, no trailing period needed. It is the site's
-  meta description and the blurb `ulo docs` prints when listing topics.
+  meta description and the blurb `e docs` prints when listing topics.
 - `order` — position inside the group. Gaps are fine; ties fall back to the
   file name. In a group's README.md the same key orders the *group*.
 
@@ -84,12 +83,12 @@ YAML dependency.
 
 - **A guide is `.md`**, the one format all three readers take. A page that
   needs components, like the package catalog, is an Astro page under
-  `src/pages/`: part of the site, not a guide, and not in `ulo docs`.
+  `src/pages/`: part of the site, not a guide, and not in `e docs`.
 - **Keep the `# Title` heading.** GitHub needs it; the site renders the
   front matter's `title` and drops the duplicate heading.
 - **A note that must stand out uses GitHub's alert syntax**, which GitHub
   renders as an alert and the site renders as an aside — no component, no
-  change to the site. `ulo docs` prints the label instead of the marker
+  change to the site. `e docs` prints the label instead of the marker
   (`> Warning:`), because `[!WARNING]` is not prose to a reader in a shell:
 
   ```md
@@ -115,12 +114,12 @@ YAML dependency.
 ## Checking your work
 
 `./x docs` covers `docs/guides/`: every guide has complete front matter, the
-topic names are unique, every relative link resolves, and `ulo docs` serves every
+topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.
 
 To read the pages as they will appear, run `npm ci` and `npm run preview` in
-`services/www/`. The build reads this checkout's guides. Merging a guide to
-`main` redeploys the website through `.github/workflows/www.yml`.
+`arocomputer/web` with `E_DOCS_PATH` pointing to this checkout. The website's
+deployment checks out the guides from this repository's `main` branch.
 
 ## Adding a guide
 
