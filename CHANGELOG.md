@@ -5,11 +5,13 @@
 ### Improvements
 
 - Replaced the README header wordmark with the split-arc logo.
-- Restored the `e` name and command while retaining the split-arc mark. The website now lives at `aro.computer/e` in `arocomputer/web`.
+- Restored the `e` name and command while retaining the split-arc mark. The website now lives at `e.aro.computer` in `arocomputer/web`.
 - Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.
 - Grouped channel clients under `services/` and contributor guides under `docs/contributing/`. Cross-crate fuzzing stays in the root `fuzz/` workspace.
+- SDK sessions can work somewhere other than the disk: `workspace` gives the file tools an in-memory tree or a sandbox's filesystem, `shell` runs `bash` commands there, and `api_key` authenticates a model without a stored credential.
 
 - **Upgrade:** npm packages publish with trusted publishing; the `NPM_BOOTSTRAP_TOKEN` secret is gone.
+- **Upgrade:** e reads only its current local formats. Sessions saved before session format 2 or in path-named session folders no longer resume, trust decisions keyed by plain path must be given again, and an `opencode` entry in `auth.json` no longer signs in to OpenCode Zen.
 
 ### Fixes
 

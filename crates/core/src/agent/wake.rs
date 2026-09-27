@@ -7,8 +7,9 @@
 //! never inputs. Ordinary elapsed time, including time with the display off,
 //! does not count as sleep. The pure comparison is testable without suspending.
 
+use crate::rt::{Instant, SystemTime};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
 /// Wall-clock excess (over the monotonic wait) that counts as a suspend —
 /// comfortably above NTP corrections and timer coalescing.
@@ -70,7 +71,7 @@ pub async fn heartbeat(gaps: Shared, stop: Arc<std::sync::atomic::AtomicBool>, i
     use std::sync::atomic::Ordering;
     let mut last = Beat::now();
     loop {
-        tokio::time::sleep(interval).await;
+        crate::rt::sleep(interval).await;
         if stop.load(Ordering::SeqCst) {
             return;
         }

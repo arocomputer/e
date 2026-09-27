@@ -325,7 +325,7 @@ fn json_status(path: &Path, supported: u32) -> String {
         Err(error) => return format!("invalid JSON: {error}"),
     };
     match value.get("format_version") {
-        None => "valid, legacy unversioned format".into(),
+        None => "valid, unversioned".into(),
         Some(version) if version.as_u64() == Some(u64::from(supported)) => {
             format!("valid, format {supported}")
         }

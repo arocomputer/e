@@ -80,13 +80,7 @@ fn capture_session(home: &Home, port: u16, tools: bool, marker: &str, resize: &s
     let workspace = home.dir.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
     let workspace = workspace.canonicalize().unwrap();
-    home.write(
-        "trust.json",
-        serde_json::to_vec(&serde_json::json!({
-            (workspace.to_str().unwrap()): {"trusted": true}
-        }))
-        .unwrap(),
-    );
+    e::core::config::trust::set(&workspace, true).unwrap();
 
     let capture = home.dir.join("stream.raw");
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/ptycap.py");
@@ -289,13 +283,7 @@ fn ctrl_c_exits_modal_panels_without_recording_trust() {
         std::fs::create_dir(&workspace).unwrap();
         let workspace = workspace.canonicalize().unwrap();
         if name != "trust" {
-            home.write(
-                "trust.json",
-                serde_json::to_vec(&serde_json::json!({
-                    (workspace.to_str().unwrap()): {"trusted": true}
-                }))
-                .unwrap(),
-            );
+            e::core::config::trust::set(&workspace, true).unwrap();
         }
         let capture = home.dir.join("panel.raw");
         let output = Command::new("python3")

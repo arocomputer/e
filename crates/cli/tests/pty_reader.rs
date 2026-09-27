@@ -16,10 +16,7 @@ fn long_transcript_reader_shows_full_output_and_restores_the_main_screen() {
     home.write("models.json", r#"{"providers":{"mock":{"base_url":"http://127.0.0.1:9","api":"openai-completions","catalog":"none","models":["test"]}}}"#);
     home.write("auth.json", r#"{"mock":{"key":"test"}}"#);
     home.write("settings.json", r#"{"theme":"dark"}"#);
-    home.write(
-        "trust.json",
-        serde_json::json!({workspace.to_str().unwrap(): {"trusted":true}}).to_string(),
-    );
+    e::core::config::trust::set(&workspace, true).unwrap();
     let mut log = SessionLog::create(&workspace, "mock/test").unwrap();
     for i in 0..30 {
         log.append(&ChatMessage::user(format!("earlier question {i}")))

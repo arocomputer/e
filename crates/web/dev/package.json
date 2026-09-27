@@ -1,0 +1,17 @@
+{
+  "name": "e-web-dev",
+  "private": true,
+  "type": "module",
+  "description": "The dev page for crates/web: a terminal emulator, just-bash, and a mock model.",
+  "scripts": {
+    "start": "node serve.mjs"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "just-bash": "3.4.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

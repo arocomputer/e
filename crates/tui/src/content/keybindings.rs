@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::KeyCode;
+use crate::term::KeyCode;
 
 use crate::content::composer::Key;
 use e_core::config::chord::normalize_chord;

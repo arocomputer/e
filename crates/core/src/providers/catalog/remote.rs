@@ -91,16 +91,13 @@ fn known_deployment(models: &[Model], provider: &str) -> Option<Deployment> {
         .or_else(|| crate::providers::registry::find(provider).map(Deployment::from_builtin))
 }
 
-/// One provider's cached listing: `models` entries, or the legacy bare `ids`.
+/// One provider's cached listing: its `models` entries.
 fn cached_models(entry: &serde_json::Value) -> Vec<serde_json::Value> {
-    let listed = entry.get("models").and_then(|v| v.as_array()).cloned();
-    let legacy = entry.get("ids").and_then(|v| v.as_array()).map(|ids| {
-        ids.iter()
-            .filter_map(|v| v.as_str())
-            .map(|id| serde_json::json!({ "id": id }))
-            .collect::<Vec<_>>()
-    });
-    listed.or(legacy).unwrap_or_default()
+    entry
+        .get("models")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Refresh the cached model lists from every signed-in provider that serves
@@ -406,6 +403,7 @@ mod tests {
             supports_tools: true,
             image_input: false,
             pricing: None,
+            api_key: None,
         }
     }
 

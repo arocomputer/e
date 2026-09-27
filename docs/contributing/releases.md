@@ -67,7 +67,7 @@ These commands are for after the first public e release. They are not
 available during development.
 
 ```sh
-curl -fsSL https://aro.computer/e/install.sh | sh
+curl -fsSL https://e.aro.computer/install.sh | sh
 npm install -g @arocomputer/e
 bun add -g @arocomputer/e
 brew install arocomputer/tap/e
@@ -239,7 +239,7 @@ Complete npm's browser authentication when prompted. An API token that bypasses
 list @arocomputer/<package>`. From then on the release workflow authenticates
 with OIDC and no token is needed.
 
-The website lives in `arocomputer/web` and serves `aro.computer/e`. Its
+The website lives in `arocomputer/web` and serves `e.aro.computer`. Its
 production workflow checks out this repository's `main` branch to render the
 guides. Follow the website repository's deployment guide for Cloudflare
 credentials and release checks. Deploy the site after the relevant guide and
@@ -254,9 +254,8 @@ token at https://crates.io/settings/tokens and set the first publication up
 interactively with `cargo login` if it is rotated.
 
 The renamed crates require their own publishing setup before SDK publication.
-See [the migration checklist](migration.md) for the first renamed release.
 
-The website installer at `https://aro.computer/e/install.sh` serves the maintained
+The website installer at `https://e.aro.computer/install.sh` serves the maintained
 script from this repository with a five-minute cache. A script change does not
 require a website deploy. Binary releases do not require a website deploy.
 

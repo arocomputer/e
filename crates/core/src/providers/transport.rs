@@ -23,6 +23,7 @@ pub fn http() -> Result<&'static reqwest::Client, ProviderError> {
 
 /// The build steps for the shared client, kept separate from the cache glue
 /// so the glue is testable without touching process-global state.
+#[cfg(not(target_family = "wasm"))]
 pub(super) fn build_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         // Credentials in custom headers and request bodies must never be
@@ -36,6 +37,15 @@ pub(super) fn build_client() -> Result<reqwest::Client, String> {
         // quickly on both sides instead.
         .tcp_keepalive(std::time::Duration::from_secs(15))
         .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// In a browser the page's `fetch` owns connections, and redirects are
+/// refused by the page's own request mode, so there is nothing to configure.
+#[cfg(target_family = "wasm")]
+pub(super) fn build_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .build()
         .map_err(|e| e.to_string())
 }
@@ -73,7 +83,7 @@ pub async fn send_request_within(
     builder: reqwest::RequestBuilder,
     wait: std::time::Duration,
 ) -> Result<reqwest::Response, ProviderError> {
-    match tokio::time::timeout(wait, builder.send()).await {
+    match crate::rt::timeout(wait, builder.send()).await {
         Ok(Ok(response)) => Ok(response),
         Ok(Err(e)) => {
             let message = format!("request failed: {}", transport_error_chain(&e));
@@ -81,7 +91,7 @@ pub async fn send_request_within(
                 // The request could not be built (a malformed base URL, an
                 // invalid header) — no retry ladder changes that.
                 Err(ProviderError::rejected(message))
-            } else if e.is_connect() {
+            } else if is_connect(&e) {
                 Err(ProviderError::network(message))
             } else {
                 // A loss while sending or awaiting headers does not prove
@@ -104,6 +114,15 @@ pub async fn send_request_within(
     }
 }
 
+/// The request never reached the provider. A browser's `fetch` rejects only
+/// when no response arrived, which it reports without detail.
+fn is_connect(error: &reqwest::Error) -> bool {
+    #[cfg(not(target_family = "wasm"))]
+    return error.is_connect();
+    #[cfg(target_family = "wasm")]
+    return error.is_request();
+}
+
 /// Await the next SSE body chunk. An idle socket fails instead of hanging the
 /// turn forever — the agent then ends with a visible error rather than a
 /// spinner that Esc cannot clear.
@@ -123,7 +142,7 @@ where
     S: futures::Stream<Item = Result<T, E>> + Unpin,
     E: std::error::Error + 'static,
 {
-    match tokio::time::timeout(wait, futures::StreamExt::next(stream)).await {
+    match crate::rt::timeout(wait, futures::StreamExt::next(stream)).await {
         Ok(None) => Ok(None),
         Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
         // A broken body transport (reset, truncated chunking) is retryable

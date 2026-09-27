@@ -10,7 +10,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "The terminal-free core of e, the coding agent you can put anywhere"
-documentation = "https://aro.computer/e/docs"
+documentation = "https://e.aro.computer/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "llm"]
 categories = ["development-tools"]
@@ -33,4 +33,15 @@ base64.workspace = true
 sha2.workspace = true
 rand.workspace = true
 regex.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "io-std", "process", "signal"] }
 libc.workspace = true
+
+# The browser build: see src/rt.rs.
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen-futures.workspace = true
+gloo-timers.workspace = true
+web-time.workspace = true
+getrandom.workspace = true
+uuid = { workspace = true, features = ["js"] }

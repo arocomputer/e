@@ -2,3 +2,5 @@
 channel = "1.98.0"
 profile = "minimal"
 components = ["clippy", "rustfmt"]
+# The core and the terminal are also checked for the browser build.
+targets = ["wasm32-unknown-unknown"]

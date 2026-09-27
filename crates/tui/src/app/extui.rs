@@ -16,7 +16,7 @@
 
 use std::collections::VecDeque;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::term::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::{json, Value};
 
 use super::*;

@@ -6,32 +6,67 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(target_family = "wasm"))]
 tokio::task_local! {
     static SCOPED_HOME: PathBuf;
 }
 
 /// Resolve configuration for one asynchronous operation without changing
 /// process environment variables. Spawned tasks must explicitly inherit it.
+#[cfg(not(target_family = "wasm"))]
 pub async fn scope<F: std::future::Future>(path: PathBuf, future: F) -> F::Output {
     SCOPED_HOME.scope(path, future).await
 }
 
-/// Spawn a task that inherits the caller's configuration home.
-pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
-where
-    F: std::future::Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    tokio::spawn(scope(home(), future))
-}
-
 /// The synchronous counterpart, used by constructors and blocking log I/O.
+#[cfg(not(target_family = "wasm"))]
 pub fn with_home<R>(path: PathBuf, operation: impl FnOnce() -> R) -> R {
     SCOPED_HOME.sync_scope(path, operation)
 }
 
+#[cfg(not(target_family = "wasm"))]
+fn scoped_home() -> Option<PathBuf> {
+    SCOPED_HOME.try_with(Clone::clone).ok()
+}
+
+// The browser build has one thread and no tokio runtime, so the scope is a
+// thread-local that each poll of the scoped future sets and restores — the
+// same visibility a task-local gives.
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static SCOPED_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_family = "wasm")]
+pub async fn scope<F: std::future::Future>(path: PathBuf, future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| with_home(path.clone(), || future.as_mut().poll(cx))).await
+}
+
+#[cfg(target_family = "wasm")]
+pub fn with_home<R>(path: PathBuf, operation: impl FnOnce() -> R) -> R {
+    let outer = SCOPED_HOME.replace(Some(path));
+    let result = operation();
+    SCOPED_HOME.set(outer);
+    result
+}
+
+#[cfg(target_family = "wasm")]
+fn scoped_home() -> Option<PathBuf> {
+    SCOPED_HOME.with_borrow(Clone::clone)
+}
+
+/// Spawn a task that inherits the caller's configuration home.
+pub fn spawn<F>(future: F) -> crate::rt::JoinHandle<F::Output>
+where
+    F: std::future::Future + crate::rt::MaybeSend + 'static,
+    F::Output: crate::rt::MaybeSend + 'static,
+{
+    crate::rt::spawn(scope(home(), future))
+}
+
 pub fn home() -> PathBuf {
-    if let Ok(path) = SCOPED_HOME.try_with(Clone::clone) {
+    if let Some(path) = scoped_home() {
         return path;
     }
     // An empty `E_HOME` is unset, not "the current directory": the same
@@ -40,14 +75,11 @@ pub fn home() -> PathBuf {
         return PathBuf::from(custom);
     }
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let directory = compatible_directory(
-        &PathBuf::from(base),
-        match crate::CHANNEL {
-            "local" => ".e-dev",
-            "pr" => ".e-pr",
-            _ => ".e",
-        },
-    );
+    let directory = PathBuf::from(base).join(match crate::CHANNEL {
+        "local" => ".e-dev",
+        "pr" => ".e-pr",
+        _ => ".e",
+    });
     if crate::CHANNEL == "pr" {
         directory.join(crate::COMMIT)
     } else {
@@ -55,21 +87,9 @@ pub fn home() -> PathBuf {
     }
 }
 
-/// Prefer e's directory, retaining ulo state until the user moves it.
-/// Legacy names are recognized only here so every frontend follows one rule.
-fn compatible_directory(base: &std::path::Path, name: &str) -> PathBuf {
-    let current = base.join(name);
-    let legacy = base.join(name.replacen(".e", ".ulo", 1));
-    if !current.exists() && legacy.is_dir() {
-        legacy
-    } else {
-        current
-    }
-}
-
-/// Trusted workspace loaders use the same directory precedence as global state.
+/// A trusted workspace's own resources live in its `.e` directory.
 pub fn workspace_directory(cwd: &std::path::Path) -> PathBuf {
-    compatible_directory(cwd, ".e")
+    cwd.join(".e")
 }
 
 /// The user's home directory, when the platform declares one — the single

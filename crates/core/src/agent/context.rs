@@ -158,8 +158,8 @@ pub fn system_prompt(cwd: &Path) -> String {
 /// Today as `YYYY-MM-DD` UTC, from the system clock alone (no date crate:
 /// civil-from-days, Howard Hinnant's algorithm).
 fn utc_date() -> Option<String> {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = crate::rt::SystemTime::now()
+        .duration_since(crate::rt::UNIX_EPOCH)
         .ok()?
         .as_secs();
     let days = (secs / 86_400) as i64;

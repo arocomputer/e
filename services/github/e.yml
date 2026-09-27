@@ -49,8 +49,19 @@ jobs:
           ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
+      # e has no published release yet, so the job builds it from source with
+      # the pinned toolchain (a few minutes). Once releases exist, the install
+      # script replaces these two steps.
+      - name: Install Rust
+        run: rustup toolchain install 1.98.0 --profile minimal
+
       - name: Install e
-        run: curl -fsSL https://aro.computer/e/install.sh | sh
+        run: cargo +1.98.0 install --locked --git https://github.com/arocomputer/e e
+
+      # `e -p` refuses an untrusted directory, and no one is there to answer the
+      # prompt: record the decision for the checkout first.
+      - name: Trust the checkout
+        run: e trust "$GITHUB_WORKSPACE"
 
       - name: Run one turn
         id: turn
@@ -62,7 +73,7 @@ jobs:
           # --json gives every event and a final result line; the reply is
           # final_output. Save the whole stream as a job artifact if you want
           # the tool trace; the comment gets the reply and the cost.
-          ~/.local/bin/e -p --json --no-save "$prompt" > events.jsonl || true
+          e -p --json --no-save "$prompt" > events.jsonl || true
           tail -n 1 events.jsonl > result.json
           {
             echo 'reply<<EOF'

@@ -36,7 +36,7 @@ impl TurnLog {
     /// being the one place that skips it.
     pub(super) async fn commit_async(&self, message: ChatMessage) {
         let log = self.clone();
-        let result = match tokio::task::spawn_blocking(move || log.append(message)).await {
+        let result = match crate::rt::spawn_blocking(move || log.append(message)).await {
             Ok(result) => result,
             Err(_) => Err(std::io::Error::other("session append task panicked")),
         };
@@ -49,7 +49,7 @@ impl TurnLog {
             return;
         }
         let log = self.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::rt::spawn_blocking(move || {
             let mut session = log.session.lock().unwrap_or_else(|e| e.into_inner());
             match session.as_mut() {
                 Some(session) => session.append_response(response),
@@ -67,7 +67,7 @@ impl TurnLog {
             return;
         }
         let log = self.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::rt::spawn_blocking(move || {
             let mut session = log.session.lock().unwrap_or_else(|e| e.into_inner());
             match session.as_mut() {
                 Some(session) => session.record_error(details),

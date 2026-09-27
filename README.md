@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://aro.computer/e">
+  <a href="https://e.aro.computer">
     <picture>
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)">
       <source srcset="assets/logo.svg" media="(prefers-color-scheme: light)">
@@ -13,7 +13,7 @@
   <a href="https://github.com/arocomputer/e/actions/workflows/checks.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/arocomputer/e/checks.yml?style=flat-square&branch=main&label=Tests" /></a>
 </p>
 
-[![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://aro.computer/e)
+[![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://e.aro.computer)
 
 ---
 
@@ -41,7 +41,7 @@ Run `/login` to connect a provider, then `/models` to choose a model.
 
 ### Documentation
 
-Read the [docs](https://aro.computer/e/docs), or run `e docs` in your terminal.
+Read the [docs](https://e.aro.computer/docs), or run `e docs` in your terminal.
 
 ### Contributing
 

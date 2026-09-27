@@ -119,7 +119,7 @@ pub enum Kind {
 struct RenderCache {
     width: usize,
     generation: u64,
-    rendered_at: std::time::Instant,
+    rendered_at: e_core::rt::Instant,
     lines: Vec<String>,
 }
 
@@ -444,7 +444,7 @@ impl Block {
             self.cache = Some(RenderCache {
                 width,
                 generation: self.generation,
-                rendered_at: std::time::Instant::now(),
+                rendered_at: e_core::rt::Instant::now(),
                 lines,
             });
         }

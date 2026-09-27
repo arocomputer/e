@@ -149,6 +149,9 @@ pub struct Model {
     /// image-capable message path before it advertises an attachment).
     pub image_input: bool,
     pub pricing: Option<Pricing>,
+    /// A key the embedder supplied with this model. It wins over any stored
+    /// credential for the provider; the catalog never sets one.
+    pub api_key: Option<crate::auth::ApiKey>,
 }
 
 pub fn slug(model: &Model) -> String {
@@ -177,6 +180,7 @@ pub fn builtin_catalog() -> Vec<Model> {
                 supports_tools: decl.supports_tools && provider.supports_tools,
                 image_input: decl.image_input || provider.image_input,
                 pricing: decl.pricing.clone(),
+                api_key: None,
             })
         })
         .collect()
@@ -267,7 +271,16 @@ pub fn config_warnings() -> Vec<String> {
     let path = home::home().join("models.json");
     let json = match std::fs::read_to_string(path) {
         Ok(json) => json,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        // No file, or a platform without files (the browser build): nothing
+        // is configured, which is not a problem to report.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::Unsupported
+            ) =>
+        {
+            return Vec::new()
+        }
         Err(error) => return vec![format!("models.json: cannot read configuration: {error}")],
     };
     let file = match serde_json::from_str::<ModelsFile>(&json) {
@@ -468,6 +481,7 @@ impl Deployment {
             supports_tools: self.supports_tools,
             image_input: self.image_input,
             pricing: None,
+            api_key: None,
         };
         if let Some(facts) = facts.get(&(provider.to_string(), id.to_string())) {
             modelsdev::apply(&mut model, facts);
@@ -617,6 +631,7 @@ fn declared_model(
             .pricing
             .or_else(|| entry.pricing.clone())
             .or(existing.pricing),
+        api_key: None,
     })
 }
 
@@ -667,6 +682,27 @@ pub fn default_model() -> Model {
 /// available models only, so a pick is always usable.
 pub fn resolve(query: &str) -> Option<Model> {
     resolve_in(&available(), query)
+}
+
+/// A model on an endpoint nothing declares — no registry entry, no
+/// models.json — with the defaults models.json gives an undeclared model: for
+/// an embedder pointing e at its own deployment. Pair it with an `api_key`.
+pub fn custom(provider: &str, id: &str, base_url: &str, api: Api) -> Model {
+    let deployment = Deployment {
+        base_url: base_url.to_string(),
+        api,
+        catalog: Default::default(),
+        responses_mount: Default::default(),
+        supports_tools: true,
+        image_input: false,
+    };
+    deployment.new_model(provider, id, &Default::default())
+}
+
+/// Like [`resolve`], over every declared model whether or not its provider
+/// is signed in: for a caller that brings the credential itself.
+pub fn resolve_declared(query: &str) -> Option<Model> {
+    resolve_in(&catalog(), query)
 }
 
 fn resolve_in(models: &[Model], query: &str) -> Option<Model> {

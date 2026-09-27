@@ -6,8 +6,12 @@ order: 4
 
 # Prompt templates
 
-A prompt template is a reusable prompt you run as a slash command. The
-markdown file `~/.e/prompts/<name>.md` becomes the `/name` command.
+A prompt template is a reusable prompt you run as a slash command. Use one
+for a request you type often, with arguments filled in each time.
+
+## Create a template
+
+Save `~/.e/prompts/review.md`:
 
 ```markdown
 ---
@@ -17,36 +21,40 @@ argument-hint: [path]
 Review ${1:-everything} carefully. Focus on $2.
 ```
 
-e reads templates on each use, so it picks up new files immediately.
+Now `/review src/ "error handling"` submits `Review src/ carefully. Focus on
+error handling.` The file stem is the command name. e reads templates on
+each use, so a new or edited file works immediately.
 
 ## Front matter
 
-- `description` shows in the `/` picker.
-- `argument-hint` shows after the description.
+Front matter is optional.
+
+| Key | Shown |
+| --- | --- |
+| `description` | In the `/` picker. |
+| `argument-hint` | After the description. |
 
 ## Arguments
 
-e submits the body as the prompt after bash-style substitution. Quoted
-arguments group as one word.
+e splits the text after the command into words on whitespace. Single or
+double quotes group words into one argument. The body is then submitted with
+these substitutions:
 
 | Syntax | Expands to |
 | --- | --- |
-| `$1`..`$9` | The positional argument. |
-| `$@` or `$ARGUMENTS` | All arguments. |
+| `$1` … `$9` | One positional argument, or nothing. |
+| `$@` or `$ARGUMENTS` | All arguments, joined with spaces. |
+| `${N}` | Argument N, for any N. |
 | `${N:-default}` | Argument N, or `default` when it is missing or empty. |
 | `${@:-default}` | All arguments, or `default` when there are none. |
-| `${@:2}` | The arguments from the 2nd on. |
+| `${@:N}` | The arguments from the Nth on. |
 
-## Package templates
+Any other `$` stays literal.
 
-An installed [package](../extend/packages.md) contributes its `prompts/`
-directory the same way. A global template shadows a package's template of the
-same name.
+## Where templates come from
 
-## Repo-local templates
-
-A trusted repository can carry its own commands in `.e/prompts/`.
-`<repo>/.e/prompts/<name>.md` becomes `/name`, in the same format as above.
-
-These templates load only after `/trust`, like the repo's AGENTS.md. They
-shadow a global template of the same name, because the closer context wins.
+| Location | Loads |
+| --- | --- |
+| `~/.e/prompts/<name>.md` | Always. |
+| `prompts/<name>.md` in an installed [package](../extend/packages.md) | Unless the home has a template of the same name. |
+| `<workspace>/.e/prompts/<name>.md` | Once the workspace is [trusted](instructions.md#trust). It shadows both of the others, because the closer context wins. |

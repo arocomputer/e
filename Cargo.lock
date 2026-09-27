@@ -247,6 +247,8 @@ version = "0.0.2"
 dependencies = [
  "base64 0.23.1",
  "futures",
+ "getrandom 0.4.3",
+ "gloo-timers",
  "libc",
  "pulldown-cmark",
  "rand 0.10.3",
@@ -257,6 +259,8 @@ dependencies = [
  "sha2",
  "tokio",
  "uuid",
+ "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]
@@ -290,6 +294,7 @@ dependencies = [
  "base64 0.23.1",
  "crossterm",
  "e-core",
+ "futures",
  "libc",
  "pulldown-cmark",
  "serde",
@@ -460,6 +465,18 @@ dependencies = [
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "gloo-timers"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "js-sys",
  "wasm-bindgen",
 ]
 

@@ -158,6 +158,7 @@ pub fn test_model(provider: &str, port: u16, api: Api) -> Model {
         supports_tools: true,
         image_input: false,
         pricing: None,
+        api_key: None,
     }
 }
 

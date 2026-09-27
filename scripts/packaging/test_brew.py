@@ -1,6 +1,5 @@
 """Publishing a formula is repeatable and cannot roll an existing tap backward."""
 
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -27,8 +26,7 @@ class BrewPublishing(unittest.TestCase):
             run("git", "clone", str(remote), str(tap))
             (tap / "README.md").write_text("tap\n")
             (tap / "Formula").mkdir()
-            (tap / "Formula/ulo.rb").write_text('class Ulo < Formula\n  version "1.2.0"\nend\n')
-            (tap / "formula_renames.json").write_text('{"another-old-name":"another-formula"}\n')
+            (tap / "Formula/other.rb").write_text('class Other < Formula\n  version "2.0.0"\nend\n')
             run("git", "-C", str(tap), "add", ".")
             run(
                 "git",
@@ -56,10 +54,7 @@ class BrewPublishing(unittest.TestCase):
                 )
 
             publish("1.2.3")
-            self.assertFalse((tap / "Formula/ulo.rb").exists())
-            self.assertEqual(json.loads((tap / "formula_renames.json").read_text()), {
-                "ulo": "e", "another-old-name": "another-formula",
-            })
+            self.assertIn("2.0.0", (tap / "Formula/other.rb").read_text())
             head = run("git", "-C", str(tap), "rev-parse", "HEAD")
             publish("1.2.3")
             publish("1.2.2")

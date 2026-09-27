@@ -10,6 +10,7 @@
 //! about it — the process group, the 32KB retained tail, ANSI/carriage-return
 //! cleanup — matches the foreground path; only the waiting is removed.
 
+use crate::rt::Instant;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
@@ -21,7 +22,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::{schema_object, OutputStream, ToolOutcome, ToolOutput};
 
@@ -52,6 +53,8 @@ static BACKGROUND_FINISHED_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy)]
 enum ExitOutcome {
     Exited(i32),
+    /// Only Unix reports a signal death.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Killed,
 }
 
@@ -476,6 +479,52 @@ where
     capture.flush_carries(&mut on_output);
     let content = capture.model_copy(state);
     verdict(content, ending, status.code(), timeout)
+}
+
+/// The bash tool over an embedding's [`super::Shell`]: the same arguments,
+/// timeout, cancellation, and result as a local command. The shell answers
+/// once the command exits, so its output arrives whole rather than live.
+/// Background processes need local processes and are refused.
+pub(super) async fn run_hosted<F>(
+    args: &Value,
+    cwd: &Path,
+    state: &super::ToolRuntime,
+    shell: &dyn super::Shell,
+    cancel: &AtomicBool,
+    mut on_output: F,
+) -> ToolOutput
+where
+    F: FnMut(OutputStream, &str),
+{
+    if args["handle"].is_string() || args["background"] == Value::Bool(true) {
+        return failure("bash: background processes need the native build of e");
+    }
+    let Some(command) = args["command"].as_str() else {
+        return failure("bash: missing command");
+    };
+    let timeout = match super::integer_arg(args, "timeout") {
+        Ok(timeout) => timeout.unwrap_or(120).clamp(1, 600),
+        Err(message) => return failure(&format!("bash: {message}")),
+    };
+    let cancelled = async {
+        while !cancel.load(Ordering::SeqCst) {
+            crate::rt::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    let (output, ending) = tokio::select! {
+        output = crate::rt::timeout(Duration::from_secs(timeout), shell.run(command, cwd)) => match output {
+            Ok(Ok(output)) => (output, Ending::Exited),
+            Ok(Err(error)) => return failure(&format!("bash: {error}")),
+            Err(_) => (super::ShellOutput::default(), Ending::TimedOut),
+        },
+        _ = cancelled => (super::ShellOutput::default(), Ending::Cancelled),
+    };
+    let mut capture = Capture::default();
+    capture.publish(OutputStream::Stdout, &output.stdout, &mut on_output);
+    capture.publish(OutputStream::Stderr, &output.stderr, &mut on_output);
+    capture.flush_carries(&mut on_output);
+    let content = capture.model_copy(state);
+    verdict(content, ending, Some(output.exit_code), timeout)
 }
 
 /// Why a foreground command stopped. Cancellation outranks a timeout that
@@ -935,7 +984,7 @@ mod tests {
         let reaper = std::thread::spawn(move || {
             super::reap_background(child, process, Some(pipe), None, std::sync::Weak::new())
         });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = crate::rt::Instant::now() + std::time::Duration::from_secs(2);
         let reserved = loop {
             let state = std::process::Command::new("ps")
                 .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -944,7 +993,7 @@ mod tests {
             if String::from_utf8_lossy(&state.stdout).contains('Z') {
                 break true;
             }
-            if std::time::Instant::now() >= deadline {
+            if crate::rt::Instant::now() >= deadline {
                 break false;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

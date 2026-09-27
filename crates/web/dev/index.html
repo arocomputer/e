@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>e in the browser (dev)</title>
+    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
+    <style>
+      html, body { height: 100%; margin: 0; background: #f8f8f8; }
+      @media (prefers-color-scheme: dark) { html, body { background: #10131c; } }
+      #terminal { position: absolute; inset: 16px; }
+    </style>
+  </head>
+  <body>
+    <div id="terminal"></div>
+    <script type="module" src="/bundle.js"></script>
+  </body>
+</html>

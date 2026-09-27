@@ -222,8 +222,8 @@ impl ResponseMeta {
     pub fn new(model: &catalog::Model, purpose: ResponsePurpose, usage: Option<Usage>) -> Self {
         Self {
             id: uuid::Uuid::now_v7().to_string(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            timestamp: crate::rt::SystemTime::now()
+                .duration_since(crate::rt::UNIX_EPOCH)
                 .map(|duration| duration.as_millis() as u64)
                 .unwrap_or(0),
             provider: model.provider.clone(),

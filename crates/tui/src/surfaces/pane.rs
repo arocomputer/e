@@ -9,7 +9,7 @@
 //! Where the pane sits and how wide it is come from `~/.e/layout.json`
 //! (`tui/content/layout.rs`); the extension only proposes a side.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crate::term::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::Value;
 
 use crate::layout::{Layout, Side};

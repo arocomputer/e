@@ -18,6 +18,13 @@
         clippy::unreachable
     )
 )]
+// The browser build is single-threaded, so sharing a non-`Send` value (its
+// shell) through `Arc` is sound; and its `std::fs::File` has no `Drop`, which
+// makes the native code's deliberate early drops look pointless there.
+#![cfg_attr(
+    target_family = "wasm",
+    allow(clippy::arc_with_non_send_sync, clippy::drop_non_drop)
+)]
 
 //! The harness — terminal-free. `agent/` is the turn loop and its satellites
 //! (compaction, the system prompt); `providers/` is the wire seam, the four
@@ -34,6 +41,7 @@ pub mod export;
 pub mod extensions;
 pub mod providers;
 pub mod resources;
+pub mod rt;
 pub mod run;
 pub mod session;
 pub mod text;

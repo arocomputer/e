@@ -52,18 +52,19 @@ pub fn read(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput 
     let full = resolve(cwd, path);
     // Reads and mutations share the same stable path lock. Record the stamp
     // paired with the bytes we actually return, not a later independent stat.
-    let _guard = super::fs_write_lock(&full);
-    if let Err(output) = super::require_regular_file(&full, "read", path) {
+    let workspace = &**state.workspace();
+    let _guard = super::fs_write_lock(workspace, &full);
+    if let Err(output) = super::require_regular_file(workspace, &full, "read", path) {
         return output;
     }
     let mut stable = None;
     for _ in 0..2 {
-        let before = super::file_stamp(&full);
-        let window = match read_window(&full, offset, limit) {
+        let before = super::file_stamp(workspace, &full);
+        let window = match read_window(workspace, &full, offset, limit) {
             Ok(w) => w,
             Err(e) => return err(format!("read {path}: {e}"), "read", path),
         };
-        let after = super::file_stamp(&full);
+        let after = super::file_stamp(workspace, &full);
         if let (Some(before), Some(after)) = (before, after) {
             if before == after {
                 stable = Some((window, after));
@@ -200,12 +201,12 @@ const WINDOW_BYTES: usize = super::MAX_BYTES - 128;
 /// number prefix is worse than one line fewer. An oversized first line fails
 /// with a skip offset rather than returning a misleading partial line.
 fn read_window(
+    workspace: &dyn super::Workspace,
     path: &Path,
     offset: Option<u64>,
     limit: Option<u64>,
 ) -> io::Result<(String, Option<u64>)> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(workspace.open(path)?);
     let first = offset.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(u64::MAX);
     let mut output = String::new();
@@ -289,12 +290,13 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
         return err("write: content must be a string".into(), "write", "");
     };
     let full = resolve(cwd, path);
-    if let Err(output) = super::require_regular_file(&full, "write", path) {
+    let workspace = &**state.workspace();
+    if let Err(output) = super::require_regular_file(workspace, &full, "write", path) {
         return output;
     }
     // Same per-path lock as edit: a concurrent mutation through any spelling
     // of this path must finish before this overwrite starts.
-    let _guard = super::fs_write_lock(&full);
+    let _guard = super::fs_write_lock(workspace, &full);
     if let Err(output) = super::check_fresh(state, &full, "write", path) {
         return output;
     }
@@ -302,8 +304,8 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
     // viewer can show a real diff. Bounded: a huge or non-UTF-8 previous
     // file degrades to the summary-only detail, never an error.
     const DIFF_SOURCE_CAP: u64 = 2 * 1024 * 1024;
-    let before_text = match std::fs::metadata(&full) {
-        Ok(meta) if meta.len() <= DIFF_SOURCE_CAP => std::fs::read_to_string(&full).ok(),
+    let before_text = match workspace.metadata(&full) {
+        Ok(meta) if meta.len <= DIFF_SOURCE_CAP => workspace.read_to_string(&full).ok(),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Some(String::new()),
         _ => None,
     };
@@ -313,19 +315,19 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
     // refusing to overwrite a file that isn't text.
     let before_lines = match &before_text {
         Some(text) => text.lines().count(),
-        None => match count_text_lines(&full) {
+        None => match count_text_lines(workspace, &full) {
             Ok(lines) => lines,
             Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
             Err(error) => return err(format!("write {path}: {error}"), "write", path),
         },
     };
     if let Some(parent) = full.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
+        if let Err(error) = workspace.create_dir_all(parent) {
             return err(format!("write {path}: {error}"), "write", path);
         }
     }
     let change = state.snapshot_change(&full, format!("write {path}"));
-    match super::staged_write(&full, content.as_bytes()) {
+    match workspace.write(&full, content.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);
             if let Some(change) = change {
@@ -358,7 +360,7 @@ pub fn write(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput
     }
 }
 
-fn count_text_lines(path: &Path) -> io::Result<usize> {
+fn count_text_lines(workspace: &dyn super::Workspace, path: &Path) -> io::Result<usize> {
     // Counting lines for the write summary must not enforce the viewer's
     // per-line cap: a valid file with long lines (minified JS/JSON) is still
     // overwritable, and bounding the read here would wrongly reject those
@@ -366,7 +368,7 @@ fn count_text_lines(path: &Path) -> io::Result<usize> {
     // overwrite) — validated incrementally so a long line is never held in
     // memory, matching bounded_line's contract without its length limit.
     use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
+    let mut file = workspace.open(path)?;
     let mut buffer = [0u8; 64 * 1024];
     let mut newlines = 0usize;
     let mut ends_with_newline = true;
@@ -457,22 +459,23 @@ pub fn grep(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput 
     let root = resolve(cwd, shown);
     // A path that isn't there is an error, not an empty result: "0 matches"
     // for a typo would have the model conclude the symbol doesn't exist.
-    let metadata = match std::fs::metadata(&root) {
+    let workspace = &**state.workspace();
+    let metadata = match workspace.metadata(&root) {
         Ok(metadata) => metadata,
         Err(error) => return err(format!("grep: {shown}: {error}"), "grep", ""),
     };
     let mut hits = Vec::new();
     let mut count = 0usize;
     if metadata.is_dir() {
-        super::walk_files(&root, &mut |path| {
+        super::walk_files(workspace, &root, &mut |path| {
             if glob_allows(glob.as_ref(), path, cwd) {
                 // The walk visits regular files only; one that vanished or
                 // turned unreadable mid-walk is skipped, not fatal.
-                let _ = search_file(path, cwd, &re, &mut hits, &mut count);
+                let _ = search_file(workspace, path, cwd, &re, &mut hits, &mut count);
             }
             count < MATCH_CAP
         });
-    } else if let Err(error) = search_file(&root, cwd, &re, &mut hits, &mut count) {
+    } else if let Err(error) = search_file(workspace, &root, cwd, &re, &mut hits, &mut count) {
         // An explicitly requested file is searched as asked — the dotfile
         // skip rule is a traversal heuristic, not a veto over `.env`, and
         // `glob` narrows a directory walk, not an explicit single-file ask.
@@ -551,16 +554,17 @@ pub(crate) fn glob_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
 /// Search one file; the error is the stat or open failure, or a refusal of
 /// a non-regular file (a FIFO would block the scan forever).
 fn search_file(
+    workspace: &dyn super::Workspace,
     path: &Path,
     cwd: &Path,
     re: &regex::Regex,
     hits: &mut Vec<String>,
     count: &mut usize,
 ) -> io::Result<()> {
-    if !std::fs::metadata(path)?.is_file() {
+    if !workspace.metadata(path)?.is_file() {
         return Err(io::Error::other("not a regular file"));
     }
-    let file = std::fs::File::open(path)?;
+    let file = workspace.open(path)?;
     let rel = path.strip_prefix(cwd).unwrap_or(path).display().to_string();
     search_lines(BufReader::new(file), &rel, re, hits, count);
     Ok(())

@@ -150,10 +150,10 @@ pub fn with_attribution(
 /// Start the request; events arrive on the returned channel. The task ends
 /// with `Done` or `Error` — always exactly one terminal event. The handle
 /// aborts the request (esc).
-pub fn stream(request: Request) -> (mpsc::Receiver<Event>, tokio::task::JoinHandle<()>) {
+pub fn stream(request: Request) -> (mpsc::Receiver<Event>, crate::rt::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(64);
     let home = crate::config::home::home();
-    let handle = tokio::spawn(crate::config::home::scope(home, async move {
+    let handle = crate::rt::spawn(crate::config::home::scope(home, async move {
         let result = match runtime::authorize(&request.model).await {
             Ok(authorization) => (match request.model.api {
                 Api::Completions => api::completions::run(&request, &authorization, &tx).await,
@@ -407,8 +407,8 @@ mod tests {
         std::env::temp_dir().join(format!(
             "e-image-test-{}-{}-{name}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            crate::rt::SystemTime::now()
+                .duration_since(crate::rt::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ))
@@ -462,6 +462,7 @@ mod tests {
             supports_tools: true,
             image_input: false,
             pricing: None,
+            api_key: None,
         }
     }
 

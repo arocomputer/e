@@ -392,8 +392,8 @@ fn memory_only_resume_leaves_the_saved_file_untouched() {
     let ws = workspace("read-only");
     let path = home.dir.join("saved.jsonl");
     let original = concat!(
-        "{\"type\":\"session\",\"id\":\"legacy\",\"cwd\":\"/tmp\",\"created\":1,\"model\":\"mock/test\"}\n",
-        "{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"saved message\"}}\n",
+        "{\"type\":\"session\",\"format_version\":2,\"id\":\"saved\",\"cwd\":\"/tmp\",\"created\":1,\"model\":\"mock/test\"}\n",
+        "{\"type\":\"message\",\"id\":\"a\",\"parent\":null,\"timestamp\":1,\"message\":{\"role\":\"user\",\"content\":\"saved message\"}}\n",
         "{\"torn\":"
     );
     std::fs::write(&path, original).unwrap();

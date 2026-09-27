@@ -196,7 +196,7 @@ pub async fn summarize(
 }
 
 /// Cancel the provider task when a summarization future is dropped.
-struct StreamGuard(tokio::task::JoinHandle<()>);
+struct StreamGuard(crate::rt::JoinHandle<()>);
 impl Drop for StreamGuard {
     fn drop(&mut self) {
         self.0.abort();

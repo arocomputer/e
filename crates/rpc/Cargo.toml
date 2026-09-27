@@ -9,7 +9,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "The JSONL session server behind `e rpc`"
-documentation = "https://aro.computer/e/docs"
+documentation = "https://e.aro.computer/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "jsonl", "rpc"]
 categories = ["development-tools"]
@@ -21,5 +21,5 @@ name = "e_rpc"
 e-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "io-std", "process", "signal"] }
 uuid.workspace = true

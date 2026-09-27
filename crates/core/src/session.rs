@@ -21,9 +21,6 @@
 //! branch in the same file. The abandoned tail is never touched — `nodes`
 //! reads every branch a file holds, while `SessionLog::load` follows parents
 //! from the most recently appended node and restores only that active path.
-//! Records written before branching existed carry neither
-//! field; `nodes` synthesizes both positionally so an old session still
-//! resumes onto its real tail instead of quietly starting a second root.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -34,9 +31,8 @@ use serde::{Deserialize, Serialize};
 use crate::config::home;
 use crate::providers::{ChatMessage, ResponseMeta};
 
-/// Current on-disk session format. Version 2 separates response provenance
-/// from replayable messages. Readers still accept earlier logs; their inline
-/// usage is ignored rather than perpetuating the old mixed contract.
+/// The on-disk session format, the only one readers accept: response
+/// provenance lives in an envelope beside replayable messages.
 pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
@@ -53,16 +49,11 @@ enum Entry {
     },
     #[serde(rename = "message")]
     Message {
-        /// Empty on a record written before branching existed; `nodes`
-        /// synthesizes a stable id for those positionally.
-        #[serde(default)]
         id: String,
-        #[serde(default)]
         parent: Option<String>,
-        /// Wall-clock write time, epoch milliseconds. Absent (0) on records
-        /// written before timestamps existed. Response completion time lives
-        /// in the response envelope so copied history keeps its original day.
-        #[serde(default)]
+        /// Wall-clock write time, epoch milliseconds. Response completion
+        /// time lives in the response envelope so copied history keeps its
+        /// original day.
         timestamp: u64,
         /// Provider provenance stays outside replayable message content.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -131,13 +122,12 @@ pub fn normalized_cwd(cwd: &Path) -> PathBuf {
     cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf())
 }
 
-/// A collision-resistant workspace key. The previous slash-to-hyphen scheme
-/// mapped distinct paths such as `a/b-c` and `a-b/c` to the same directory.
+/// A collision-resistant workspace key: a hash of the normalized path, so
+/// distinct paths such as `a/b-c` and `a-b/c` never share a directory.
 fn cwd_slug(cwd: &Path) -> String {
     use sha2::Digest;
-    use std::os::unix::ffi::OsStrExt;
     let cwd = normalized_cwd(cwd);
-    let digest = sha2::Sha256::digest(cwd.as_os_str().as_bytes());
+    let digest = sha2::Sha256::digest(cwd.as_os_str().as_encoded_bytes());
     let hex = digest
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -145,17 +135,9 @@ fn cwd_slug(cwd: &Path) -> String {
     format!("sha256-{hex}")
 }
 
-/// The pre-0.4 directory name, read-only so existing sessions remain
-/// resumable. Files found there are checked against their header cwd because
-/// the legacy encoding can contain sessions from more than one workspace.
-fn legacy_cwd_slug(cwd: &Path) -> String {
-    let joined = normalized_cwd(cwd).to_string_lossy().replace('/', "-");
-    format!("-{joined}-")
-}
-
 fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    crate::rt::SystemTime::now()
+        .duration_since(crate::rt::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
@@ -403,16 +385,11 @@ impl SessionLog {
     }
 
     /// Every message in the file as an explicit tree node — every branch a
-    /// session ever grew, not just the one `load` walks. A record from
-    /// before branching existed (empty `id`) gets an id and parent
-    /// synthesized from its position, chained onto whatever came before it,
-    /// so an old session reads as the same straight line it always was.
-    /// Reject broken links and cycles on every branch before exposing nodes.
+    /// session ever grew, not just the one `load` walks. Reject broken links and cycles on every branch before exposing nodes.
     pub fn nodes(path: &Path) -> std::io::Result<Vec<Node>> {
         let lines = lines_lossy(path)?;
         let last_nonempty = lines.iter().rposition(|l| !l.trim().is_empty());
         let mut out: Vec<Node> = Vec::new();
-        let mut previous: Option<String> = None;
         let mut saw_header = false;
         for (index, line) in lines.iter().enumerate() {
             if line.trim().is_empty() {
@@ -431,12 +408,6 @@ impl SessionLog {
                     mut message,
                 }) => {
                     message.restore_response(response);
-                    let (id, parent) = if id.is_empty() {
-                        (format!("legacy-{}", out.len()), previous.clone())
-                    } else {
-                        (id, parent)
-                    };
-                    previous = Some(id.clone());
                     out.push(Node {
                         id,
                         parent,
@@ -586,13 +557,17 @@ fn lines_lossy(path: &Path) -> std::io::Result<Vec<String>> {
         .collect())
 }
 
+/// Accept exactly the current format. A newer file needs a newer e; an
+/// older one predates the first release and is not migrated.
 fn validate_format(version: u32) -> std::io::Result<()> {
-    if version <= FORMAT_VERSION {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
+    match version.cmp(&FORMAT_VERSION) {
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Greater => Err(std::io::Error::other(format!(
             "session format {version} is newer than this e supports ({FORMAT_VERSION})"
-        )))
+        ))),
+        std::cmp::Ordering::Less => Err(std::io::Error::other(format!(
+            "session format {version} predates this e ({FORMAT_VERSION}) and is not supported"
+        ))),
     }
 }
 
@@ -690,24 +665,14 @@ pub struct SessionInfo {
 
 /// List this workspace's sessions, newest first.
 pub fn list(cwd: &Path) -> Vec<SessionInfo> {
-    let cwd = normalized_cwd(cwd);
-    let mut dirs = vec![(home::sessions_dir().join(cwd_slug(&cwd)), false)];
-    let legacy = home::sessions_dir().join(legacy_cwd_slug(&cwd));
-    if legacy != dirs[0].0 {
-        dirs.push((legacy, true));
-    }
-    let mut sessions = Vec::new();
-    for (dir, verify_header) in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        sessions.extend(
-            entries
-                .flatten()
-                .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-                .filter_map(|e| info(&e.path(), if verify_header { Some(&cwd) } else { None })),
-        );
-    }
+    let Ok(entries) = std::fs::read_dir(home::sessions_dir().join(cwd_slug(cwd))) else {
+        return Vec::new();
+    };
+    let mut sessions: Vec<SessionInfo> = entries
+        .flatten()
+        .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
+        .filter_map(|e| info(&e.path()))
+        .collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
     sessions
 }
@@ -732,14 +697,14 @@ pub fn list_all() -> Vec<SessionInfo> {
             entries
                 .flatten()
                 .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-                .filter_map(|e| info(&e.path(), None)),
+                .filter_map(|e| info(&e.path())),
         );
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
     sessions
 }
 
-fn info(path: &Path, expected_cwd: Option<&Path>) -> Option<SessionInfo> {
+fn info(path: &Path) -> Option<SessionInfo> {
     // One lean pass over the log. Listing needs the header, the name, the
     // message and user-turn counts, and the first user line for the title —
     // not the full content of every recorded tool result. A full ChatMessage
@@ -806,11 +771,6 @@ fn info(path: &Path, expected_cwd: Option<&Path>) -> Option<SessionInfo> {
         }
     }
     let session_cwd = session_cwd.unwrap_or_default();
-    if let Some(expected_cwd) = expected_cwd {
-        if session_cwd.as_os_str().is_empty() || normalized_cwd(&session_cwd) != expected_cwd {
-            return None;
-        }
-    }
     let modified = std::fs::metadata(path)
         .ok()?
         .modified()
@@ -893,7 +853,7 @@ mod tests {
             .join("\n");
         std::fs::write(&path, format!("{body}\n")).unwrap();
 
-        let info = info(&path, None).unwrap();
+        let info = info(&path).unwrap();
         assert_eq!(info.user_turns, 1);
         assert_eq!(info.message_count, 3);
         assert_eq!(info.title, "the real prompt");

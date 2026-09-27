@@ -1,0 +1,4 @@
+/target
+/dev/pkg
+/dev/node_modules
+/dev/bundle.js

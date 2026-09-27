@@ -134,9 +134,9 @@ fn nodes_reject_corruption_on_an_inactive_branch() {
     for parent in ["missing", "bad"] {
         let path = home.dir.join("session.jsonl");
         let entries = [
-            json!({"type":"session","id":"s","cwd":"/tmp","created":1,"model":"mock"}),
-            json!({"type":"message","id":"bad","parent":parent,"message":ChatMessage::user("bad branch")}),
-            json!({"type":"message","id":"good","parent":null,"message":ChatMessage::user("active branch")}),
+            json!({"type":"session","format_version":2,"id":"s","cwd":"/tmp","created":1,"model":"mock"}),
+            json!({"type":"message","id":"bad","parent":parent,"timestamp":1,"message":ChatMessage::user("bad branch")}),
+            json!({"type":"message","id":"good","parent":null,"timestamp":1,"message":ChatMessage::user("active branch")}),
         ];
         home.write(
             "session.jsonl",

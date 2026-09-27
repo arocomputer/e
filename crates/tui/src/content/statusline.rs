@@ -34,7 +34,7 @@ pub struct RetryStatus {
     pub attempt: u32,
     pub limit: u32,
     pub delay_secs: u64,
-    pub since: std::time::Instant,
+    pub since: e_core::rt::Instant,
     pub cause: FailureCause,
     pub reason: String,
 }
@@ -45,7 +45,7 @@ pub struct RetryStatus {
 pub struct RecoveredStatus {
     pub attempt: u32,
     pub limit: u32,
-    pub since: std::time::Instant,
+    pub since: e_core::rt::Instant,
 }
 
 /// Truncate to `max_chars`, marking the cut with an ellipsis — keeps a raw
@@ -374,7 +374,7 @@ mod tests {
             attempt: 3,
             limit: 10,
             delay_secs: 4,
-            since: std::time::Instant::now(),
+            since: e_core::rt::Instant::now(),
             cause: FailureCause::ProviderUnavailable,
             reason: "503 Service Unavailable".into(),
         });
@@ -392,7 +392,7 @@ mod tests {
             attempt: 1,
             limit: 10,
             delay_secs: 4,
-            since: std::time::Instant::now() - std::time::Duration::from_secs(9),
+            since: e_core::rt::Instant::now() - std::time::Duration::from_secs(9),
             cause: FailureCause::RateLimited,
             reason: "429 Too Many Requests".into(),
         });
@@ -410,7 +410,7 @@ mod tests {
             attempt: 1,
             limit: 10,
             delay_secs: 1,
-            since: std::time::Instant::now(),
+            since: e_core::rt::Instant::now(),
             cause: FailureCause::Network,
             reason: "x".repeat(200),
         });
@@ -426,7 +426,7 @@ mod tests {
         turn.recovered = Some(RecoveredStatus {
             attempt: 4,
             limit: 10,
-            since: std::time::Instant::now(),
+            since: e_core::rt::Instant::now(),
         });
         assert_eq!(turn.label(9).as_deref(), Some("Recovered · attempt 4/10"));
     }

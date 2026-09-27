@@ -64,7 +64,11 @@ crates/core/ the harness, terminal-free (`e_core`)
                   read_result (page into a truncated result by id; the
                   runtime keeps the whole text) — the whole surface;
                   directory listing and file-finding go through bash, and
-                  skills load through read (the catalog carries their paths)
+                  skills load through read (the catalog carries their paths) ·
+                  workspace.rs (where tools read, write, and run: the disk or
+                  an embedder's Workspace and Shell)
+  rt.rs           tasks, timers, and clocks: tokio natively, the page's event
+                  loop in the browser build; guard.sh keeps them in here
   run.rs          frontend-neutral execution preferences and model validation
   update.rs       shared release discovery, verification, and package installation
   session.rs · output.rs · workspace.rs — SessionLog is a tree, not just a
@@ -78,6 +82,9 @@ crates/tui/  the terminal frontend (`e_tui`; short paths re-export from the grou
                   keymap) · statusline · history
                   (prompts across sessions, ~/.e/history.jsonl)
   surfaces/       panel · menu · settingspanel · authpanel · trustpanel
+  term/           e's own input events and the terminal under them: native.rs
+                  (crossterm, the only file that names it) · web.rs (a page's
+                  terminal emulator) · vt.rs (input bytes to events, for web)
   app/            mod.rs (App state and shared actions) · runtime.rs (startup
                   and frame loop) · frame.rs (painting) · input.rs (composer
                   and attachments) · sessions.rs (navigation) · events.rs
@@ -92,7 +99,7 @@ crates/rpc/  the headless frontend (`e_rpc`): `e rpc`, a JSONL session server ov
 docs/        guides/: the guides, one folder per nav group, with front matter
              as their only metadata (docs/README.md is the writing guide);
              `e docs` embeds them, and `arocomputer/web` renders them at
-             aro.computer/e/docs. contributing/ is the
+             e.aro.computer/docs. contributing/ is the
              repository's own documentation, never published.
 crates/cli/  the `e` binary, published as e: src/args.rs parses flags;
              src/update.rs owns self-update and its launch policy; src/main.rs
@@ -108,6 +115,8 @@ services/slack/ · services/github/  reference clients of `e rpc`
              Actions workflow. A channel spawns e; it is not compiled into it.
 fuzz/        independent development workspace, testing core and tui directly;
              three scheduled fuzz targets, never published or linked into e
+crates/web/  archived: the TUI and core as WebAssembly in a web page, with a
+             dev page (README.md). Its own workspace; nothing builds or ships it
 ```
 
 ## Running one thing, not everything

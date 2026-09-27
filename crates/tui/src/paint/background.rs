@@ -15,7 +15,8 @@
 //! (The libc poll/read here is the audited terminal-poll site — `guard.sh`
 //! permits `unsafe` only in this file and the bash tool.)
 
-use std::time::{Duration, Instant};
+use e_core::rt::Instant;
+use std::time::Duration;
 
 /// How long to wait for the terminal's OSC 11 reply before giving up.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(100);

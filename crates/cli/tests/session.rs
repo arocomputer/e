@@ -9,40 +9,36 @@ use e::core::providers::{ChatMessage, ResponseMeta, ResponsePurpose, Usage};
 use e::core::session::{self, SessionLog};
 
 #[test]
-fn released_session_fixtures_remain_readable() {
-    for (name, expected) in [
-        ("v0.jsonl", "legacy session"),
-        ("v1.jsonl", "current session"),
-        ("v2.jsonl", "response session"),
-    ] {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/sessions")
-            .join(name);
-        let messages = SessionLog::load(&path).unwrap_or_else(|error| {
-            panic!("compatibility fixture {name} stopped loading: {error}")
-        });
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].content, expected);
-    }
+fn released_session_fixture_remains_readable() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sessions/v2.jsonl");
+    let messages = SessionLog::load(&path)
+        .unwrap_or_else(|error| panic!("compatibility fixture v2.jsonl stopped loading: {error}"));
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].content, "response session");
 }
 
 #[test]
-fn future_session_format_fails_with_an_actionable_error() {
-    let path = std::env::temp_dir().join(format!(
-        "e-future-session-{}-{}.jsonl",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::write(
-        &path,
-        r#"{"type":"session","format_version":999,"id":"future","cwd":"/tmp","created":1,"model":"m"}
-{"type":"message","message":{"role":"user","content":"hello"}}
-"#,
-    )
-    .unwrap();
-    let error = SessionLog::load(&path).expect_err("future format must fail");
-    assert!(error.to_string().contains("newer than this e supports"));
-    let _ = std::fs::remove_file(path);
+fn other_session_formats_fail_with_an_actionable_error() {
+    for (version, expected) in [(999, "newer than this e supports"), (1, "predates this e")] {
+        let path = std::env::temp_dir().join(format!(
+            "e-format-session-{}-{}.jsonl",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"type":"session","format_version":{version},"id":"other","cwd":"/tmp","created":1,"model":"m"}}
+{{"type":"message","id":"a","parent":null,"timestamp":1,"message":{{"role":"user","content":"hello"}}}}
+"#
+            ),
+        )
+        .unwrap();
+        let error = SessionLog::load(&path).expect_err("only the current format loads");
+        assert!(error.to_string().contains(expected), "{error}");
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[test]
@@ -185,6 +181,7 @@ fn session_name_sets_reads_and_clears() {
         supports_tools: true,
         image_input: false,
         pricing: None,
+        api_key: None,
     };
     let (agent, _events) = Agent::new(model);
 
@@ -217,6 +214,7 @@ fn opening_e_does_not_count_as_a_session() {
         supports_tools: true,
         image_input: false,
         pricing: None,
+        api_key: None,
     };
     let (_agent, _events) = Agent::new(model);
     assert!(
@@ -281,53 +279,6 @@ fn path_separator_and_hyphen_do_not_collide() {
 
     assert_eq!(session::list(&first).len(), 1);
     assert!(session::list(&second).is_empty());
-    let _ = std::fs::remove_dir_all(home);
-}
-
-#[test]
-fn legacy_session_directories_are_filtered_by_header_cwd() {
-    let _lock = env_lock();
-    let fixture = Home::new("session");
-    let home = fixture.dir.clone();
-
-    let root = home.join("workspaces");
-    let first = root.join("alpha").join("beta-gamma");
-    let second = root.join("alpha-beta").join("gamma");
-    std::fs::create_dir_all(&first).unwrap();
-    std::fs::create_dir_all(&second).unwrap();
-    let first = first.canonicalize().unwrap();
-    let second = second.canonicalize().unwrap();
-    let legacy = format!("-{}-", first.to_string_lossy().replace('/', "-"));
-    assert_eq!(
-        legacy,
-        format!("-{}-", second.to_string_lossy().replace('/', "-"))
-    );
-    let dir = home.join("sessions").join(legacy);
-    std::fs::create_dir_all(&dir).unwrap();
-
-    for (name, cwd, message) in [
-        ("first", &first, "belongs to first"),
-        ("second", &second, "belongs to second"),
-    ] {
-        let contents = format!(
-            "{}\n{}\n",
-            serde_json::json!({
-                "type": "session", "id": name, "cwd": cwd,
-                "created": 1, "model": "test/model"
-            }),
-            serde_json::json!({
-                "type": "message", "message": ChatMessage::user(message)
-            })
-        );
-        std::fs::write(dir.join(format!("{name}.jsonl")), contents).unwrap();
-    }
-
-    let first_list = session::list(&first);
-    assert_eq!(first_list.len(), 1);
-    assert_eq!(first_list[0].title, "belongs to first");
-    let second_list = session::list(&second);
-    assert_eq!(second_list.len(), 1);
-    assert_eq!(second_list[0].title, "belongs to second");
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -698,6 +649,7 @@ async fn persistence_failure_warns_once_not_silently() {
         supports_tools: true,
         image_input: false,
         pricing: None,
+        api_key: None,
     };
     let (agent, mut rx) = Agent::new(model);
     agent.record_user("first".into());
@@ -829,48 +781,6 @@ fn reopen_continues_the_branch_that_was_active() {
         parent.message.content, "chosen branch",
         "reopen must resume onto the branch that was active, not the root"
     );
-
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-/// A record written before branching existed carries no id or parent.
-/// `nodes` must still produce a usable, linearly-chained tree for it so an
-/// old session resumes onto its real tail instead of silently starting a
-/// second root.
-#[test]
-fn legacy_records_synthesize_a_linear_chain() {
-    let _lock = env_lock();
-    let fixture = Home::new("session");
-    let home = fixture.dir.clone();
-    let cwd = std::env::temp_dir().join("e-tree-legacy-proj");
-    std::fs::create_dir_all(&cwd).unwrap();
-
-    // Hand-write a pre-branching-format log: no id/parent on the records.
-    let s = SessionLog::create(&cwd, "test/model").unwrap();
-    let path = s.path().to_path_buf();
-    drop(s);
-    let legacy = format!(
-        "{}\n{}\n{}\n",
-        serde_json::json!({"type":"session","id":"x","cwd":cwd.to_string_lossy(),"created":1,"model":"test/model"}),
-        serde_json::json!({"type":"message","message":ChatMessage::user("legacy first")}),
-        serde_json::json!({"type":"message","message":ChatMessage::assistant("legacy reply", Vec::<e::core::providers::ToolCall>::new())}),
-    );
-    std::fs::write(&path, legacy).unwrap();
-
-    let nodes = SessionLog::nodes(&path).unwrap();
-    assert_eq!(nodes.len(), 2);
-    assert!(nodes[0].parent.is_none());
-    assert_eq!(nodes[1].parent.as_deref(), Some(nodes[0].id.as_str()));
-
-    // A session reopened from a legacy tail keeps growing that same line.
-    let mut resumed = SessionLog::reopen(&path).unwrap();
-    resumed
-        .append(&ChatMessage::user("new turn after legacy tail"))
-        .unwrap();
-    drop(resumed);
-    let nodes = SessionLog::nodes(&path).unwrap();
-    assert_eq!(nodes.len(), 3);
-    assert_eq!(nodes[2].parent.as_deref(), Some(nodes[1].id.as_str()));
 
     let _ = std::fs::remove_dir_all(&home);
 }

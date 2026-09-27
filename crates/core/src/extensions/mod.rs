@@ -12,6 +12,9 @@
 //!
 //! See docs/guides/extend/extensions.md for the protocol reference and a worked example.
 
+// The browser build refuses extension processes at spawn, which leaves the
+// pipe plumbing unused there.
+#[cfg_attr(target_family = "wasm", allow(dead_code, unused_imports))]
 mod host;
 mod protocol;
 

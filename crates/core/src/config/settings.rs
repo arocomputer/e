@@ -220,18 +220,11 @@ pub fn all(effort_levels: Vec<String>) -> Vec<Setting> {
     ]
 }
 
-/// The main-screen layout. Older composer preferences apply only until a
-/// TUI mode is saved; missing or invalid values keep the compact inline layout.
+/// The main-screen layout: `fullscreen` when saved as such, otherwise the
+/// compact inline layout (missing and invalid values included).
 pub fn tui_mode() -> String {
-    let value = get_string("tui_mode").unwrap_or_else(|| {
-        if get_string("composer_position").as_deref() == Some("bottom") {
-            "fullscreen".into()
-        } else {
-            "inline".into()
-        }
-    });
-    if value == "fullscreen" {
-        value
+    if get_string("tui_mode").as_deref() == Some("fullscreen") {
+        "fullscreen".into()
     } else {
         "inline".into()
     }

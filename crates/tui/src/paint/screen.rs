@@ -374,9 +374,10 @@ fn log_frame(lines: &[String]) {
 }
 
 /// One sequenced frame in the paint thread's single-slot mailbox.
+#[cfg(not(target_family = "wasm"))]
 struct PendingFrame {
     sequence: u64,
-    posted_at: std::time::Instant,
+    posted_at: e_core::rt::Instant,
     lines: Vec<String>,
     alternate: bool,
 }
@@ -387,7 +388,7 @@ struct PendingFrame {
 pub struct PaintStatus {
     pub posted: u64,
     pub completed: u64,
-    pub pending_since: Option<std::time::Instant>,
+    pub pending_since: Option<e_core::rt::Instant>,
     pub failure: Option<(u64, String)>,
     pub stopped: bool,
 }
@@ -403,6 +404,7 @@ impl PaintStatus {
 /// undelivered one, so a terminal blocked mid-write bounds the backlog to
 /// exactly one pending frame — an unbounded queue would grow by a full
 /// transcript copy per tick for as long as the write stalls.
+#[cfg(not(target_family = "wasm"))]
 #[derive(Default)]
 struct PaintMailbox {
     frame: Option<PendingFrame>,
@@ -411,12 +413,13 @@ struct PaintMailbox {
     resize: Option<(u16, u16)>,
     posted: u64,
     completed: u64,
-    pending_since: Option<std::time::Instant>,
+    pending_since: Option<e_core::rt::Instant>,
     failure: Option<(u64, String)>,
     stopped: bool,
     shutdown: bool,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl PaintMailbox {
     fn status(&self) -> PaintStatus {
         PaintStatus {
@@ -441,15 +444,17 @@ impl PaintMailbox {
     fn fail(&mut self, sequence: u64, error: String) {
         self.failure = Some((sequence, error));
         self.pending_since
-            .get_or_insert_with(std::time::Instant::now);
+            .get_or_insert_with(e_core::rt::Instant::now);
     }
 }
 
 /// Marks an unexpected painter exit even when it unwinds outside `paint()`.
+#[cfg(not(target_family = "wasm"))]
 struct PaintThreadGuard {
     mailbox: std::sync::Arc<(std::sync::Mutex<PaintMailbox>, std::sync::Condvar)>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for PaintThreadGuard {
     fn drop(&mut self) {
         let (lock, wake) = &*self.mailbox;
@@ -463,6 +468,9 @@ impl Drop for PaintThreadGuard {
     }
 }
 
+const ENTER_ALTERNATE: &[u8] = b"\x1b[?1049h";
+const LEAVE_ALTERNATE: &[u8] = b"\x1b[?1049l";
+
 /// Preserve the main-screen renderer while a full-height review owns the terminal.
 /// Dropping the paint worker restores the main buffer even after a failed frame.
 #[derive(Default)]
@@ -471,13 +479,20 @@ struct ReviewScreen {
 }
 
 impl ReviewScreen {
-    fn switch(&mut self, screen: &mut Screen, alternate: bool) -> io::Result<()> {
+    fn switch(
+        &mut self,
+        screen: &mut Screen,
+        alternate: bool,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
         if alternate && self.main.is_none() {
-            crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+            out.write_all(ENTER_ALTERNATE)?;
+            out.flush()?;
             let review = Screen::new(screen.cols, screen.rows, 0);
             self.main = Some(std::mem::replace(screen, review));
         } else if !alternate && self.main.is_some() {
-            crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+            out.write_all(LEAVE_ALTERNATE)?;
+            out.flush()?;
             if let Some(main) = self.main.take() {
                 *screen = main;
                 // The restored buffer's contents belong to the terminal, not
@@ -503,7 +518,7 @@ impl ReviewScreen {
 impl Drop for ReviewScreen {
     fn drop(&mut self) {
         if self.main.is_some() {
-            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+            let _ = crate::term::write(LEAVE_ALTERNATE);
         }
     }
 }
@@ -511,12 +526,14 @@ impl Drop for ReviewScreen {
 /// The paint thread: owns the `Screen` and its blocking stdout writes so a
 /// slow terminal can never stall the event loop. `anchor` is the launch
 /// cursor row — the frame paints below it, never over what came before.
+#[cfg(not(target_family = "wasm"))]
 pub struct Painter {
     mailbox: std::sync::Arc<(std::sync::Mutex<PaintMailbox>, std::sync::Condvar)>,
     thread: Option<std::thread::JoinHandle<()>>,
     next_sequence: u64,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Painter {
     pub fn spawn(cols: u16, rows: u16, anchor: usize) -> Self {
         let mailbox = std::sync::Arc::new((
@@ -549,8 +566,9 @@ impl Painter {
                 if let Some(frame) = frame {
                     let sequence = frame.sequence;
                     let painted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        review.switch(&mut screen, frame.alternate)?;
-                        screen.paint_to(frame.lines, &mut io::stdout().lock())
+                        let mut out = io::stdout().lock();
+                        review.switch(&mut screen, frame.alternate, &mut out)?;
+                        screen.paint_to(frame.lines, &mut out)
                     }));
                     let mut mailbox = lock.lock().unwrap_or_else(|e| e.into_inner());
                     match painted {
@@ -594,7 +612,7 @@ impl Painter {
     pub fn frame_in_view(&mut self, lines: Vec<String>, alternate: bool) {
         self.next_sequence = self.next_sequence.wrapping_add(1);
         let sequence = self.next_sequence;
-        let posted_at = std::time::Instant::now();
+        let posted_at = e_core::rt::Instant::now();
         self.post(|mailbox| {
             mailbox.posted = sequence;
             mailbox.pending_since.get_or_insert(posted_at);
@@ -628,6 +646,66 @@ impl Painter {
     }
 }
 
+/// The browser's painter. A page's terminal takes writes without blocking,
+/// so each frame is painted as it is posted, on the page's one thread.
+#[cfg(target_family = "wasm")]
+pub struct Painter {
+    screen: Screen,
+    review: ReviewScreen,
+    posted: u64,
+    failure: Option<(u64, String)>,
+}
+
+#[cfg(target_family = "wasm")]
+impl Painter {
+    pub fn spawn(cols: u16, rows: u16, anchor: usize) -> Self {
+        Painter {
+            screen: Screen::new(cols, rows, anchor),
+            review: ReviewScreen::default(),
+            posted: 0,
+            failure: None,
+        }
+    }
+
+    pub fn frame(&mut self, lines: Vec<String>) {
+        self.frame_in_view(lines, false);
+    }
+
+    pub fn frame_in_view(&mut self, lines: Vec<String>, alternate: bool) {
+        self.posted = self.posted.wrapping_add(1);
+        let mut bytes = Vec::new();
+        let painted = self
+            .review
+            .switch(&mut self.screen, alternate, &mut bytes)
+            .and_then(|()| self.screen.paint_to(lines, &mut bytes))
+            .and_then(|()| crate::term::write(&bytes));
+        match painted {
+            Ok(()) => self.failure = None,
+            Err(error) => {
+                let (cols, rows) = (self.screen.cols, self.screen.rows);
+                self.review.resize(&mut self.screen, cols, rows);
+                self.failure = Some((self.posted, format!("terminal write failed: {error}")));
+            }
+        }
+    }
+
+    pub fn status(&self) -> PaintStatus {
+        PaintStatus {
+            posted: self.posted,
+            completed: self.posted,
+            pending_since: None,
+            failure: self.failure.clone(),
+            stopped: false,
+        }
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.review.resize(&mut self.screen, cols, rows);
+    }
+
+    pub fn shutdown(&mut self) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,7 +730,7 @@ mod tests {
             screen
                 .paint_to(transcript.render(&theme, 100), &mut sink)
                 .unwrap();
-            let start = std::time::Instant::now();
+            let start = e_core::rt::Instant::now();
             for tick in 0..100 {
                 let mut frame = transcript.render(&theme, 100);
                 frame.push(format!("composer {tick}"));
@@ -867,7 +945,7 @@ mod tests {
     #[test]
     fn paint_progress_distinguishes_posted_completed_and_failed_frames() {
         let mut mailbox = PaintMailbox::default();
-        let posted_at = std::time::Instant::now();
+        let posted_at = e_core::rt::Instant::now();
         mailbox.posted = 2;
         mailbox.pending_since = Some(posted_at);
         mailbox.frame = Some(PendingFrame {

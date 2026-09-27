@@ -87,7 +87,7 @@ impl App {
         let results = self.results.clone();
         let fallback = Some(text);
         e_core::config::home::spawn(async move {
-            let images = tokio::task::spawn_blocking(move || {
+            let images = e_core::rt::spawn_blocking(move || {
                 e_core::providers::ImageInput::from_paths(&paths)
             })
             .await
@@ -139,7 +139,7 @@ impl App {
         let generation = self.attachments.generation;
         let results = self.results.clone();
         e_core::config::home::spawn(async move {
-            let paste = tokio::task::spawn_blocking(clipboard::read)
+            let paste = e_core::rt::spawn_blocking(clipboard::read)
                 .await
                 .unwrap_or_else(|_| Err("clipboard reader panicked".into()));
             let _ = results

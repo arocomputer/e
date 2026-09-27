@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # The Slack bot on a server that has neither Node nor a checkout of e: e comes
-# from the release, the channel from this directory. Build from the repository:
+# from a release when one is named, otherwise it is built from source; the
+# channel comes from this directory. Build from the repository:
 #
 #   docker build -t e-slack services/slack
 #
@@ -8,8 +9,8 @@
 # link against glibc 2.39, which bookworm's 2.36 is too old for.
 FROM node:24-trixie-slim
 
-# git is what e's tools need on a checkout; curl and ca-certificates are for the
-# installer.
+# git is what e's tools need on a checkout; curl and ca-certificates fetch the
+# release installer or the Rust toolchain.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git \
  && rm -rf /var/lib/apt/lists/*
@@ -21,8 +22,9 @@ RUN apt-get update \
 ENV E_HOME=/home/e
 RUN mkdir -p /home/e && chmod 0777 /home/e
 
-# The e release the bot drives. Empty for the latest published release, or a
-# pinned `E_VERSION`. Passed by the release workflow.
+# The e release the bot drives: a pinned `E_VERSION`, passed by the release
+# workflow. Empty builds e from source (`main`), since no release is published
+# yet; the Rust toolchain and compiler are removed again in the same layer.
 ARG E_VERSION=""
 # The container check (`./x container`) builds without a published release, so it
 # installs this stub `e` instead of downloading one. Published images leave it
@@ -32,14 +34,19 @@ RUN set -eux; \
     if [ -n "$E_RELEASE_STUB" ]; then \
       printf '#!/bin/sh\necho "e 0.0.0-stub"\n' > /usr/local/bin/e; \
       chmod 0755 /usr/local/bin/e; \
-    else \
-      curl -fsSL https://aro.computer/e/install.sh -o /tmp/install.sh; \
-      if [ -n "$E_VERSION" ]; then \
-        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --version "$E_VERSION"; \
-      else \
-        E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh; \
-      fi; \
+    elif [ -n "$E_VERSION" ]; then \
+      curl -fsSL https://e.aro.computer/install.sh -o /tmp/install.sh; \
+      E_INSTALL_DIR=/usr/local/bin sh /tmp/install.sh --version "$E_VERSION"; \
       rm -f /tmp/install.sh; \
+    else \
+      apt-get update; \
+      apt-get install -y --no-install-recommends gcc libc6-dev; \
+      export RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo; \
+      curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.98.0; \
+      /tmp/cargo/bin/cargo install --locked --git https://github.com/arocomputer/e --root /usr/local e; \
+      rm -rf /tmp/rustup /tmp/cargo /usr/local/.crates.toml /usr/local/.crates2.json; \
+      apt-get purge -y --auto-remove gcc libc6-dev; \
+      rm -rf /var/lib/apt/lists/*; \
     fi; \
     e --version
 

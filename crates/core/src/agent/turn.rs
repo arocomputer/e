@@ -6,10 +6,10 @@
 //! Every phase returns a [`Flow`]: `Continue` carries on and `Break` ends the
 //! run with its [`Outcome`], so `?` is how a phase stops the run.
 
+use crate::rt::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
 use std::iter::Peekable;
 use std::ops::ControlFlow::{self, Break, Continue};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
 
@@ -145,7 +145,7 @@ struct Attempt {
     /// the request in flight, so the loss is the sleep's, not the provider's.
     started: Instant,
     rx: mpsc::Receiver<ProviderEvent>,
-    handle: tokio::task::JoinHandle<()>,
+    handle: crate::rt::JoinHandle<()>,
     /// Tool-argument bytes streamed so far, for the liveness row.
     assembly_bytes: u64,
     /// A retried attempt already reported that it recovered.
@@ -812,7 +812,7 @@ impl Turn {
                 .into_iter()
                 .map(|(id, call)| {
                     let context = self.tool_context(id, &active_tools);
-                    (call.clone(), tokio::spawn(execute_tool(context, call)))
+                    (call.clone(), crate::rt::spawn(execute_tool(context, call)))
                 })
                 .collect();
             for (call, task) in tasks {
@@ -895,7 +895,9 @@ impl Turn {
             let Some((_, call)) = remaining.peek() else {
                 break;
             };
-            if let Some(file) = file_target(call, &self.ctx.cwd, &self.ctx.cancel).await {
+            let workspace = self.ctx.tool_runtime.workspace().clone();
+            if let Some(file) = file_target(call, &self.ctx.cwd, workspace, &self.ctx.cancel).await
+            {
                 if !files.insert(file) {
                     break;
                 }
@@ -1042,7 +1044,7 @@ async fn execute_tool(context: ToolRunContext, call: ToolCall) -> tools::ToolOut
 /// place, so on Esc stop waiting, record the call as cancelled, and detach
 /// the task: the run must end promptly even over a stalled FIFO or NFS mount.
 async fn settle_tool(
-    task: tokio::task::JoinHandle<tools::ToolOutput>,
+    task: crate::rt::JoinHandle<tools::ToolOutput>,
     cancel: &AtomicBool,
 ) -> tools::ToolOutput {
     tokio::select! {
@@ -1112,7 +1114,7 @@ pub(super) fn instruction_dirs(messages: &[ChatMessage]) -> std::collections::Ha
 /// turn nor be read whole. `None` for anything that is not a regular file
 /// inside `root` once links are resolved.
 async fn read_instructions(file: PathBuf, root: PathBuf) -> Option<String> {
-    tokio::task::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         use std::io::Read as _;
         let real = file.canonicalize().ok()?;
         if !real.starts_with(&root) || !std::fs::metadata(&real).ok()?.is_file() {
@@ -1241,6 +1243,7 @@ async fn load_nested_instructions(
 async fn file_target(
     call: &ToolCall,
     cwd: &std::path::Path,
+    workspace: Arc<dyn tools::Workspace>,
     cancel: &AtomicBool,
 ) -> Option<FileTarget> {
     if !matches!(call.name.as_str(), "read" | "write" | "edit") {
@@ -1251,14 +1254,12 @@ async fn file_target(
     }
     let args: serde_json::Value = serde_json::from_str(&call.arguments).ok()?;
     let path = cwd.join(args.get("path")?.as_str()?);
-    let lookup = tokio::task::spawn_blocking(move || {
-        let path = tools::stable_path_key(&path);
-        #[cfg(unix)]
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            use std::os::unix::fs::MetadataExt;
-            return FileTarget::Inode(metadata.dev(), metadata.ino());
+    let lookup = crate::rt::spawn_blocking(move || {
+        let path = tools::stable_path_key(&*workspace, &path);
+        match workspace.identity(&path) {
+            Some((device, inode)) => FileTarget::Inode(device, inode),
+            None => FileTarget::Path(path),
         }
-        FileTarget::Path(path)
     });
     tokio::select! {
         result = lookup => result.ok(),
@@ -1270,6 +1271,5 @@ async fn file_target(
 #[derive(PartialEq, Eq, Hash)]
 enum FileTarget {
     Path(PathBuf),
-    #[cfg(unix)]
     Inode(u64, u64),
 }

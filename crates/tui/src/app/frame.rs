@@ -406,7 +406,7 @@ impl App {
 
     /// A mouse event while a pane is open: inside the pane it navigates,
     /// on the conversation it hands focus back.
-    pub(super) fn pane_mouse(&mut self, mut event: crossterm::event::MouseEvent, width: usize) {
+    pub(super) fn pane_mouse(&mut self, mut event: crate::term::MouseEvent, width: usize) {
         if self.trust.is_some() || self.auth.is_some() || self.settings.is_some() {
             return;
         }
@@ -423,7 +423,7 @@ impl App {
                     crate::layout::Side::Left => (0, pane_width),
                 };
                 if column < start || column >= end {
-                    if matches!(event.kind, crossterm::event::MouseEventKind::Down(_)) {
+                    if matches!(event.kind, crate::term::MouseEventKind::Down(_)) {
                         pane.focused = false;
                     }
                     return;
