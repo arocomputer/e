@@ -2303,23 +2303,6 @@ fn keyless_local_providers_are_signed_in_without_credentials() {
     assert!(catalog::available().is_empty());
 }
 
-#[test]
-fn legacy_opencode_auth_keys_still_sign_in() {
-    let _lock = env_lock();
-    let home = Home::new("legacy-auth");
-    clear_env_keys();
-
-    home.auth(r#"{"opencode":{"key":"sk-old"}}"#);
-    let auth = e::core::auth::load();
-    assert!(
-        matches!(auth.get("opencode-zen"), Some(e::core::auth::Credential::ApiKey { key }) if key == "sk-old"),
-        "legacy key not honored"
-    );
-    assert!(catalog::available()
-        .iter()
-        .any(|m| m.provider == "opencode-zen"));
-}
-
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
 async fn provider_reported_models_appear_without_a_release() {

@@ -56,7 +56,7 @@ impl ErrorDetails {
             FailureCause::Rejected => ("rejected", "Provider request failed."),
         };
         let home = crate::config::home::home();
-        tokio::task::spawn_blocking(move || {
+        crate::rt::spawn_blocking(move || {
             crate::config::home::with_home(home, || {
                 crate::config::settings::get_string(&format!("error_{key}"))
             })

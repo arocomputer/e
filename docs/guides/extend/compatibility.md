@@ -6,14 +6,13 @@ order: 4
 
 # Compatibility
 
-The e rename changes command, environment, package, and Rust import names.
-The diagnostic JSON home field is now `e_home`. Session, configuration,
-RPC, and extension message formats keep their existing versions. See
-[installation migration](../start/install.md#migrate-an-existing-installation)
-for existing homes and workspace resources.
-
-e is still pre-1.0. This page names the surfaces you can persist or build
-against, so changes to them are deliberate, not accidental.
+This page names the surfaces of e you can persist data in or build
+against, and the rules for changing them. Read it before you depend on a
+file format, a protocol, or the CLI, and before you change one. e is
+pre-1.0 and has no published release yet; these contracts still change only
+deliberately. Until the first release, a format change may drop older local
+data instead of migrating it: e reads only the current formats described
+here.
 
 ## Supported contracts
 
@@ -35,14 +34,13 @@ its report. It never turns provider reachability into a network side effect.
 
 ### Sessions
 
-Session JSONL headers carry `format_version`. e reads these versions:
+Session JSONL headers carry `format_version`. e reads version 2, which
+keeps response provenance and disjoint usage in an envelope outside
+replayable message content. Every message record carries an `id`, its
+`parent`, and a `timestamp`.
 
-- Version 0, the unmarked pre-release format.
-- Version 1.
-- Version 2, which keeps response provenance and disjoint usage in an
-  envelope outside replayable message content.
-
-Readers reject a newer version with an actionable error instead of guessing.
+Readers reject any other version with an actionable error instead of
+guessing.
 
 ### Configuration
 
@@ -70,13 +68,15 @@ source is one of:
 - `npm:name[@version]`
 - `git:host/user/repo[@ref]`
 - a git URL
+- `release:owner/repo/name[@tag]`
 - a directory path
 
 An entry can also be an object that carries a `source` plus per-kind filter
 lists: `extensions`, `skills`, `prompts`, and `themes`.
 
-npm packages live under `~/.e/packages/npm/node_modules/<name>`. Git
-packages live under `~/.e/packages/<host>/<path>`.
+npm packages live under `~/.e/packages/npm/node_modules/<name>`, git
+packages under `~/.e/packages/<host>/<path>`, and release packages under
+`~/.e/packages/releases/<owner>/<repo>/<name>`.
 
 All of this is documented in [Packages](packages.md) and pinned by
 `crates/cli/tests/fixtures/config/settings-v1-packages.json`. A reader that meets an
@@ -105,10 +105,12 @@ protocol number during `initialize`. Additive fields do not change the
 number. Incompatible wire changes require a new protocol version.
 
 Version 1 is documented in [Extensions](extensions.md). The families beyond
-it are additive: `events`, `hooks`, `display`, `ui`, `session`, and
-`shortcuts`. Each family is advertised in `capabilities`, declared in the
-manifest, or initiated by the extension. A version-1 extension is never sent
-a message it did not ask for.
+it are additive: `tool.update`, `events`, `hooks`, `display`, `ui`,
+`session`, `shortcuts`, `pane`, `widget`, and `render`. Each family is
+advertised in `capabilities`, declared in the manifest, or initiated by the
+extension. A version-1 extension is never sent a message it did not ask
+for. `crates/cli/tests/fixtures/extensions/v1-manifest.json` pins a
+version-1 manifest.
 
 A method name, event name, field, or result shape in those families is a
 supported contract once documented.
@@ -124,37 +126,25 @@ internal. They are not a persisted compatibility contract.
 
 ## Session locks
 
-Session sidecars now use OS-held locks. Stop older e processes before you
-resume their sessions with the new writer. Writers that use PID locks and
-writers that use OS locks must not open the same session concurrently.
-
-Existing JSONL needs no migration. Empty `.lock` sidecars are expected. Do
-not delete them.
+Session `.lock` sidecars use OS-held locks. Empty `.lock` sidecars are
+expected; do not delete them.
 
 ## Error diagnostics
 
 Provider failure diagnostics go to separate `<session-stem>.errors.jsonl`
-files. This keeps message logs readable across their supported versions.
-
+files, which keeps diagnostics out of the message log.
 These sidecars carry their own `format_version: 1` and link records to
-message IDs. You can remove them without changing conversation history.
+message IDs. Removing them does not change conversation history.
 
 Headless responses add an optional `error_details` object and keep the
 `error` string.
 
 ## Home directory and file permissions
 
-Each kind of build has its own home directory:
-
-| Build | Home |
-| --- | --- |
-| Production | `~/.e` |
-| Local (`./x dev`) | `~/.e-dev` |
-| PR builds | `~/.e-pr/COMMIT` |
-
-`E_HOME` overrides the channel default. Use a dedicated directory for
-`E_HOME`. It is private application state, not a shared workspace. Files
-copied outside that directory are not migrated.
+Each kind of build keeps its own home directory; see
+[settings](../customize/settings.md). `E_HOME` overrides the default. Use a
+dedicated directory for `E_HOME`: it is private application state, not a
+shared workspace. Files copied outside that directory are not migrated.
 
 On Unix, e creates its state directories with `0700` and session logs with
 `0600`.
@@ -168,9 +158,9 @@ On Unix, e creates its state directories with `0700` and session logs with
 
 ## Redirects
 
-Provider and OAuth endpoints must be final URLs. Authenticated requests no
-longer follow HTTP redirects, including same-origin redirects. Update any
-custom gateway URL that relied on one.
+Provider and OAuth endpoints must be final URLs. Authenticated requests do
+not follow HTTP redirects, including same-origin redirects, so a custom
+gateway URL must not rely on one.
 
 Release asset downloads still follow redirects. They do so without provider
 credentials, and they reject HTTPS-to-HTTP downgrades.
@@ -216,10 +206,11 @@ The workspace crates under `crates/` share code between the binary, the
 integration tests, and the SDK. Their public Rust items, in `e-core`
 and the frontend crates, are not a stable third-party API in themselves.
 
-The supported Rust SDK is the separate `e-sdk` crate in `crates/sdk/`.
-See [SDK](sdk.md). The API it consumes is its documented contract. It
-follows semantic versioning from its first published release. Before 1.0, a
-breaking change moves the minor version and is named in the changelog.
+The supported Rust SDK is the separate `e-sdk` crate in `crates/sdk/`,
+not yet published to crates.io. See [SDK](sdk.md). Its documented API is
+its contract. It follows semantic versioning from its first published
+release. Before 1.0, a breaking change moves the minor version and is named
+in the changelog.
 
 ## Change process
 
@@ -227,6 +218,8 @@ A change to a supported contract needs all of the following in one pull
 request:
 
 1. A compatibility fixture or contract test.
-2. Migration behavior for existing user data or extensions.
+2. Migration behavior for existing user data or extensions. Before the
+   first release, local data may be dropped instead; say so in the
+   changelog.
 3. Documentation and a changelog entry.
 4. Updated contract documentation in the relevant guide.

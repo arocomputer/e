@@ -20,6 +20,13 @@ pub struct Authorization {
 }
 
 pub async fn authorize(model: &Model) -> Result<Authorization, ProviderError> {
+    if let Some(key) = &model.api_key {
+        return Ok(Authorization {
+            bearer: key.expose().to_string(),
+            account_id: None,
+            credentialed: true,
+        });
+    }
     authorize_provider(&model.provider, model.api, model.responses_mount).await
 }
 

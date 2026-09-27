@@ -7,7 +7,7 @@
 //! precedence from e's own chords down to the composer.
 
 use std::ops::ControlFlow::{self, Break, Continue};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -74,20 +74,15 @@ pub(super) async fn run_scoped(
         agent: agent_options,
         images,
     } = options;
-    install_panic_hook();
-    let guard = enter_terminal()?;
-    // detect_light() probes the terminal background over OSC 11 (short
-    // timeout) and falls back to COLORFGBG, then dark.
-    let detected = crate::background::detect_light().unwrap_or(false);
+    let terminal = crate::term::enter()?;
+    // A real terminal is probed for its background (OSC 11, then
+    // COLORFGBG, then dark); a page says which it chose.
+    let detected = crate::term::light_background().unwrap_or(false);
     let theme = crate::theme::resolve(&e_core::config::settings::theme(), detected);
     let keymap = crate::keybindings::load();
 
-    let (cols, rows) = terminal::size()?;
-    // The launch anchor: the frame paints below where the user launched e,
-    // never over what came before. A terminal that doesn't answer DSR 6n — a raw pty —
-    // falls back to the screen's bottom row, the common launch spot.
-    let anchor =
-        crate::paint::background::query_cursor_row(rows).unwrap_or(rows.saturating_sub(1)) as usize;
+    let (cols, rows) = crate::term::size()?;
+    let anchor = crate::term::launch_row(rows);
     let painter = Painter::spawn(cols, rows, anchor);
     let (mut agent, session_events) = Agent::with_options(model, agent_options.clone());
     let (logins_tx, logins_rx) = tokio::sync::mpsc::channel::<LoginOutcome>(4);
@@ -110,26 +105,25 @@ pub(super) async fn run_scoped(
     let mut app = App::new(agent, host, theme, keymap, detected, images, senders);
     app.start(&agent_options, resume_session, continue_session);
 
-    use tokio::signal::unix::{signal, SignalKind};
     let input_paused = Arc::new(AtomicBool::new(false));
     let mut frame_loop = FrameLoop {
+        terminal,
         painter,
         cols,
         rows,
         anchor,
-        input: spawn_input_reader(input_paused.clone()),
+        input: crate::term::input(input_paused.clone()),
         input_paused,
         session_events,
         requests: requests_rx,
         results: results_rx,
         jobs: jobs_rx,
         logins: logins_rx,
-        tick: tokio::time::interval(Duration::from_millis(250)),
-        // SIGTERM/SIGHUP (a kill, a closed tab) exit through the same cleanup as
-        // /quit — the terminal is restored, the extension host shut down.
-        sigterm: signal(SignalKind::terminate())?,
-        sighup: signal(SignalKind::hangup())?,
-        next_paint: tokio::time::Instant::now(),
+        tick: e_core::rt::interval(Duration::from_millis(250)),
+        // A kill or a closed tab exits through the same cleanup as /quit —
+        // the terminal is restored, the extension host shut down.
+        signals: crate::term::Signals::new()?,
+        next_paint: e_core::rt::Instant::now(),
         paint_deferred: false,
         event_buf: Vec::with_capacity(128),
     };
@@ -139,83 +133,25 @@ pub(super) async fn run_scoped(
         .painter
         .frame_in_view(app.frame(cols as usize, rows as usize), app.fixed_view());
     frame_loop.run(&mut app).await;
-    shut_down(&mut app, &mut frame_loop.painter, guard).await;
+    shut_down(&mut app, frame_loop).await;
     Ok(())
-}
-
-/// A panic mid-frame must not strand the shell in raw mode with a hidden
-/// cursor or kitty keyboard flags — restore the terminal first, then
-/// report as usual. (\x1b[<u pops the keyboard enhancement stack.) Only
-/// a panic on this thread — the frame loop, driven by the runtime's
-/// block_on — is fatal to the session; the paint thread, tool tasks and
-/// the turn worker all run elsewhere and catch their own panics to keep
-/// the session alive, so the hook must leave the terminal alone for them
-/// (the hook fires before any catch_unwind gets its say).
-fn install_panic_hook() {
-    let default_hook = std::panic::take_hook();
-    let frame_thread = std::thread::current().id();
-    std::panic::set_hook(Box::new(move |info| {
-        if std::thread::current().id() == frame_thread {
-            let _ = terminal::disable_raw_mode();
-            print!("\x1b[<u\x1b[?2004l\x1b[?25h\r\n");
-            use std::io::Write as _;
-            let _ = std::io::stdout().flush();
-        }
-        default_hook(info);
-    }));
-}
-
-/// Raw mode first so the frame loop can take the terminal over. Theme
-/// detection, which follows, queries the terminal (OSC 11 background color,
-/// then COLORFGBG) so `auto` follows the real terminal theme instead of
-/// defaulting to dark. The probe is timeout-bounded and runs after this,
-/// where the TUI owns the terminal reader, so it can't block startup or
-/// swallow keystrokes (audit #93). The guard exists before any further mode
-/// changes, so every exit path restores them.
-fn enter_terminal() -> std::io::Result<TerminalGuard> {
-    terminal::enable_raw_mode()?;
-    let guard = TerminalGuard;
-    push_terminal_modes()?;
-    Ok(guard)
-}
-
-/// Enable the modes the TUI reads input through: bracketed paste, mouse
-/// capture, and the kitty keyboard protocol — without it, terminals send
-/// plain Enter for shift+enter and multi-line entry is unreachable.
-fn push_terminal_modes() -> std::io::Result<()> {
-    execute!(
-        std::io::stdout(),
-        EnableBracketedPaste,
-        EnableMouseCapture,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    )
-}
-
-/// Undo [`push_terminal_modes`]. Popping a mode that never got enabled is
-/// harmless.
-fn pop_terminal_modes() -> std::io::Result<()> {
-    execute!(
-        std::io::stdout(),
-        PopKeyboardEnhancementFlags,
-        DisableBracketedPaste,
-        DisableMouseCapture
-    )
 }
 
 /// Let the final frame land before the terminal is restored. Shells use
 /// detached process groups, so stop them explicitly before this process
 /// gives extensions their shutdown notification.
-async fn shut_down(app: &mut App, painter: &mut Painter, guard: TerminalGuard) {
-    painter.shutdown();
+async fn shut_down(app: &mut App, mut frame_loop: FrameLoop) {
+    frame_loop.painter.shutdown();
     e_core::tools::kill_tracked_processes();
     app.host
         .event("session_shutdown", serde_json::json!({"reason": "quit"}))
         .await;
     app.host.shutdown().await;
-    drop(guard);
+    drop(frame_loop);
     // The tab title we set at launch (or from a session name) is ours to
     // clear — the reference leaves the terminal pristine on exit.
     set_tab_title("");
+    #[cfg(not(target_family = "wasm"))]
     if app.relaunch {
         // The terminal is restored and the host is down: replace this
         // process with the updated binary, continuing the same session.
@@ -241,7 +177,12 @@ struct Senders {
 
 /// The terminal side of the session and every channel the frame loop waits
 /// on. Built once at launch, alive until the process exits.
+// The terminal guard, anchor, and pause flag serve the external editor, which
+// only a real terminal has.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct FrameLoop {
+    /// Restores the terminal when the loop is dropped.
+    terminal: crate::term::Guard,
     painter: Painter,
     cols: u16,
     rows: u16,
@@ -256,10 +197,9 @@ struct FrameLoop {
     results: Receiver<AppJob>,
     jobs: Receiver<String>,
     logins: Receiver<LoginOutcome>,
-    tick: tokio::time::Interval,
-    sigterm: tokio::signal::unix::Signal,
-    sighup: tokio::signal::unix::Signal,
-    next_paint: tokio::time::Instant,
+    tick: e_core::rt::Interval,
+    signals: crate::term::Signals,
+    next_paint: e_core::rt::Instant,
     /// A paint was skipped inside the frame interval.
     paint_deferred: bool,
     event_buf: Vec<SessionEvent>,
@@ -272,15 +212,10 @@ impl FrameLoop {
         loop {
             if app.external_edit {
                 app.external_edit = false;
-                edit_externally(
-                    app,
-                    &mut self.painter,
-                    &self.input_paused,
-                    self.cols,
-                    self.rows,
-                    self.anchor,
-                )
-                .await;
+                #[cfg(not(target_family = "wasm"))]
+                edit_externally(app, self).await;
+                #[cfg(target_family = "wasm")]
+                app.notice("there is no external editor in the browser".into());
             }
             if self.wait(app).await.is_break() {
                 return;
@@ -332,11 +267,10 @@ impl FrameLoop {
                     app.on_login_outcome(outcome);
                 }
             }
-            _ = self.sigterm.recv() => return Break(()),
-            _ = self.sighup.recv() => return Break(()),
+            _ = self.signals.recv() => return Break(()),
             // A paint was skipped inside the frame interval; fire it when
             // the interval lapses.
-            _ = tokio::time::sleep_until(self.next_paint), if self.paint_deferred => {}
+            _ = e_core::rt::sleep_until(self.next_paint), if self.paint_deferred => {}
             _ = self.tick.tick() => app.on_tick(),
         }
         Continue(())
@@ -353,7 +287,7 @@ impl FrameLoop {
                 self.rows = r;
                 self.painter.resize(c, r);
             }
-            TermEvent::Key(k) if k.kind != crossterm::event::KeyEventKind::Release => {
+            TermEvent::Key(k) if k.kind != crate::term::KeyEventKind::Release => {
                 app.on_key(k, cols, rows);
             }
             _ => {}
@@ -378,7 +312,7 @@ impl FrameLoop {
     /// Paint now if the frame interval has lapsed (or the app is quitting),
     /// else defer the paint to the interval's end.
     fn paint_when_due(&mut self, app: &mut App) {
-        let now = tokio::time::Instant::now();
+        let now = e_core::rt::Instant::now();
         if now < self.next_paint && !app.should_quit {
             self.paint_deferred = true;
             return;
@@ -528,7 +462,10 @@ impl App {
             }
             e_core::run::ToolMode::All => {}
         }
-        if e_core::config::trust::status(&self.agent.cwd()).is_none() {
+        // Trust guards a directory on this machine. A workspace the embedder
+        // supplied is not one, so there is nothing to ask about.
+        if options.workspace.is_none() && e_core::config::trust::status(&self.agent.cwd()).is_none()
+        {
             self.trust = Some(TrustStage::new(&self.agent.cwd()));
         }
         // The trust lookup may be the first read of trust.json; drain afterward so
@@ -539,8 +476,12 @@ impl App {
     }
 
     /// With no provider signed in, open sign-in; otherwise say when the
-    /// saved model could not be used.
+    /// saved model could not be used. A model that brings its own key needs
+    /// neither.
     fn check_sign_in(&mut self) {
+        if self.agent.model.api_key.is_some() {
+            return;
+        }
         if e_core::auth::load().is_empty() {
             self.notice(
                 "no provider signed in — use /login to sign in with an account or API key".into(),
@@ -1239,48 +1180,23 @@ pub(super) fn arm(app: &mut App) {
     app.overlay = Some("press ctrl+c again to exit".into());
 }
 
-/// Read terminal events on a thread the frame loop can pause. Each poll
-/// waits at most 100 ms, so a pause takes effect within that; the thread
-/// ends when the receiver is dropped.
-pub(super) fn spawn_input_reader(
-    paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> tokio::sync::mpsc::Receiver<std::io::Result<TermEvent>> {
-    let (tx, rx) = tokio::sync::mpsc::channel(64);
-    std::thread::spawn(move || loop {
-        if paused.load(std::sync::atomic::Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(50));
-            continue;
-        }
-        match crossterm::event::poll(Duration::from_millis(100)) {
-            Ok(true) => {
-                let event = crossterm::event::read();
-                if tx.blocking_send(event).is_err() {
-                    break;
-                }
-            }
-            Ok(false) => {}
-            Err(error) => {
-                let _ = tx.blocking_send(Err(error));
-                break;
-            }
-        }
-    });
-    rx
-}
-
 /// ctrl+g: hand the terminal to `$VISUAL` / `$EDITOR` (or the `editor`
 /// setting) with the draft in a private temp file, then take it back and
 /// load what was saved. The painter is stopped and respawned around the
 /// hand-off so the next frame repaints from a known-blank screen; the input
 /// reader is paused so the editor gets every keystroke.
-pub(super) async fn edit_externally(
-    app: &mut App,
-    painter: &mut Painter,
-    input_paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    cols: u16,
-    rows: u16,
-    anchor: usize,
-) {
+#[cfg(not(target_family = "wasm"))]
+async fn edit_externally(app: &mut App, frame_loop: &mut FrameLoop) {
+    let FrameLoop {
+        terminal,
+        painter,
+        input_paused,
+        cols,
+        rows,
+        anchor,
+        ..
+    } = frame_loop;
+    let (cols, rows, anchor) = (*cols, *rows, *anchor);
     let command = e_core::config::settings::external_editor();
     let Some(program) = command.first().cloned() else {
         app.notice("no editor: set `editor` in this channel's settings.json or $EDITOR".into());
@@ -1293,31 +1209,23 @@ pub(super) async fn edit_externally(
             return;
         }
     };
-    input_paused.store(true, Ordering::SeqCst);
+    input_paused.store(true, std::sync::atomic::Ordering::SeqCst);
     // The reader's poll in flight ends within its 100 ms window.
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    e_core::rt::sleep(Duration::from_millis(150)).await;
     painter.shutdown();
-    let _ = pop_terminal_modes();
-    let _ = terminal::disable_raw_mode();
-    {
-        use std::io::Write as _;
-        let mut out = std::io::stdout();
-        let _ = write!(out, "\x1b[?25h");
-        let _ = out.flush();
-    }
+    terminal.suspend();
     let args: Vec<String> = command.iter().skip(1).cloned().collect();
     let edit_path = path.clone();
-    let status = tokio::task::spawn_blocking(move || {
+    let status = e_core::rt::spawn_blocking(move || {
         std::process::Command::new(&program)
             .args(&args)
             .arg(&edit_path)
             .status()
     })
     .await;
-    let _ = terminal::enable_raw_mode();
-    let _ = push_terminal_modes();
+    terminal.resume();
     *painter = Painter::spawn(cols, rows, anchor);
-    input_paused.store(false, Ordering::SeqCst);
+    input_paused.store(false, std::sync::atomic::Ordering::SeqCst);
     match status {
         Ok(Ok(status)) if status.success() => match std::fs::read_to_string(&path) {
             Ok(text) => {
@@ -1336,6 +1244,7 @@ pub(super) async fn edit_externally(
 }
 
 /// Write the draft to a fresh private temp file for the external editor.
+#[cfg(not(target_family = "wasm"))]
 /// An unguessable name and create_new: a pre-placed symlink in the shared
 /// temp directory is refused rather than followed.
 fn stage_draft(draft: &str) -> std::io::Result<std::path::PathBuf> {
@@ -1355,20 +1264,4 @@ fn stage_draft(draft: &str) -> std::io::Result<std::path::PathBuf> {
         .open(&path)
         .and_then(|mut f| std::io::Write::write_all(&mut f, draft.as_bytes()))?;
     Ok(path)
-}
-
-/// Restores every terminal mode the TUI enables — keyboard enhancement
-/// flags, bracketed paste, raw mode, cursor visibility — on every exit
-/// path, `?` returns and unwinds included. Popping a mode that never got
-/// enabled is harmless; leaving one enabled corrupts the user's shell.
-struct TerminalGuard;
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = pop_terminal_modes();
-        let _ = terminal::disable_raw_mode();
-        use std::io::Write as _;
-        let mut out = std::io::stdout();
-        let _ = write!(out, "\r\n\x1b[?25h");
-        let _ = out.flush();
-    }
 }

@@ -25,7 +25,10 @@ pub mod app;
 pub mod content;
 pub mod paint;
 pub mod surfaces;
+pub mod term;
 
 pub use content::{composer, history, keybindings, layout, markdown, statusline, transcript};
-pub use paint::{background, highlight, render, screen, theme};
+#[cfg(not(target_family = "wasm"))]
+pub use paint::background;
+pub use paint::{highlight, render, screen, theme};
 pub use surfaces::{authpanel, menu, pane, panel, settingspanel, trustpanel};

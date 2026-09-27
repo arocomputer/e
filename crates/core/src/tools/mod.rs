@@ -14,6 +14,9 @@ pub mod diffview;
 mod edit;
 mod fs;
 mod results;
+pub mod workspace;
+
+pub use workspace::{Shell, ShellOutput, Workspace};
 
 /// The clipboard reader terminates its helpers the same way the bash tool
 /// does: the whole process group, so descendants holding a pipe die too.
@@ -21,14 +24,85 @@ pub use bash::kill_group;
 
 /// Mutable tool state owned by one agent. File observations and background
 /// handles must not leak between independent conversations in one process.
-#[derive(Default)]
 pub struct ToolRuntime {
-    seen: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::time::SystemTime, u64)>>,
+    /// Where the file tools read and write.
+    workspace: std::sync::Arc<dyn Workspace>,
+    /// Where `bash` runs when there are no local processes.
+    shell: Option<std::sync::Arc<dyn Shell>>,
+    seen: std::sync::Mutex<std::collections::HashMap<PathBuf, (workspace::Stamp, u64)>>,
     background: std::sync::Arc<bash::BackgroundRegistry>,
     /// Full tool outputs the model saw truncated, for `read_result`.
     results: std::sync::Mutex<ResultStore>,
     /// What write and edit replaced, newest last, for `/undo`.
     changes: std::sync::Mutex<Vec<Change>>,
+}
+
+impl Default for ToolRuntime {
+    fn default() -> Self {
+        Self::with_workspace(std::sync::Arc::new(workspace::Disk))
+    }
+}
+
+impl ToolRuntime {
+    /// Fresh tool state over `workspace`.
+    pub fn with_workspace(workspace: std::sync::Arc<dyn Workspace>) -> Self {
+        ToolRuntime {
+            workspace,
+            shell: None,
+            seen: Default::default(),
+            background: Default::default(),
+            results: Default::default(),
+            changes: Default::default(),
+        }
+    }
+
+    /// Run `bash` through `shell` instead of local processes.
+    pub fn with_shell(mut self, shell: Option<std::sync::Arc<dyn Shell>>) -> Self {
+        self.shell = shell;
+        self
+    }
+
+    /// Fresh tool state over the same workspace and shell, for a new
+    /// conversation.
+    pub fn renewed(&self) -> Self {
+        Self::with_workspace(self.workspace.clone()).with_shell(self.shell.clone())
+    }
+
+    /// The embedding's shell, when `bash` must not start local processes.
+    pub fn shell(&self) -> Option<&std::sync::Arc<dyn Shell>> {
+        self.shell.as_ref()
+    }
+
+    /// Run a `bash` call through the embedding's shell.
+    pub async fn run_hosted_bash<F>(
+        &self,
+        shell: &dyn Shell,
+        arguments: &str,
+        cwd: &Path,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_output: F,
+    ) -> ToolOutput
+    where
+        F: FnMut(OutputStream, &str),
+    {
+        let args: Value = match serde_json::from_str(arguments) {
+            Ok(value) => value,
+            Err(e) => {
+                return ToolOutput {
+                    content: format!("tool arguments were not valid JSON: {e}"),
+                    outcome: ToolOutcome::Failed,
+                    summary: "bad arguments".into(),
+                    display: None,
+                }
+            }
+        };
+        bash::run_hosted(&args, cwd, self, shell, cancel, on_output).await
+    }
+
+    /// Where this agent's file tools read and write.
+    pub fn workspace(&self) -> &std::sync::Arc<dyn Workspace> {
+        &self.workspace
+    }
 }
 
 /// One reversible file change: the bytes the path held before a write or
@@ -49,9 +123,9 @@ impl ToolRuntime {
     /// the write succeeded, so a failed tool leaves nothing to undo.
     /// Oversized files are skipped rather than held in memory.
     pub(crate) fn snapshot_change(&self, path: &Path, label: String) -> Option<Change> {
-        let before = match std::fs::metadata(path) {
-            Ok(meta) if meta.len() > UNDO_MAX_BYTES => return None,
-            Ok(_) => std::fs::read(path).ok(),
+        let before = match self.workspace.metadata(path) {
+            Ok(meta) if meta.len > UNDO_MAX_BYTES => return None,
+            Ok(_) => self.workspace.read(path).ok(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => return None,
         };
@@ -82,8 +156,8 @@ impl ToolRuntime {
             }
         };
         let result = match &change.before {
-            Some(bytes) => staged_write(&change.path, bytes),
-            None => match std::fs::remove_file(&change.path) {
+            Some(bytes) => self.workspace.write(&change.path, bytes),
+            None => match self.workspace.remove_file(&change.path) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 other => other,
             },
@@ -170,9 +244,19 @@ impl ToolRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn default_runtime() -> &'static ToolRuntime {
     static RUNTIME: std::sync::OnceLock<ToolRuntime> = std::sync::OnceLock::new();
     RUNTIME.get_or_init(ToolRuntime::default)
+}
+
+/// A browser shell is not `Sync`, so the one thread keeps its own runtime.
+#[cfg(target_family = "wasm")]
+fn default_runtime() -> &'static ToolRuntime {
+    thread_local! {
+        static RUNTIME: &'static ToolRuntime = Box::leak(Box::default());
+    }
+    RUNTIME.with(|runtime| *runtime)
 }
 
 /// Terminal state of one tool execution.
@@ -626,7 +710,7 @@ fn staged_replace(
     if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         path.canonicalize()?;
     }
-    let target = stable_path_key(path);
+    let target = stable_path_key(&workspace::Disk, path);
     let mut existing = match std::fs::OpenOptions::new().write(true).open(&target) {
         Ok(file) => Some(file),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -775,11 +859,11 @@ impl Drop for PathWriteGuard {
     }
 }
 
-fn fs_write_lock(path: &Path) -> PathWriteGuard {
+fn fs_write_lock(workspace: &dyn Workspace, path: &Path) -> PathWriteGuard {
     // Canonicalize the deepest existing ancestor, then append the normalized
     // missing tail. This gives a not-yet-created file the same key through
     // `new`, `./new`, `dir/../new`, and a symlinked parent.
-    let key = stable_path_key(path);
+    let key = stable_path_key(workspace, path);
     let mut held = FS_WRITE_HELD
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -796,8 +880,13 @@ fn fs_write_lock(path: &Path) -> PathWriteGuard {
 /// block `read_to_string` forever with Esc inert (issue: a `read` on a
 /// writerless named pipe hangs the turn). Missing files pass — the caller's
 /// own open reports the real error.
-fn require_regular_file(path: &Path, tool: &str, shown: &str) -> Result<(), ToolOutput> {
-    match std::fs::metadata(path) {
+fn require_regular_file(
+    workspace: &dyn Workspace,
+    path: &Path,
+    tool: &str,
+    shown: &str,
+) -> Result<(), ToolOutput> {
+    match workspace.metadata(path) {
         Ok(meta) if !meta.is_file() => Err(ToolOutput {
             content: format!("{tool} {shown}: not a regular file"),
             outcome: ToolOutcome::Failed,
@@ -809,20 +898,16 @@ fn require_regular_file(path: &Path, tool: &str, shown: &str) -> Result<(), Tool
 }
 
 /// Metadata paired with a successful read or mutation in this tool runtime.
-fn file_stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some((meta.modified().ok()?, meta.len()))
+fn file_stamp(workspace: &dyn Workspace, path: &Path) -> Option<(workspace::Stamp, u64)> {
+    let meta = workspace.metadata(path).ok()?;
+    Some((meta.stamp?, meta.len))
 }
 
-fn freshness_key(path: &Path) -> PathBuf {
-    stable_path_key(path)
-}
-
-pub(crate) fn stable_path_key(path: &Path) -> PathBuf {
+pub(crate) fn stable_path_key(workspace: &dyn Workspace, path: &Path) -> PathBuf {
     let mut cursor = path;
     let mut tail = Vec::new();
     loop {
-        if let Ok(mut existing) = cursor.canonicalize() {
+        if let Ok(mut existing) = workspace.canonicalize(cursor) {
             for part in tail.iter().rev() {
                 existing.push(part);
             }
@@ -841,15 +926,16 @@ pub(crate) fn stable_path_key(path: &Path) -> PathBuf {
 
 /// Record the file's current on-disk state as the one e has seen.
 fn note_seen(state: &ToolRuntime, path: &Path) {
-    let Some(stamp) = file_stamp(path) else {
+    let Some(stamp) = file_stamp(&*state.workspace, path) else {
         return;
     };
     note_seen_stamp(state, path, stamp);
 }
 
-fn note_seen_stamp(state: &ToolRuntime, path: &Path, stamp: (std::time::SystemTime, u64)) {
+fn note_seen_stamp(state: &ToolRuntime, path: &Path, stamp: (workspace::Stamp, u64)) {
+    let key = stable_path_key(&*state.workspace, path);
     let mut seen = state.seen.lock().unwrap_or_else(|p| p.into_inner());
-    seen.insert(freshness_key(path), stamp);
+    seen.insert(key, stamp);
 }
 
 /// Fail when a recorded file changed on disk since e last saw it. A file
@@ -862,19 +948,20 @@ fn check_fresh(
     tool: &str,
     shown: &str,
 ) -> Result<(), ToolOutput> {
+    let key = stable_path_key(&*state.workspace, path);
     let recorded = {
         let seen = state.seen.lock().unwrap_or_else(|p| p.into_inner());
-        seen.get(&freshness_key(path)).copied()
+        seen.get(&key).copied()
     };
     let Some(recorded) = recorded else {
         return Ok(());
     };
-    match std::fs::metadata(path) {
+    match state.workspace.metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Ok(meta)
             if meta
-                .modified()
-                .is_ok_and(|modified| (modified, meta.len()) == recorded) =>
+                .stamp
+                .is_some_and(|stamp| (stamp, meta.len) == recorded) =>
         {
             return Ok(());
         }
@@ -896,10 +983,14 @@ fn check_fresh(
 /// to stop early (a result cap); the walk then unwinds immediately.
 /// The one traversal for any file-scanning tool — a second walker with its
 /// own skip rules would make "no matches" mean different things per tool.
-fn walk_files(root: &Path, visit: &mut dyn FnMut(&Path) -> bool) -> bool {
+fn walk_files(
+    workspace: &dyn Workspace,
+    root: &Path,
+    visit: &mut dyn FnMut(&Path) -> bool,
+) -> bool {
     const SKIP: &[&str] = &[".git", "target", "node_modules", "dist", ".cache"];
-    let entries = match std::fs::read_dir(root) {
-        Ok(e) => e.flatten().map(|e| e.path()).collect::<Vec<_>>(),
+    let entries = match workspace.read_dir(root) {
+        Ok(entries) => entries,
         Err(_) => return true,
     };
     for path in entries {
@@ -912,14 +1003,14 @@ fn walk_files(root: &Path, visit: &mut dyn FnMut(&Path) -> bool) -> bool {
         }
         // Never follow symlinks: a link cycle (`ln -s . loop`) would recurse
         // forever, and a link out of the tree would silently widen the walk.
-        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+        let Ok(meta) = workspace.symlink_metadata(&path) else {
             continue;
         };
-        if meta.file_type().is_symlink() {
+        if meta.kind == workspace::Kind::Symlink {
             continue;
         }
         if meta.is_dir() {
-            if !walk_files(&path, visit) {
+            if !walk_files(workspace, &path, visit) {
                 return false;
             }
         } else if meta.is_file() && !visit(&path) {
@@ -1107,14 +1198,23 @@ mod tests {
         let real = root.join("real");
         std::fs::create_dir_all(real.join("child")).unwrap();
 
-        let expected = stable_path_key(&real.join("new.txt"));
-        assert_eq!(expected, stable_path_key(&real.join("./new.txt")));
-        assert_eq!(expected, stable_path_key(&real.join("child/../new.txt")));
+        let expected = stable_path_key(&super::workspace::Disk, &real.join("new.txt"));
+        assert_eq!(
+            expected,
+            stable_path_key(&super::workspace::Disk, &real.join("./new.txt"))
+        );
+        assert_eq!(
+            expected,
+            stable_path_key(&super::workspace::Disk, &real.join("child/../new.txt"))
+        );
 
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&real, root.join("alias")).unwrap();
-            assert_eq!(expected, stable_path_key(&root.join("alias/new.txt")));
+            assert_eq!(
+                expected,
+                stable_path_key(&super::workspace::Disk, &root.join("alias/new.txt"))
+            );
         }
         let _ = std::fs::remove_dir_all(root);
     }

@@ -46,13 +46,7 @@ fn a_pane_opens_beside_the_conversation_and_esc_restores_the_screen() {
     let workspace = home.dir.join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let workspace = workspace.canonicalize().unwrap();
-    home.write(
-        "trust.json",
-        serde_json::to_vec(&serde_json::json!({
-            (workspace.to_str().unwrap()): {"trusted": true}
-        }))
-        .unwrap(),
-    );
+    e::core::config::trust::set(&workspace, true).unwrap();
 
     let capture = home.dir.join("pane.raw");
     // Open the pane, then Esc twice: back to the first section, then close.

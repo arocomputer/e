@@ -1,12 +1,12 @@
 //! The non-destructive store: writes preserve unknown keys, quarantine
 //! corrupt files, and never wipe on a parse error.
 
+use crate::rt::{SystemTime, UNIX_EPOCH};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
@@ -71,7 +71,15 @@ pub fn read_object(path: &Path) -> io::Result<Map<String, Value>> {
             Ok(_) => quarantine(path, "expected a JSON object"),
             Err(error) => quarantine(path, &error.to_string()),
         },
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
+        // No file, or a platform without files (the browser build).
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::Unsupported
+            ) =>
+        {
+            Ok(Map::new())
+        }
         Err(e) => Err(e),
     }
 }
@@ -152,6 +160,7 @@ fn update_inner<F: FnOnce(&mut Map<String, Value>)>(
     write_atomic(path, &text, mode)
 }
 
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn write_atomic(path: &Path, contents: &str, mode: u32) -> io::Result<()> {
     // Unique per attempt: stale files from a killed writer must never be
     // reused. The process lock prevents live writers from racing, while

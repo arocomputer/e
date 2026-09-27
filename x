@@ -124,6 +124,9 @@ case "$command" in
     ;;
   lint)
     cargo clippy --workspace --all-targets "$@" -- -D warnings
+    # The core and the terminal also build for the browser (crates/web);
+    # code behind cfg(target_family = "wasm") is linted there.
+    cargo clippy --locked --target wasm32-unknown-unknown -p e-core -p e-tui -- -D warnings
     ;;
   bench)
     [ "$#" -eq 0 ] || usage

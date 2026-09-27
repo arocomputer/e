@@ -144,7 +144,7 @@ where
 
     /// Read one event before the public boundary attaches response metadata.
     async fn next_payload(&mut self) -> Result<String, ProviderError> {
-        let deadline = tokio::time::Instant::now() + self.event_timeout;
+        let deadline = crate::rt::Instant::now() + self.event_timeout;
         loop {
             if let Some(payload) = self.queue.pop_front() {
                 return Ok(payload);
@@ -154,7 +154,7 @@ where
                     "provider sent an SSE event larger than {MAX_SSE_EVENT_BYTES} bytes"
                 )));
             }
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.saturating_duration_since(crate::rt::Instant::now());
             if remaining.is_zero() {
                 return Err(ProviderError::stalled(
                     "stream stalled before completing an SSE event",

@@ -17,10 +17,9 @@ of the session document.
   bottom of the terminal, leaving blank space above it. Changes apply immediately
   and persist in `~/.e/settings.json` as `"tui_mode": "inline"` or
   `"tui_mode": "fullscreen"`. Missing or invalid values use `inline`.
-  Manual file edits apply with `/reload`. The older
-  `"composer_position": "bottom"` preference selects Fullscreen until a TUI mode
-   is saved. Inline mode uses the normal screen at the tail. Fullscreen uses
-   the alternate screen with a fixed-height transcript viewport and composer.
+  Manual file edits apply with `/reload`. Inline mode uses the normal screen at
+  the tail. Fullscreen uses the alternate screen with a fixed-height transcript
+  viewport and composer.
 - Wheel and page navigation retain a reading offset independently of the
   composer. Inline mode temporarily uses the alternate screen while paused.
   New output does not move that offset. End or scrolling to the bottom resumes

@@ -921,11 +921,11 @@ mod tests {
         let small = line_of(16 * 1024);
         let large = line_of(64 * 1024);
 
-        let start = std::time::Instant::now();
+        let start = e_core::rt::Instant::now();
         let out_small = highlight_line(&t, "rust", &small);
         let small_elapsed = start.elapsed();
 
-        let start = std::time::Instant::now();
+        let start = e_core::rt::Instant::now();
         let out_large = highlight_line(&t, "rust", &large);
         let large_elapsed = start.elapsed();
 

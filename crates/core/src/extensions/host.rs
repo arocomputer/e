@@ -18,7 +18,6 @@ use transport::spawn;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -132,7 +131,7 @@ struct Link {
     /// Requests awaiting a response, keyed by wire id.
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
     progress: Mutex<HashMap<u64, mpsc::Sender<ToolProgress>>>,
-    child: tokio::sync::Mutex<Option<tokio::process::Child>>,
+    child: tokio::sync::Mutex<Option<transport::Child>>,
     /// Manifest notice and unexpected-exit flag, coordinated across handshake
     /// and pipe tasks. Pre-initialize failures are reported by `start`.
     exit_notice: Mutex<(Option<String>, bool)>,
@@ -192,7 +191,7 @@ impl Link {
         let mut slot = self.child.lock().await;
         if let Some(child) = slot.as_mut() {
             let _ = child.start_kill();
-            let _ = tokio::time::timeout(REAP_TIMEOUT, child.wait()).await;
+            let _ = crate::rt::timeout(REAP_TIMEOUT, child.wait()).await;
             *slot = None;
         }
     }
@@ -228,10 +227,8 @@ impl Drop for StartupGuard {
                 .iter()
             {
                 link.kill_now();
-                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                    let link = link.clone();
-                    runtime.spawn(async move { link.reap().await });
-                }
+                let link = link.clone();
+                crate::rt::spawn_detached(async move { link.reap().await });
             }
         }
     }
@@ -962,7 +959,7 @@ impl ExtensionHost {
             ext.link.retire();
             let _ = ext.writer.try_send(line.clone());
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        crate::rt::sleep(Duration::from_millis(150)).await;
         futures::future::join_all(self.extensions.iter().map(|ext| ext.link.reap())).await;
     }
 
@@ -1018,7 +1015,7 @@ impl ExtensionHost {
         // The whole exchange shares one budget — including the enqueue: an
         // extension that stops reading stdin fills the pipe and the channel,
         // and an unbounded send here would hang past every timeout.
-        match tokio::time::timeout(timeout, async {
+        match crate::rt::timeout(timeout, async {
             if ext.writer.send(line).await.is_err() {
                 return Err("extension exited".to_string());
             }

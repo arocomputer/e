@@ -295,6 +295,7 @@ mod tests {
             supports_tools: true,
             image_input: false,
             pricing: None,
+            api_key: None,
         };
         let mut model = seed(Api::Anthropic);
         apply(

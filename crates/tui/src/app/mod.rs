@@ -8,17 +8,11 @@ mod input;
 mod runtime;
 pub use runtime::{run, Requests, RunOptions};
 
-use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-};
-use crossterm::{execute, terminal};
-use std::io::Write;
-use std::time::{Duration, Instant};
+use crate::term::{Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
+use e_core::rt::Instant;
+use std::time::Duration;
 
 use crate::authpanel::{self, AuthStage};
-use crate::background::stdout_is_tty;
 use crate::composer::{Editor, EditorResult, Key};
 use crate::menu::{
     Menu, MenuItem, MenuKind, HINT_MODELS, HINT_SCOPED, HINT_SESSIONS, HINT_SKILLS, HINT_USE,
@@ -222,7 +216,7 @@ impl PendingInputVerdicts {
 struct ActiveLogin {
     flow_id: u64,
     cancellation: e_core::auth::login::LoginCancellation,
-    task: tokio::task::JoinHandle<()>,
+    task: e_core::rt::JoinHandle<()>,
     wait_for_callback: bool,
 }
 
@@ -600,19 +594,35 @@ impl App {
         let results = self.results.clone();
         let cwd = self.agent.cwd();
         let epoch = self.session_epoch;
+        // An embedding's shell (the browser's) runs `!` commands as it runs
+        // the bash tool's; otherwise they are local processes.
+        let tools = self.agent.tools();
         e_core::config::home::spawn(async move {
-            let shell_cmd = cmd.clone();
-            let home = e_core::config::home::home();
-            let output = tokio::task::spawn_blocking(move || {
-                e_core::config::home::with_home(home, || e_core::tools::run_shell(&shell_cmd, &cwd))
-            })
-            .await
-            .unwrap_or(e_core::tools::ToolOutput {
-                content: "shell command panicked".into(),
-                outcome: e_core::tools::ToolOutcome::Failed,
-                summary: "error".into(),
-                display: None,
-            });
+            let output = match tools.shell() {
+                Some(shell) => {
+                    let arguments = serde_json::json!({ "command": cmd }).to_string();
+                    let cancel = std::sync::atomic::AtomicBool::new(false);
+                    tools
+                        .run_hosted_bash(&**shell, &arguments, &cwd, &cancel, |_, _| {})
+                        .await
+                }
+                None => {
+                    let shell_cmd = cmd.clone();
+                    let home = e_core::config::home::home();
+                    e_core::rt::spawn_blocking(move || {
+                        e_core::config::home::with_home(home, || {
+                            e_core::tools::run_shell(&shell_cmd, &cwd)
+                        })
+                    })
+                    .await
+                    .unwrap_or(e_core::tools::ToolOutput {
+                        content: "shell command panicked".into(),
+                        outcome: e_core::tools::ToolOutcome::Failed,
+                        summary: "error".into(),
+                        display: None,
+                    })
+                }
+            };
             let _ = results.send(AppJob::Shell { cmd, output, epoch }).await;
         });
     }
@@ -816,8 +826,7 @@ impl App {
                 // the sequence.
                 use base64::Engine;
                 let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-                let ok = write!(std::io::stdout(), "\x1b]52;c;{encoded}\x07").is_ok();
-                let _ = std::io::stdout().flush();
+                let ok = crate::term::write(format!("\x1b]52;c;{encoded}\x07").as_bytes()).is_ok();
                 self.notice(if ok {
                     "copied the last reply".into()
                 } else {
@@ -846,7 +855,8 @@ impl App {
     /// Call after sign-in, model switches, effort cycles, settings changes,
     /// and /reload.
     fn refresh_status_cache(&mut self) {
-        self.signed_in = e_core::auth::signed_in(&e_core::auth::load(), &self.agent.model.provider);
+        self.signed_in = self.agent.model.api_key.is_some()
+            || e_core::auth::signed_in(&e_core::auth::load(), &self.agent.model.provider);
         self.status_effort = self.agent.effort();
         self.bottom_pinned = e_core::config::settings::tui_mode() == "fullscreen";
         self.show_thinking = e_core::config::settings::show_thinking();
@@ -938,13 +948,11 @@ fn tab_title(path: &str, session_name: Option<&str>) -> String {
 fn set_tab_title(title: &str) {
     // Escape codes into a pipe are garbage in the pipe; titles only make
     // sense on a terminal.
-    if !stdout_is_tty() {
+    if !crate::term::is_terminal() {
         return;
     }
     let title = e_core::tools::sanitize_display(title).replace('\n', " ");
-    let mut out = std::io::stdout();
-    let _ = write!(out, "\x1b]0;{title}\x07");
-    let _ = out.flush();
+    let _ = crate::term::write(format!("\x1b]0;{title}\x07").as_bytes());
 }
 
 /// The tab title's path: a short showcase, never the full absolute path.
@@ -1009,8 +1017,8 @@ fn collapse_home(path: &std::path::Path) -> String {
 }
 
 fn ago(ms: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = e_core::rt::SystemTime::now()
+        .duration_since(e_core::rt::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let secs = now.saturating_sub(ms) / 1000;
@@ -1169,6 +1177,7 @@ fn stage_initial_prompt(
 /// Replace this process with the current e binary, optionally in a new cwd.
 /// Extensions may choose arguments and environment, but never an arbitrary
 /// executable.
+#[cfg(not(target_family = "wasm"))]
 pub fn relaunch_self(
     cwd: &str,
     args: &[String],

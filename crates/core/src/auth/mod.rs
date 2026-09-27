@@ -49,13 +49,6 @@ pub fn load() -> AuthFile {
             out.insert(provider, cred);
         }
     }
-    // The Zen provider was once id'd `opencode`; honor old auth.json keys
-    // under the new name. Read-only — the file stays as the user left it.
-    if !out.contains_key("opencode-zen") {
-        if let Some(cred) = out.remove("opencode") {
-            out.insert("opencode-zen".into(), cred);
-        }
-    }
     for provider in crate::providers::registry::all() {
         if out.contains_key(&provider.name) {
             continue;
@@ -94,9 +87,31 @@ pub fn set(provider: &str, credential: Credential) -> io::Result<()> {
     })
 }
 
+/// An API key an embedder supplied with a model, used instead of any stored
+/// credential. Never printed: `Debug` shows only that one is present.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiKey(String);
+
+impl ApiKey {
+    pub fn new(key: impl Into<String>) -> Self {
+        ApiKey(key.into())
+    }
+
+    /// The key itself, for the request that carries it.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ApiKey(…)")
+    }
+}
+
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    crate::rt::SystemTime::now()
+        .duration_since(crate::rt::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }

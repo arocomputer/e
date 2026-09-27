@@ -34,18 +34,10 @@ fn key(cwd: &Path) -> String {
     format!("sha256-{hex}")
 }
 
-/// Old releases used the visible path as the object key. Preserve decisions
-/// for valid UTF-8 paths, but never consult a lossy key for invalid bytes:
-/// two distinct directories can collapse to the same replacement character.
-fn legacy_key(cwd: &Path) -> Option<&str> {
-    cwd.as_os_str().to_str()
-}
-
 /// The recorded decision for exactly this directory, if any.
 fn decision(object: &serde_json::Map<String, serde_json::Value>, cwd: &Path) -> Option<bool> {
     object
         .get(&key(cwd))
-        .or_else(|| legacy_key(cwd).and_then(|legacy| object.get(legacy)))
         .and_then(|v| v.get("trusted"))
         .and_then(|v| v.as_bool())
 }

@@ -6,84 +6,88 @@ order: 1
 
 # Getting started
 
-e is the coding agent you can put anywhere. It runs on macOS and glibc Linux,
-on ARM64 and x86-64, and works in any directory you trust.
+e is a coding agent that runs in your terminal. It reads your code, edits
+files, and runs commands with the model you choose. This guide takes you from
+install to a first finished task.
 
 ## Install
 
+e is not published yet, so you build it from source. You need Rust 1.98 or
+newer, from [rustup](https://rustup.rs).
+
 ```sh
-git clone https://github.com/arocomputer/e.git
-cd e
-cargo build
+cargo install --locked --git https://github.com/arocomputer/e e
 ```
 
-e is in development, with public packages paused. This requires the Rust
-toolchain and builds `target/debug/e`. [Install](install.md) covers local
-builds and PR previews.
+This puts `e` in `~/.cargo/bin`, which rustup adds to your `PATH`. Check it
+with `e --version`. [Install](install.md) covers updating, where e keeps its
+files, and running a checkout you are editing.
 
 ## Open a project
 
-From the source checkout, start e in the project you want it to work in:
+Start e in the directory you want it to work in:
 
 ```sh
-./x dev /path/to/your-project
+cd /path/to/project
+e
 ```
 
-On the first visit, e asks whether you trust the directory. Trust lets e load
-the repository's own instructions and resources. Trust is not a sandbox.
+The first time, e asks whether you trust the directory. Trusting it lets e
+load the project's own instructions and resources;
+[Instructions](../customize/instructions.md) lists what that includes. Trust
+is not a sandbox.
 
 > [!WARNING]
-> Tools run with your user's permissions, and by default e shows no permission
-> prompt. Use a container, VM, or OS sandbox when the work needs containment.
+> Tools run with your user's permissions, and e does not ask before running
+> them. Use a container, VM, or OS sandbox when the work needs containment.
 > [Sandboxing](../usage/sandboxing.md) covers the options.
 
-A session with no terminal cannot answer the trust panel. Record the decision
-first with `e trust [dir]`. [Instructions](../customize/instructions.md)
-explains what trust loads.
+Where nobody can answer the trust prompt, as in a script or CI, record the
+decision first with `e trust /path/to/project`.
 
 ## Connect a model
 
-Run `/login` and follow the provider's sign-in or API-key flow. Then open
-`/models` and pick a model.
+Inside e, run `/login` and follow your provider's sign-in or API-key flow.
+Then pick a model with `/models`.
 
-- `/login <provider>` connects one provider by name.
-- For scripts, a provider's usual environment variable works, such as
+- `/login <provider>` goes straight to one provider.
+- In scripts, set the provider's usual environment variable instead, such as
   `ANTHROPIC_API_KEY`.
 
-[Models & providers](../customize/models.md) covers local servers,
-`~/.e/models.json`, context windows, and pricing.
+[Models & providers](../customize/models.md) covers local models, custom
+providers, context windows, and pricing.
 
 ## Run your first task
 
-Type a question or describe a change, then press enter. e reads files, edits
-code, and runs shell commands to answer:
+Describe what you want and press enter. e reads files, edits code, and runs
+shell commands to do it:
 
 ```
-Find the authentication entry point.
-Explain how a request reaches the session check.
+Find the authentication entry point and explain how a request reaches the session check.
 ```
 
-For an edit, name the behavior you want and the checks that should pass. Read
-the diff and the test output before you commit.
+For a change, name the behavior you want and the check that should pass, such
+as a test command. Review the diff and the test output before you commit.
 
 | Key | Action |
 | --- | --- |
+| `ctrl+c` | stop the running turn; press twice quickly to quit |
 | `ctrl+o` | open the transcript reader |
-| `esc` | return to the composer |
-| `ctrl+c` | cancel the running turn |
+| `esc` | close the reader |
 
-## Where to go next
+## Next steps
 
-- [Sessions](../usage/sessions.md): resume, branch, compact, and export a conversation.
-- [Settings](../customize/settings.md): `~/.e`, and every preference in it.
-- [Command line](../usage/commands.md): run options, and the commands inside a session.
+- [Sessions](../usage/sessions.md): resume, branch, compact, and export conversations.
+- [Command line](../usage/commands.md): flags, subcommands, and the slash commands inside a session.
+- [Settings](../customize/settings.md): where e keeps its files, and every preference.
 - [Extensions](../extend/extensions.md): add tools, commands, and hooks in any language.
+
+In the terminal, `e docs` lists every guide and `e docs <topic>` prints one.
 
 ## Troubleshooting
 
-| Symptom | What to check |
+| Symptom | Fix |
 | --- | --- |
-| `e: command not found` | Add `~/.local/bin` to `PATH` and open a new terminal. Package managers install into a directory `PATH` already has. |
-| `/models` lists nothing | Run `/login` to connect a provider. For a local model, start its server before you open the picker. |
-| The trust panel keeps returning | The directory is untrusted. Answer the panel, or record the decision with `e trust [dir]`. |
-| You need the full reference | `e docs` lists every topic, and `e docs <topic>` prints one. |
+| `e: command not found` | Add `~/.cargo/bin` to `PATH` and open a new terminal. |
+| `/models` shows no models | Run `/login` first. For a local model, start its server before you open the picker. |
+| The trust prompt keeps coming back | Answer it, or run `e trust` in the project directory. |

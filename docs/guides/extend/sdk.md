@@ -6,20 +6,32 @@ order: 3
 
 # SDK
 
-The SDK is e's coding agent as a Rust library. It lives in `crates/sdk/` and is
-published as `e-sdk`.
+The SDK is e's coding agent as a Rust library, `e-sdk` in `crates/sdk/`.
+Read this guide to run e sessions inside your own Rust program; from another
+language, use `e rpc` instead (see [automation](../usage/automation.md)).
 
-With the SDK you create a session against a working directory, prompt it,
-read the core's ordered event stream, and get a reply. Extension notices
-fill the gaps in the event stream.
+A session runs the same core as the terminal, without a terminal: the
+built-in tools, skills and `AGENTS.md` context, automatic compaction,
+on-disk session logs, and optionally the user's extensions.
 
-The SDK links the same core the terminal frontend drives, without a
-terminal. You get the built-in tools, skills and `AGENTS.md` context,
-automatic compaction, on-disk session logs, and extensions.
+## Add the dependency
+
+`e-sdk` is not published to crates.io yet. Depend on it from the
+repository:
 
 ```sh
-cargo add e-sdk
+cargo add e-sdk --git https://github.com/arocomputer/e
+cargo add tokio --features rt-multi-thread,macros
 ```
+
+Pin a commit with `--rev <sha>` for reproducible builds. The crate needs the
+Rust version the repository's `Cargo.toml` declares (`rust-version`) and a
+Tokio runtime: the core spawns its turn worker and runs tool I/O on the
+blocking pool.
+
+A session uses the models and credentials in e's home, so sign in to a
+provider with `e` and `/login` first, or pass `.home()` a home that has
+them.
 
 ## Quick start
 
@@ -52,176 +64,199 @@ let reply = session.prompt("And the tests?").await?;
 session.close().await;
 ```
 
-The SDK needs a Tokio runtime. The core spawns its turn worker and runs tool
-I/O on the blocking pool.
+`crates/sdk/examples/ask.rs` is a complete program; in a checkout, run it
+with `cargo run -p e-sdk --example ask -- "what does this repository do"`.
 
-## Core types
+## `SessionBuilder`
 
-Three types carry the design.
+`Session::builder()` returns a `SessionBuilder`. Every option has a default.
 
-### `Session`
+| Method | Default | Meaning |
+| --- | --- | --- |
+| `cwd(path)` | the process's working directory | The workspace the tools operate in and whose `AGENTS.md` and skills load. |
+| `home(path)` | `E_HOME`, else the build's home | The configuration home: credentials, models, settings, extensions, and where sessions persist. Scoped to this session; the process environment is untouched, so sessions with different homes coexist. |
+| `model(query)` | the configured default | `provider/id`, a bare id, or a unique substring of an available model. |
+| `effort(level)` | the model's default | One of the model's declared reasoning levels. Local to this process; never saved. |
+| `tools(Tools)` | `Tools::All` | `Tools::All` (built-ins plus extension tools), `Tools::None`, or `Tools::Only(vec![…])` (built-ins only, enforced at execution). |
+| `persist(bool)` | `false` | Write the conversation to a JSONL log under the home's `sessions/`. |
+| `extensions(bool)` | `false` | Start the home's extensions. See [Extensions in the SDK](#extensions-in-the-sdk). |
+| `instructions(text)` | none | Appended to e's system prompt, after the skills catalog and project context. |
+| `resume(path)` | none | Continue a saved session file in place. Implies `persist(true)` and holds the file's lock. |
+| `history(messages)` | empty | Seed the conversation. Ignored with `resume`. With `persist(true)`, the seeds are written to the new session file. |
+| `workspace(Arc<dyn Workspace>)` | the disk | Where the file tools read and write. See [Workspaces and shells](#workspaces-and-shells). |
+| `shell(Arc<dyn Shell>)` | local processes | Where `bash` commands run. |
+| `api_key(key)` | the home's credentials | Authenticates the model with this key instead. `model` may then name any declared model, signed in or not. The key is never written anywhere. |
 
-A `Session` is one conversation. You build it once from a `SessionBuilder`
-and prompt it many times.
+`saved()` lists this workspace's saved sessions in the home, newest first.
+`build().await` starts the session.
 
-The builder sets the working directory, home, model, effort, tools,
-persistence, extensions, host instructions, and resume or seed history.
+## `Session`
 
-Between turns, call `history()`, `set_model()`, `clear()`, or `path()`.
+A `Session` is one conversation, prompted many times.
 
-### `Turn`
+| Method | Meaning |
+| --- | --- |
+| `prompt(p)` | Start a `Turn`. Takes a `&str`, a `String`, or a `Prompt` (`Prompt::new(text).image(img)` or `.image_file(path)?`). |
+| `compact()` | A `Turn` that summarizes older history now; it emits `Compacting` and `Compacted`. |
+| `model()`, `set_model(query)` | The active model as `provider/id`; switch between turns. |
+| `effort()` | The reasoning effort the next request uses. |
+| `history()` | The conversation so far, as `Message` values. |
+| `clear()` | Forget the conversation. |
+| `path()` | The session log's path, once a persisted session has its first message. |
+| `cwd()` | The workspace. |
+| `close().await` | Stop leftover work and shut extensions down. Dropping a session does this on a best-effort basis. |
 
-A `Turn` is one prompt's run. It is lazy, so nothing is sent until you first
+`prompt` borrows the session mutably for the turn's lifetime, so only one
+turn runs at a time.
+
+## `Turn`
+
+A `Turn` is one prompt's run. It is lazy: nothing is sent until you first
 poll it.
 
-- Iterate it for `Event`s, then call `finish()` for the `Reply`.
-- Or `.await` it directly to skip the events.
-- `steer()` adds a message to the running turn. e delivers it before the
-  turn's next provider request.
-- `cancel()` works like pressing Esc.
-- Dropping a running turn also interrupts it.
+- Call `next().await` for each `Event` (it is also a `futures::Stream`),
+  then `finish().await` for the `Reply`.
+- Or `.await` the turn directly to skip the events.
+- `steer(text)` adds a message that e delivers before the turn's next
+  provider request.
+- `cancel()` works like pressing Esc. Dropping a running turn also
+  interrupts it; the session stays usable.
 
-### `Reply`
-
-A `Reply` is what the turn produced. It holds:
-
-- the joined assistant text
-- token usage
-- an optional cost estimate
-- tool counts
-- whether the turn completed or was cancelled
-- any warnings
-
-## Errors
-
-`build()` fails on everything that can be checked up front. It returns an
-`Error` that names what is wrong:
-
-- unavailable model
-- no signed-in provider
-- unsupported effort
-- unknown tool
-- unusable working directory
-- locked or unreadable session file
-
-A turn that ran and failed returns a `TurnError`. Its `reply` holds
-everything the turn produced before it failed. The core's error is not an
-event. It ends the turn, so it arrives as the `TurnError`.
-
-## Rules the types enforce
-
-- **One turn at a time.** `prompt` borrows the session mutably for the
-  turn's lifetime. A second prompt cannot start until the first has finished
-  or been dropped. Send mid-turn input through `Turn::steer`.
-- **Nothing is lost.** The turn reads the core's event channel directly, so
-  an unread event holds the model instead of growing a buffer. A failed
-  turn's partial text, usage, and tool counts come back inside the error.
-- **Nothing touches `~/.e` unless you ask.** Conversations are memory-only
-  unless you set `persist(true)`. Extensions start only with
-  `extensions(true)`. The SDK never writes settings. Effort set at build is
-  local to the process.
-- **Configuration is injected, not inherited.** `home()` scopes every
-  configuration read to that directory without touching the process
-  environment. Sessions with different homes can coexist in one process.
-  Without `home()`, the home is `E_HOME`, then `~/.e`, as for the terminal.
-
-## Events
+### Events
 
 A turn yields events in the order they happen:
 
-- `Text` and `Reasoning` deltas.
-- `ToolCall` when the model asked for a tool, with the raw JSON arguments.
-  Every call in one assistant message is announced before any runs.
-- `ToolStart`.
-- `ToolOutput`, a preview of live command output.
-- `ToolEnd`, with the outcome and the retained content.
-- `Usage` per provider request.
-- `Compacting` and `Compacted` when the context window is checkpointed
-  mid-turn.
-- `Retry`, with the backoff.
-- `Steered` and `Discarded`.
-- `Named` when an extension names the session.
-- `Warning`.
-- `Notice` for extension messages.
+| Event | Meaning |
+| --- | --- |
+| `Text(String)`, `Reasoning(String)` | Reply and visible-reasoning deltas. |
+| `ToolCall { id, name, arguments }` | The model asked for a tool; `arguments` is the raw JSON. Every call in one assistant message is announced before any runs. |
+| `ToolStart { id }` | The call started executing. |
+| `ToolOutput { id, stream, chunk }` | A preview of live command output. A slow reader may miss chunks. |
+| `ToolEnd { id, outcome, summary, content }` | The call finished; `content` is what the model reads. |
+| `Usage(Usage)` | Token counts for one provider request. |
+| `Compacting`, `Compacted { summary, context_tokens }` | History is being, and has been, checkpointed. |
+| `Retry { attempt, limit, delay, reason }` | A retryable provider failure and the backoff before the next attempt. |
+| `Steered(String)`, `Discarded(Vec<String>)` | A steering message was taken up, or never ran because the turn ended first. |
+| `Named(String)` | An extension named the session. |
+| `Warning(String)` | A non-fatal problem, also collected in the reply. |
+| `Notice(String)` | An extension message or startup diagnostic. |
 
-Core events keep their order. e delivers a `Notice` only when no core event
-is waiting. A talkative extension can interleave with model output but never
-delay it.
+The turn reads the core's event channel directly, so an unread event holds
+the model instead of growing a buffer. A `Notice` is delivered only when no
+core event is waiting, so a talkative extension never delays model output.
+Diagnostics from extension startup arrive before the next turn's first
+event.
 
-Diagnostics raised while extensions started come out before the next turn's
-first event.
+### `Reply`
+
+`Reply` holds the joined assistant `text`, summed `usage`, an optional
+`cost_usd` estimate from the model's pricing, `tools` (`calls` and
+`failures`), `stop` (`Stop::Complete` or `Stop::Cancelled`), and
+`warnings`.
+
+## Errors
+
+`build()` checks everything it can up front and returns an `Error`:
+`ModelUnavailable`, `NoProvider`, `KeyWithoutModel` (`api_key` without
+`model`), `Effort` (unsupported level),
+`UnknownTool`, `Cwd` (unusable working directory), or `Session` (a session
+file that cannot be opened, locked, or read). `Prompt::image_file` returns
+`Error::Image`.
+
+A turn that ran and failed returns a `TurnError`. Its `reply` holds
+everything the turn produced before it failed: text, usage, and tool counts.
+A core error is not an event; it ends the turn and arrives as the
+`TurnError`.
 
 ## Sessions on disk
 
-`persist(true)` writes the conversation to a JSONL log under the home's
-`sessions/`. These are the same files `e -r` lists, in the documented
-session format.
+Nothing is written to e's home unless you ask: conversations are
+memory-only without `persist(true)`, and the SDK never writes settings.
+With `persist(true)`, the log is the same JSONL file `e -r` lists, in the
+[session format](../usage/sessions.md).
 
 | API | What it does |
 | --- | --- |
 | `SessionBuilder::saved()` | Lists a workspace's logs. |
-| `resume(path)` | Continues a log in place and holds its lock. |
-| `e_sdk::transcript(path)` | Reads a log without taking ownership. |
-| `history(messages)` | Seeds a session from a transcript. With `persist(true)` the seeds are written to the session file, so a resume replays the whole conversation. |
+| `SessionBuilder::resume(path)` | Continues a log in place and holds its lock. |
+| `e_sdk::transcript(path)` | Reads a log's active conversation without taking ownership. |
+| `SessionBuilder::history(messages)` | Seeds a session, for example from `transcript`. |
 
-That is the whole checkpoint story: a readable file, not opaque bytes.
+## Workspaces and shells
+
+By default the tools work on the disk and `bash` starts local processes, as
+your user. Give a session its own `Workspace` and `Shell` to put them
+somewhere else: an in-memory tree for a test or a preview, a container's
+filesystem and shell, a remote machine. `cwd` then names a directory inside
+that workspace.
+
+```rust
+use std::sync::Arc;
+use e_sdk::{MemoryWorkspace, Session, Workspace};
+
+# async fn demo() -> Result<(), e_sdk::Error> {
+let workspace = Arc::new(MemoryWorkspace::new());
+workspace.create_dir_all("/project".as_ref())?;
+workspace.write("/project/main.rs".as_ref(), b"fn main() {}\n")?;
+let mut session = Session::builder()
+    .cwd("/project")
+    .workspace(workspace.clone())
+    .build()
+    .await?;
+session.prompt("Add a greeting to main.rs").await?;
+println!("{}", workspace.read_to_string("/project/main.rs".as_ref())?);
+# Ok(())
+# }
+```
+
+A `Workspace` implements eight file operations: metadata (following links
+and not), open, write, remove, create directories, list a directory, and
+canonicalize. `MemoryWorkspace` and `DiskWorkspace` are the two built in. A
+`Shell` runs one command in a directory and resolves with its stdout,
+stderr, and exit code; it should see the same files as the workspace. With
+a shell, `bash` refuses background commands, which need a local process to
+track.
+
+Project resources (`AGENTS.md`, skills, prompt templates) are not read from
+a supplied workspace. They load from the disk at `cwd`, and only when you
+trusted that directory. Pass a workspace's own guidance with
+`instructions(text)`.
+
+## Extensions in the SDK
+
+With `extensions(true)`, the session starts the home's
+[extensions](extensions.md) for their tools and hooks. They run in the
+session's `cwd` and are told so at `initialize`, with `ui: false`, so every
+`ui.*` and `session.*` request fails with `no ui`. Startup hooks do not run
+and no flags are parsed, because the host process's command line is not
+e's.
+
+The SDK runs e's tools in the working directory you give it, as your user,
+without a permission prompt, the same safety contract as the terminal,
+unless you give the session a [workspace and shell](#workspaces-and-shells)
+of your own. There are no host-defined in-process tools; write an extension
+instead.
 
 ## Versioning
 
-The SDK versions itself, separately from the e binary.
-
-The crate is named `e-sdk` because bare `e` is taken on crates.io. The
-application crates share the same `aro-` family prefix.
+The SDK versions itself, separately from the e binary. It depends on
+`e-core` alone and pins the exact version it was tested against; the
+core's Rust items are not a stable API (see
+[Compatibility](compatibility.md)).
 
 The SDK follows semantic versioning from its first published release.
 Before 1.0, a release that changes the documented API without a compatible
-path moves the minor version and names the change in the changelog.
+path moves the minor version and names the change in the changelog. When
+you change the core pin, bump the SDK's patch version too, or its minor
+version if the documented API breaks.
 
-The SDK depends on `e-core` alone and pins the exact version it was
-tested against. The core's Rust items are not a stable API. See
-[Compatibility](compatibility.md).
-
-When you change the core pin, bump the SDK's patch version too, or its minor
-version if the documented API breaks. Published crate versions are
-immutable.
-
-## Why a separate package
-
-The SDK is not part of the core and not an extension. It is a frontend over
-the core, like the terminal and `e rpc`, and it never links either of them. It has its own release boundary so that
-stabilizing an API is a deliberate act, not an accident of visibility.
-
-## Building
+## Working on the SDK
 
 ```sh
 cargo build -p e-sdk
 cargo test -p e-sdk
-cargo run -p e-sdk --example ask -- "what does this repository do"
 ```
 
-The package is a member of the root workspace, so `./x check` and `./x test`
-cover it like every other member.
-
-`./x check` also stages the files Cargo packs for both crates and compiles an
-external consumer from the SDK example. That catches a missing packaged file
-or a dependency drift before publication. The check patches in the staged
-application crate, because its version may not be on crates.io yet. The
-release job publishes the application before the SDK.
-
-## What the SDK is not
-
-- **Not an extension.** Extensions are child processes that speak a JSONL
-  protocol to a running e. See [Extensions](extensions.md). The SDK links
-  the core into your program. With `extensions(true)`, it starts the home's
-  extensions for their tools and hooks. They run in the session's `cwd` and
-  are told so at `initialize`. Startup hooks do not run, and no flags are
-  parsed for them, because the host process's command line is not e's.
-- **Not a daemon.** e stays a spawned process. There is no server to run.
-- **Not a tool kernel.** The SDK runs e's tools in the working directory you
-  give it, as your user, without a permission prompt. This is the same
-  safety contract as the terminal. Host-defined in-process tools are not
-  part of the surface. Use an extension instead.
-
-If you integrate from another language, use the JSON output and RPC modes in
-[Automation](../usage/automation.md). They remain the language-agnostic
-surface. The SDK is the in-process Rust alternative.
+The SDK is a workspace member, so `./x check` and `./x test` cover it.
+`./x check` also compiles an external consumer from the packed SDK crate,
+which catches a missing packaged file or dependency drift.

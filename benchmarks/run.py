@@ -193,7 +193,8 @@ def cold_launch():
 
 def make_session_home(i):
     """A home holding one heavy saved session for this workspace — 400 turns
-    of prompt and markdown reply, the tail a unique marker — plus a fake
+    of prompt and markdown reply chained into one branch, the tail a unique
+    marker — plus a fake
     provider sign-in so the boot goes straight to the restored transcript.
     Sessions are keyed by the cwd's sha256 slug; the benchmark spawns e with
     cwd = ROOT."""
@@ -202,12 +203,12 @@ def make_session_home(i):
     sessions = os.path.join(home, "sessions", slug)
     os.makedirs(sessions)
     messages = [json.dumps({
-        "type": "session", "format_version": 1,
+        "type": "session", "format_version": 2,
         "id": "00000000-0000-0000-0000-000000000000",
         "cwd": os.path.realpath(ROOT), "created": 1788949125319, "model": "bench"})]
     for turn in range(400):
         messages.append(json.dumps({
-            "type": "message", "id": f"u{turn}", "parent": None,
+            "type": "message", "id": f"u{turn}", "parent": f"a{turn - 1}" if turn else None,
             "timestamp": 1788949125319 + turn,
             "message": {"role": "user",
                         "content": f"benchmark prompt {turn}: fix the flaky test in module {turn % 12}"}}))
@@ -217,7 +218,7 @@ def make_session_home(i):
             "message": {"role": "assistant",
                         "content": "A **finished** response with some text.\n\n```rust\nfn main() {}\n```"}}))
     messages.append(json.dumps({
-        "type": "message", "id": "tail", "parent": None,
+        "type": "message", "id": "tail", "parent": "a399",
         "timestamp": 1788949125319 + 999,
         "message": {"role": "assistant", "content": "resume-benchmark-tail"}}))
     stamp = int(time.time() * 1000)

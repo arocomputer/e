@@ -47,7 +47,8 @@
  *   paneClosed({pane})     — the user (or another pane) closed yours
  *
  * Asking e — every call returns a promise of the result, rejected with
- * e's error text (for instance "no ui" under `e rpc`):
+ * e's error text (for instance "no ui" from `e -p`, the SDK, or an `e rpc`
+ * client that did not opt in to questions):
  *
  *   ext.ui.notify(message, tone?)          ext.ui.show({title, body, format})
  *   ext.ui.select(title, options)          ext.ui.confirm(title, message?)

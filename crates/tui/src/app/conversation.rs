@@ -1,6 +1,6 @@
 //! Main-screen reading position, independent of the composer and detail reader.
 use super::*;
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crate::term::{MouseEvent, MouseEventKind};
 
 impl App {
     /// Fixed-height views use the alternate screen; inline output keeps native history at the tail.

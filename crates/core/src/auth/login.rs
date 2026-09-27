@@ -63,7 +63,7 @@ impl LoginCancellation {
 /// blocking callback worker to observe its flag and drop the fixed port so a
 /// second login can start immediately.
 pub fn wait_for_callback_release() {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    let deadline = crate::rt::Instant::now() + std::time::Duration::from_millis(500);
     loop {
         match TcpListener::bind(CALLBACK_ADDR) {
             Ok(listener) => {
@@ -72,7 +72,7 @@ pub fn wait_for_callback_release() {
             }
             Err(error)
                 if error.kind() == std::io::ErrorKind::AddrInUse
-                    && std::time::Instant::now() < deadline =>
+                    && crate::rt::Instant::now() < deadline =>
             {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
@@ -89,7 +89,7 @@ fn browser_opener() -> &'static str {
     "open"
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 fn browser_opener() -> &'static str {
     "xdg-open"
 }
@@ -213,7 +213,7 @@ async fn codex_login_inner(
     let expected = state.clone();
     let cancellation = cancellation.clone();
     let code =
-        tokio::task::spawn_blocking(move || wait_for_code(&listener, &expected, &cancellation))
+        crate::rt::spawn_blocking(move || wait_for_code(&listener, &expected, &cancellation))
             .await
             .map_err(|error| error.to_string())??;
 
@@ -268,7 +268,7 @@ fn callback_path(
     cancellation: &LoginCancellation,
 ) -> Option<String> {
     const MAX_HEADER_BYTES: usize = 16 * 1024;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = crate::rt::Instant::now() + std::time::Duration::from_secs(2);
     stream.set_nonblocking(false).ok()?;
     stream
         .set_read_timeout(Some(std::time::Duration::from_millis(50)))
@@ -278,7 +278,7 @@ fn callback_path(
         .ok()?;
     let mut header = Vec::new();
     while header.len() < MAX_HEADER_BYTES
-        && std::time::Instant::now() < deadline
+        && crate::rt::Instant::now() < deadline
         && !cancellation.is_cancelled()
     {
         let mut chunk = [0u8; 1024];
@@ -376,7 +376,7 @@ fn wait_for_code(
 }
 
 /// The one e surface a browser renders: the split-arc mark, a title, a dim
-/// line — aro.computer/e in page form. The palette (warm paper and ink, the
+/// line — e.aro.computer in page form. The palette (warm paper and ink, the
 /// green and red status inks), the mono type, and the heading's weight and
 /// tracking are the website's values; keep them aligned with its `site.css`
 /// and `logo.tsx`. The page is self-contained — no font or asset is fetched,
@@ -521,7 +521,7 @@ async fn xai_login_inner(
         .and_then(|v| v.as_u64())
         .filter(|i| *i > 0)
         .unwrap_or(5);
-    let deadline = std::time::Instant::now()
+    let deadline = crate::rt::Instant::now()
         + std::time::Duration::from_secs(
             device
                 .get("expires_in")
@@ -538,8 +538,8 @@ async fn xai_login_inner(
         if cancellation.is_cancelled() {
             return Err("login cancelled".into());
         }
-        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-        if std::time::Instant::now() > deadline {
+        crate::rt::sleep(std::time::Duration::from_secs(interval)).await;
+        if crate::rt::Instant::now() > deadline {
             return Err("xAI device code expired".into());
         }
         let response = crate::providers::http()
@@ -829,7 +829,7 @@ mod tests {
             let _held = lock.lock().await;
             assert!(std::sync::Arc::ptr_eq(&lock, &super::refresh_lock("mock")));
             assert!(super::refresh_lock("other").try_lock().is_ok());
-            let token = tokio::time::timeout(
+            let token = crate::rt::timeout(
                 std::time::Duration::from_millis(100),
                 super::codex_access("mock"),
             )
@@ -881,7 +881,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let start = std::time::Instant::now();
+            let start = crate::rt::Instant::now();
             assert!(
                 super::callback_path(&mut stream, &super::LoginCancellation::default()).is_none()
             );

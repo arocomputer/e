@@ -33,16 +33,17 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
         return err("edit: missing old_string or new_string".into(), "");
     };
     let full = resolve(cwd, path);
-    if let Err(output) = super::require_regular_file(&full, "edit", path) {
+    let workspace = &**state.workspace();
+    if let Err(output) = super::require_regular_file(workspace, &full, "edit", path) {
         return output;
     }
     // Hold this path's write lock across read-modify-write so a concurrent
     // batch member can't overwrite this edit (or vice versa) unseen.
-    let _guard = super::fs_write_lock(&full);
+    let _guard = super::fs_write_lock(workspace, &full);
     if let Err(output) = super::check_fresh(state, &full, "edit", path) {
         return output;
     }
-    let text = match std::fs::read_to_string(&full) {
+    let text = match workspace.read_to_string(&full) {
         Ok(t) => t,
         Err(e) => return err(format!("edit {path}: {e}"), path),
     };
@@ -82,7 +83,7 @@ pub fn run(args: &Value, cwd: &Path, state: &super::ToolRuntime) -> ToolOutput {
         updated = updated.replace('\n', "\r\n");
     }
     let change = state.snapshot_change(&full, format!("edit {path}"));
-    match super::staged_write(&full, updated.as_bytes()) {
+    match workspace.write(&full, updated.as_bytes()) {
         Ok(()) => {
             super::note_seen(state, &full);
             if let Some(change) = change {

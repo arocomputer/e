@@ -28,12 +28,14 @@ The API is unstable until its first release declares a versioning policy.
 
 ## Versioning
 
-`e-sdk` is published on crates.io and its versions mean something from
-the first release:
+`e-sdk` is not on crates.io yet. Depend on it from git until its first
+release:
 
 ```sh
-cargo add e-sdk
+cargo add e-sdk --git https://github.com/arocomputer/e
 ```
+
+Its versions mean something from the first release:
 
 - **The SDK's API is the contract**: the types and methods
   [docs/guides/extend/sdk.md](../../docs/guides/extend/sdk.md) documents. Everything else is internal.

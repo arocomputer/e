@@ -22,10 +22,11 @@ pub mod wake;
 const SLEEP_CONTINUATION: &str = "Your previous reply was cut off because the device slept. \
 Continue from exactly where it stopped.";
 
+use crate::rt::Instant;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::mpsc;
 
@@ -180,7 +181,7 @@ async fn install_checkpoint(
     let checkpoint = summary.text.clone();
     let response = summary.response.clone();
     let installation_cancel = cancel.clone();
-    let installed = tokio::task::spawn_blocking(move || {
+    let installed = crate::rt::spawn_blocking(move || {
         writer.load_compacted(
             &checkpoint,
             Some(response),
@@ -205,7 +206,7 @@ async fn install_checkpoint(
 /// cannot strand the turn with `running` stuck true and Esc inert.
 async fn wait_cancelled(cancel: &AtomicBool) {
     while !cancel.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        crate::rt::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -215,7 +216,7 @@ async fn wait_cancelled(cancel: &AtomicBool) {
 /// guards against. Returns false when cancelled before the delay elapsed.
 async fn sleep_cancellable(delay: Duration, cancel: &AtomicBool) -> bool {
     tokio::select! {
-        _ = tokio::time::sleep(delay) => true,
+        _ = crate::rt::sleep(delay) => true,
         _ = wait_cancelled(cancel) => false,
     }
 }
@@ -223,11 +224,11 @@ async fn sleep_cancellable(delay: Duration, cancel: &AtomicBool) -> bool {
 /// Supervise one run on the runtime: its heartbeat, its workers (the first
 /// runs `compact_only`; a continuation compacts only when no prompt is
 /// waiting), and the `turn_end` event once the run settles.
-fn spawn_supervisor(context: turn::Context, compact_only: bool) -> tokio::task::JoinHandle<()> {
+fn spawn_supervisor(context: turn::Context, compact_only: bool) -> crate::rt::JoinHandle<()> {
     // The heartbeat belongs to the supervisor too. If the turn worker
     // panics, it is stopped instead of leaking into later turns.
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = tokio::spawn(wake::heartbeat(
+    let heartbeat = crate::rt::spawn(wake::heartbeat(
         context.wake.clone(),
         heartbeat_stop.clone(),
         Duration::from_secs(1),
@@ -249,12 +250,12 @@ fn spawn_supervisor(context: turn::Context, compact_only: bool) -> tokio::task::
                 .is_empty()
         };
         first_worker = false;
-        tokio::spawn(crate::config::home::scope(
+        crate::rt::spawn(crate::config::home::scope(
             context.log.home.clone(),
             turn::run(context.clone(), compact_only),
         ))
     };
-    tokio::spawn(async move {
+    crate::rt::spawn(async move {
         let aborted = supervise_turn(spawn_worker, events, pending, compact_requested).await;
         heartbeat_stop.store(true, Ordering::SeqCst);
         heartbeat.abort();
@@ -275,7 +276,7 @@ async fn supervise_turn<F>(
     compact_requested: Arc<AtomicBool>,
 ) -> bool
 where
-    F: FnMut() -> tokio::task::JoinHandle<turn::Outcome>,
+    F: FnMut() -> crate::rt::JoinHandle<turn::Outcome>,
 {
     let _ = events.send(SessionEvent::TurnStart).await;
     loop {
@@ -363,6 +364,10 @@ pub struct AgentOptions {
     /// built-in and extension set. It composes under `tool_mode`, so no-tools
     /// mode always wins.
     pub allowed_tools: Option<Vec<String>>,
+    /// Where the file tools read and write; `None` is the disk.
+    pub workspace: Option<Arc<dyn tools::Workspace>>,
+    /// Where `bash` runs; `None` starts local processes.
+    pub shell: Option<Arc<dyn tools::Shell>>,
 }
 
 impl Default for AgentOptions {
@@ -374,6 +379,8 @@ impl Default for AgentOptions {
             tool_mode: ToolMode::All,
             effort_override: None,
             allowed_tools: None,
+            workspace: None,
+            shell: None,
         }
     }
 }
@@ -413,7 +420,7 @@ pub struct Agent {
     next_turn: Mutex<Vec<ChatMessage>>,
     /// The supervisor owns the worker's terminal event. Keeping its handle
     /// prevents the turn from becoming unobserved background work.
-    turn_task: Option<tokio::task::JoinHandle<()>>,
+    turn_task: Option<crate::rt::JoinHandle<()>>,
     /// The session log; every committed message is appended.
     session: Arc<Mutex<Option<SessionLog>>>,
     /// An extension-set display name, applied when the log exists or when it
@@ -462,9 +469,14 @@ impl Agent {
         } else {
             process_cwd.join(home)
         };
+        let tools = match &options.workspace {
+            Some(workspace) => tools::ToolRuntime::with_workspace(workspace.clone()),
+            None => tools::ToolRuntime::default(),
+        }
+        .with_shell(options.shell.clone());
         let agent = Agent {
             home,
-            tools: Arc::new(tools::ToolRuntime::default()),
+            tools: Arc::new(tools),
             model,
             host: None,
             cwd,
@@ -586,7 +598,7 @@ impl Agent {
             .clone()
     }
     pub fn load_history(&mut self, messages: Vec<ChatMessage>) {
-        self.tools = Arc::new(tools::ToolRuntime::default());
+        self.tools = Arc::new(self.tools.renewed());
         self.reset_session_scoped();
         self.remember_instructions(&messages);
         *self.history.lock().unwrap_or_else(|e| e.into_inner()) = messages;
@@ -601,7 +613,7 @@ impl Agent {
             .unwrap_or_else(|e| e.into_inner()) = turn::instruction_dirs(messages);
     }
     pub fn clear(&mut self) {
-        self.tools = Arc::new(tools::ToolRuntime::default());
+        self.tools = Arc::new(self.tools.renewed());
         self.reset_session_scoped();
         self.history
             .lock()
@@ -717,7 +729,7 @@ impl Agent {
         let log = self.log();
         let summary = summary.to_string();
         let expected = self.history_snapshot();
-        tokio::task::spawn_blocking(move || {
+        crate::rt::spawn_blocking(move || {
             log.load_compacted(&summary, None, kept, &AtomicBool::new(false), &expected)
         })
         .await
@@ -862,6 +874,11 @@ impl Agent {
     /// Drop the session name — a fresh session starts unnamed.
     pub fn clear_session_name(&self) {
         *self.session_name.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// This agent's tool state: its workspace, shell, and file observations.
+    pub fn tools(&self) -> Arc<tools::ToolRuntime> {
+        self.tools.clone()
     }
 
     pub fn cwd(&self) -> PathBuf {
@@ -1252,9 +1269,22 @@ async fn run_builtin(context: ToolRunContext, name: &str, arguments: &str) -> to
         events,
         ..
     } = context;
+    let publish = |stream, chunk: &str| {
+        let chunk = tools::sanitize_display(chunk);
+        if !chunk.is_empty() {
+            let _ = events.try_send(SessionEvent::ToolOutput { id, stream, chunk });
+        }
+    };
+    if name == "bash" {
+        if let Some(shell) = tool_runtime.shell() {
+            return tool_runtime
+                .run_hosted_bash(&**shell, arguments, &cwd, &cancel, publish)
+                .await;
+        }
+    }
     let name = name.to_string();
     let arguments = arguments.to_string();
-    tokio::task::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         tool_runtime.run_streaming(&name, &arguments, &cwd, &cancel, |stream, chunk| {
             let chunk = tools::sanitize_display(chunk);
             if !chunk.is_empty() {
@@ -1332,12 +1362,12 @@ mod option_tests {
             let compaction = compact_log(&log, "system", &cancel, None, None);
             tokio::pin!(compaction);
             assert!(
-                tokio::time::timeout(Duration::from_millis(20), &mut compaction)
+                crate::rt::timeout(Duration::from_millis(20), &mut compaction)
                     .await
                     .is_err()
             );
             cancel.store(true, Ordering::SeqCst);
-            let result = tokio::time::timeout(Duration::from_secs(1), compaction)
+            let result = crate::rt::timeout(Duration::from_secs(1), compaction)
                 .await
                 .unwrap();
             assert_eq!(
@@ -1466,7 +1496,7 @@ mod option_tests {
     async fn a_panicking_turn_still_reports_one_terminal_event() {
         let (events, mut rx) = mpsc::channel(8);
         let worker = || {
-            tokio::spawn(async {
+            crate::rt::spawn(async {
                 panic!("test turn panic");
             })
         };
@@ -1535,7 +1565,7 @@ mod option_tests {
         let factory = move || {
             let pending = pending.clone();
             let count = count.clone();
-            tokio::spawn(async move {
+            crate::rt::spawn(async move {
                 let attempt = count.fetch_add(1, Ordering::SeqCst);
                 let mut pending = pending.lock().unwrap();
                 if attempt == 0 {

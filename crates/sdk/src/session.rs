@@ -20,6 +20,7 @@ use e_core::providers::catalog::{self, Model};
 use e_core::providers::{ChatMessage, ImageInput};
 use e_core::run::ToolMode;
 use e_core::session::{self as log, SessionLog};
+use e_core::tools::{Shell, Workspace};
 
 use crate::turn::{Start, Turn};
 use crate::{Error, Message, SavedSession};
@@ -97,6 +98,9 @@ pub struct SessionBuilder {
     instructions: Option<String>,
     resume: Option<PathBuf>,
     history: Vec<Message>,
+    workspace: Option<Arc<dyn Workspace>>,
+    shell: Option<Arc<dyn Shell>>,
+    api_key: Option<e_core::auth::ApiKey>,
 }
 
 impl SessionBuilder {
@@ -181,6 +185,35 @@ impl SessionBuilder {
         self
     }
 
+    /// Where the file tools read and write, instead of the disk: an
+    /// in-memory tree ([`crate::MemoryWorkspace`]), a sandbox's filesystem,
+    /// anything that implements [`Workspace`]. `cwd` names a directory in
+    /// it. Project resources (AGENTS.md, skills, prompts) are not read from
+    /// the workspace: they load from the disk at `cwd`, and only when the
+    /// user trusted that directory. Give a workspace's own guidance through
+    /// [`SessionBuilder::instructions`].
+    pub fn workspace(mut self, workspace: Arc<dyn Workspace>) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
+    /// Run the `bash` tool's commands through `shell` instead of starting
+    /// local processes: a container, a remote machine, a simulated shell.
+    /// It should see the same files as the session's workspace. Background
+    /// commands are refused, since they need a local process to track.
+    pub fn shell(mut self, shell: Arc<dyn Shell>) -> Self {
+        self.shell = Some(shell);
+        self
+    }
+
+    /// Authenticate the model with this key instead of the home's stored
+    /// credentials. The model from [`SessionBuilder::model`] may then be any
+    /// declared model, signed in or not; the key is never written anywhere.
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(e_core::auth::ApiKey::new(key));
+        self
+    }
+
     /// This workspace's saved sessions in this home, newest first.
     pub fn saved(&self) -> Vec<SavedSession> {
         let cwd = resolve_cwd(self.cwd.clone());
@@ -194,7 +227,16 @@ impl SessionBuilder {
         let cwd = resolve_cwd(self.cwd);
         let home = resolve_home(self.home);
         let persist = self.persist && self.resume.is_none();
-        let model = preflight(cwd.clone(), home.clone(), self.model.clone(), persist).await?;
+        let mut model = preflight(
+            cwd.clone(),
+            home.clone(),
+            self.model.clone(),
+            persist,
+            self.workspace.clone(),
+            self.api_key.is_some(),
+        )
+        .await?;
+        model.api_key = self.api_key;
         check_effort(&model, self.effort.as_deref())?;
         let (tool_mode, allowed_tools) = tool_policy(self.tools)?;
         let options = AgentOptions {
@@ -204,6 +246,8 @@ impl SessionBuilder {
             tool_mode,
             effort_override: self.effort,
             allowed_tools,
+            workspace: self.workspace,
+            shell: self.shell,
         };
         let (mut agent, events) = Agent::with_options(model, options);
         let cwd = agent.cwd();
@@ -233,7 +277,8 @@ impl SessionBuilder {
     }
 }
 
-/// Check the workspace is a directory, resolve the model in the home, and,
+/// Check the working directory is a directory in its workspace, resolve the
+/// model in the home (any declared model when the host brings a key), and,
 /// when a new log will be written, probe that the home can write one.
 ///
 /// These checks read workspace metadata and home configuration, and
@@ -244,20 +289,31 @@ async fn preflight(
     home: PathBuf,
     model_query: Option<String>,
     persist: bool,
+    workspace: Option<Arc<dyn Workspace>>,
+    keyed: bool,
 ) -> Result<Model, Error> {
     tokio::task::spawn_blocking(move || -> Result<Model, Error> {
-        let meta = std::fs::metadata(&cwd).map_err(|error| Error::Cwd {
+        let is_dir = match &workspace {
+            Some(workspace) => workspace.metadata(&cwd).map(|meta| meta.is_dir()),
+            None => std::fs::metadata(&cwd).map(|meta| meta.is_dir()),
+        }
+        .map_err(|error| Error::Cwd {
             path: cwd.clone(),
             reason: error.to_string(),
         })?;
-        if !meta.is_dir() {
+        if !is_dir {
             return Err(Error::Cwd {
                 path: cwd,
                 reason: "not a directory".into(),
             });
         }
         home::with_home(home, || {
-            let model = resolve_model(model_query.as_deref())?;
+            let model = match (keyed, model_query.as_deref()) {
+                (true, Some(query)) => catalog::resolve_declared(query)
+                    .ok_or_else(|| Error::ModelUnavailable(query.into()))?,
+                (true, None) => return Err(Error::KeyWithoutModel),
+                (false, query) => resolve_model(query)?,
+            };
             // Persistence is checked up front like every other option: a
             // home that cannot create logs must fail here, not keep the
             // first prompt memory-only behind a warning.

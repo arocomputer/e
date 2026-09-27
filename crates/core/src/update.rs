@@ -5,6 +5,7 @@ use std::path::Path;
 
 /// Release assets redirect to GitHub's download hosts. This client carries
 /// no provider credentials and must not be reused for authenticated requests.
+#[cfg(not(target_family = "wasm"))]
 fn download_client() -> Result<&'static reqwest::Client, String> {
     static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
         std::sync::OnceLock::new();
@@ -28,6 +29,12 @@ fn download_client() -> Result<&'static reqwest::Client, String> {
         })
         .as_ref()
         .map_err(Clone::clone)
+}
+
+/// The browser build installs nothing; it has no disk to install to.
+#[cfg(target_family = "wasm")]
+fn download_client() -> Result<&'static reqwest::Client, String> {
+    Err("downloads need the native build".into())
 }
 
 /// The release artifact name for this build's platform — `None` when the

@@ -16,7 +16,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use common::{request_json, serve_raw, serve_sse};
-use e_sdk::{Event, Message, Session, Stop, ToolOutcome, Tools, Usage};
+use e_sdk::{
+    Event, MemoryWorkspace, Message, Session, Shell, ShellOutput, Stop, ToolOutcome, Tools, Usage,
+    Workspace,
+};
 
 /// One plain reply with usage, in the Completions dialect.
 const OK: &str = concat!(
@@ -906,4 +909,127 @@ fn sessions_and_turns_are_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Session>();
     assert_send::<e_sdk::Turn<'static>>();
+}
+
+/// One tool call in the Completions dialect, then the end of the response.
+fn tool_call(name: &str, arguments: serde_json::Value) -> String {
+    let call = serde_json::json!({"choices": [{"delta": {"tool_calls": [{
+        "index": 0,
+        "id": "c1",
+        "function": {"name": name, "arguments": arguments.to_string()},
+    }]}}]});
+    format!(
+        "data: {call}\n\ndata: {{\"choices\":[{{\"finish_reason\":\"tool_calls\"}}]}}\n\ndata: [DONE]\n\n"
+    )
+}
+
+/// A memory workspace with an empty project directory.
+fn memory_project() -> std::sync::Arc<MemoryWorkspace> {
+    let workspace = std::sync::Arc::new(MemoryWorkspace::new());
+    workspace
+        .create_dir_all(std::path::Path::new("/project"))
+        .unwrap();
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_api_key_authenticates_a_provider_the_home_never_signed_in() {
+    let (port, server) = serve_sse(&[OK]);
+    let home = mock_home("keyed", &[("mock", port)]);
+    std::fs::remove_file(home.0.join("auth.json")).unwrap();
+    let mut session = Session::builder()
+        .home(&home.0)
+        .model("mock/test")
+        .api_key("host-key-3f9a")
+        .build()
+        .await
+        .unwrap();
+
+    session.prompt("hi").await.unwrap();
+    let request = &server.join().unwrap()[0];
+    assert!(
+        request.contains("Bearer host-key-3f9a"),
+        "the host's key must authenticate the request, got: {request}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn file_tools_write_into_the_supplied_workspace_not_the_disk() {
+    let write = tool_call(
+        "write",
+        serde_json::json!({"path": "notes.txt", "content": "kept in memory"}),
+    );
+    let (port, _server) = serve_sse(&[&write, OK]);
+    let home = mock_home("memory", &[("mock", port)]);
+    let workspace = memory_project();
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd("/project")
+        .workspace(workspace.clone())
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    let reply = session.prompt("save a note").await.unwrap();
+    assert_eq!((reply.tools.calls, reply.tools.failures), (1, 0));
+    let saved = workspace
+        .read_to_string(std::path::Path::new("/project/notes.txt"))
+        .unwrap();
+    assert_eq!(saved, "kept in memory");
+    assert!(!std::path::Path::new("/project/notes.txt").exists());
+}
+
+/// Records each command and answers for it, like a sandbox's shell would.
+#[derive(Debug, Default)]
+struct RecordingShell {
+    commands: std::sync::Mutex<Vec<(String, PathBuf)>>,
+}
+
+impl Shell for RecordingShell {
+    fn run(
+        &self,
+        command: &str,
+        cwd: &std::path::Path,
+    ) -> e_sdk::BoxFuture<'static, std::io::Result<ShellOutput>> {
+        self.commands
+            .lock()
+            .unwrap()
+            .push((command.to_string(), cwd.to_path_buf()));
+        Box::pin(async {
+            Ok(ShellOutput {
+                stdout: b"answered by the host shell\n".to_vec(),
+                stderr: Vec::new(),
+                exit_code: 0,
+            })
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bash_runs_through_the_supplied_shell() {
+    let bash = tool_call("bash", serde_json::json!({"command": "ls -la"}));
+    let (port, server) = serve_sse(&[&bash, OK]);
+    let home = mock_home("shell", &[("mock", port)]);
+    let shell = std::sync::Arc::new(RecordingShell::default());
+    let mut session = Session::builder()
+        .home(&home.0)
+        .cwd("/project")
+        .workspace(memory_project())
+        .shell(shell.clone())
+        .model("mock/test")
+        .build()
+        .await
+        .unwrap();
+
+    session.prompt("list the files").await.unwrap();
+    assert_eq!(
+        *shell.commands.lock().unwrap(),
+        vec![("ls -la".to_string(), PathBuf::from("/project"))]
+    );
+    let followup = request_json(&server.join().unwrap()[1]);
+    assert!(
+        followup.to_string().contains("answered by the host shell"),
+        "the shell's output must reach the model, got: {followup}"
+    );
 }

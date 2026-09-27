@@ -6,125 +6,193 @@ order: 1
 
 # Extensions
 
-An extension is a program that adds tools, commands, hooks, and UI to e. It
-is an executable in `~/.e/extensions/`, or in the `extensions/`
-directory of an installed [package](packages.md). It can be a top-level file
-such as `foo.mjs`. It can also be the entry point of a directory such as
-`foo/` that holds helper files too.
+An extension is a program, in any language, that adds tools, commands,
+hooks, and UI to e. This guide starts with a working extension and then
+documents the whole protocol.
 
-e picks a directory's entry point by checking, in order:
+e runs each extension as its own process and exchanges one JSON object per
+line with it over stdin and stdout. An extension never touches the
+terminal: what it shows is data that e paints through the user's theme.
 
-1. `index.*`
-2. a file matching the directory name
-3. a sole executable
+## Quick start
 
-When two files match the same rule, path order breaks the tie.
+This extension registers one tool, `greet`, that the model can call. Save it
+as `greet.mjs`:
 
-You can write an extension in any language. e starts each process at launch
-and keeps it running for the session. The two sides exchange one JSON object
-per line over stdin and stdout.
+```js
+#!/usr/bin/env node
+// greet: one tool the model can call.
+import { createInterface } from "node:readline";
 
-## What extensions can do
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\n");
 
-- Add tools the model calls. A tool with a built-in's name overrides that
-  built-in.
-- Add slash commands that show up in the `/` picker, and add shortcuts.
-- Rewrite or swallow a submitted line with the `input` hook.
-- Name the session from a command or tool result. `/resume` shows the name.
-- Gate tool calls with the `tool_call` hook, which returns a block and a
-  reason.
-- Shape a turn with the `before_turn`, `tool_result`, and `compact_summary`
-  hooks.
-- Subscribe to lifecycle events for the session, turns, tools, compaction,
-  and the model.
-- Show a notice, a block of text, markdown, a real diff, a tool row with its
-  own verbs, a panel, or a status slot.
-- Ask the user to pick from a list, answer yes or no, or type a line.
-- Steer the session by injecting a message, narrowing the toolset, switching
-  the model or effort, interrupting, or compacting.
-- Handle startup arguments and request a relaunch of the same binary in
-  another directory.
+const manifest = {
+  name: "greet",
+  version: "0.1",
+  tools: [
+    {
+      name: "greet",
+      description: "Greet someone by name.",
+      parameters: {
+        type: "object",
+        properties: { who: { type: "string" } },
+        required: ["who"],
+      },
+      label: { running: "Greeting", completed: "Greeted", target: "who" },
+    },
+  ],
+};
 
-Everything an extension shows is data, and e paints it through the user's
-theme. An extension never emits terminal bytes and never runs inside e. e
-reports a crashed or hostile extension as a notice, and the extension never
-gets control of the terminal.
-
-## Wire protocol
-
-The protocol is version 1, extended by capabilities. Messages flow in both
-directions, one JSON object per line.
-
-### Requests from e
-
-Each request carries an `id`. Your extension answers with that `id`.
-
-```
-{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts","pane","widget","render"],"ui":true,"e_version":"0.0.1","cwd":"/path","extensions_config":{…}}}
-{"id":2,"method":"hook.startup","params":{"cwd":"/path","argv":["--project","../app"],"flags":{"project":"../app"}}}
-{"id":3,"method":"tool_call","params":{"name":"greet","arguments":{...}}}
-{"id":4,"method":"command","params":{"name":"ping","args":"rest of the line"}}
-{"id":5,"method":"hook.tool_call","params":{"name":"bash","arguments":{...}}}
-{"id":6,"method":"hook.input","params":{"text":"a submitted line"}}
-{"id":7,"method":"hook.before_turn","params":{"prompt":"the user's message"}}
-{"id":8,"method":"hook.tool_result","params":{"name":"bash","content":"…","is_error":false}}
-{"id":9,"method":"hook.compact_summary","params":{"summary":"…"}}
-{"id":11,"method":"hook.render","params":{"kind":"tool","name":"bash","content":"…"}}
-{"id":10,"method":"shortcut","params":{"key":"ctrl+alt+g"}}
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const { id, method, params } = JSON.parse(line);
+  if (method === "initialize") send({ id, result: manifest });
+  else if (method === "tool_call") send({ id, result: { content: `Hello, ${params.arguments.who}!` } });
+  else if (method === "shutdown") process.exit(0);
+  else if (id !== undefined) send({ id, error: `unsupported method ${method}` });
+});
 ```
 
-### Notifications from e
+Install it and make it executable:
 
-Notifications have no `id` and take no reply.
-
-```
-{"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
-{"method":"flags","params":{"flags":{…}}}
-{"method":"ui.key","params":{"key":"down"}}          while your interactive panel is open
-{"method":"ui.panel_closed","params":{}}             the user closed it
-{"method":"pane.select","params":{"pane":"diff","section":"files","id":"a.rs"}}   the side pane's cursor moved
-{"method":"pane.activate","params":{"pane":"diff","section":"files","id":"a.rs"}} Enter on a pane item
-{"method":"pane.key","params":{"pane":"diff","key":"x"}}                          a pane chord e did not use
-{"method":"pane.closed","params":{"pane":"diff"}}                                 the user closed the pane
-{"method":"shutdown"}
+```sh
+mkdir -p ~/.e/extensions
+cp greet.mjs ~/.e/extensions/
+chmod +x ~/.e/extensions/greet.mjs
 ```
 
-### Messages from your extension
+`~/.e` is e's home directory; [settings](../customize/settings.md) says
+where your build keeps it. Start e, or run `/reload`, and ask
+`Use the greet tool to greet Ada.` The transcript shows `Greeting Ada`, then
+`Greeted Ada`, and the model reads `Hello, Ada!`.
 
+If the extension fails to start, the transcript says why
+(`extension greet.mjs: …`). Each line it writes to stderr shows there too,
+so use stderr for debug output. `e --no-extensions` starts e without any
+extensions.
+
+## Where extensions load from
+
+e starts every extension it finds, in this order:
+
+1. `~/.e/extensions/`, sorted by path.
+2. The `extensions/` directory of each [package](packages.md): the
+   `packages` list in settings, then a trusted repository's `.e/packages`
+   list, then `e --package` for this run.
+
+This is the **extension order**. Hooks run in it, and when two extensions
+declare the same tool or shortcut, the first wins and e shows a notice.
+Extensions never load from a repository's own `.e/extensions/`, even a
+trusted one.
+
+An extension is a top-level executable file, such as `greet.mjs`, or a
+directory that bundles an entry point with helper files. In a directory, e
+runs the first executable it finds, checking in this order (ties go to the
+first sorted path):
+
+1. a file named `index.*`
+2. a file named after the directory, such as `foo/foo.mjs`
+3. the only executable in the directory
+
+On Unix, files without the executable bit never start, so helpers beside
+an entry point are safe.
+
+### Configuration
+
+Keep an extension's settings in `~/.e/settings.json` under
+`"extensions"`, keyed by its manifest name, such as
+`{"extensions": {"greet": {"greeting": "Hi"}}}`. e passes the whole
+`"extensions"` object to every extension as `extensions_config` in the
+`initialize` params.
+
+## Protocol overview
+
+The protocol is version 1. Newer features are additive families listed in
+`initialize` as `capabilities`; an extension may ignore them all.
+
+- **Framing:** one UTF-8 JSON object per line. A stdout line over 1 MiB ends
+  the extension.
+- **Requests** carry `id` and `method`, and get exactly one answer with the
+  same `id`: `{"id":…,"result":{…}}` or `{"id":…,"error":"message"}`.
+- **Notifications** carry `method` and no `id`, and get no answer.
+- **Both sides send requests.** e's ids are integers; yours may be any JSON
+  value. A line with both `id` and `method` is always a request, so the id
+  spaces never collide.
+
+### Messages from e
+
+| Method | Kind | Params | Answer |
+| --- | --- | --- | --- |
+| `initialize` | request | `{protocol, capabilities, ui, e_version, cwd, extensions_config}` | [the manifest](#initialize) |
+| `hook.startup` | request | `{cwd, argv, flags}` | [`hook.startup`](#hookstartup) |
+| `tool_call` | request | `{name, arguments}` | [`tool_call`](#tool_call) |
+| `command` | request | `{name, args}` | [`command`](#command) |
+| `command.complete` | request | `{name, prefix}` | [`command.complete`](#commandcomplete) |
+| `shortcut` | request | `{key}` | same as `command` |
+| `hook.tool_call` | request | `{name, arguments}` | [`hook.tool_call`](#hooktool_call) |
+| `hook.input` | request | `{text}` | [`hook.input`](#hookinput) |
+| `hook.before_turn` | request | `{prompt}` | [`hook.before_turn`](#hookbefore_turn) |
+| `hook.tool_result` | request | `{name, content, is_error}` | [`hook.tool_result`](#hooktool_result) |
+| `hook.render` | request | `{kind, name, content}` | [`hook.render`](#hookrender) |
+| `hook.compact_summary` | request | `{summary}` | [`hook.compact_summary`](#hookcompact_summary) |
+| `flags` | notification | `{flags}` | [Flags](#flags) |
+| `event` | notification | `{name, extra}` | [Events](#events) |
+| `ui.key` | notification | `{key}` | a key while your interactive panel is open |
+| `ui.panel_closed` | notification | `{}` | your panel was closed |
+| `pane.select` | notification | `{pane, section, id}` | the side pane's cursor moved to an item |
+| `pane.activate` | notification | `{pane, section, id}` | Enter on a pane item |
+| `pane.key` | notification | `{pane, key}` | a pane chord e did not use |
+| `pane.closed` | notification | `{pane}` | your pane was closed |
+| `shutdown` | notification | none | exit; e kills the process 150 ms later |
+
+The `initialize` params look like this:
+
+```json
+{"id":1,"method":"initialize","params":{"protocol":1,"capabilities":["tool.update","events","hooks","display","ui","session","shortcuts","pane","widget","render"],"ui":true,"e_version":"0.0.2","cwd":"/path/to/project","extensions_config":{"greet":{"greeting":"Hi"}}}}
 ```
-{"id":1,"result":{...}}                        answer a request
-{"id":2,"error":"what went wrong"}             or fail it
-{"method":"notify","params":{"message":"hi"}}  a transcript notice, any time
+
+### Messages from an extension
+
+```json
+{"id":1,"result":{"name":"greet"}}
+{"id":2,"error":"what went wrong"}
+{"method":"notify","params":{"message":"a transcript notice, at any time"}}
 {"method":"tool.update","params":{"id":3,"stream":"stdout","chunk":"working\n"}}
-{"id":"q1","method":"ui.select","params":{…}}  ask e something (see below)
+{"id":"q1","method":"ui.select","params":{"title":"Pick one","options":["a","b"]}}
 ```
 
-A request from your extension carries its own `id`, which can be any JSON
-value. e answers with the same id: `{"id":"q1","result":{…}}` or
-`{"id":"q1","error":"…"}`. The two id spaces never meet, because direction
-tells them apart.
+The last line is a [request to e](#requests-to-e).
 
-### Capabilities and `ui`
+### Which frontends support what
 
-In the `initialize` params, `capabilities` lists the families this e speaks.
-`ui` says whether someone can answer `ui.*` requests:
+e has three frontends that can run extensions. `ui` in the `initialize`
+params is true when someone can answer `ui.*` requests.
 
-- Under `e -p`, `ui` is false. e answers every `ui.*` request with
-  `{"error":"no ui"}` at once.
-- Under `e rpc`, `ui` is true, and the client may relay questions to a
-  person. See [automation](../usage/automation.md). e still refuses the
-  display-only requests there.
+| Feature | Terminal | `e rpc` | `e -p` | [SDK](sdk.md) with `extensions(true)` |
+| --- | --- | --- | --- | --- |
+| `initialize` `ui` | true | true | false | false |
+| Tools, `tool_call`, `before_turn`, `tool_result`, `compact_summary` hooks | yes | yes | yes | yes |
+| `hook.startup` and `flags` | yes | yes | yes | no |
+| Commands, shortcuts, `input` and `render` hooks | yes | no | no | no |
+| `turn_*`, `tool_*`, `compact_*` events | yes | yes | yes | yes |
+| `session_*`, `model_change`, `effort_change` events | yes | no | no | no |
+| `ui.*` and `session.*` requests | yes | see below | `no ui` error | `no ui` error |
 
-Handle the error in both cases.
+Under `e rpc`, `ui.notify` and `ui.show` reach the client as `notice` lines
+and succeed. `ui.select`, `ui.confirm`, `ui.input`, and `ui.editor` reach
+the client as `ask` lines when it opted in, and fail with `no ui` otherwise.
+Every other `ui.*` and `session.*` request fails with `no ui`. See
+[automation](../usage/automation.md). Handle the error in every case.
 
 ## Results by method
 
-Each request from e expects a result of a specific shape.
+Each request from e expects a result of a specific shape. A result that
+does not parse counts as a failure: a runtime hook then changes nothing, a
+startup hook stops launch, and a tool or command reports an error.
 
 ### `initialize`
 
-Your answer to `initialize` is the manifest. Everything but `name` is
-optional. `parameters` is a JSON Schema object.
+Your answer to `initialize` is the manifest. Only `name` is required;
+unknown fields are ignored.
 
 ```json
 {
@@ -138,27 +206,25 @@ optional. `parameters` is a JSON Schema object.
       "label": {"category": "greet", "running": "Greeting", "completed": "Greeted", "target": "who"}
     }
   ],
-  "commands": [{"name": "ping", "description": "check the extension"}],
+  "commands": [{"name": "deploy", "description": "deploy an environment", "arguments": "<env>", "completions": true}],
   "flags": [
     {"name": "project", "type": "string", "description": "relaunch in this directory"},
-    {"name": "plan", "type": "boolean", "description": "plan mode"}
+    {"name": "plan", "type": "boolean", "description": "plan mode", "default": false}
   ],
-  "hooks": ["tool_call", "input", "before_turn", "tool_result", "compact_summary", "render"],
+  "hooks": ["startup", "tool_call", "input", "before_turn", "tool_result", "compact_summary", "render"],
   "renders": ["tool:bash", "assistant"],
   "events": ["session_start", "turn_start", "tool_end"],
   "shortcuts": [{"key": "ctrl+alt+g", "description": "greet"}]
 }
 ```
 
-The `initialize` params carry your configuration in `extensions_config`. It
-holds every entry under `"extensions"` in `~/.e/settings.json`, namespaced by
-extension name. Your extension gets its own config without claiming a
-top-level settings key.
+`name` identifies the extension in notices, settings, and status slots.
+`hooks` lists the hooks e should call; each is described below. A tool's
+`parameters` is a JSON Schema object (anything else becomes an empty object
+schema), and a tool with a built-in's name replaces that built-in. A tool's
+`label` gives its transcript row the built-in grammar:
 
-A tool's `label` gives its transcript row the built-in grammar. The example
-row reads `Greeting bob` while running and `Greeted bob` after.
-
-| Field | Meaning |
+| Label field | Meaning |
 | --- | --- |
 | `category` | The noun used when e tallies a batch of tool calls. |
 | `running`, `completed` | Verbs, shown as given. |
@@ -168,189 +234,98 @@ Without a label, the row reads `Running greet` and then `Ran greet`.
 
 ### Flags
 
-Declare `flags` so they are discoverable and so e can parse them for you. A
-flag's `type` is `"boolean"`, the default, or `"string"`. e recognizes both
-types in startup argv:
+Declared `flags` appear in `e --help` and `/help`. `type` is `"boolean"`
+(the default) or `"string"`. e parses a flag whose `name` uses only
+letters, digits, and `-`:
 
-- A boolean matches `--name`, `--name=true`, `--name=false`, and `--no-name`.
-- A string matches `--name=value` or `--name value`. e never consumes a
-  following `-` token as the value.
-- A bare string flag at the end of argv parses as `null`. The flag is
-  present but has no value.
-- The last occurrence wins.
-- `--` stops parsing.
+- A boolean matches `--name`, `--no-name`, and `--name=<value>`, where `1`,
+  `true`, `yes`, and `on` mean true and anything else false.
+- A string matches `--name=value` and `--name value`. A following token that
+  starts with `-` is never taken as the value; the flag then parses as
+  `null`, as it does at the end of argv.
+- The last occurrence wins, and `--` stops parsing.
 
-A name that isn't a clean `--name` token, such as `"-x, --example"`, appears
-in `e --help`, but e never parses it. Those flags still need the startup
-hook's raw argv.
+Any other name, such as `"-x, --example"`, is help text only; read it from
+the startup hook's raw `argv`. At launch, before any startup hook, e sends
+the parsed values to every extension that declares a parsable flag:
 
-After every startup hook has seen the raw argv, e removes typed flags and
-their separated string values. Only then does e parse its own subcommands and
-build the initial prompt.
+```json
+{"method":"flags","params":{"flags":{"project":"../app","plan":true}}}
+```
 
-Right after launch, e sends the parsed flags as a `flags` notification to
-every extension that declares typed flags. No reply is needed. A tool-only
-extension can read them from any handler, not just during startup. The raw
-protocol message is `{"method":"flags","params":{"flags":{…}}}`.
-
-The notification carries only flags actually passed on the command line. An
-absent flag stays absent, so a handler can tell "passed false" from "not
-passed".
-
-A declaration can set an optional `"default"`, the value to use when the flag
-is absent. e retains the default but never adds it to the notification. Your
-extension applies it itself. The scaffold helper does this for you:
-
-- `flag(name)` returns the passed value, else the declared default, else
-  undefined.
-- `flagPassed(name)` is true only when the flag was on the command line,
-  regardless of default.
+Only flags actually passed appear, so "passed false" differs from "not
+passed". e never fills in a declared `default`; apply it yourself. After the
+startup hooks, e removes parsed flags and their values from argv before it
+reads its own arguments and the initial prompt.
 
 ### `tool_call`
 
-Your answer to `tool_call` is the tool's result:
+Your answer is the tool's result:
 
 ```json
-{"content":"text the model sees","is_error":false,"session_name":"optional new session name","summary":"+12 -3","display":"…","format":"diff"}
+{"content":"text the model sees","is_error":false,"summary":"+12 -3","display":"…","format":"diff","session_name":"optional new session name"}
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `content` | All the model reads. |
-| `session_name` | An optional new session name. |
-| `summary` | The suffix on the tool's row. |
-| `display` | What the ctrl+o viewer shows instead of `content`. A built-in edit does the same with its full diff. |
-| `format` | `text`, the default, `markdown`, or `diff`. |
+| `content` | Everything the model reads. |
+| `is_error` | Marks the result as a failure. |
+| `summary` | The suffix on the tool's transcript row. |
+| `display` | What the ctrl+o viewer shows instead of `content`, up to 64 KiB. Never reaches the model. |
+| `format` | How the viewer paints it: `text` (default), `markdown`, or `diff`. With `diff`, e takes a unified diff (`git diff` output) and paints it with line numbers and coloured markers. Unknown values read as `text`. |
+| `session_name` | Renames the session, as shown in `/resume`. |
 
-With `diff`, e takes a unified diff, the output of `git diff`, and converts
-it to the viewer's row grammar with real line numbers and coloured markers.
+A timeout, crash, or unparsable result becomes an error result for the
+model.
 
-Before the final response, your extension may emit any number of
-`tool.update` notifications to stream output:
+To stream progress before the result, send `tool.update` notifications:
 
-- `id` must be the active tool-call request id.
-- `stream` is `stdout` or `stderr`.
-- e displays `chunk` through the same ordered tool-output stream as built-in
-  commands.
-
-Version-1 extensions remain compatible. They simply never emit an update. The
-scaffold passes tool handlers a second `{update}` argument:
-
-```js
-async tool({ arguments }, { update }) {
-  update("starting\n");
-  update("a warning\n", "stderr");
-  return { content: "done" };
-}
+```json
+{"method":"tool.update","params":{"id":3,"stream":"stdout","chunk":"working\n"}}
 ```
+
+`id` is the `tool_call` request's id, and `stream` is `stdout` or `stderr`.
+e shows the chunks in order in the same tool-output stream as built-in
+commands. Updates are optional.
 
 ### `command`
 
-Your answer to `command` holds any combination of these:
+Your answer to `command` may combine these fields:
 
-- `{"notice":"line for the transcript"}`
-- `{"show":{"title":"diff src/main.rs","body":"…","format":"diff"}}`, a block
-  in the transcript. See `ui.show`.
-- `{"prompt":"text submitted as the user"}`
+| Field | Effect |
+| --- | --- |
+| `notice` | A line in the transcript. |
+| `show` | A transcript block, `{"title":"…","body":"…","format":"markdown"}`; `body` is clipped at 64 KiB. |
+| `prompt` | Text submitted as if the user typed it. |
+| `session_name` | Renames the session. |
 
-It can also set `{"session_name":"name shown in /resume"}`.
+`params.args` is the rest of the line after `/name`. A failure shows as a
+notice.
 
-A command may declare `"arguments":"<env>"`. The `/` picker shows it, and
-picking the command leaves `/name ` in the composer for the user to finish.
+A command that declares `"arguments": "<env>"` shows that hint in the `/`
+picker, and picking it leaves `/name ` in the composer for the user to
+finish.
 
-A command may also declare `"completions":true`. Typing `/name pre` then
-sends
-`{"id":…,"method":"command.complete","params":{"name":"name","prefix":"pre"}}`.
-Your answer, `{"items":[{"value":"prefix-match","label"?,"description"?}]}`,
-opens a picker, and the chosen item replaces the prefix. Completions have
-three seconds. A slow or empty answer shows nothing.
+### `command.complete`
 
-### `shortcut`
-
-Answer a shortcut with the same result shape as a command. e sends it to the
-extension that declared the chord. See [Shortcuts](#shortcuts).
-
-### Pane notifications
-
-`pane.select`, `pane.activate`, `pane.key`, and `pane.closed` are
-notifications from the side pane. See [The side pane](#the-side-pane).
-
-### `hook.before_turn`
-
-Use this hook to add context to a turn. e runs it once per turn, before the
-first request, with the prompt that started the turn. Answer:
+A command that declares `"completions": true` is asked for argument
+completions as the user types `/name pre`:
 
 ```json
-{"system_suffix":"a paragraph appended to the system prompt for this turn","message":{"content":"…","internal":true}}
+{"id":11,"method":"command.complete","params":{"name":"deploy","prefix":"st"}}
 ```
 
-e appends `system_suffix` to the system prompt and never replaces the prompt.
-The system prompt is the user's file-backed contract with the model.
-
-e adds `message` to the conversation before the request. `internal` is the
-default and keeps the message out of the transcript.
-
-### `hook.tool_result`
-
-Use this hook to redact or trim tool output. e runs it after every tool,
-before the result is shown, stored, or sent. Answer
-`{"content":"what the model should read instead"}`, or `{}` to keep the
-result.
-
-Extensions see each other's rewrites in declaration order. A rewrite also
-drops the tool's richer `display` text, so the viewer shows exactly what you
-let through.
-
-### `hook.render`
-
-Use this hook to supply the content for an entry that e renders. Declare
-`renders` in the manifest to be asked:
-
-- `"tool:bash"`, or `"tool:*"`, asks for a tool's finished result. Your body
-  replaces it in the ctrl+o viewer.
-- `"assistant"` asks for a completed reply. Your body replaces its markdown
-  in the transcript.
-
-The params are `{kind: "tool"|"assistant", name, content}`. Answer
-`{"body":"…","format":"text"|"markdown"|"diff"}`, or `{}` to leave the entry
-as e paints it.
-
-Extensions see each other's answers in declaration order. A slow answer
-changes nothing.
-
-### `hook.compact_summary`
-
-The generated summary is about to replace the older conversation, and this
-hook has the last word on it. Answer `{"summary":"…"}` or `{}`.
-
-### `hook.tool_call`
-
-Answer `{"block":true,"reason":"why"}` to stop the call. The model sees the
-reason as an error result. Answer `{"block":false}` to allow the call.
-
-### `hook.input`
-
-This hook decides what happens to a submitted line. e runs input hooks in
-order, and the first extension to consume or replace the line wins:
-
-```json
-{"consume":true,"notice":"swallowed, with a notice"}
-{"replace":"the rewritten line"}
-{"consume":false,"replace":null}
-```
-
-An empty result lets the line through untouched. `{"notice":"…"}` lets the
-line through and posts the notice. The transcript shows notices from every
-extension that allowed the line, alongside the notice from whichever
-extension consumed or replaced it.
-
-e handles a pasted API key before the hook, so the key never reaches it.
+Answer `{"items":[{"value":"staging","label":"staging","description":"the staging cluster"}]}`.
+`label` and `description` are optional. e opens a picker of up to 50 items,
+and the chosen `value` replaces the prefix. A slow, failed, or empty answer
+shows nothing.
 
 ### `hook.startup`
 
-This hook rewrites arguments and optionally changes the process. It receives
-`{cwd, argv, flags}`, where `flags` holds the parsed values of every typed
-flag declaration. Answer:
+Rewrite the command line or relaunch e elsewhere. Startup hooks run in
+extension order before e parses its subcommands, `-c`, `-r`, or the initial
+prompt. The params are `{cwd, argv, flags}`. Answer, with every field
+optional:
 
 ```json
 {"argv":["-c"],
@@ -358,116 +333,175 @@ flag declaration. Answer:
  "relaunch":{"cwd":"/path/to/project","env":{"BOOTSTRAPPED":"1"}}}
 ```
 
-Startup hooks run in extension filename order, before e parses subcommands,
-`-c`, `-r`, or the initial prompt.
+- `argv` replaces the arguments the next hook, and then e, sees.
+- `env` sets variables in the current process; `null` removes one.
+- `relaunch` replaces the process with the same e binary in `cwd`, with
+  `env` applied, and ends the chain. No other executable can be chosen.
 
-- `argv` feeds the next hook.
-- `env` changes the current process.
-- `relaunch` replaces the current process with the same e binary in `cwd`.
-  Extensions cannot choose another executable. The first relaunch ends the
-  chain.
+Unlike other hooks, startup hooks fail closed. If one errors, times out, or
+returns an invalid result, e prints the error and exits with status 1, so a
+consumed flag or branch name never leaks into the prompt.
+
+### `hook.tool_call`
+
+Gate a tool call before it runs. Answer `{"block":true,"reason":"why"}` to
+stop it; the model sees the reason as an error result (`blocked by <name>`
+without one). Answer `{"block":false}` or `{}` to allow it. The first
+extension to block wins.
+
+### `hook.input`
+
+Decide what happens to a line the user submits. e runs the hook in
+extension order, and the first extension to consume or replace the line
+wins:
+
+```json
+{"consume":true,"notice":"swallowed, with a notice"}
+{"replace":"the rewritten line"}
+{"notice":"let through, with a notice"}
+{}
+```
+
+An empty result lets the line through untouched. Every notice is shown,
+including those from extensions that let the line through. A pasted API key
+never reaches the hook.
+
+### `hook.before_turn`
+
+Add context to a turn. e runs it once per turn, before the first provider
+request, with the prompt that started the turn. Answer:
+
+```json
+{"system_suffix":"a paragraph appended to the system prompt for this turn","message":{"content":"…","internal":true}}
+```
+
+e appends `system_suffix` to the system prompt; it never replaces the
+prompt. e adds `message` to the conversation before the request. `internal`
+defaults to true, which keeps the message out of the transcript.
+
+### `hook.tool_result`
+
+Redact or trim tool output. e runs it after every tool, before the result
+is shown, stored, or sent. Answer `{"content":"what the model reads instead"}`,
+or `{}` to keep the result. Each extension sees the previous one's rewrite.
+A rewrite also drops the tool's `display` text, so the viewer shows exactly
+what you let through.
+
+### `hook.render`
+
+Replace how an entry is displayed. Add `render` to `hooks` and list what to
+render in `renders`:
+
+- `"tool:<name>"`, or `"tool:*"` for every tool, asks about a tool's
+  finished result. Your body replaces it in the ctrl+o viewer.
+- `"assistant"` asks about a completed reply. Your body replaces its
+  markdown in the transcript.
+- `"*"` asks about both.
+
+The params are `{"kind":"tool"|"assistant","name":"…","content":"…"}`;
+`name` is empty for a reply. Answer `{"body":"…","format":"text"|"markdown"|"diff"}`,
+or `{}` to leave the entry as e paints it. Each extension sees the previous
+one's body. The model never sees the rendered body.
+
+### `hook.compact_summary`
+
+Edit the summary that is about to replace the older conversation during
+compaction. Answer `{"summary":"…"}` or `{}`. Each extension sees the
+previous one's summary.
 
 ## Events
 
-Events tell your extension what happens in a session. List the events you
-want in the manifest's `events`. e sends only those, as notifications:
-`{"method":"event","params":{"name":"…","extra":{…}}}`.
+List the events you want in the manifest's `events`. e sends them as
+notifications:
 
-```
-session_start     {reason, path}       reason: startup | reload | new | resume | fork
-session_shutdown  {reason}             reason: quit | reload | new | resume | fork
-turn_start        {prompt}
-turn_end          {aborted}
-tool_start        {id, name, arguments}
-tool_end          {id, name, outcome, content}
-compact_start     {}
-compact_end       {summary}
-model_change      {model}
-effort_change     {effort}
+```json
+{"method":"event","params":{"name":"turn_end","extra":{"aborted":false}}}
 ```
 
-A manifest without an `events` field is a version-1 extension and receives
-`turn_end` alone.
+| Event | `extra` |
+| --- | --- |
+| `session_start` | `{reason, path}`, where `reason` is `startup`, `reload`, `new`, `resume`, or `fork` |
+| `session_shutdown` | `{reason}`: `quit`, `reload`, `new`, `resume`, or `fork` |
+| `turn_start` | `{prompt}` |
+| `turn_end` | `{aborted}` |
+| `tool_start` | `{id, name, arguments}` |
+| `tool_end` | `{id, name, outcome, content}`, where `outcome` is `completed`, `failed`, `timedout`, `blocked`, or `cancelled` |
+| `compact_start` | `{}` |
+| `compact_end` | `{summary}` |
+| `model_change` | `{model}` |
+| `effort_change` | `{effort}` |
 
-There are no per-token events. A pipe per delta is a cost with no consumer.
-`tool_end` carries the finished text.
+A manifest without an `events` field receives `turn_end` only. Unknown
+event names are ignored. There are no per-token events; `tool_end` carries
+the finished text.
 
 ## Requests to e
 
-Your extension can ask e to show things, ask the user questions, and control
+An extension can ask e to show things, ask the user questions, and control
 the session. Send `{"id":<yours>,"method":"…","params":{…}}` and read the
-answer with the same id.
+answer with the same id. Unknown methods fail with `unknown method <name>`.
 
 Every request is bounded:
 
-- An extension can have at most 32 unanswered requests. e answers any more
-  with an error.
-- One modal shows at a time across all extensions.
-- e sanitizes text before painting it.
-- e clips oversized content rather than refusing it. A long diff still
-  shows, it just ends early.
+- An extension can have at most 32 unanswered requests; more fail at once.
+- One modal (`select`, `confirm`, `input`, `editor`) shows at a time across
+  all extensions; the rest queue.
+- e sanitizes text before painting it and clips oversized content rather
+  than refusing it.
+- Requests have no timeout, because a person answers them; see
+  [Timeouts and failures](#timeouts-and-failures).
 
 ### UI requests
 
-```
-ui.notify   {message, tone?}                     → {}            tone: info | warning | error
-ui.show     {title?, body, format}               → {}            a transcript block
-ui.select   {title, options:[…]}                 → {value, label} | {cancelled:true}
-ui.confirm  {title, message?}                    → {confirmed}
-ui.input    {title, placeholder?, prefill?, secret?} → {text} | {cancelled:true}
-ui.status   {text | null, key?}                  → {}            your slot on the status row (40 columns);
-                                                                 `key` keeps several
-ui.activity {text | null, key?}                  → {}            your text on the activity row below the
-                                                                 transcript (`Thinking (3s) …`), 40 columns
-ui.compose  {text}                               → {}            put text in the composer
-ui.panel    {title, lines, interactive?} | null  → {}            a footer panel; null closes yours
-ui.editor   {title, text?, placeholder?}         → {text} | {cancelled:true}   a multi-line answer
-ui.widget   {lines | null, key?}                 → {}            rows above the composer; null removes
-ui.pane     {id?, title?, side?, hint?, sections} | null → {}    a side pane; null closes yours
-```
+| Method | Params | Answer |
+| --- | --- | --- |
+| `ui.notify` | `{message, tone?}`, tone `info` (default), `warning`, or `error` | `{}` |
+| `ui.show` | `{title?, body, format?}` | `{}`; a transcript block like a command's `show` |
+| `ui.select` | `{title, options}` | `{value, label}` or `{cancelled:true}` |
+| `ui.confirm` | `{title, message?}` | `{confirmed}` |
+| `ui.input` | `{title, placeholder?, prefill?, secret?}` | `{text}` or `{cancelled:true}` |
+| `ui.editor` | `{title, text?, placeholder?}` | `{text}` or `{cancelled:true}` |
+| `ui.compose` | `{text}` | `{}`; replaces the composer draft |
+| `ui.status` | `{text, key?}` | `{}`; `text: null` clears the slot |
+| `ui.activity` | `{text, key?}` | `{}`; `text: null` clears the slot |
+| `ui.widget` | `{lines, key?}` | `{}`; `lines: null` removes the widget |
+| `ui.panel` | `{title?, lines, interactive?}`, or `null` | `{}`; `null` closes your panel |
+| `ui.pane` | `{id?, title?, side?, hint?, sections}`, or `null` | `{}`; `null` closes your pane. See [The side pane](#the-side-pane). |
 
 **Questions.** `select` options are strings or `{label, description?,
-value?}` objects. The picker is the same one `/` opens. `confirm` is a Yes/No
-picker.
+value?}` objects (`value` defaults to the label); at least one is required.
+`confirm` is a Yes/No picker; Esc answers it `{confirmed:false}` and cancels
+the others. `input` turns the composer into the answer field; `secret`
+masks the text and keeps it from input hooks and the model. `editor` is the
+multi-line version: Shift+Enter breaks a line and Ctrl+G opens the user's
+external editor. `ui.compose` fails while the composer is answering.
 
-`input` takes over the composer until Enter or Esc. `secret` masks the text,
-and the text never reaches input hooks or the model. `editor` is the same
-field for several lines. Shift+enter breaks a line, ctrl+g hands the draft to
-the user's external editor, and Enter answers.
+**Spans.** Panel, widget, and `rows` pane lines are strings or arrays of
+`{text, token}` spans, painted in the theme's colour for `token` (`dim`,
+`accent`, `success`, `warning`, `error`, `userMessageText`, …). Unknown
+tokens paint plain.
 
-**Panels.** `panel` lines are strings, or arrays of `{text, token}` spans. e
-paints each span with the theme's colour for `token`, such as `dim`,
-`accent`, `success`, `warning`, `error`, or `userMessageText`. Unknown tokens
-paint plain. A panel holds at most 200 lines.
+**Panels.** A footer surface of up to 200 lines, titled with the extension
+name by default. One panel shows at a time; when another replaces yours, e
+sends `ui.panel_closed`. An `interactive` panel receives every key as a
+`ui.key` notification, such as `{"key":"shift+tab"}`, except Esc (closes the
+panel) and Ctrl+C. To redraw, send `ui.panel` again.
 
-Only one panel shows at a time. Another extension's panel replaces yours, and
-e tells you with `ui.panel_closed`.
+**Status and activity.** `status` is a slot on the status row; `activity` is
+text on the row below the transcript that reads `Thinking (3s) …` during a
+turn. Each is one line of at most 40 columns, and a `key` keeps several per
+extension. The user's [layout](../customize/layout.md) places them with
+`{status}` (all slots), `{status:<name>}` (one extension's), and
+`{activity}`.
 
-An `interactive` panel receives the keyboard. Every key arrives as
-`{"method":"ui.key","params":{"key":"down"}}`, including chords like `ctrl+x`
-and `shift+tab`. `escape` never arrives, because Esc closes the panel. ctrl+c
-stays e's. To redraw, send `ui.panel` again. Your extension handles state and
-key events, and e renders the frame.
-
-**Activity.** `activity` is the row that reads `Thinking (3s) (↑1k ↓20)`
-during a turn. Your text joins it through the `{activity}` token of the
-user's template. See [layout](../customize/layout.md). Between turns your text
-stands alone there, such as a test count, a build step, or a clock.
-
-**Widgets and status.** `widget` rows use the same span grammar as panels and
-sit above the composer. Every extension's widgets show together in key order,
-eight rows at most. `{"lines": null}` removes one.
-
-`status` with a `key` keeps several slots per extension. The status row's
-template joins them with `{status}`, or picks one extension's with
-`{status:<name>}`. See [layout](../customize/layout.md).
+**Widgets.** Rows above the composer. All extensions' widgets show
+together, ordered by extension name and key, eight rows at most.
 
 ### The side pane
 
-`ui.pane` opens a pane beside the conversation for a diff review, a plan, a
-test runner, or a log. You send content. e owns the split, focus, scrolling,
-the cursor, selection, and the mouse, so every pane navigates alike and none
-can paint outside its column.
+`ui.pane` opens a pane beside the conversation for a diff review, a plan,
+or a log. You send content; e owns the layout, focus, scrolling, selection,
+and the mouse.
 
 ```json
 {"id": "diff", "title": "Changes", "side": "right", "sections": [
@@ -477,74 +511,73 @@ can paint outside its column.
 ]}
 ```
 
-A pane holds these section kinds:
+| Pane field | Meaning |
+| --- | --- |
+| `id` | Identifies the pane; defaults to the extension name. |
+| `title` | Defaults to the `id`. |
+| `side` | `left` or `right`. A proposal: the user's `~/.e/layout.json` decides where every pane goes and how wide it is. |
+| `hint` | Replaces the pane's default key hint. |
+| `sections` | At least one section. |
+
+Each section has a `kind`, an optional `id` (defaults to its position), and
+an optional `title`:
 
 | Kind | Content |
 | --- | --- |
-| `list` | Selectable rows: `{id, label, detail?, token?}`, or plain strings. |
-| `diff` | A unified diff, painted in e's row grammar. |
-| `text` | Plain text. |
-| `markdown` | Markdown. |
-| `rows` | The panel's span lines. |
+| `list` | `items`: `{id, label, detail?, token?}` objects or plain strings. `selected` names the item under the cursor. Shows eight rows and scrolls. |
+| `diff` | `body`: a unified diff, painted in e's diff rows. |
+| `text` | `body`: plain text. |
+| `markdown` | `body`: markdown. |
+| `rows` | `lines`: span lines, as in a panel. |
 
-Lists show eight rows and scroll. The other kinds share the remaining height.
-The whole pane holds 256 KiB. Past that, e drops the rest and the last row
-says so.
+A pane holds 256 KiB; e drops the rest and says so on the last row. To
+refresh, send `ui.pane` again with the same `id`; the user keeps their
+place in every section whose `id` survived. One pane shows at a time; when
+another replaces yours, e sends `pane.closed`.
 
-To refresh, send `ui.pane` again with the same `id`. The user keeps their
-place in every section that kept its `id`. Send `null` to close the pane.
+What the user does comes back as `pane.select`, `pane.activate`,
+`pane.key`, and `pane.closed` notifications, listed in
+[Messages from e](#messages-from-e). e uses these keys while the pane has
+focus:
 
-What the user does comes back as notifications:
+- Up/Down, `j`/`k`, PageUp, PageDown, Home, and End navigate; Left/Right
+  scroll a wide diff; Tab moves between sections.
+- Enter on a list activates the item and moves to the next section;
+  elsewhere it attaches the selected rows to the composer.
+- Shift with a movement key, or a mouse drag, selects rows.
+- Esc returns to the first section, then closes the pane.
 
-```
-{"method":"pane.select",  "params":{"pane":"diff","section":"files","id":"src/main.rs"}}  the cursor moved to an item
-{"method":"pane.activate","params":{"pane":"diff","section":"files","id":"src/main.rs"}}  Enter on an item
-{"method":"pane.key",     "params":{"pane":"diff","key":"x"}}                               a chord e did not use
-{"method":"pane.closed",  "params":{"pane":"diff"}}                                         the user closed it
-```
-
-e uses these keys while the pane has focus:
-
-- `↑`/`↓` and `j`/`k`, `PageUp`, `PageDown`, `Home`, and `End` navigate.
-- `←`/`→` scroll a wide diff.
-- `Tab` moves between sections.
-- `Enter` on a list activates the item and moves to the next section. On
-  anything else, it attaches the selected rows to the composer as a snapshot.
-- `Shift` with a movement, or a mouse drag, selects rows.
-- `Esc` goes back to the first section, and then closes the pane.
-
-The layout's focus chord, `ctrl+t` by default, moves between the conversation
-and the pane. On a terminal too narrow to split, the focused one fills the
-screen, and the status row says how to reach the other.
-
-`side` is a proposal. The user's `~/.e/layout.json` decides where every pane
-goes and how wide it is.
+Other chords arrive as `pane.key`. The layout's focus chord (`ctrl+t` by
+default) moves between conversation and pane; on a terminal too narrow to
+split, the focused one fills the screen.
 
 ### Session requests
 
-```
-session.send      {content, internal?, run?, when?} → {}  internal: model sees it, transcript does not;
-                                                         run: start (or steer) a turn — default true
-                                                         for visible messages, false for internal;
-                                                         when: "next_turn" holds an internal message
-                                                         until the user's next prompt and sends it
-                                                         just ahead of it. While a turn runs only
-                                                         run: true (a steer) or when: "next_turn"
-                                                         is accepted; run: false is an error then
-session.info      {}                          → {path, id, name, cwd, model, effort, running,
-                                                  tools, context_tokens, context_window}
-session.name      {name}                      → {}
-session.model     {model}                     → {} | error   the same path /model takes
-session.effort    {effort}                    → {} | error   one of the model's levels
-session.tools     {names | null}              → {}           narrow the toolset; null restores
-session.interrupt {}                          → {}
-session.compact   {focus?}                    → {}
-```
+| Method | Params | Answer |
+| --- | --- | --- |
+| `session.send` | `{content, internal?, run?, when?}` | `{}` |
+| `session.info` | `{}` | `{path, id, name, cwd, model, effort, running, tools, context_tokens, context_window}` |
+| `session.name` | `{name}` | `{}`; an empty name clears it |
+| `session.model` | `{model}` | `{}`, or an error; resolves and saves the model the way `/model` does |
+| `session.effort` | `{effort}` | `{}`, or an error; one of the current model's levels |
+| `session.tools` | `{names}` | `{}`; a list narrows the toolset, `null` restores it |
+| `session.interrupt` | `{}` | `{}`; stops a running turn |
+| `session.compact` | `{focus?}` | `{}`; compacts now, optionally with a focus |
 
-`session.tools` is how a plan mode works. Send `["read","grep"]`, and the
-model can neither see nor call anything else until you send `null`. It covers
-built-in and extension tools alike. e enforces it at execution, not only in
-what the request advertises. It resets on `/new` and resume.
+`session.send` puts a message into the session:
+
+- `internal: true` means the model sees it and the transcript does not.
+- `run` starts a turn, or steers the running one. It defaults to true for a
+  visible message and false for an internal one.
+- `when: "next_turn"` holds an internal message and sends it just ahead of
+  the user's next prompt. It requires `internal: true`.
+- While a turn runs, only `run: true` or `when: "next_turn"` is accepted.
+  During compaction or a reload, every send fails; try again later.
+
+`session.tools` is how a plan mode works. Send `{"names":["read","grep"]}`,
+and the model can neither see nor call anything else until you send
+`{"names":null}`. It covers built-in and extension tools, is enforced at
+execution, and resets on `/new` and resume.
 
 ### What e does not offer
 
@@ -553,241 +586,94 @@ These are left out on purpose:
 - rewriting the provider request or its headers
 - replacing the system prompt
 - custom providers
-- replacing the session, because `/new`, `/resume`, and `/tree` are the
-  user's
+- replacing the session: `/new`, `/resume`, and `/tree` are the user's
 - per-token streams
 
 ## Shortcuts
 
-A shortcut binds a key chord to your extension. Declare `shortcuts` in the
-manifest. When the user presses a chord, e sends
-`{"id":…,"method":"shortcut","params":{"key":"ctrl+alt+g"}}`, and you answer
-it like a command.
+A shortcut binds a key chord to your extension. When the user presses a
+declared chord, e sends `{"id":…,"method":"shortcut","params":{"key":"ctrl+alt+g"}}`,
+and you answer it like a [command](#command).
 
-A chord needs `ctrl` or `alt`. e refuses bare keys and shift-only chords at
-the manifest, because those are how text gets typed.
+A chord needs `ctrl` or `alt`. e refuses bare keys and shift-only chords,
+because those type text, and keeps these for itself: `ctrl+c`, `ctrl+d`,
+`ctrl+g`, `ctrl+i`, `ctrl+j`, `ctrl+l`, `ctrl+m`, `ctrl+o`, `ctrl+p`,
+`ctrl+shift+p`, `ctrl+s`, `ctrl+v`, `ctrl+shift+v`, `ctrl+x`, and `ctrl+z`.
+A refused chord is dropped with a notice.
 
-e keeps these chords for itself: `ctrl+c`, `ctrl+d`, `ctrl+g`, `ctrl+i`,
-`ctrl+j`, `ctrl+l`, `ctrl+m`, `ctrl+o`, `ctrl+p`, `ctrl+shift+p`, `ctrl+s`,
-`ctrl+v`, `ctrl+shift+v`, `ctrl+x`, and `ctrl+z`.
-
-A chord the composer binds, such as `ctrl+k`, stays the composer's. See
-[keybindings](../customize/keybindings.md). A shortcut fires only when the key
-would otherwise do nothing. A user frees a chord for your extension by
-unbinding it in `keybindings.json`.
-
-When two extensions declare the same chord, the first declaration wins and e
-shows a notice.
+A chord the composer binds, such as `ctrl+k`, stays the composer's: a
+shortcut fires only when the key would otherwise do nothing. A user frees a
+chord by unbinding it in `keybindings.json`; see
+[keybindings](../customize/keybindings.md).
 
 ## Timeouts and failures
 
-- The initialize answer must arrive within 5 s, or e skips the extension.
-- Runtime hooks have 5 s and **fail open**. A slow or broken tool gate never
-  blocks the agent. A silent `before_turn` adds nothing, and a silent
-  `tool_result` changes nothing. Return `{"block":true}` to deny a tool call.
-- Startup hooks are different. If an advertised startup hook errors or times
-  out, launch stops. That keeps a consumed flag or branch name from leaking
-  into the initial prompt.
-- Your `ui.*` and `session.*` requests have no timeout, because a person
-  answers them. A reload, a session switch, or shutdown answers every open
-  request with an error, so you are never left waiting.
-- Tool calls have 300 s. Commands have 60 s.
-- On quit, e sends `shutdown`, waits a beat, then kills the process.
-- e reports a crashed or missing extension in the transcript and skips it. A
-  broken extension is never a reason e can't run.
-- If an extension exits right after a valid initialize response, e still
-  emits one notice. The notice includes which runtime hooks now fail open.
+| Request | Budget | On timeout or failure |
+| --- | --- | --- |
+| `initialize` | 5 s | The extension is skipped, with a notice. |
+| `hook.startup` | 5 s | Launch stops; e exits with status 1. |
+| Other hooks | 5 s | Fail open: the hook changes nothing and blocks nothing. |
+| `tool_call` | 300 s | The model gets an error result. |
+| `command`, `shortcut` | 60 s | A notice. |
+| `command.complete` | 3 s | No completions. |
+| Your `ui.*` and `session.*` requests | none | Failed with an error on reload, session switch, or shutdown. |
+
+Runtime hooks fail open, so a slow or broken gate never blocks the agent.
+Only an explicit `{"block":true}` denies a tool call.
+
+A crashed, missing, or misbehaving extension is reported in the transcript
+and skipped; it never stops e from running. If an extension exits
+mid-session, e shows one notice, which names any `tool_call` or `input`
+hook that no longer applies.
 
 ## Examples
 
-These examples live in `docs/guides/extend/examples/`:
+These examples live in [`examples/`](examples/README.md):
 
+| File | What it shows |
+| --- | --- |
+| [`hello.mjs`](examples/hello.mjs) | A command, a tool, config, an input hook, and session naming, on the scaffold. |
+| [`plan.mjs`](examples/plan.mjs) | A plan mode: `session.tools`, a `before_turn` paragraph, a shortcut, a picker, a status slot, and a side pane, on the scaffold. |
+| [`gate.mjs`](examples/gate.mjs) | The `tool_call` hook as a fail-open guard against destructive commands. |
+| [`protected.mjs`](examples/protected.mjs) | The `tool_call` hook denying calls that touch credential-shaped paths such as `~/.ssh` or `.env`. See [sandboxing](../usage/sandboxing.md) for where a hook like this fits. |
+| [`project.mjs`](examples/project.mjs) | A startup hook that adds `e --project <path>` and relaunches e in that directory, on the scaffold. |
+| [`mcp.mjs`](examples/mcp.mjs) | One MCP stdio server's tools as e tools. Self-contained. |
+| [`subagent.mjs`](examples/subagent.mjs) | A `delegate` tool that runs one turn in a child `e rpc --no-extensions`, with agents (`Explore`, `Plan`, `Build`) defined as tool allowlists plus a model. Replace its `"{provider/model}"` placeholders; `E_BIN` picks the e binary. Self-contained. |
+| [`scaffold.mjs`](examples/scaffold.mjs) | An optional helper for the protocol. |
+
+To try one, copy it into `~/.e/extensions/`, make it executable, and
+restart e. An example built on the scaffold needs `scaffold.mjs` beside it
+in a bundle directory:
+
+```sh
+mkdir -p ~/.e/extensions/hello
+cp docs/guides/extend/examples/hello.mjs docs/guides/extend/examples/scaffold.mjs ~/.e/extensions/hello/
+chmod +x ~/.e/extensions/hello/hello.mjs
 ```
-docs/guides/extend/examples/
-  subagent.mjs   bounded delegated e turns as a tool, over e rpc (self-contained)
-  hello.mjs      every surface at once, on the optional scaffold helper
-  gate.mjs       the tool_call hook as a fail-open guard
-  protected.mjs  the tool_call hook denying credential-shaped paths
-  project.mjs    a startup-hook directory router (e --project <path>)
-  mcp.mjs        one MCP stdio server's tools as extension tools
-  scaffold.mjs   an optional wire-protocol helper (not required, never installed)
-  plan.mjs       a plan mode on the new surface: session.tools, a shortcut, a pane,
-                 ui.select, a status slot, and a panel
-```
 
-An extension speaks the protocol directly. `subagent.mjs` and the shell
-`ping.sh` below are single self-contained files. Each reads a JSON request
-per line and writes a response per line. e installs nothing beside an
-extension.
-
-- **`hello.mjs`.** Every surface at once, on the optional scaffold: a
-  command, a tool, config, an input hook, and session naming, in about 50
-  lines of handlers.
-- **`gate.mjs`.** The `tool_call` hook as a guard, in e's fail-open shape.
-  Only an explicit block stops a call. A slow or crashed extension never
-  blocks the agent.
-- **`protected.mjs`.** The `tool_call` hook denies any call to `read`,
-  `write`, `edit`, `grep`, or `bash` that touches a credential-shaped path:
-  `~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `*.pem`, or `*.key`. It catches the
-  tool's `path` argument and bash commands that mention one. `gate.mjs` denies
-  destructive commands. This one is about what gets read into context or
-  written to disk, not just what bash runs. See
-  [sandboxing](../usage/sandboxing.md) for e's trust model and where a hook
-  like this fits.
-- **`project.mjs`.** This startup-hook launcher uses the scaffold.
-  `e --project <path>` relaunches e in an existing project directory.
-- **`subagent.mjs`.** Its `delegate` tool drives a single-shot `e rpc
-  --no-extensions` child with one JSON request line in and one result out. The
-  delegated turn is extension-free, so it cannot delegate again. It defines
-  `Explore`, `Plan`, and `Build` in the extension and sends each agent's
-  `tools` and optional `model` in the RPC request. Core stays generic and does
-  not have an agent type.
-- **`mcp.mjs`.** A dependency-free bridge from one configured MCP stdio
-  server's `tools/list` and `tools/call` surface into e extension tools. It
-  forwards MCP progress through the additive `tool.update` capability.
+To share an extension, including a compiled one, put it in a
+[package](packages.md).
 
 ### The scaffold helper
 
-`scaffold.mjs` is an optional convenience. It handles the same stdin and
-stdout framing and the id routing, and it provides a
-`connect({ manifest, handlers })` wrapper. You write handlers instead of a
-read loop.
+`scaffold.mjs` handles framing and id routing for Node.js extensions: pass
+a manifest and handlers to `connect()` and call `.run()`. Its header comment
+lists every handler. Tool handlers get an `{update}` argument that sends
+`tool.update` chunks, and `flag(name)` returns a flag's value or its
+declared default. Copy it into your bundle; e never installs it.
 
-To use it, drop it into your extension's own bundle directory and
-`import { connect } from "./scaffold.mjs"`. e never installs it for you, and
-you don't need to think about it otherwise.
+### MCP tools
 
-### Use or share an example
-
-To use an example, put it in `~/.e/extensions/`, make it executable, and
-restart e. It can be a top-level executable file, or a subdirectory bundling
-it and its helpers.
-
-An example that uses the scaffold helper needs `scaffold.mjs` beside it in its
-bundle. The self-contained ones, `subagent.mjs` and `ping.sh`, need nothing.
-
-To share an extension, put it in a repository's `extensions/` directory.
-Others install it with `e install git:<host>/<user>/<repo>`. See
-[packages.md](packages.md).
-
-## Compiled extensions
-
-Extensions are programs, not only scripts. Anything that speaks the line
-protocol qualifies, including a compiled binary.
-
-A compiled extension lives in its own repository, like every package. It
-reaches users as a release package with
-`e install release:<owner>/<repo>/<name>`. See [packages.md](packages.md). The
-e repository ships no extensions of its own.
-
-What an extension sends still crosses the line as data. e sanitizes notices
-before painting them. An extension that wants colour returns a `show` with a
-`format` rather than styled bytes.
-
-## A complete extension in shell
-
-Save this as `~/.e/extensions/ping.sh` and make it executable with
-`chmod +x`:
-
-```sh
-#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"initialize"'*)
-      printf '{"id":%s,"result":{"name":"ping","version":"1","commands":[{"name":"ping","description":"are you there"}]}}\n' "$id" ;;
-    *'"command"'*)
-      printf '{"id":%s,"result":{"notice":"pong"}}\n' "$id" ;;
-    *'"shutdown"'*) exit 0 ;;
-  esac
-done
-```
-
-Restart e, type `/ping`, and you get `pong`.
-
-## MCP tools
-
-`mcp.mjs` exposes one MCP stdio server's tools as e tools. Put it in
-`~/.e/extensions/` and make it executable. Then configure the stdio server
-that e should own in `~/.e/settings.json`:
+`mcp.mjs` exposes one MCP stdio server's tools as e tools (MCP 2025-11-25
+stdio; tools only, not prompts, resources, sampling, or elicitation).
+Configure the server it starts in `~/.e/settings.json`:
 
 ```json
-{
-  "extensions": {
-    "mcp": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/safe/root"]
-    }
-  }
-}
+{"extensions": {"mcp": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/safe/root"]}}}
 ```
 
 > [!TIP]
-> `npx -y` downloads the server on first use. That routinely takes longer
-> than the 5 s initialize budget, so e skips the bridge with
-> `initialize timed out` until the package is cached. Run the `npx` line once
-> by hand first, or point `command` at an installed binary.
-
-The bridge intentionally maps only MCP tools. Prompts, resources, sampling,
-elicitation, and authorization stay out of e's core and out of this example.
-
-The bridge uses:
-
-- the 2025-11-25 initialize/initialized stdio lifecycle supported by current
-  SDK legacy/default mode
-- newline-delimited JSON-RPC
-- paginated `tools/list`
-- `tools/call`
-
-See the [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle),
-[transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports),
-and [tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
-specifications.
-
-## Delegated turns
-
-`subagent.mjs` gives the model a `delegate` tool that runs a task in a child
-e. Put it in `~/.e/extensions/` and restart. It is a single self-contained
-file with nothing beside it.
-
-Each delegation is a single-shot `e rpc` child in the same working directory.
-The extension writes one JSON request line, reads one result object, and
-closes stdin. The child loads no extensions, so it cannot delegate again. Set
-`E_BIN` when the child should use an e binary other than the one on `PATH`.
-
-`timeout_seconds` defaults to 240 seconds. At the deadline the extension
-sends SIGTERM, and `e rpc` kills every active built-in bash process group
-before it exits. A later SIGKILL remains as a watchdog if graceful shutdown
-stalls.
-
-The delegation sets `save: true`. The response includes the saved JSONL path,
-and the tool result gives that path to the parent. The parent can read it when
-the final answer omits a useful tool call or result.
-
-### Agents live in the extension
-
-A delegation can name an `agent` defined in `subagent.mjs`. Each agent
-chooses a built-in tool allowlist and an optional model. The child receives
-the task as its user message. It uses e's normal system prompt with a generic
-tool-policy suffix. Core does not have an agent type.
-
-The extension defines these agents:
-
-- `Explore` can use `read` and `grep`.
-- `Plan` can use `read` and `grep`.
-- `Build` can use every built-in tool.
-
-Each agent object has `name`, `description`, optional `tools`, and optional
-`model`. The shipped `"{provider/model}"` values are placeholders. Until you
-replace one, that child uses the model `e rpc` normally resolves from
-configuration. A call can also pass `model` to override the selected agent.
-
-The core validates `tools` as built-in names and advertises only those
-schemas. It enforces the same list when a provider emits a tool call.
-
-## What startup hooks are for
-
-A startup extension sees raw argv and can relaunch the same binary in a new
-cwd. That lets it implement project-directory routing with `--project <path>`,
-project profiles, or scratch-directory routing. Any language that speaks the
-line protocol can add these behaviors without hardcoding them in e.
+> `npx -y` downloads the server on first use, which often takes longer than
+> the 5-second `initialize` budget: e then skips the bridge with
+> `initialize timed out`. Run the `npx` command once by hand first, or point
+> `command` at an installed binary.

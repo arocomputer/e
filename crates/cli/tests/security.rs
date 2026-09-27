@@ -33,17 +33,17 @@ async fn authenticated_http_never_follows_redirects() {
 
 #[cfg(unix)]
 #[test]
-fn session_permissions_cover_new_and_legacy_state() {
+fn session_permissions_cover_new_and_reopened_state() {
     use std::os::unix::fs::PermissionsExt;
     let _lock = common::env_lock();
     let home = common::Home::new("private-sessions");
     std::fs::set_permissions(&home.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let legacy_dir = home.dir.join("sessions/legacy");
-    std::fs::create_dir_all(&legacy_dir).unwrap();
-    let legacy = legacy_dir.join("old.jsonl");
-    let legacy_data = include_str!("fixtures/sessions/v0.jsonl");
-    std::fs::write(&legacy, legacy_data).unwrap();
-    std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let existing_dir = home.dir.join("sessions/existing");
+    std::fs::create_dir_all(&existing_dir).unwrap();
+    let existing = existing_dir.join("old.jsonl");
+    let existing_data = include_str!("fixtures/sessions/v2.jsonl");
+    std::fs::write(&existing, existing_data).unwrap();
+    std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let log = e::core::session::SessionLog::create(&home.dir, "dummy/model").unwrap();
     for dir in [
@@ -60,7 +60,7 @@ fn session_permissions_cover_new_and_legacy_state() {
         std::fs::metadata(log.path()).unwrap().permissions().mode() & 0o077,
         0
     );
-    let reopened = e::core::session::SessionLog::reopen(&legacy).unwrap();
+    let reopened = e::core::session::SessionLog::reopen(&existing).unwrap();
     assert_eq!(
         std::fs::metadata(reopened.path())
             .unwrap()
@@ -69,7 +69,7 @@ fn session_permissions_cover_new_and_legacy_state() {
             & 0o777,
         0o600
     );
-    assert_eq!(std::fs::read_to_string(&legacy).unwrap(), legacy_data);
+    assert_eq!(std::fs::read_to_string(&existing).unwrap(), existing_data);
 }
 
 #[test]

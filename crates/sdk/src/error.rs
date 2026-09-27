@@ -20,6 +20,9 @@ pub enum Error {
         "no provider is signed in — pass `.model()` for a declared provider, or run `e` and /login"
     )]
     NoProvider,
+    /// An API key was given without a model to use it with.
+    #[error("an API key needs a model: pass `.model()` with `.api_key()`")]
+    KeyWithoutModel,
     /// The requested reasoning effort is not one the model declares.
     #[error("model `{model}` does not support effort `{effort}` (supported: {supported})")]
     Effort {

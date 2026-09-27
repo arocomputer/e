@@ -8,6 +8,7 @@ gets its own HOME, E_HOME, workspace, raw PTY capture, and rendered frames.
 """
 import argparse
 import fcntl
+import hashlib
 import http.server
 import json
 import os
@@ -106,7 +107,8 @@ def capture(name, steps, out, port):
         settings['tui_mode'] = 'fullscreen'
     (state / 'settings.json').write_text(json.dumps(settings))
     if name not in ('trust-exit', 'narrow-trust', 'path-control'):
-        (state / 'trust.json').write_text(json.dumps({str(workspace): {'trusted': True}}))
+        key = 'sha256-' + hashlib.sha256(os.fsencode(workspace.resolve())).hexdigest()
+        (state / 'trust.json').write_text(json.dumps({key: {'trusted': True}}))
     env = {'HOME': str(home), 'E_HOME': str(state), 'PATH': '/usr/bin:/bin',
            'TERM': 'xterm-256color', 'LANG': 'en_US.UTF-8'}
     pid, fd = pty.fork()

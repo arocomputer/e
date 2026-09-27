@@ -31,20 +31,19 @@ once. Nothing here is compiled into e.
 
 ## Run it
 
-`@arocomputer/e-slack` versions itself and publishes new versions under `latest`
-with e's production releases. Dev and beta application releases do not republish the
-bot; their historical npm tags remain available. **Bump `version` in
-`package.json` in the same pull request that changes the bot**: npm refuses to
-republish a version, so an unraised version means the change ships in the
-repository and nowhere else. It only needs a checkout to work in (`E_CWD`):
+The bot is not published yet. Run it from this directory; it only needs a
+checkout to work in (`E_CWD`):
 
 ```sh
-npm install -g @arocomputer/e-slack
+npm install
 set -a; . ./.env; set +a
-e-slack
+npm start
 ```
 
-`npx @arocomputer/e-slack` does the same without a global install.
+When releases resume, the bot publishes as `@arocomputer/e-slack` alongside
+e's production releases. **Bump `version` in `package.json` in the same pull
+request that changes the bot**: npm refuses to republish a version, so an
+unraised version means the change ships in the repository and nowhere else.
 
 ## Develop
 
@@ -58,30 +57,29 @@ npm start
 
 ## Run it on a server
 
-Image publication is paused during development. When releases resume, the bot
-will publish as `ghcr.io/arocomputer/e-slack` (`:latest` on
-the production channel, `:beta` on the beta one), so the host needs neither Node
-nor a checkout of e:
+Build the image from the repository root; the host then needs neither Node nor a
+checkout of e. With no release published, the build compiles e from source, which
+takes a few minutes:
 
 ```sh
+docker build -t e-slack services/slack
 docker volume create e-slack-home
 
 # Once: trust the checkout and sign in. e's home is the volume, so both stick.
 docker run --rm -it --user "$(id -u):$(id -g)" \
-  -v e-slack-home:/home/e -v "$PWD:/work" --entrypoint e \
-  ghcr.io/arocomputer/e-slack:latest trust
+  -v e-slack-home:/home/e -v "$PWD:/work" --entrypoint e e-slack trust
 docker run --rm -it --user "$(id -u):$(id -g)" \
-  -v e-slack-home:/home/e --entrypoint e ghcr.io/arocomputer/e-slack:latest   # then /login
+  -v e-slack-home:/home/e --entrypoint e e-slack   # then /login
 
 docker run -d --restart unless-stopped --name e-slack \
   --user "$(id -u):$(id -g)" --env-file .env -e E_CWD=/work \
-  -v e-slack-home:/home/e -v "$PWD:/work" ghcr.io/arocomputer/e-slack:latest
+  -v e-slack-home:/home/e -v "$PWD:/work" e-slack
 ```
 
-`Dockerfile` builds that same image from a checkout — for a patch of your own,
-or an architecture the release does not carry. It takes `--build-arg
-E_VERSION=0.1.0 --build-arg E_CHANNEL=production` to pin the release it carries; the
-base is Debian 13 because the released Linux binaries link against glibc 2.39.
+Once releases exist, `--build-arg E_VERSION=0.1.0` installs that release instead
+of compiling, and the release workflow publishes the image as
+`ghcr.io/arocomputer/e-slack`. The base is Debian 13 because the released Linux
+binaries link against glibc 2.39.
 
 `--user` is what keeps the files the agent writes in the checkout owned by you
 rather than root. `-v "$PWD:/work"` must be the repository the bot should work

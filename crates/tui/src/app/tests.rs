@@ -26,7 +26,7 @@ use super::*;
 /// Mouse navigation pauses output following without recalling or editing prompts.
 #[test]
 fn main_wheel_keeps_the_draft_and_reading_position_through_output_and_review() {
-    use crossterm::event::{MouseEvent, MouseEventKind};
+    use crate::term::{MouseEvent, MouseEventKind};
     let mut app = session_app();
     app.editor.push_history("old prompt".into());
     app.editor.set_text("unfinished draft");
@@ -823,6 +823,7 @@ fn session_app() -> App {
         supports_tools: true,
         image_input: false,
         pricing: None,
+        api_key: None,
     });
     let (jobs, _) = tokio::sync::mpsc::channel(1);
     let (logins, _) = tokio::sync::mpsc::channel(1);
@@ -1655,7 +1656,7 @@ fn tui_mode_defaults_inline_and_settings_cycle_the_layout() {
             .find(|setting| setting.key == "tui_mode")
             .unwrap();
         assert_eq!(setting.current(), "inline");
-        e_core::config::settings::set_string("composer_position", "bottom").unwrap();
+        e_core::config::settings::set_string("tui_mode", "fullscreen").unwrap();
         app.refresh_status_cache();
         assert!(app.bottom_pinned);
         assert_eq!(setting.current(), "fullscreen");

@@ -7,13 +7,48 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::OnceLock;
 
+#[cfg(not(target_family = "wasm"))]
+use std::process::Stdio;
+#[cfg(not(target_family = "wasm"))]
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
 use super::*;
 
+/// An extension's process.
+#[cfg(not(target_family = "wasm"))]
+pub(super) type Child = tokio::process::Child;
+
+/// The browser build starts no processes, so no extension ever has one.
+#[cfg(target_family = "wasm")]
+pub(super) enum Child {}
+
+#[cfg(target_family = "wasm")]
+impl Child {
+    pub(super) fn start_kill(&mut self) -> std::io::Result<()> {
+        match *self {}
+    }
+
+    pub(super) async fn wait(&mut self) -> std::io::Result<()> {
+        match *self {}
+    }
+}
+
+/// Extensions are processes; the browser build refuses them at the door.
+#[cfg(target_family = "wasm")]
+pub(super) async fn spawn(
+    _path: &PathBuf,
+    _cwd: &Path,
+    _notices: mpsc::Sender<String>,
+    _startup_registry: Option<&Arc<Mutex<Vec<Arc<Link>>>>>,
+    _requests: Option<mpsc::Sender<HostRequest>>,
+) -> Result<Extension, String> {
+    Err("extensions need the native build".into())
+}
+
 /// Start one extension and complete its handshake. The child is registered
 /// in `startup_registry` before `initialize` is sent, so a cancelled startup
 /// can still find and kill it; a failed handshake reaps it before returning.
+#[cfg(not(target_family = "wasm"))]
 pub(super) async fn spawn(
     path: &PathBuf,
     cwd: &Path,
@@ -41,7 +76,7 @@ pub(super) async fn spawn(
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "extension".into());
     if let Some(stderr) = stderr {
-        tokio::spawn(relay_stderr(stderr, notices.clone(), source.clone()));
+        crate::rt::spawn(relay_stderr(stderr, notices.clone(), source.clone()));
     }
 
     let link = Arc::new(Link {
@@ -63,7 +98,7 @@ pub(super) async fn spawn(
     }
 
     let (writer, writer_rx) = mpsc::channel::<String>(64);
-    tokio::spawn(write_stdin(stdin, writer_rx, link.clone()));
+    crate::rt::spawn(write_stdin(stdin, writer_rx, link.clone()));
     let name: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
     let ui = requests.is_some();
     let router = Router {
@@ -73,7 +108,7 @@ pub(super) async fn spawn(
         writer: writer.clone(),
         early: Vec::new(),
     };
-    tokio::spawn(read_stdout(stdout, link.clone(), router));
+    crate::rt::spawn(read_stdout(stdout, link.clone(), router));
 
     let ext = Extension {
         manifest: Manifest::default(),
@@ -98,6 +133,7 @@ pub(super) async fn spawn(
 /// and its remainder dropped, then reading goes on. The pipe must
 /// stay open as long as the child lives — closing it would turn the
 /// child's next stderr write into SIGPIPE/EPIPE and kill it.
+#[cfg(not(target_family = "wasm"))]
 async fn relay_stderr(stderr: ChildStderr, notices: mpsc::Sender<String>, source: String) {
     let mut reader = BufReader::new(stderr);
     loop {
@@ -125,6 +161,7 @@ async fn relay_stderr(stderr: ChildStderr, notices: mpsc::Sender<String>, source
 
 /// Serialize outgoing lines to the child's stdin, one per message. A failed
 /// write means the extension is gone.
+#[cfg(not(target_family = "wasm"))]
 async fn write_stdin(mut stdin: ChildStdin, mut lines: mpsc::Receiver<String>, link: Arc<Link>) {
     while let Some(line) = lines.recv().await {
         let written: std::io::Result<()> = async {
@@ -143,6 +180,7 @@ async fn write_stdin(mut stdin: ChildStdin, mut lines: mpsc::Receiver<String>, l
 /// Route every stdout line: responses to pending waiters, notifies to the
 /// app, progress to the running tool, and the extension's own requests to
 /// the surface owner.
+#[cfg(not(target_family = "wasm"))]
 async fn read_stdout(stdout: ChildStdout, link: Arc<Link>, mut router: Router) {
     let mut reader = BufReader::new(stdout);
     while let Ok(Some(line)) = read_bounded_line(&mut reader, MAX_EXTENSION_LINE_BYTES).await {
@@ -293,7 +331,7 @@ impl Router {
         self.inflight.fetch_add(1, Ordering::SeqCst);
         let inflight = self.inflight.clone();
         let writer = self.writer.clone();
-        tokio::spawn(async move {
+        crate::rt::spawn(async move {
             let result = rx.await.unwrap_or_else(|_| Err("request dropped".into()));
             inflight.fetch_sub(1, Ordering::SeqCst);
             let _ = writer.send(answer(&id, result)).await;
@@ -306,7 +344,7 @@ impl Router {
     fn refuse(&self, id: &Value, error: String) {
         let line = answer(id, Err(error));
         let writer = self.writer.clone();
-        tokio::spawn(async move {
+        crate::rt::spawn(async move {
             let _ = writer.send(line).await;
         });
     }

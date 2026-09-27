@@ -5,6 +5,13 @@
 //! helper) can neither stall a ctrl+v forever nor balloon memory: the run
 //! is killed and the read surfaces as a notice.
 
+// Only macOS and Linux have clipboard helpers; elsewhere (the browser, whose
+// page pastes through the terminal) a read reports that none is available.
+#![cfg_attr(
+    not(any(target_os = "macos", target_os = "linux")),
+    allow(dead_code, unused_imports)
+)]
+
 use e_core::providers::{ImageInput, MAX_IMAGE_BYTES};
 
 /// One clipboard read may take this long before its helpers are killed.
@@ -101,11 +108,11 @@ fn spawn_grouped(program: &str, args: &[&str]) -> Result<std::process::Child, Ru
 /// group id then, and cannot yet have been reused.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn wait_for_exit(child: &mut std::process::Child) -> Option<bool> {
-    let deadline = std::time::Instant::now() + READ_TIMEOUT;
+    let deadline = e_core::rt::Instant::now() + READ_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Some(status.success()),
-            Ok(None) if std::time::Instant::now() < deadline => {
+            Ok(None) if e_core::rt::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             _ => return None,

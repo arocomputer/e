@@ -9,7 +9,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "The terminal frontend of e, the coding agent you can put anywhere"
-documentation = "https://aro.computer/e/docs"
+documentation = "https://e.aro.computer/docs"
 readme = "../../README.md"
 keywords = ["agent", "coding-agent", "tui"]
 categories = ["command-line-utilities"]
@@ -22,9 +22,13 @@ e-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 unicode-width.workspace = true
-crossterm.workspace = true
 tokio.workspace = true
 pulldown-cmark.workspace = true
 uuid.workspace = true
 base64.workspace = true
+futures.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+crossterm.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "io-std", "process", "signal"] }
 libc.workspace = true

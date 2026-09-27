@@ -73,9 +73,17 @@ pub use e_core::providers::ImageInput as Image;
 /// Token counts with disjoint categories: `input` excludes cache reads and
 /// writes; `prompt_tokens()` is their sum.
 pub use e_core::providers::Usage;
+/// The future a [`Shell`] returns.
+pub use e_core::rt::BoxFuture;
 /// A session file on disk, as listed by [`SessionBuilder::saved`].
 pub use e_core::session::SessionInfo as SavedSession;
-pub use e_core::tools::{OutputStream, ToolOutcome};
+/// The disk, the default [`Workspace`].
+pub use e_core::tools::workspace::Disk as DiskWorkspace;
+/// A [`Workspace`] held in memory: nothing the session writes reaches a disk.
+pub use e_core::tools::workspace::Memory as MemoryWorkspace;
+/// What a [`Workspace`] reports about an entry.
+pub use e_core::tools::workspace::{Kind as EntryKind, Metadata, Stamp};
+pub use e_core::tools::{OutputStream, Shell, ShellOutput, ToolOutcome, Workspace};
 
 /// Read a saved session's active conversation without taking ownership of
 /// the file: the messages a `resume` of `path` would load. Pass them to
