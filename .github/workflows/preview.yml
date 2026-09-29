@@ -1,4 +1,4 @@
-name: Preview
+name: preview
 
 # Explicit requests only. PR code gets a read-only token and no publishing secrets.
 on:
@@ -12,7 +12,7 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
-  source:
+  resolve:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.pr.outputs.sha }}
@@ -27,8 +27,8 @@ jobs:
           sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
   build:
-    name: Build - ${{ matrix.target }}
-    needs: source
+    name: build (${{ matrix.target }})
+    needs: resolve
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -46,12 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.sha }}
+          ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
       - name: Build pinned preview
         env:
           E_BUILD_CHANNEL: pr
-          E_BUILD_COMMIT: ${{ needs.source.outputs.sha }}
+          E_BUILD_COMMIT: ${{ needs.resolve.outputs.sha }}
           SEQUENCE: ${{ github.run_number }}
           PR: ${{ inputs.pr }}
           TARGET: ${{ matrix.target }}

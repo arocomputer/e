@@ -124,11 +124,11 @@ if out=$(sed -n '/^\[dependencies\]/,/^\[/p' crates/sdk/Cargo.toml | grep -nE '^
   say "$out"
 fi
 
-# 9. The Tests workflow uses the local check commands. Raw `cargo` or `npm`
+# 9. The ci workflow uses the local check commands. Raw `cargo` or `npm`
 #    calls would create a second definition of passing, one
 #    the local check does not have; the specialized workflows (release,
-#    security, docs) are their own thing and are not fenced.
-if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/checks.yml 2>/dev/null); then
+#    preview, fuzz) are their own thing and are not fenced.
+if out=$(grep -nE 'run: .*\b(cargo|npm|python3 -m unittest|scripts/packaging)' .github/workflows/ci.yml 2>/dev/null); then
   bad "a check calls a tool directly; call ./x <step> instead
 $out"
 fi

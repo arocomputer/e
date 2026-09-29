@@ -1,6 +1,7 @@
-name: Tests
+name: ci
 
-# Rust checks, terminal frames, packaging, and docs share the local ./x commands.
+# Every job runs the ./x command it is named after, so CI and local checks
+# share one definition of passing.
 on:
   push:
     branches: [main]
@@ -15,12 +16,11 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   changes:
-    # Preserve required job names so existing PR results remain valid.
     name: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -71,10 +71,10 @@ jobs:
         if: needs.changes.outputs.build == 'true'
         run: ./x lint
 
-  unit:
+  test:
     # The suite, on both supported platforms. `./x test` runs every test binary
     # even after one fails, so a red pull request reports all of them.
-    name: unit (${{ matrix.name }})
+    name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     needs: changes
@@ -106,10 +106,10 @@ jobs:
         if: needs.changes.outputs.build == 'true'
         run: ./x test
 
-  e2e:
+  ui:
     # The frames and colours are pinned against the reference design, which no
     # other job looks at.
-    name: Terminal
+    name: ui
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
@@ -147,7 +147,7 @@ jobs:
     # The guides are published on the website and embedded in the binary. A
     # change to the binary gets the contract from `./x test`; a prose-only
     # change, which skips that, gets it here.
-    name: Documentation
+    name: docs
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
@@ -172,7 +172,7 @@ jobs:
         run: ./x docs
 
   packages:
-    name: Packages - ${{ matrix.name }}
+    name: packages (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     needs: changes
@@ -218,7 +218,7 @@ jobs:
         run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
 
   channels:
-    name: Channels
+    name: channels
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: changes
@@ -238,7 +238,7 @@ jobs:
     # The release's Linux image, so the floor is proven on the pull request
     # instead of by a user on an older distribution. Release plumbing and the
     # lockfile both decide it, because a dependency can raise the floor.
-    name: glibc compatibility
+    name: glibc
     needs: changes
     if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.lock == 'true'
     runs-on: ubuntu-latest
@@ -266,8 +266,21 @@ jobs:
           E_GLIBC_CEILING: "2.31"
         run: scripts/release/build.sh
 
+  audit:
+    # RustSec advisories, when the dependency set changes and weekly, so a CVE
+    # in an existing pin still surfaces without a pull request.
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: changes
+    if: github.event_name == 'schedule' || needs.changes.outputs.lock == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Audit
+        run: ./x audit
+
   bench:
-    name: Benchmarks
+    name: bench
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes

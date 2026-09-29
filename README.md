@@ -10,7 +10,7 @@
 <p align="center">The coding agent you can put anywhere.</p>
 <p align="center">
   <a href="https://github.com/arocomputer/e/releases"><img alt="Release" src="https://img.shields.io/github/v/release/arocomputer/e?style=flat-square&label=release&labelColor=grey&color=blue" /></a>
-  <a href="https://github.com/arocomputer/e/actions/workflows/checks.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/arocomputer/e/checks.yml?style=flat-square&branch=main&label=Tests" /></a>
+  <a href="https://github.com/arocomputer/e/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/arocomputer/e/ci.yml?style=flat-square&branch=main&label=ci" /></a>
 </p>
 
 [![e using GPT-5.6 Sol with low reasoning effort to fix code and run tests](assets/readme.png)](https://e.aro.computer)

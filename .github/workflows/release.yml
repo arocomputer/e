@@ -1,7 +1,7 @@
-name: publish
+name: release
 
 # Publication stays off during development unless explicitly enabled in repository variables.
-# Preview builds are unsigned artifacts in preview.yml.
+# Preview builds are unsigned artifacts from the preview workflow.
 on:
   push:
     tags: ["v*"]
@@ -48,10 +48,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release/resolve.py
-  qualify:
+  verify:
+    name: verify
     needs: resolve
     if: needs.resolve.outputs.mode == 'build'
-    name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -86,9 +86,9 @@ jobs:
         run: |
           E_BUILD_CHANNEL="$CHANNEL" ./x release-check "$TAG"
 
-  create:
+  draft:
     name: draft
-    needs: [resolve, qualify]
+    needs: [resolve, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -114,9 +114,9 @@ jobs:
             gh release create "$TAG" --draft --target "$SHA" --title "$TITLE" --notes-file notes.md
           fi
 
-  build:
-    name: build (macos)
-    needs: [resolve, create]
+  build-macos:
+    name: build-macos
+    needs: [resolve, draft]
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -160,8 +160,8 @@ jobs:
           overwrite: true
 
   build-linux:
-    name: build (${{ matrix.leg }})
-    needs: [resolve, create]
+    name: build-linux (${{ matrix.leg }})
+    needs: [resolve, draft]
     runs-on: ${{ matrix.runner }}
     # A Linux binary links against the glibc of the image that built it, so it
     # is built where that glibc is oldest: Debian 11 ships 2.31, which covers
@@ -177,10 +177,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - leg: linux-x86_64
+          - leg: x86_64
             runner: ubuntu-latest
             targets: "x86_64-unknown-linux-gnu"
-          - leg: linux-arm64
+          - leg: arm64
             runner: ubuntu-24.04-arm
             targets: "aarch64-unknown-linux-gnu"
     steps:
@@ -216,15 +216,15 @@ jobs:
       - name: Retain build archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binaries-${{ matrix.leg }}
+          name: binaries-linux-${{ matrix.leg }}
           path: e-*.tar.gz
           retention-days: 14
           overwrite: true
 
-  publish:
-    name: release
-    needs: [resolve, build, build-linux]
-    if: ${{ !cancelled() && ((needs.build.result == 'success' && needs.build-linux.result == 'success') || needs.resolve.outputs.mode == 'recover') }}
+  github:
+    name: github
+    needs: [resolve, build-macos, build-linux]
+    if: ${{ !cancelled() && ((needs.build-macos.result == 'success' && needs.build-linux.result == 'success') || needs.resolve.outputs.mode == 'recover') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -313,8 +313,8 @@ jobs:
 
   npm:
     name: npm
-    needs: [resolve, publish]
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+    needs: [resolve, github]
+    if: ${{ !cancelled() && (needs.github.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     # Six packages may each need up to twenty minutes for npm processing.
     timeout-minutes: 110
@@ -368,8 +368,8 @@ jobs:
   container:
     name: container
     # The image installs the release it belongs to, so it waits for one.
-    needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    needs: [resolve, github]
+    if: ${{ !cancelled() && needs.github.result == 'success' }}
     # A registry hiccup must not fail the release, the way the npm
     # publishing step does not. The deployment report still records the outcome.
     continue-on-error: true
@@ -399,12 +399,12 @@ jobs:
             ghcr.io/arocomputer/e-slack:latest
             ghcr.io/arocomputer/e-slack:${{ needs.resolve.outputs.version }}
 
-  sdk:
-    name: sdk crate
+  crates:
+    name: crates
     # The embedded SDK is the one crate that still publishes: it has no shell,
     # Homebrew, or npm installer. It depends on core, so core publishes first.
-    needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    needs: [resolve, github]
+    if: ${{ !cancelled() && needs.github.result == 'success' }}
     # A registry hiccup must not fail the release, the way the npm and image
     # publications do not. The deployment report records the outcome.
     continue-on-error: true
@@ -456,8 +456,8 @@ jobs:
     name: homebrew
     permissions:
       contents: read
-    needs: [resolve, publish]
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+    needs: [resolve, github]
+    if: ${{ !cancelled() && (needs.github.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -488,10 +488,10 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: scripts/packaging/publish-brew.sh "dist/${{ needs.resolve.outputs.command }}.rb" tap
 
-  channel:
-    name: channel
-    needs: [resolve, publish]
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
+  installer:
+    name: installer
+    needs: [resolve, github]
+    if: ${{ !cancelled() && (needs.github.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -508,9 +508,9 @@ jobs:
           E_INSTALL_DIR="$RUNNER_TEMP/e-pinned" sh "$RUNNER_TEMP/install.sh" --version "${TAG#v}"
           "$RUNNER_TEMP/e-pinned/e" --version | grep -Fx "e ${TAG#v}"
 
-  deployment:
+  report:
     name: report
-    needs: [resolve, qualify, create, build, build-linux, publish, npm, homebrew, container, sdk, channel]
+    needs: [resolve, verify, draft, build-macos, build-linux, github, npm, homebrew, container, crates, installer]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

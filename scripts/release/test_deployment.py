@@ -14,7 +14,7 @@ class DeploymentTests(unittest.TestCase):
                     'resolve': {'result': 'success', 'outputs': {
                         'channel': 'production', 'repository': 'arocomputer/e', 'sha': 'a' * 40, 'tag': 'v1.2.3', 'version': '1.2.3'}},
                     'npm': {'result': outcome}, 'homebrew': {'result': 'success'},
-                    'channel': {'result': 'success' if outcome == 'success' else 'skipped'},
+                    'installer': {'result': 'success' if outcome == 'success' else 'skipped'},
                 }
                 with patch.dict(os.environ, GITHUB_STEP_SUMMARY=''), \
                         patch('deployment.subprocess.check_output', side_effect=['{"id": 42}', '{}']) as call:
@@ -34,7 +34,7 @@ class DeploymentTests(unittest.TestCase):
         import tempfile
         needs = {'resolve': {'result': 'success', 'outputs': {'channel': 'production', 'sha': 'a' * 40,
                  'repository': 'arocomputer/e', 'tag': 'v1.2.3', 'version': '1.2.3'}},
-                 'publish': {'result': 'success'}, 'channel': {'result': 'success'},
+                 'github': {'result': 'success'}, 'installer': {'result': 'success'},
                  'npm': {'result': 'failure'}, 'homebrew': {'result': 'success'}}
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.dict(os.environ, GITHUB_STEP_SUMMARY=str(Path(tmp, 'summary'))), \

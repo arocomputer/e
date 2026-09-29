@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -131,6 +131,12 @@ case "$command" in
   bench)
     [ "$#" -eq 0 ] || usage
     python3 benchmarks/run.py --build --check
+    ;;
+  audit)
+    [ "$#" -eq 0 ] || usage
+    # RustSec advisories against Cargo.lock.
+    cargo install cargo-audit --locked
+    cargo audit
     ;;
   sbom)
     [ "$#" -eq 1 ] || usage
