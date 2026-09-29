@@ -66,11 +66,11 @@ repeated here.
 ```
 
 The `ci` workflow runs these commands, one job per `./x` command and named
-after it: `lint`, `test (linux)`, `test (macos)`, `ui`, `docs`, `packages`,
-`channels`, `audit`, and `bench`, plus `glibc` for the release's Linux floor.
-GitHub shows each as `ci / <job>`. Branch protection requires `changes`,
-`lint`, `test (linux)`, and `test (macos)`; renaming one of those means
-updating branch protection in the same change.
+after it: `lint`, `test (linux)`, `test (macos)`, `ui`, `docs`,
+`packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
+`bench`, plus `glibc` for the release's Linux floor. The `changes` job decides
+which of them a change needs; the others show as skipped. Branch protection
+requires only `ready`, which passes when every job passed or was skipped.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included

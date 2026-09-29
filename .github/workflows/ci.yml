@@ -1,7 +1,8 @@
 name: ci
 
 # Every job runs the ./x command it is named after, so CI and local checks
-# share one definition of passing.
+# share one definition of passing. `changes` decides which jobs a change
+# needs; the rest are skipped whole, and `ready` is the one required check.
 on:
   push:
     branches: [main]
@@ -42,10 +43,12 @@ jobs:
         run: python3 scripts/ci/changes.py
 
   lint:
+    # Content, formatting, and the guard run on every change; clippy only when
+    # Rust compilation can change.
     name: lint
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: changes
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,27 +74,17 @@ jobs:
         if: needs.changes.outputs.build == 'true'
         run: ./x lint
 
-  test:
-    # The suite, on both supported platforms. `./x test` runs every test binary
-    # even after one fails, so a red pull request reports all of them.
-    name: test (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+  test-linux:
+    # The suite. `./x test` runs every test binary even after one fails, so a
+    # red pull request reports all of them.
+    name: test (linux)
     needs: changes
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-latest
-          - name: macos
-            os: macos-latest
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust cache
-        if: needs.changes.outputs.build == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -101,24 +94,41 @@ jobs:
             target/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - run: ./x test
 
-      - name: Test
-        if: needs.changes.outputs.build == 'true'
-        run: ./x test
+  test-macos:
+    # The suite. `./x test` runs every test binary even after one fails, so a
+    # red pull request reports all of them.
+    name: test (macos)
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - run: ./x test
 
   ui:
     # The frames and colours are pinned against the reference design, which no
     # other job looks at.
     name: ui
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: changes
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust cache
-        if: needs.changes.outputs.build == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -128,11 +138,7 @@ jobs:
             target/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
-
-      - name: Frames
-        if: needs.changes.outputs.build == 'true'
-        run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
-
+      - run: ./x ui --out "$RUNNER_TEMP/e-ui-frames"
       - name: Retain frames
         if: failure()
         continue-on-error: true
@@ -148,46 +154,13 @@ jobs:
     # change to the binary gets the contract from `./x test`; a prose-only
     # change, which skips that, gets it here.
     name: docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.build != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: changes
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Rust cache
-        if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.build != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-            target/release
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
-
-      - name: Docs contract
-        if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.build != 'true'
-        run: ./x docs
-
-  packages:
-    name: packages (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    needs: changes
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-latest
-          - name: macos
-            os: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust cache
-        if: matrix.name == 'linux' && (needs.changes.outputs.build == 'true' || needs.changes.outputs.packages == 'true')
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -197,40 +170,76 @@ jobs:
             target/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - run: ./x docs
 
-      - if: needs.changes.outputs.packages == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-      - if: needs.changes.outputs.packages == 'true'
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: '1.4.2'
-      - name: Package contents and native launchers
-        if: needs.changes.outputs.packages == 'true'
-        run: ./x packages
-
-      - name: Published crates
-        if: matrix.name == 'linux' && needs.changes.outputs.build == 'true'
-        run: ./x crates
-      - name: Release SBOM
-        if: matrix.name == 'linux' && (needs.changes.outputs.build == 'true' || needs.changes.outputs.packages == 'true')
-        run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
-
-  channels:
-    name: channels
+  packages-linux:
+    # Installers and package launchers, on each platform they install to.
+    name: packages (linux)
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: changes
-    if: needs.changes.outputs.channels == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - name: Reference channels
-        run: ./x channels
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: ./x packages
 
+  packages-macos:
+    # Installers and package launchers, on each platform they install to.
+    name: packages (macos)
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: ./x packages
+
+  crates:
+    # The crates.io packages and the release's dependency inventory.
+    name: crates
+    needs: changes
+    if: needs.changes.outputs.build == 'true' || needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - run: ./x crates
+      - run: ./x sbom "$RUNNER_TEMP/e-sbom.cdx.json"
+
+  channels:
+    name: channels
+    needs: changes
+    if: needs.changes.outputs.channels == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: ./x channels
       - name: Build the Slack image
         run: ./x container
 
@@ -247,7 +256,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -259,7 +267,6 @@ jobs:
             target/*/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
-
       - name: Build for the oldest glibc the release promises
         env:
           TARGETS: x86_64-unknown-linux-gnu
@@ -270,25 +277,22 @@ jobs:
     # RustSec advisories, when the dependency set changes and weekly, so a CVE
     # in an existing pin still surfaces without a pull request.
     name: audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     needs: changes
     if: github.event_name == 'schedule' || needs.changes.outputs.lock == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Audit
-        run: ./x audit
+      - run: ./x audit
 
   bench:
     name: bench
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
     needs: changes
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.changes.outputs.build == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.bench == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -299,9 +303,7 @@ jobs:
             target/release
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
-
-      - name: Bench
-        run: ./x bench
+      - run: ./x bench
 
       # A reviewer convenience, not a contract: GitHub's artifact service
       # occasionally 403s at finalize, and that flake must not fail the job.
@@ -314,3 +316,17 @@ jobs:
           path: target/release/e
           if-no-files-found: error
           retention-days: 7
+
+  ready:
+    # The one check branch protection requires. It passes when every job
+    # passed or was skipped, so jobs skip whole and can be renamed without
+    # touching branch protection. A new job joins `needs` here.
+    name: ready
+    needs: [changes, lint, test-linux, test-macos, ui, docs, packages-linux, packages-macos, crates, channels, glibc, audit, bench]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

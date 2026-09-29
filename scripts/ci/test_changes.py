@@ -1,4 +1,4 @@
-"""Protect the boundaries between documentation, native builds, and publication."""
+"""Protect the boundaries between documentation, native builds, and packaging."""
 import json
 import os
 import unittest
@@ -11,29 +11,25 @@ from changes import changed_paths, classify, main
 
 
 class ChangesTests(unittest.TestCase):
-    def test_readme_artwork_does_not_build_or_publish(self):
+    def test_readme_artwork_does_not_build(self):
         gates = classify(['README.md', 'assets/readme.png', 'assets/readme-window.html'])
         self.assertTrue(gates['docs'])
         self.assertFalse(gates['build'])
-        self.assertFalse(gates['publish'])
         self.assertFalse(gates['bench'])
 
     def test_unknown_paths_fail_open(self):
         gates = classify(['new-runtime/input.dat'])
         self.assertTrue(gates['build'])
-        self.assertTrue(gates['publish'])
 
-    def test_channel_services_check_clients_without_publishing_the_binary(self):
+    def test_channel_services_check_clients_without_building_the_binary(self):
         for path in ['services/slack/src/index.ts', 'services/github/e.yml']:
             gates = classify([path])
             self.assertTrue(gates['channels'])
             self.assertFalse(gates['build'])
-            self.assertFalse(gates['publish'])
 
     def test_embedded_theme_is_runtime_data(self):
         gates = classify(['crates/core/themes/dark.json'])
         self.assertTrue(gates['build'])
-        self.assertTrue(gates['publish'])
         self.assertTrue(gates['bench'])
 
     def test_guides_get_docs_without_duplicate_full_suite(self):
