@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select checks and dev publication from changed paths; unknown paths run checks."""
+"""Select CI jobs from changed paths; unknown paths run every job."""
 import json
 import os
 from pathlib import Path
@@ -7,8 +7,8 @@ import subprocess
 
 
 def classify(paths):
-    """Return independent gates; artwork/prose cannot trigger a native build or release."""
-    gates = dict.fromkeys(('build', 'packages', 'channels', 'docs', 'lock', 'bench', 'publish'), False)
+    """Return independent gates; artwork and prose cannot trigger a native build."""
+    gates = dict.fromkeys(('build', 'packages', 'channels', 'docs', 'lock', 'bench'), False)
     for path in paths:
         workflow = path.startswith('.github/workflows/')
         if path.startswith(('services/slack/', 'services/github/', 'crates/cli/tests/fixtures/channels/')) or workflow:
@@ -33,7 +33,7 @@ def classify(paths):
                 or path in ('LICENSE', '.gitignore', '.gitattributes', '.editorconfig',
                             '.github/CODEOWNERS', '.github/dependabot.yml')):
             continue
-        gates['build'] = gates['publish'] = True
+        gates['build'] = True
     gates['bench'] |= gates['lock']
     return gates
 

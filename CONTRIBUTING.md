@@ -65,13 +65,12 @@ repeated here.
 ./x bench    # release-mode performance budgets
 ```
 
-The `Tests` workflow runs lint, unit tests on Linux and macOS, terminal tests,
-package checks, channels, documentation, glibc compatibility, and benchmarks.
-
-GitHub prefixes each job with its workflow, for example `Tests / Terminal` or
-`Security / Audit`. Required job names remain `changes`, `lint`, `unit (linux)`,
-and `unit (macos)` so existing PR results continue to satisfy branch protection.
-The dev publication workflow listens for a successful `Tests` run on main.
+The `ci` workflow runs these commands, one job per `./x` command and named
+after it: `lint`, `test (linux)`, `test (macos)`, `ui`, `docs`,
+`packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
+`bench`, plus `glibc` for the release's Linux floor. The `changes` job decides
+which of them a change needs; the others show as skipped. Branch protection
+requires only `ready`, which passes when every job passed or was skipped.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
@@ -82,6 +81,7 @@ The dev publication workflow listens for a successful `Tests` run on main.
 ./x guard         # the trust boundary and the repository's tooling tests
 ./x ui            # terminal frames and interaction scenarios
 ./x packages      # installers and package launchers
+./x audit         # RustSec advisories against Cargo.lock
 ./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
 ```
 

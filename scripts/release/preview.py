@@ -29,7 +29,7 @@ def main():
     if not args.run.isdigit():
         parser.error('run must be numeric')
     run = json.loads(gh('api', f'repos/arocomputer/e/actions/runs/{args.run}'))
-    assert run['path'] == '.github/workflows/preview.yml' and run['conclusion'] == 'success', 'Not a successful Preview run'
+    assert run['path'] == '.github/workflows/preview.yml' and run['conclusion'] == 'success', 'Not a successful preview run'
     os_name = {'Darwin': 'apple-darwin', 'Linux': 'unknown-linux-gnu'}[platform.system()]
     arch = {'arm64': 'aarch64', 'aarch64': 'aarch64', 'x86_64': 'x86_64'}[platform.machine()]
     with tempfile.TemporaryDirectory() as tmp:

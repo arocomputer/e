@@ -10,7 +10,7 @@ def report(needs, repository, server, run_id):
     """Report completed release jobs; never substitute the workflow branch for the source."""
     release = needs['resolve']['outputs']
     environment = 'production'
-    required = ('npm', 'homebrew', 'channel')
+    required = ('npm', 'homebrew', 'installer')
     success = all(needs[job]['result'] == 'success' for job in required)
     state = 'success' if success else 'error' if any(job['result'] == 'cancelled' for job in needs.values()) else 'failure'
     run_url = f'{server}/{repository}/actions/runs/{run_id}'
@@ -25,9 +25,9 @@ def report(needs, repository, server, run_id):
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
             summary.write('Release distribution results\n\n| Distribution | Result |\n| --- | --- |\n')
-            for job, label in [('publish', 'Verified binaries'), ('channel', 'Website installer'),
+            for job, label in [('github', 'Verified binaries'), ('installer', 'Website installer'),
                                ('npm', 'npm and bun'), ('homebrew', 'Homebrew'),
-                               ('container', 'Container'), ('sdk', 'SDK crate')]:
+                               ('container', 'Container'), ('crates', 'SDK crate')]:
                 summary.write(f'| {label} | {needs.get(job, {}).get("result", "skipped")} |\n')
 
     deployment = post('deployments', {

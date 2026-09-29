@@ -82,7 +82,7 @@ unless auto-update is disabled in its settings.
 
 ```sh
 ./x preview 123
-# After its Preview run succeeds:
+# After its preview run succeeds:
 ./x preview 123 --run RUN_ID
 ```
 
