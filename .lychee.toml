@@ -1,0 +1,12 @@
+# Check live external links weekly; relative links remain the docs-test contract.
+scheme = ['http', 'https']
+include_mail = false
+exclude_private = true
+exclude_loopback = true
+exclude_link_local = true
+timeout = 20
+max_retries = 2
+max_concurrency = 8
+no_progress = true
+# Reserved example domains are documentation placeholders, not live resources.
+exclude = ['^https?://([^.]+\.)*example\.(com|org|net|invalid)(/|$)']

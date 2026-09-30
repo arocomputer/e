@@ -1,0 +1,32 @@
+name: scheduled-report
+
+on:
+  # The reporter runs trusted default-branch code and reads metadata only.
+  workflow_run: # zizmor: ignore[dangerous-triggers] -- no triggering code or artifacts are executed
+    workflows: [ci, fuzz, links]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: scheduled-report-${{ github.event.workflow_run.workflow_id }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event.workflow_run.event == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Reconcile scheduled failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/report.py

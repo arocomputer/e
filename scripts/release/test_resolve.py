@@ -26,10 +26,12 @@ class RetryTests(unittest.TestCase):
     def test_production_selection_matches_manifest_and_refuses_other_channels(self):
         with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_EVENT_PATH='/event',
                         GITHUB_REF_NAME='v1.2.3'), \
-                patch('resolve.Path.read_text', return_value='{}'), \
-                patch('resolve.git', side_effect=['a' * 40, '[workspace.package]\nversion = "1.2.3"']), \
+                patch('resolve.Path.read_text', return_value=json.dumps({'after': 'b'*40})), \
+                patch('resolve.git', side_effect=['b' * 40, '[workspace.package]\nversion = "1.2.3"']) as git, \
                 patch('resolve.subprocess.run'):
             result = resolve()
+        self.assertEqual(git.call_args_list[0].args, ('rev-parse', '--verify', 'b'*40+'^{commit}'))
+        self.assertEqual(result['sha'], 'b'*40)
         self.assertEqual(result['channel'], 'production')
         self.assertEqual(result['tag'], 'v1.2.3')
         self.assertEqual(result['mode'], 'build')

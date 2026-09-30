@@ -253,10 +253,9 @@ cover pinned dependencies separately, including Git sources.
 The embedded SDK (`e-sdk`) and its core dependency publish to crates.io. The
 SDK versions itself and is the only way to embed e in a Rust program.
 `./x crates` verifies core publication and compiles an external SDK consumer
-from the packed core and SDK archives. Publishing uses `CARGO_REGISTRY_TOKEN`,
-a token scoped to `e-sdk` and `e-core` (the SDK depends on it) and no others.
-Create the token at https://crates.io/settings/tokens and set the first publication up
-interactively with `cargo login` if it is rotated.
+from the packed core and SDK archives. Publishing uses short-lived OIDC credentials
+through crates.io trusted publishers for `e-core` and `e-sdk`; no persistent Cargo
+token or interactive login is needed. See the SDK publication setup below.
 
 The renamed crates require their own publishing setup before SDK publication.
 
@@ -287,3 +286,22 @@ means availability is unconfirmed; check npm package status and rerun failed job
 Authentication errors and checksum mismatches fail immediately. The npm job allows
 110 minutes for the application packages, optional bot publication, and
 installation verification.
+
+## SDK publication identity
+
+The resolver runs trusted main tooling and verifies the pushed/tagged source
+against main before granting later publication steps. The release workflow
+verifies core and SDK packages from the selected release
+commit, including recovery of an older draft. The SDK keeps its own version and
+pins that commit's core version exactly. Tested archives and upload bodies move
+to a separate `crates-io` environment job; no repository build code runs with
+publication credentials. The job uses the official crates.io OIDC action instead
+of a persistent Cargo token. Configure trusted publishers for both `e-core` and
+`e-sdk` with repository `arocomputer/e`, workflow `release.yml`, and environment
+`crates-io`. Restrict that environment to main/version tags and require maintainer
+approval before enabling release publication.
+
+Retrying an existing release re-verifies its tagged source and can resume SDK
+publication. Existing registry versions are skipped only when their checksum
+matches the verified archive and they are not yanked. Changed SDK contents need
+a fresh SDK version; a conflicting published version is never silently reused.

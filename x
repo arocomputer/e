@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|site|fuzz-check|workflows|links|repository-settings|guard|packages|channels|audit-channels|container|ui|bench|audit|audit-python|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -44,6 +44,7 @@ case "$command" in
     ./x test
     ./x crates
     ./x guard
+    ./x workflows
     ;;
   test)
     # Every failing suite in one run: without this, the first of 46 test
@@ -72,6 +73,17 @@ case "$command" in
     # folder, unique topics, and every relative link resolving.
     cargo test --locked --test docs
     ;;
+  workflows)
+    [ "$#" -eq 0 ] || usage
+    python3 scripts/ci/workflows.py
+    ;;
+  links)
+    [ "$#" -eq 0 ] || usage
+    python3 scripts/ci/links.py
+    ;;
+  repository-settings)
+    python3 scripts/ci/settings.py "$@"
+    ;;
   packages)
     [ "$#" -eq 0 ] || usage
     # Installer and package contents: npm and Homebrew packaging, the platform
@@ -87,11 +99,21 @@ case "$command" in
     (cd services/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
     python3 -m unittest discover -s services/github -p 'test_*.py'
     ;;
-  container)
+  audit-channels)
     [ "$#" -eq 0 ] || usage
+    (cd services/slack && npm audit --omit=dev)
+    ;;
+  container)
     # The check builds without a published release, so it installs a stub `e`.
     # The release workflow builds the real image with the release it published.
-    docker build --tag e-slack --build-arg E_RELEASE_STUB=1 services/slack
+    docker build "$@" --tag e-slack --build-arg E_RELEASE_STUB=1 services/slack
+    docker run --rm --entrypoint sh e-slack -ec '
+      test "$(id -u)" -ne 0
+      test "$(stat -c %a "$E_HOME")" = 700
+      test -w "$E_HOME"
+      test -w "$(dirname "$E_SLACK_STATE")"
+      test "$(e --version)" = "e 0.0.0-stub"
+    '
     ;;
   guard)
     [ "$#" -eq 0 ] || usage
@@ -133,12 +155,19 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     python3 benchmarks/run.py --build --check
     ;;
-  audit)
-    [ "$#" -eq 0 ] || usage
-    # RustSec advisories against Cargo.lock.
-    cargo install cargo-audit --locked
-    cargo audit
+  fuzz-check)
+    cargo check --manifest-path fuzz/Cargo.toml --locked "$@"
     ;;
+  site)
+    python3 scripts/ci/site.py "$@"
+    ;;
+  audit)
+    python3 scripts/ci/audit.py rust
+    ;;
+  audit-python)
+    python3 scripts/ci/audit.py python
+    ;;
+
   sbom)
     [ "$#" -eq 1 ] || usage
     cargo install cargo-cyclonedx --version 0.5.9 --locked

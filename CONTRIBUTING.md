@@ -34,7 +34,7 @@ staged content. It never rewrites files or stages changes. Full tests and builds
 remain separate so commits stay fast. Python 3 and the pinned Rust toolchain are
 required.
 
-Git allows local hooks to be bypassed. The required CI Guard check runs the same
+Git allows local hooks to be bypassed. CI's lint job runs the same
 content checks on every PR, including docs-only changes, so bypassing a hook does
 not bypass merge checks.
 
@@ -67,13 +67,15 @@ repeated here.
 
 The `ci` workflow runs these commands, one job per `./x` command and named
 after it: `lint`, `test (linux)`, `test (macos)`, `ui`, `docs`,
-`packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
-`bench`, plus `glibc` for the release's Linux floor. The `changes` job decides
+`site`, `packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
+`bench`, `fuzz-check`, plus `glibc` for the release's Linux floor. The `changes` job decides
 which of them a change needs; the others show as skipped. Branch protection
-requires only `ready`, which passes when every job passed or was skipped.
+requires only `ready`, which validates the job plan and requires selected jobs
+to succeed and unselected jobs to skip. Unexpected skips or cancelled work fail.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
+./x workflows     # pinned actionlint syntax checks and offline zizmor security checks
 ./x lint          # clippy, warnings denied
 ./x test          # the suite; every failing binary reports, not just the first
 ./x crates        # the crates.io packages: packaged, built, and file-listed
@@ -82,25 +84,48 @@ requires only `ready`, which passes when every job passed or was skipped.
 ./x ui            # terminal frames and interaction scenarios
 ./x packages      # installers and package launchers
 ./x audit         # RustSec advisories against Cargo.lock
+./x channels      # reference channel typechecking and tests
+./x audit-channels # production npm advisories for Slack; also runs weekly
+./x container     # Slack image build and unprivileged runtime smoke check
 ./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
 ```
 
-The full suite includes the docs contract. Prose-only changes run that contract
-and the site build without the full suite. Performance-related PRs run benchmarks;
+The full suite includes the docs contract. Prose-only changes run the docs contract without the full suite; published guide
+changes also render the proposed guides with public dependencies using `./x site`; the private website validates its full build in its own pipeline. Performance-related PRs run benchmarks;
 main code changes and the weekly schedule run them too. Rust jobs cache
 dependencies and build outputs by platform, job, toolchain, and dependency set.
+
+Dependabot combines Cargo, npm, GitHub Actions, and Docker version updates into
+one weekly PR. Docker coverage includes the Slack runtime and CI container images;
+security updates can arrive separately. `./x audit` covers the root and active fuzz lockfiles and pins cargo-audit to 0.22.2;
+`./x audit-python` covers the pinned PTY dependencies;
+update that version deliberately when upgrading the advisory checker.
 
 `./x` is the single definition of green; CI runs the same commands, so
 nothing merges on a private definition of passing. `scripts/guard.sh` enforces
 the last part mechanically: the check workflow may not invoke `cargo` or `npm`
 directly.
 
+`./x workflows` installs checksum-verified binaries into `target/infra-tools/`.
+Versions and Linux/macOS archive hashes live in `.github/infra-tools.json`.
+Update those pins together when upgrading tools. The check runs on every PR;
+release jobs build without restored caches. The Homebrew tap checkout retains
+credentials because its publishing script pushes the formula, with a narrowly
+documented scanner exception. Actionlint's single compatibility exception covers
+GitHub's `queue: max` concurrency setting until the parser supports it.
+
+See [repository maintenance](docs/contributing/maintenance.md) for scheduled
+failure issues, closed-PR cache cleanup, link checks, and GitHub settings setup.
+
 ## Review
 
 Every change needs the maintainer's review. Paths that form the trust
 boundary — the extension host, authentication, the config store, provider
 wire code, session persistence, `install.sh`, and `.github/` — are called out
-in [CODEOWNERS](.github/CODEOWNERS) and cannot merge on green checks alone.
+in [CODEOWNERS](.github/CODEOWNERS). Maintainer review is project policy;
+CODEOWNERS routes review requests but does not enforce approval by itself.
+The documented status gate is `ready`; required review enforcement depends
+on the repository's current branch-protection settings.
 
 Title the PR as a conventional commit in plain language, scoped by area:
 `fix(tui): tool trees stay connected after compaction`. Scopes are `core`,
@@ -130,13 +155,12 @@ condition: the content is yours to own.
 
 - Review everything the AI produced — code, prose, commit messages —
   before you ask anyone here to review it for you.
-- Never attribute a commit to AI/LLM as author, co-author, committer, or
-  signatory: no `Assisted-by`, `Co-authored-by`, or similar trailer, and
-  no generated footer naming the model or harness. Attribution here is
-  human only.
-- Answer maintainer questions and review comments yourself; what an
-  agent wrote is input to your reply, not the reply.
-- One AI-assisted pull request open at a time.
+- A human contributor owns the change, its verification, and follow-up review.
+- Preserve accurate author, committer, service-account, signature, and co-author
+  metadata. Agent attribution is allowed; it does not replace human accountability.
+  Never rewrite history merely to add or remove attribution.
+- Contributors may use cloud agents and open multiple focused PRs. Keep each
+  reviewable and respond to maintainer feedback.
 
 If you reach the point where you feel unwilling or unable to do the
 above, close your issue or pull request.

@@ -4,6 +4,8 @@
 
 ### Improvements
 
+- **Upgrade:** the Slack reference service requires explicit `E_SLACK_ALLOWED_USERS` and `E_SLACK_ALLOWED_CHANNELS` allowlists for prompts and question answers. Its agent children no longer inherit `SLACK_*` credentials. The image defaults to a non-root user and a private home; existing home volumes must match the selected UID/GID and use mode `0700`.
+- Slack sessions retire idle processes, limit concurrent threads, and resume saved conversations after a process exits. Configure `E_SLACK_IDLE_MS` and `E_SLACK_MAX_THREADS` to change the defaults.
 - Inline conversations, fullscreen conversations, and review views now paint through Wove, retaining e's themes, layout, and native scrollback. Markdown parsing uses Wove's semantic API with e's existing presentation.
 - Replaced the README header wordmark with the split-arc logo.
 - Restored the `e` name and command while retaining the split-arc mark. The website now lives at `e.aro.computer` in `arocomputer/web`.
@@ -16,6 +18,7 @@
 
 ### Fixes
 
+- A second Slack prompt cannot replace the event listener for a turn already running in the same thread.
 - Attaching a selection from an extension's Markdown pane takes the rendered rows you selected, not whichever source lines had the same numbers.
 - Attaching from an extension's text pane wraps at the pane's width, not the whole terminal's, so the attached lines match the ones you selected.
 - A foreground `bash` command whose exit status can't be read no longer leaves a reader thread spinning when a child process still holds the output pipe open.
@@ -96,7 +99,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 - **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the production home. Set `E_HOME` explicitly to select another dedicated home.
 
-- **Upgrade:** `/diff` is now the separate [e-diff](https://github.com/fschrhunt/e-diff) package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
+- **Upgrade:** `/diff` is now the separate `e-diff` package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
 - **Upgrade:** `e ask` is removed. Use `e -p` for a headless turn or `e rpc` for JSONL automation. Piped stdin requires a supported headless mode.
 - **Upgrade:** read-only mode and the `ask` tool are removed. Use `--no-tools` or a tool allowlist; extensions should obtain required input through configuration or their supported interface requests.
 - **Upgrade:** Ctrl+D deletes forward. Press Ctrl+C twice to exit, or change the keybindings. Unlabeled code fences no longer guess a language, and footnotes remain literal text.

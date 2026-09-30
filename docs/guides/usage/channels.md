@@ -78,7 +78,10 @@ To run it from a checkout of this repository (Node 22.6 or later):
    three credentials, as the channel's
    [README](../../../services/slack/README.md) describes.
 3. Trust the repository the bot works in: `e trust /path/to/checkout`.
-4. Copy `services/slack/.env.example` to `.env` and fill it in.
+4. Copy `services/slack/.env.example` to `.env` and fill it in, including explicit
+   `E_SLACK_ALLOWED_USERS` and `E_SLACK_ALLOWED_CHANNELS` lists of comma-separated
+   Slack IDs. Missing or invalid lists stop startup. Every prompt, stop message,
+   and question answer must come from an allowed user in an allowed channel.
 5. Start the bot:
 
    ```sh
@@ -91,7 +94,16 @@ To run it from a checkout of this repository (Node 22.6 or later):
 `.env` sets `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_TOKEN`, and
 `E_CWD`. Optional: `E_BIN` (the `e` binary, default `e` on `PATH`),
 `E_MODEL`, and `E_SLACK_STATE` (where the thread-to-session map is kept,
-default `./e-slack-state.json`).
+default `./e-slack-state.json`, or `/home/e/slack-state.json` in the container).
+`E_SLACK_MAX_THREADS` limits live processes (default 16), and `E_SLACK_IDLE_MS`
+closes idle processes (default fifteen minutes). Running turns are kept alive;
+the next message after a process exits resumes its saved conversation. See the
+[Slack README](../../../services/slack/README.md) for deployment and migration.
+
+Allowed Slack users have the agent's shell and filesystem privileges. Child
+processes do not inherit `SLACK_*` credentials; keep the adapter's credential file
+outside the agent's readable workspace as well. Use a container or VM for
+containment, as described in [sandboxing](sandboxing.md).
 
 `services/slack/Dockerfile` packages the bot and e in one image. With no
 release published it compiles e from source; the

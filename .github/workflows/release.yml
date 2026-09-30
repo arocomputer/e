@@ -43,6 +43,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
+          persist-credentials: false
           fetch-depth: 0
       - id: release
         env:
@@ -58,21 +60,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-            target/release
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Check selected source
         run: |
@@ -97,6 +91,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
 
       - name: Draft
@@ -120,24 +115,13 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-            target/release
-            target/*/release
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Build
         env:
@@ -172,7 +156,7 @@ jobs:
       image: rust:1.98-bullseye
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -187,19 +171,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-            target/release
-            target/*/release
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-bullseye-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Build
         env:
@@ -234,11 +207,16 @@ jobs:
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Keep SBOM tooling for older source commits
-        run: cp scripts/release/sbom.py "$RUNNER_TEMP/release-sbom.py"
+        with:
+          persist-credentials: false
+      - name: Keep release tooling for older source commits
+        run: |
+          cp scripts/release/sbom.py "$RUNNER_TEMP/release-sbom.py"
+          cp scripts/release/assets.py "$RUNNER_TEMP/release-assets-check.py"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Download build archives
@@ -251,28 +229,19 @@ jobs:
 
       - name: Download and checksum every artifact
         env:
+          MODE: ${{ needs.resolve.outputs.mode }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           mkdir -p "$RUNNER_TEMP/release-assets"
-          if [ '${{ needs.resolve.outputs.mode }}' = recover ]; then
+          if [ "$MODE" = recover ]; then
             gh release download "$TAG" --pattern "e-*.tar.gz" --dir "$RUNNER_TEMP/release-assets"
           fi
           cd "$RUNNER_TEMP/release-assets"
           test "$(find . -name 'e-*.tar.gz' | wc -l)" -eq 4
           sha256sum e-*.tar.gz > checksums.txt
 
-      - name: Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-            target/release
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-host-${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Generate CycloneDX SBOM
         run: |
           cargo install cargo-cyclonedx --version 0.5.9 --locked
@@ -290,17 +259,18 @@ jobs:
         with:
           subject-path: ${{ runner.temp }}/release-assets/*
 
-      - name: Upload metadata and publish
+      - name: Upload verified assets and publish
         env:
           SHA: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
+          gh release upload "$TAG" "$RUNNER_TEMP"/release-assets/e-*.tar.gz "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" "$RUNNER_TEMP/release-assets/build.json" --clobber
           ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
+          python3 "$RUNNER_TEMP/release-assets-check.py" "$TAG"
           gh release edit "$TAG" --draft=false --latest
 
       - name: Retain verified assets for package publication
@@ -327,10 +297,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
       - name: Download verified assets
         if: needs.resolve.outputs.mode != 'retry'
@@ -340,11 +312,12 @@ jobs:
           path: ${{ runner.temp }}/npm-assets
       - name: Prepare verified packages
         env:
+          MODE: ${{ needs.resolve.outputs.mode }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          if [ '${{ needs.resolve.outputs.mode }}' = retry ]; then
+          if [ "$MODE" = retry ]; then
             test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = false
             gh release download "$TAG" --pattern 'e-*.tar.gz' --pattern checksums.txt --dir "$RUNNER_TEMP/npm-assets"
           fi
@@ -381,6 +354,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -399,58 +373,154 @@ jobs:
             ghcr.io/arocomputer/e-slack:latest
             ghcr.io/arocomputer/e-slack:${{ needs.resolve.outputs.version }}
 
-  crates:
-    name: crates
-    # The embedded SDK is the one crate that still publishes: it has no shell,
-    # Homebrew, or npm installer. It depends on core, so core publishes first.
+  crates-verify:
+    name: crates-verify
     needs: [resolve, github]
-    if: ${{ !cancelled() && needs.github.result == 'success' }}
-    # A registry hiccup must not fail the release, the way the npm and image
-    # publications do not. The deployment report records the outcome.
-    continue-on-error: true
+    if: ${{ !cancelled() && (needs.github.result == 'success' || needs.resolve.outputs.mode == 'retry') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout workflow tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Publish the SDK
+          path: tooling
+          persist-credentials: false
+      - name: Checkout selected release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source and consumers without publication credentials
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          test -n "$CARGO_REGISTRY_TOKEN" || { echo 'Configure CARGO_REGISTRY_TOKEN to publish the SDK.'; exit 1; }
+          cd source
+          ./x check
+          cd ..
+          python3 tooling/scripts/release/registry.py --source source --tag "$TAG" --out staged
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-registry
+          path: staged
+          if-no-files-found: error
+          retention-days: 14
 
-          # The SDK versions itself; only publish when its version is new.
-          SDK_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('crates/sdk/Cargo.toml','rb'))['package']['version'])")
-          CORE_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('crates/core/Cargo.toml','rb'))['package']['version'])")
-
-          # crates.io serves a new version to the index asynchronously, and a
-          # crate cannot resolve a dependency until that version is visible.
-          await_index() {
-            for _ in $(seq 1 60); do
-              curl -fsS -o /dev/null "https://crates.io/api/v1/crates/$1/$2" && return 0
-              sleep 10
-            done
-            return 1
-          }
-
-          # Core first: the SDK pins it by exact version.
-          if curl -fsS -o /dev/null "https://crates.io/api/v1/crates/e-core/$CORE_VERSION"; then
-            echo "e-core $CORE_VERSION is already published"
-          else
-            cargo publish --locked -p e-core
-            await_index e-core "$CORE_VERSION" || { echo 'e-core never reached the index'; exit 1; }
-          fi
-
-          if curl -fsS -o /dev/null "https://crates.io/api/v1/crates/e-sdk/$SDK_VERSION"; then
-            echo "e-sdk $SDK_VERSION is already published"
-          else
-            # Not --locked: packaging the SDK resolves its dependency from the
-            # registry rather than from this workspace.
-            cargo publish -p e-sdk
-          fi
+  crates:
+    needs: [resolve, crates-verify]
+    if: ${{ !cancelled() && needs.crates-verify.result == 'success' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sdk-registry
+          path: release
+      # Upload bodies were prepared without credentials. No checkout or crate execution.
+      - name: Verify archives and upload bodies
+        run: |
+          cd release
+          sha256sum --check SHA256SUMS
+      - name: Select unpublished packages and reject conflicting registry versions
+        id: pending
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+          source = json.loads(Path('release/source.json').read_text())
+          if [p['name'] for p in source['packages']] != ['e-core', 'e-sdk']:
+              raise ValueError('invalid SDK publication order')
+          pending = []
+          for package in source['packages']:
+              name, version = package['name'], package['version']
+              try:
+                  with urlopen(f'https://index.crates.io/{name[:2]}/{name[2:4]}/{name}', timeout=30) as response:
+                      entries = [json.loads(line) for line in response.read().decode().splitlines()]
+              except HTTPError as error:
+                  if error.code != 404:
+                      raise
+                  entries = []
+              existing = next((entry for entry in entries if entry['vers'] == version), None)
+              if existing is None:
+                  pending.append(name + ':' + version)
+              else:
+                  checksum = hashlib.sha256(Path(f'release/{name}-{version}.crate').read_bytes()).hexdigest()
+                  if existing['yanked'] or existing['cksum'] != checksum:
+                      raise ValueError(f'{name} {version} already exists with a different archive or is yanked')
+                  print(f'{name} {version}: identical version already published')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('packages=' + ' '.join(pending) + '\n')
+          PY
+      - id: auth
+        if: steps.pending.outputs.packages != ''
+        uses: rust-lang/crates-io-auth-action@9c067fc5d5c254b33978fed918cb50c032549d0e
+      - name: Publish core before dependent crates
+        if: steps.pending.outputs.packages != ''
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          PACKAGES: ${{ steps.pending.outputs.packages }}
+        run: |
+          for item in $PACKAGES; do
+            package=${item%%:*}
+            version=${item#*:}
+            curl --fail-with-body --silent --show-error --max-time 60 --request PUT \
+              --header "Authorization: $CARGO_REGISTRY_TOKEN" \
+              --header 'Content-Type: application/octet-stream' --header 'Accept: application/json' \
+              --data-binary "@release/$package-$version.publish" \
+              https://crates.io/api/v1/crates/new --output response.json
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          response = json.loads(Path('response.json').read_text())
+          if response.get('errors'):
+              raise ValueError(response['errors'])
+          print(response.get('warnings', {}))
+          PY
+            # Wait for index visibility before a dependent package is uploaded.
+            PACKAGE="$package" VERSION="$version" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import time
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+          name, version = os.environ['PACKAGE'], os.environ['VERSION']
+          checksum = hashlib.sha256(Path(f'release/{name}-{version}.crate').read_bytes()).hexdigest()
+          for attempt in range(60):
+              try:
+                  with urlopen(f'https://index.crates.io/{name[:2]}/{name[2:4]}/{name}', timeout=15) as response:
+                      entries = [json.loads(line) for line in response.read().decode().splitlines()]
+              except HTTPError as error:
+                  if error.code != 404:
+                      raise
+                  entries = []
+              published = next((entry for entry in entries if entry['vers'] == version), None)
+              if published is not None:
+                  if published['cksum'] != checksum or published['yanked']:
+                      raise ValueError('registry archive does not match the verified release')
+                  break
+              time.sleep(2)
+          else:
+              raise TimeoutError(f'{name} {version} did not appear in the index')
+          PY
+          done
 
   homebrew:
     name: homebrew
@@ -463,6 +533,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Prepare verified formula
         env:
@@ -478,7 +549,7 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: test -n "$TAP_TOKEN" || { echo 'Configure HOMEBREW_TAP_TOKEN before publishing.'; exit 1; }
       - name: Check out tap
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] -- tap publishing needs git push credentials
         with:
           repository: arocomputer/homebrew-tap
           path: tap
@@ -486,7 +557,8 @@ jobs:
       - name: Publish formula
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
-        run: scripts/packaging/publish-brew.sh "dist/${{ needs.resolve.outputs.command }}.rb" tap
+          COMMAND: ${{ needs.resolve.outputs.command }}
+        run: scripts/packaging/publish-brew.sh "dist/$COMMAND.rb" tap
 
   installer:
     name: installer
@@ -499,6 +571,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Verify website installer
         env:
@@ -510,7 +583,7 @@ jobs:
 
   report:
     name: report
-    needs: [resolve, verify, draft, build-macos, build-linux, github, npm, homebrew, container, crates, installer]
+    needs: [resolve, verify, draft, build-macos, build-linux, github, npm, homebrew, container, crates-verify, crates, installer]
     if: ${{ always() && needs.resolve.result == 'success' && needs.resolve.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -520,6 +593,8 @@ jobs:
     steps:
       # Reporting uses this workflow's code, while the deployment records the selected release SHA.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Record channel outcome
         env:
           GH_TOKEN: ${{ github.token }}

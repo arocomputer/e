@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -26,15 +26,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      plan: ${{ steps.filter.outputs.plan }}
       build: ${{ steps.filter.outputs.build }}
       packages: ${{ steps.filter.outputs.packages }}
       channels: ${{ steps.filter.outputs.channels }}
       docs: ${{ steps.filter.outputs.docs }}
       lock: ${{ steps.filter.outputs.lock }}
+      ui: ${{ steps.filter.outputs.ui }}
+      crates: ${{ steps.filter.outputs.crates }}
+      glibc: ${{ steps.filter.outputs.glibc }}
+      site: ${{ steps.filter.outputs.site }}
+      python: ${{ steps.filter.outputs.python }}
       bench: ${{ steps.filter.outputs.bench }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 2
       - id: filter
         env:
@@ -52,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 2
       - name: Check changed content
         run: python3 scripts/hooks/check.py HEAD^
@@ -59,6 +67,8 @@ jobs:
         run: ./x fmt --check
       - name: Guard and tooling tests
         run: ./x guard
+      - name: Workflow syntax and security
+        run: ./x workflows
       - name: Rust cache
         if: needs.changes.outputs.build == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -79,11 +89,13 @@ jobs:
     # red pull request reports all of them.
     name: test (linux)
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['test-linux']
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -101,11 +113,13 @@ jobs:
     # red pull request reports all of them.
     name: test (macos)
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['test-macos']
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -123,11 +137,13 @@ jobs:
     # other job looks at.
     name: ui
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['ui']
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -155,11 +171,13 @@ jobs:
     # change, which skips that, gets it here.
     name: docs
     needs: changes
-    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.build != 'true'
+    if: fromJSON(needs.changes.outputs.plan)['docs']
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -176,11 +194,13 @@ jobs:
     # Installers and package launchers, on each platform they install to.
     name: packages (linux)
     needs: changes
-    if: needs.changes.outputs.packages == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['packages-linux']
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -193,11 +213,13 @@ jobs:
     # Installers and package launchers, on each platform they install to.
     name: packages (macos)
     needs: changes
-    if: needs.changes.outputs.packages == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['packages-macos']
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -210,11 +232,13 @@ jobs:
     # The crates.io packages and the release's dependency inventory.
     name: crates
     needs: changes
-    if: needs.changes.outputs.build == 'true' || needs.changes.outputs.packages == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['crates']
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -231,16 +255,20 @@ jobs:
   channels:
     name: channels
     needs: changes
-    if: needs.changes.outputs.channels == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['channels']
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
       - run: ./x channels
+      - run: ./x audit-channels
       - name: Build the Slack image
+        if: github.event_name != 'schedule'
         run: ./x container
 
   glibc:
@@ -249,13 +277,15 @@ jobs:
     # lockfile both decide it, because a dependency can raise the floor.
     name: glibc
     needs: changes
-    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.lock == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['glibc']
     runs-on: ubuntu-latest
     container:
       image: rust:1.98-bullseye
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -278,21 +308,26 @@ jobs:
     # in an existing pin still surfaces without a pull request.
     name: audit
     needs: changes
-    if: github.event_name == 'schedule' || needs.changes.outputs.lock == 'true'
+    if: fromJSON(needs.changes.outputs.plan)['audit']
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./x audit
+      - run: ./x audit-python
 
   bench:
     name: bench
     needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.changes.outputs.build == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.bench == 'true')
+    if: fromJSON(needs.changes.outputs.plan)['bench']
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -317,16 +352,42 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  site:
+    name: site
+    needs: changes
+    if: fromJSON(needs.changes.outputs.plan)['site']
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Render guides without private repository credentials
+        run: ./x site
+
+  fuzz:
+    name: fuzz-check
+    needs: changes
+    if: fromJSON(needs.changes.outputs.plan)['fuzz']
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ./x fuzz-check
+
   ready:
-    # The one check branch protection requires. It passes when every job
-    # passed or was skipped, so jobs skip whole and can be renamed without
-    # touching branch protection. A new job joins `needs` here.
     name: ready
-    needs: [changes, lint, test-linux, test-macos, ui, docs, packages-linux, packages-macos, crates, channels, glibc, audit, bench]
+    needs: [changes, lint, test-linux, test-macos, ui, docs, site, packages-linux, packages-macos, crates, channels, glibc, audit, bench, fuzz]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every job passed or was skipped
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify selected checks and intended skips
+        env:
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/ready.py

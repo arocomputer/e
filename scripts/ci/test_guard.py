@@ -7,6 +7,20 @@ import unittest
 
 
 class GuardTests(unittest.TestCase):
+    def test_provider_data_cannot_add_an_unlisted_network_host(self):
+        source = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            shutil.copytree(source, root, ignore=shutil.ignore_patterns('.git', 'node_modules', 'target', '__pycache__'))
+            provider = root / 'crates/core/src/providers/data/anthropic.json'
+            for host, status in [('api.anthropic.com', 0), ('unlisted-provider.invalid', 1)]:
+                with self.subTest(host=host):
+                    provider.write_text('{"base_url": "https://' + host + '"}')
+                    result = subprocess.run(['sh', 'scripts/guard.sh'], cwd=root, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                    if status:
+                        self.assertIn('unlisted network host', result.stdout)
+
     def test_direct_check_command_exits_unsuccessfully(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

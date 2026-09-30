@@ -4,13 +4,19 @@ import { createInterface } from "node:readline";
 
 export type Json = Record<string, unknown>;
 
+/** Slack transport credentials belong to the adapter, never its agent or tools. */
+function agentEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(source).filter(([name]) => !name.startsWith("SLACK_")));
+}
+
 /** A spawned `e rpc` and the pipes to it. */
 export class Rpc {
   private child: ChildProcess;
   private next = 1;
   private stopped = false;
-  private exited: Promise<void>;
+  readonly exited: Promise<void>;
   private failure?: Error;
+  private closing?: Promise<void>;
   private pending = new Map<string, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
   /** Event lines by session id; a turn's owner registers here. */
   readonly listeners = new Map<string, (event: Json) => void>();
@@ -18,7 +24,7 @@ export class Rpc {
   onAsk: (ask: Json) => void = () => {};
 
   constructor(bin: string, args: string[], cwd?: string) {
-    this.child = spawn(bin, [...args, "rpc"], { cwd, stdio: ["pipe", "pipe", "inherit"] });
+    this.child = spawn(bin, [...args, "rpc"], { cwd, env: agentEnvironment(process.env), stdio: ["pipe", "pipe", "inherit"] });
     createInterface({ input: this.child.stdout! }).on("line", (line) => this.receive(line));
     this.exited = new Promise<void>((resolve) => {
       this.child.once("error", (error) => { this.stopped = true; this.fail(error); resolve(); });
@@ -68,7 +74,11 @@ export class Rpc {
   }
 
   /** Give shutdown a deadline, then terminate a process that stopped answering. */
-  async close(timeoutMs = 1000) {
+  close(timeoutMs = 1000): Promise<void> {
+    return this.closing ??= this.terminate(timeoutMs);
+  }
+
+  private async terminate(timeoutMs: number) {
     if (this.stopped) return;
     const deadline = async (work: Promise<unknown>) => {
       let timer: ReturnType<typeof setTimeout> | undefined;

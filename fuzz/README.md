@@ -11,6 +11,8 @@ not belong to the CLI executable:
 The security workflow runs all three weekly and on manual dispatch, for two
 minutes each. Each target has a checked-in starting corpus. Keep fuzzing
 separate from ordinary tests because it needs nightly Rust and libFuzzer.
+Failures upload `fuzz/artifacts/<target>/` as `fuzz-crashes-<target>` for fourteen
+days. Download that artifact from the failed run before turning it into a test.
 
 From the repository root, with the pinned nightly and cargo-fuzz installed:
 

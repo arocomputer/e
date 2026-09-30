@@ -1,13 +1,47 @@
 version: 2
+multi-ecosystem-groups:
+  dependencies:
+    schedule:
+      interval: weekly
+    labels: []
 updates:
+  - package-ecosystem: npm
+    labels: []
+    directory: /services/slack
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
   - package-ecosystem: cargo
     labels: []
     directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
   - package-ecosystem: github-actions
     labels: []
     directory: /
-    schedule:
-      interval: weekly
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: docker
+    labels: []
+    directory: /services/slack
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: docker
+    labels: []
+    directory: /.github/workflows
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: cargo
+    labels: []
+    directory: /fuzz
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: pip
+    labels: []
+    directory: /scripts/ci
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: pip
+    labels: []
+    directory: /crates/cli/tests/ui
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies

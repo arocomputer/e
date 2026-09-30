@@ -17,6 +17,12 @@ class ChangesTests(unittest.TestCase):
         self.assertFalse(gates['build'])
         self.assertFalse(gates['bench'])
 
+    def test_renderer_requirements_select_render_and_audit(self):
+        gates = classify(['scripts/ci/requirements-site.txt'])
+        self.assertTrue(gates['site'])
+        self.assertTrue(gates['python'])
+        self.assertFalse(gates['build'])
+
     def test_unknown_paths_fail_open(self):
         gates = classify(['new-runtime/input.dat'])
         self.assertTrue(gates['build'])
@@ -53,7 +59,7 @@ class ChangesTests(unittest.TestCase):
             with patch.dict(os.environ, GITHUB_OUTPUT=str(output), GITHUB_EVENT_NAME='push'), \
                     patch('changes.changed_paths', side_effect=subprocess.CalledProcessError(1, 'gh')):
                 main()
-            self.assertEqual(dict(line.split('=') for line in output.read_text().splitlines()),
+            self.assertEqual(dict(line.split('=', 1) for line in output.read_text().splitlines() if not line.startswith('plan=')),
                              dict.fromkeys(classify([]), 'true'))
 
     def test_rename_out_of_runtime_still_checks_old_path(self):
@@ -61,6 +67,29 @@ class ChangesTests(unittest.TestCase):
         with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='arocomputer/e'), \
                 patch('changes.subprocess.check_output', return_value=json.dumps(pages)):
             self.assertTrue(classify(changed_paths())['build'])
+
+    def test_truncated_pr_listing_falls_back_to_every_layer(self):
+        with patch.dict(os.environ, PR='1', GITHUB_REPOSITORY='owner/repo'), \
+                patch('changes.subprocess.check_output', return_value=json.dumps([[{'filename': 'README.md'}]*3000])):
+            with self.assertRaises(ValueError):
+                changed_paths()
+
+    def test_push_range_includes_all_commits_not_only_the_last(self):
+        with tempfile.TemporaryDirectory() as temp:
+            event = Path(temp) / 'event.json'
+            event.write_text(json.dumps({'before': 'a'*40}))
+            with patch.dict(os.environ, GITHUB_EVENT_PATH=str(event)), \
+                    patch('changes.subprocess.check_output', return_value='crates/core/src/agent.rs\nREADME.md\n') as git:
+                with patch.dict(os.environ, {}, clear=True):
+                    os.environ['GITHUB_EVENT_PATH'] = str(event)
+                    self.assertEqual(changed_paths(), ['crates/core/src/agent.rs', 'README.md'])
+                self.assertEqual(git.call_args.args[0][-2:], ['a'*40, 'HEAD'])
+
+    def test_audit_tool_edits_select_audit_without_native_build(self):
+        plan = classify(['scripts/ci/audit.py'])
+        self.assertTrue(plan['lock'])
+        self.assertTrue(plan['python'])
+        self.assertFalse(plan['build'])
 
 
 if __name__ == '__main__':
