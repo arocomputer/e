@@ -93,6 +93,11 @@ and the site build without the full suite. Performance-related PRs run benchmark
 main code changes and the weekly schedule run them too. Rust jobs cache
 dependencies and build outputs by platform, job, toolchain, and dependency set.
 
+Dependabot combines Cargo, npm, GitHub Actions, and Docker version updates into
+one weekly PR. Docker coverage includes the Slack runtime and CI container images;
+security updates can arrive separately. `./x audit` pins cargo-audit to 0.22.2;
+update that version deliberately when upgrading the advisory checker.
+
 `./x` is the single definition of green; CI runs the same commands, so
 nothing merges on a private definition of passing. `scripts/guard.sh` enforces
 the last part mechanically: the check workflow may not invoke `cargo` or `npm`

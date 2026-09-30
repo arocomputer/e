@@ -146,7 +146,7 @@ case "$command" in
   audit)
     [ "$#" -eq 0 ] || usage
     # RustSec advisories against Cargo.lock.
-    cargo install cargo-audit --locked
+    cargo install cargo-audit --version 0.22.2 --locked
     cargo audit
     ;;
   sbom)

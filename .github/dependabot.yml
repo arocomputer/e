@@ -20,3 +20,13 @@ updates:
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+  - package-ecosystem: docker
+    labels: []
+    directory: /services/slack
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: docker
+    labels: []
+    directory: /.github/workflows
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
