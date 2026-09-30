@@ -16,6 +16,6 @@ We'll endeavor to respond quickly and keep you updated throughout the process.
 ## What is not a vulnerability
 
 e runs model-directed tools as your user without a permission prompt by
-default — that is the documented design (see the SAFETY section of the
-[README](README.md)), not a flaw. Use a container, VM, or OS sandbox when
+default — that is the documented design (see the
+[sandboxing guide](docs/guides/usage/sandboxing.md)), not a flaw. Use a container, VM, or OS sandbox when
 work needs containment.

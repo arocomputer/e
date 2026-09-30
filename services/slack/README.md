@@ -27,7 +27,17 @@ once. Nothing here is compiled into e.
    `~/.e/auth.json`), and clone the repository the bot should work in.
 3. Trust the checkout (`e trust`) so the repository's own `AGENTS.md`, skills,
    and prompts load: the bot has no terminal to answer the trust panel with.
-4. Copy `.env.example` to `.env` and fill it in.
+4. Copy `.env.example` to `.env` and fill it in, including
+   `E_SLACK_ALLOWED_USERS` and `E_SLACK_ALLOWED_CHANNELS`: comma-separated Slack
+   user IDs and channel IDs. Both must match for a mention, thread reply, stop,
+   or approval button to reach e. Missing, empty, or malformed lists stop startup;
+   wildcard access is not supported. Only authorized people can answer questions.
+
+Allowlisted users have the agent's filesystem and shell privileges, including
+access to provider credentials. Use a dedicated checkout and container or VM
+when work needs containment. The agent's child environment excludes `SLACK_*`
+credentials, but this is not a sandbox: keep the adapter's `.env` outside its
+checkout and other paths the agent can read when separating those credentials.
 
 ## Run it
 
@@ -62,27 +72,32 @@ checkout of e. With no release published, the build compiles e from source, whic
 takes a few minutes:
 
 ```sh
-docker build -t e-slack services/slack
+docker build -t e-slack --build-arg E_UID="$(id -u)" \
+  --build-arg E_GID="$(id -g)" services/slack
 docker volume create e-slack-home
 
 # Once: trust the checkout and sign in. e's home is the volume, so both stick.
-docker run --rm -it --user "$(id -u):$(id -g)" \
+docker run --rm -it \
   -v e-slack-home:/home/e -v "$PWD:/work" --entrypoint e e-slack trust
-docker run --rm -it --user "$(id -u):$(id -g)" \
+docker run --rm -it \
   -v e-slack-home:/home/e --entrypoint e e-slack   # then /login
 
 docker run -d --restart unless-stopped --name e-slack \
-  --user "$(id -u):$(id -g)" --env-file .env -e E_CWD=/work \
+  --env-file /path/outside/checkout/e-slack.env -e E_CWD=/work \
   -v e-slack-home:/home/e -v "$PWD:/work" e-slack
 ```
 
 Once releases exist, `--build-arg E_VERSION=0.1.0` installs that release instead
 of compiling, and the release workflow publishes the image as
-`ghcr.io/arocomputer/e-slack`. The base is Debian 13 because the released Linux
-binaries link against glibc 2.39.
+`ghcr.io/arocomputer/e-slack`. Debian 13 supplies a maintained runtime above the
+released Linux binaries' glibc 2.31 floor.
 
-`--user` is what keeps the files the agent writes in the checkout owned by you
-rather than root. `-v "$PWD:/work"` must be the repository the bot should work
+The default user is non-root (UID/GID 1000); the build arguments match it to your
+checkout's owner. `/home/e` has mode `0700`, and the container stores its Slack
+state there by default. A runtime `--user UID:GID` override also works when that
+UID owns the mounted home. Existing volumes may need their owner changed to the
+selected UID/GID and their directory mode changed to `0700` before restarting.
+`-v "$PWD:/work"` must be the repository the bot should work
 in. Instead of signing in, a provider key in the environment works
 (`ANTHROPIC_API_KEY`, and the other names in the registry's `key_env` fields).
 
@@ -103,6 +118,14 @@ in. Instead of signing in, a provider key in the environment works
   error and stays untouched; repair it or move it aside to start fresh.
 - Shutdown gives each RPC process a deadline, then terminates children that stop
   answering. Pending requests fail when their process exits.
+- An exited process is evicted; the next message resumes its saved conversation
+  in a new process. Idle processes close after `E_SLACK_IDLE_MS` (default 900000,
+  fifteen minutes). A running turn is kept alive, and a second turn in the same
+  thread is refused until it completes or is stopped.
+- `E_SLACK_MAX_THREADS` caps live and opening processes (default 16). At capacity,
+  new threads get an error until a process exits or closes. Both limits must be
+  positive integers; `E_SLACK_IDLE_MS` must not exceed 2147483647 (Node's timer
+  limit). Retiring a process also discards its outstanding questions.
 - Question buttons retain the owning connection, so two processes can use
   the same ask number without sending an answer to the wrong conversation.
 

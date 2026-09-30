@@ -8,7 +8,7 @@ Instructions for an agent editing this repo.
 ./x hooks            # required once per contributing worktree
 cargo build          # fast dev build
 ./x test             # the whole behavioral contract
-./x check            # format, lint, tests, and security-surface guard
+./x check            # format, lint, tests, packed crates, and security-surface guard
 ./x bench            # release-mode performance budgets
 ./x ui               # PTY frame/color checks; makes its own Python env on first run
 ```
@@ -141,8 +141,24 @@ process environment belongs only in serialized fixtures. Keep specialized
 servers when the test needs transport timing or malformed bytes.
 
 `./x check` covers all workspace members and an external consumer compiled from
-the packed SDK and core crates. It does not replace `./x packages`, `./x channels`,
-or `./x ui`; run the relevant command when changing those paths.
+the packed SDK and core crates. It does not replace the checks below; run the
+additional commands for the paths you change. Python 3, the pinned Rust toolchain
+(including rustfmt), and Node are needed for tooling and channel checks; package
+smoke tests also need Bun, and container checks need Docker.
+
+| Change | Additional checks |
+| --- | --- |
+| TUI rendering or interaction | `./x ui`; retain a captured frame |
+| Guides or documentation links | `./x docs` |
+| Release, installer, or package tooling | `./x packages`; `./x release-check vX.Y.Z` when qualifying a release |
+| Slack or GitHub reference services | `./x channels`; `./x audit-channels` |
+| Slack Dockerfile, dependencies, or container startup | `./x container` |
+| Dependency manifests or lockfiles | `./x audit`; `./x audit-channels` for Slack dependencies |
+| Startup or performance-sensitive behavior | `./x bench` |
+
+CI selects jobs in `scripts/ci/changes.py`; `ready` aggregates them. A new CI job
+must join `ready.needs`. Provider endpoints live in JSON under
+`crates/core/src/providers/data/` and are part of the network guard's audit surface.
 
 ## How the look stays consistent
 

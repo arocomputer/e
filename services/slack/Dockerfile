@@ -5,8 +5,7 @@
 #
 #   docker build -t e-slack services/slack
 #
-# Debian 13 rather than the default bookworm base: the released Linux binaries
-# link against glibc 2.39, which bookworm's 2.36 is too old for.
+# Debian 13 supplies a maintained runtime above the release's glibc 2.31 floor.
 FROM node:24-trixie-slim
 
 # git is what e's tools need on a checkout; curl and ca-certificates fetch the
@@ -15,12 +14,16 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git \
  && rm -rf /var/lib/apt/lists/*
 
-# e's own home: the trust decision, credentials, sessions, packages. Writable by
-# any uid so the bot can run as the checkout's owner (`--user "$(id -u):$(id -g)"`)
-# instead of leaving root-owned files in the repository it edits. Mount a volume
-# here to keep it across restarts.
+# Match the checkout's owner at build time when needed. The runtime always has
+# an unprivileged default user and a private credential/session directory.
+ARG E_UID=1000
+ARG E_GID=1000
+RUN test "$E_UID" -gt 0 && test "$E_GID" -gt 0 \
+ && if ! getent group "$E_GID" >/dev/null; then groupmod -g "$E_GID" node; fi \
+ && usermod -u "$E_UID" -g "$E_GID" node \
+ && install -d -m 0700 -o "$E_UID" -g "$E_GID" /home/e /work
 ENV E_HOME=/home/e
-RUN mkdir -p /home/e && chmod 0777 /home/e
+ENV E_SLACK_STATE=/home/e/slack-state.json
 
 # The e release the bot drives: a pinned `E_VERSION`, passed by the release
 # workflow. Empty builds e from source (`main`), since no release is published
@@ -52,11 +55,14 @@ RUN set -eux; \
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts --no-fund --no-audit
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --omit=dev --ignore-scripts --no-fund --no-audit
 COPY src ./src
 COPY .env.example manifest.json README.md ./
 
 # The repository the bot works in. Mount one here.
 WORKDIR /work
 ENV E_CWD=/work
+USER node
 ENTRYPOINT ["node", "--experimental-strip-types", "/app/src/index.ts"]

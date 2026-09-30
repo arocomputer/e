@@ -34,7 +34,7 @@ staged content. It never rewrites files or stages changes. Full tests and builds
 remain separate so commits stay fast. Python 3 and the pinned Rust toolchain are
 required.
 
-Git allows local hooks to be bypassed. The required CI Guard check runs the same
+Git allows local hooks to be bypassed. CI's lint job runs the same
 content checks on every PR, including docs-only changes, so bypassing a hook does
 not bypass merge checks.
 
@@ -82,6 +82,9 @@ requires only `ready`, which passes when every job passed or was skipped.
 ./x ui            # terminal frames and interaction scenarios
 ./x packages      # installers and package launchers
 ./x audit         # RustSec advisories against Cargo.lock
+./x channels      # reference channel typechecking and tests
+./x audit-channels # production npm advisories for Slack; also runs weekly
+./x container     # Slack image build and unprivileged runtime smoke check
 ./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
 ```
 
@@ -100,7 +103,10 @@ directly.
 Every change needs the maintainer's review. Paths that form the trust
 boundary — the extension host, authentication, the config store, provider
 wire code, session persistence, `install.sh`, and `.github/` — are called out
-in [CODEOWNERS](.github/CODEOWNERS) and cannot merge on green checks alone.
+in [CODEOWNERS](.github/CODEOWNERS). Maintainer review is project policy;
+CODEOWNERS routes review requests but does not enforce approval by itself.
+The documented status gate is `ready`; required review enforcement depends
+on the repository's current branch-protection settings.
 
 Title the PR as a conventional commit in plain language, scoped by area:
 `fix(tui): tool trees stay connected after compaction`. Scopes are `core`,

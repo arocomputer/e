@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -87,11 +87,21 @@ case "$command" in
     (cd services/slack && npm ci --no-fund --no-audit && npm run typecheck && npm test)
     python3 -m unittest discover -s services/github -p 'test_*.py'
     ;;
-  container)
+  audit-channels)
     [ "$#" -eq 0 ] || usage
+    (cd services/slack && npm audit --omit=dev)
+    ;;
+  container)
     # The check builds without a published release, so it installs a stub `e`.
     # The release workflow builds the real image with the release it published.
-    docker build --tag e-slack --build-arg E_RELEASE_STUB=1 services/slack
+    docker build "$@" --tag e-slack --build-arg E_RELEASE_STUB=1 services/slack
+    docker run --rm --entrypoint sh e-slack -ec '
+      test "$(id -u)" -ne 0
+      test "$(stat -c %a "$E_HOME")" = 700
+      test -w "$E_HOME"
+      test -w "$(dirname "$E_SLACK_STATE")"
+      test "$(e --version)" = "e 0.0.0-stub"
+    '
     ;;
   guard)
     [ "$#" -eq 0 ] || usage

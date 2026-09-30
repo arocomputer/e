@@ -73,7 +73,8 @@ class Packages(unittest.TestCase):
         package = json.loads((output / "slack/package.json").read_text())
         self.assertEqual(package["name"], "@arocomputer/e-slack")
         # The channel versions itself; mutable tags stay outside its tarball.
-        self.assertEqual(package["version"], "0.0.2")
+        source = Path(__file__).resolve().parents[2] / "services/slack/package.json"
+        self.assertEqual(package["version"], json.loads(source.read_text())["version"])
         self.assertEqual(package["publishConfig"], {"access": "public"})
         self.assertEqual(package["bin"], {"e-slack": "bin/e-slack.js"})
         self.assertNotIn("scripts", package)

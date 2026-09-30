@@ -234,8 +234,10 @@ jobs:
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Keep SBOM tooling for older source commits
-        run: cp scripts/release/sbom.py "$RUNNER_TEMP/release-sbom.py"
+      - name: Keep release tooling for older source commits
+        run: |
+          cp scripts/release/sbom.py "$RUNNER_TEMP/release-sbom.py"
+          cp scripts/release/assets.py "$RUNNER_TEMP/release-assets-check.py"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -290,17 +292,18 @@ jobs:
         with:
           subject-path: ${{ runner.temp }}/release-assets/*
 
-      - name: Upload metadata and publish
+      - name: Upload verified assets and publish
         env:
           SHA: ${{ needs.resolve.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ needs.resolve.outputs.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release upload "$TAG" "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" --clobber
+          gh release upload "$TAG" "$RUNNER_TEMP"/release-assets/e-*.tar.gz "$RUNNER_TEMP/release-assets/checksums.txt" "$RUNNER_TEMP/release-assets/e-sbom.cdx.json" "$RUNNER_TEMP/release-assets/build.json" --clobber
           ./scripts/release-notes.sh "$TAG" < CHANGELOG.md > notes.md
           python3 scripts/release/notes.py notes.md "$TAG" "$SHA" > "$RUNNER_TEMP/release-assets/release.json"
           gh release upload "$TAG" "$RUNNER_TEMP/release-assets/release.json" --clobber
+          python3 "$RUNNER_TEMP/release-assets-check.py" "$TAG"
           gh release edit "$TAG" --draft=false --latest
 
       - name: Retain verified assets for package publication

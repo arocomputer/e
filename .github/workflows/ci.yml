@@ -231,7 +231,7 @@ jobs:
   channels:
     name: channels
     needs: changes
-    if: needs.changes.outputs.channels == 'true'
+    if: github.event_name == 'schedule' || needs.changes.outputs.channels == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -240,7 +240,9 @@ jobs:
         with:
           node-version: '24'
       - run: ./x channels
+      - run: ./x audit-channels
       - name: Build the Slack image
+        if: github.event_name != 'schedule'
         run: ./x container
 
   glibc:

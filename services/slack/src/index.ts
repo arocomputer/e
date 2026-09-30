@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import bolt from "@slack/bolt";
 import { Rpc, type Json } from "./rpc.ts";
 import { Threads, type Connection } from "./threads.ts";
+import { authorization } from "./authorization.ts";
 
 const { App } = bolt;
 
@@ -21,18 +22,34 @@ const env = (name: string) => {
 };
 
 const cwd = resolve(env("E_CWD"));
+const authorize = authorization(process.env.E_SLACK_ALLOWED_USERS, process.env.E_SLACK_ALLOWED_CHANNELS);
 const app = new App({
   token: env("SLACK_BOT_TOKEN"),
   signingSecret: env("SLACK_SIGNING_SECRET"),
   appToken: env("SLACK_APP_TOKEN"),
   socketMode: true,
 });
+app.use(authorize);
+
+const positive = (name: string, fallback: number) => {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  return value;
+};
 
 const threads = new Threads(
   process.env.E_SLACK_STATE ?? "./e-slack-state.json",
   () => new Rpc(process.env.E_BIN ?? "e", [], cwd),
   { cwd, ...(process.env.E_MODEL ? { model: process.env.E_MODEL } : {}) },
   (key, rpc, ask) => relayAsk(key, rpc, ask),
+  {
+    maxThreads: positive("E_SLACK_MAX_THREADS", 16),
+    idleMs: positive("E_SLACK_IDLE_MS", 15 * 60 * 1000),
+    onRetire: (key) => {
+      textAsks.delete(key);
+      for (const [token, ask] of buttonAsks) if (ask.key === key) buttonAsks.delete(token);
+    },
+  },
 );
 
 /** Text a person wants to read about a finished tool call. */
@@ -64,7 +81,16 @@ interface Post {
 
 /** Run one prompt on a thread's session, posting as it goes. */
 async function runTurn(key: string, name: string, prompt: string, post: Post) {
-  const { rpc, session } = await threads.get(key, name);
+  try {
+    await threads.use(key, name, async ({ rpc, session }) => {
+      await promptTurn(key, rpc, session, prompt, post);
+    });
+  } catch (error) {
+    await post(`:x: ${(error as Error).message}`);
+  }
+}
+
+async function promptTurn(key: string, rpc: Connection, session: string, prompt: string, post: Post) {
   const batch = new Map<number, Json>();
   rpc.listeners.set(session, (event) => {
     switch (event.type) {
@@ -108,7 +134,7 @@ async function runTurn(key: string, name: string, prompt: string, post: Post) {
 // A message in a thread while an extension waits for text answers it.
 type Answer = (result: Json) => Promise<unknown>;
 const textAsks = new Map<string, Answer>();
-const buttonAsks = new Map<string, Answer>();
+const buttonAsks = new Map<string, { key: string; answer: Answer }>();
 
 /** Route a question through the connection owned by this thread. */
 function relayAsk(key: string, rpc: Connection, ask: Json) {
@@ -122,7 +148,7 @@ function relayAsk(key: string, rpc: Connection, ask: Json) {
     app.client.chat.postMessage({ channel, thread_ts, text, blocks: blocks as never });
   switch (ask.method) {
     case "ui.confirm":
-      buttonAsks.set(token, answer);
+      buttonAsks.set(token, { key, answer });
       void post(title, [
         { type: "section", text: { type: "mrkdwn", text: `*${title}*\n${params.message ?? ""}` } },
         {
@@ -135,7 +161,7 @@ function relayAsk(key: string, rpc: Connection, ask: Json) {
       ]);
       break;
     case "ui.select": {
-      buttonAsks.set(token, answer);
+      buttonAsks.set(token, { key, answer });
       const options = ((params.options ?? []) as (string | Json)[]).slice(0, 5).map((o) => {
         const label = typeof o === "string" ? o : String(o.label);
         const value = typeof o === "string" ? o : String(o.value ?? o.label);
@@ -160,25 +186,25 @@ function relayAsk(key: string, rpc: Connection, ask: Json) {
 }
 
 /** A button can answer only the process and question that created it. */
-async function answerButton(token: string, result: Json) {
-  const answer = buttonAsks.get(token);
-  if (!answer) return;
+async function answerButton(token: string, channel: string | undefined, result: Json) {
+  const ask = buttonAsks.get(token);
+  if (!ask || ask.key.split(":")[0] !== channel) return;
   buttonAsks.delete(token);
-  await answer(result);
+  await ask.answer(result);
 }
 
-app.action("ask_yes", async ({ ack, action }) => {
+app.action("ask_yes", async ({ ack, action, body }) => {
   await ack();
-  await answerButton(String((action as unknown as Json).value), { confirmed: true });
+  await answerButton(String((action as unknown as Json).value), body.channel?.id, { confirmed: true });
 });
-app.action("ask_no", async ({ ack, action }) => {
+app.action("ask_no", async ({ ack, action, body }) => {
   await ack();
-  await answerButton(String((action as unknown as Json).value), { confirmed: false });
+  await answerButton(String((action as unknown as Json).value), body.channel?.id, { confirmed: false });
 });
-app.action(/^ask_pick_/, async ({ ack, action }) => {
+app.action(/^ask_pick_/, async ({ ack, action, body }) => {
   await ack();
   const { token, value, label } = JSON.parse(String((action as unknown as Json).value));
-  await answerButton(token, { value, label });
+  await answerButton(token, body.channel?.id, { value, label });
 });
 
 function stripMention(text: string): string {
