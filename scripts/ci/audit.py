@@ -21,8 +21,10 @@ def main():
         subprocess.run([sys.executable, '-m', 'venv', str(environment)], check=True)
         python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         subprocess.run([str(python), '-m', 'pip', 'install', 'pip-audit==2.10.1'], check=True)
-        subprocess.run([str(python), '-m', 'pip_audit', '--disable-pip', '--no-deps', '--progress-spinner', 'off',
-                        '-r', str(ROOT / 'crates/cli/tests/ui/requirements.txt')], check=True)
+        for requirements in ('crates/cli/tests/ui/requirements.txt', 'scripts/ci/requirements-site.txt'):
+            subprocess.run([str(python), '-m', 'pip_audit', '--disable-pip', '--no-deps', '--progress-spinner', 'off',
+                            '-r', str(ROOT / requirements)], check=True)
+
 
 
 if __name__ == '__main__':

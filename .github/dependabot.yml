@@ -30,3 +30,18 @@ updates:
     directory: /.github/workflows
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+  - package-ecosystem: cargo
+    labels: []
+    directory: /fuzz
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: pip
+    labels: []
+    directory: /scripts/ci
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+  - package-ecosystem: pip
+    labels: []
+    directory: /crates/cli/tests/ui
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies

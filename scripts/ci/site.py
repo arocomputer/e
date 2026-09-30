@@ -1,11 +1,9 @@
-"""Build the pinned website renderer against this checkout's actual guides."""
+"""Render guides without private repository access; optionally build a local website."""
 import argparse
-import json
 import os
 from pathlib import Path
-import re
 import subprocess
-import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,15 +22,13 @@ def main():
     if args.source:
         build(args.source.resolve())
         return
-    spec = json.loads((ROOT / '.github/site-source.json').read_text())
-    if spec['repository'] != 'arocomputer/web' or not re.fullmatch('[0-9a-f]{40}', spec['commit']):
-        raise ValueError('website source must be the pinned official repository')
-    with tempfile.TemporaryDirectory(prefix='e-site-') as temp:
-        source = Path(temp)
-        subprocess.run(['git', 'init', '-q', str(source)], check=True)
-        subprocess.run(['git', 'fetch', '--depth=1', 'https://github.com/arocomputer/web.git', spec['commit']], cwd=source, check=True)
-        subprocess.run(['git', 'checkout', '--detach', 'FETCH_HEAD'], cwd=source, check=True)
-        build(source)
+    environment = ROOT / 'target/site-python'
+    subprocess.run([sys.executable, '-m', 'venv', str(environment)], check=True)
+    python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    subprocess.run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check',
+                    '-r', str(ROOT / 'scripts/ci/requirements-site.txt')], check=True)
+    subprocess.run([str(python), str(ROOT / 'scripts/ci/render_guides.py')], check=True)
+
 
 
 if __name__ == '__main__':

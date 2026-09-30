@@ -16,11 +16,11 @@ def classify(paths):
     """Select runtime consumers separately from repository maintenance tooling."""
     gates = dict.fromkeys(GATES, False)
     for path in paths:
-        if path == '.github/site-source.json':
+        if path.startswith('docs/guides/') or path in ('docs/README.md', 'scripts/ci/site.py', 'scripts/ci/render_guides.py'):
             gates['site'] = True
+        if path == 'scripts/ci/requirements-site.txt':
+            gates['site'] = gates['python'] = True
             continue
-        if path.startswith('docs/guides/') or path in ('docs/README.md', 'scripts/ci/site.py', '.github/site-source.json'):
-            gates['site'] = True
         if path.endswith('.md') or path.startswith('docs/'):
             gates['docs'] = True
             continue

@@ -93,12 +93,17 @@ runtime test edits run both native test platforms without repeating UI and
 packed-consumer checks. Unknown inputs select every layer. The selector emits
 one job plan; both job conditions and `ready` use it, so an unexpected skip fails.
 
-Published guide changes run `./x site`, which uses the exact website commit in
-`.github/site-source.json` with this checkout's guides. Update that pin deliberately
-when changing the site importer contract. `./x site --source /path/to/web` uses a
-local renderer for development. The website's trusted main workflow checks for
-merged guide changes twice an hour and deploys a build of the exact selected e
-commit. That scheduled integration becomes active when its web changes merge.
+Published guide changes run `./x site`, which renders every Markdown guide to
+HTML with pinned public dependencies and no repository credentials. The docs
+contract tests separately validate front matter, routes, and relative links.
+The website repository is private: a public PR token cannot fetch it, and PRs
+must not depend on a cross-repository secret. `./x site --source /path/to/web`
+builds a local full renderer when available. The website's own pipeline checks
+its importer and built routes, then its trusted main workflow checks for merged
+guide changes twice an hour and deploys the exact selected e commit. That
+scheduled integration becomes active when its web changes merge. PR rendering
+is a portable Markdown check; the full website build remains in that pipeline.
+
 
 `./x fuzz-check` compiles active targets when their code, lockfile, or core/TUI
 source changes. The expanded audit identified and patched the fuzz workspace's

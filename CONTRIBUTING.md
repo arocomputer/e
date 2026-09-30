@@ -91,7 +91,7 @@ to succeed and unselected jobs to skip. Unexpected skips or cancelled work fail.
 ```
 
 The full suite includes the docs contract. Prose-only changes run the docs contract without the full suite; published guide
-changes also build the pinned website against the proposed commit with `./x site`. Performance-related PRs run benchmarks;
+changes also render the proposed guides with public dependencies using `./x site`; the private website validates its full build in its own pipeline. Performance-related PRs run benchmarks;
 main code changes and the weekly schedule run them too. Rust jobs cache
 dependencies and build outputs by platform, job, toolchain, and dependency set.
 

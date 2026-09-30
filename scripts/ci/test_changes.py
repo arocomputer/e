@@ -17,6 +17,12 @@ class ChangesTests(unittest.TestCase):
         self.assertFalse(gates['build'])
         self.assertFalse(gates['bench'])
 
+    def test_renderer_requirements_select_render_and_audit(self):
+        gates = classify(['scripts/ci/requirements-site.txt'])
+        self.assertTrue(gates['site'])
+        self.assertTrue(gates['python'])
+        self.assertFalse(gates['build'])
+
     def test_unknown_paths_fail_open(self):
         gates = classify(['new-runtime/input.dat'])
         self.assertTrue(gates['build'])
