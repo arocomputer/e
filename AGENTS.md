@@ -154,6 +154,7 @@ smoke tests also need Bun, and container checks need Docker.
 | Slack or GitHub reference services | `./x channels`; `./x audit-channels` |
 | Slack Dockerfile, dependencies, or container startup | `./x container` |
 | Dependency manifests or lockfiles | `./x audit`; `./x audit-channels` for Slack dependencies |
+| Actions workflows or workflow tooling | `./x workflows` |
 | Startup or performance-sensitive behavior | `./x bench` |
 
 CI selects jobs in `scripts/ci/changes.py`; `ready` aggregates them. A new CI job

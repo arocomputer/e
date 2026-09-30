@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|workflows|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -44,6 +44,7 @@ case "$command" in
     ./x test
     ./x crates
     ./x guard
+    ./x workflows
     ;;
   test)
     # Every failing suite in one run: without this, the first of 46 test
@@ -71,6 +72,10 @@ case "$command" in
     # The guides are a published contract: front matter, one group README per
     # folder, unique topics, and every relative link resolving.
     cargo test --locked --test docs
+    ;;
+  workflows)
+    [ "$#" -eq 0 ] || usage
+    python3 scripts/ci/workflows.py
     ;;
   packages)
     [ "$#" -eq 0 ] || usage

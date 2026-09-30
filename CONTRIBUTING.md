@@ -74,6 +74,7 @@ requires only `ready`, which passes when every job passed or was skipped.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
+./x workflows     # pinned actionlint syntax checks and offline zizmor security checks
 ./x lint          # clippy, warnings denied
 ./x test          # the suite; every failing binary reports, not just the first
 ./x crates        # the crates.io packages: packaged, built, and file-listed
@@ -102,6 +103,14 @@ update that version deliberately when upgrading the advisory checker.
 nothing merges on a private definition of passing. `scripts/guard.sh` enforces
 the last part mechanically: the check workflow may not invoke `cargo` or `npm`
 directly.
+
+`./x workflows` installs checksum-verified binaries into `target/infra-tools/`.
+Versions and Linux/macOS archive hashes live in `.github/infra-tools.json`.
+Update those pins together when upgrading tools. The check runs on every PR;
+release jobs build without restored caches. The Homebrew tap checkout retains
+credentials because its publishing script pushes the formula, with a narrowly
+documented scanner exception. Actionlint's single compatibility exception covers
+GitHub's `queue: max` concurrency setting until the parser supports it.
 
 ## Review
 
