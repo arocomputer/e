@@ -112,6 +112,9 @@ credentials because its publishing script pushes the formula, with a narrowly
 documented scanner exception. Actionlint's single compatibility exception covers
 GitHub's `queue: max` concurrency setting until the parser supports it.
 
+See [repository maintenance](docs/contributing/maintenance.md) for scheduled
+failure issues, closed-PR cache cleanup, link checks, and GitHub settings setup.
+
 ## Review
 
 Every change needs the maintainer's review. Paths that form the trust

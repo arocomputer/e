@@ -34,18 +34,20 @@ list.
 
 ## Install and manage
 
+These examples show source syntax; replace the sample names with real packages.
+
 ```sh
-e install npm:@fschrhunt1/e-diff                # from npm, follows latest
+e install npm:@team/e-tools                # from npm, follows latest
 e install npm:@team/e-tools@1.4.0               # pinned to a version, range, or dist-tag
-e install git:github.com/fschrhunt/e-diff       # a git repository, default branch
-e install git:github.com/fschrhunt/e-diff@v2    # pinned to a tag, branch, or commit
+e install git:github.com/team/e-tools       # a git repository, default branch
+e install git:github.com/team/e-tools@v2    # pinned to a tag, branch, or commit
 e install https://github.com/user/repo          # any git URL (https, ssh, git, file)
 e install git:git@github.com:user/repo@main     # SSH, with your keys
 e install release:owner/repo/name@v1.2.0        # a compiled extension from a GitHub release
 e install ~/src/my-package                      # a local directory, used in place
 
 e packages                                      # each listed package and its state
-e remove npm:@fschrhunt1/e-diff                 # forget it and delete the install
+e remove npm:@team/e-tools                 # forget it and delete the install
 e install                                       # make disk match settings
 ```
 
@@ -114,7 +116,7 @@ with the `source` and a glob list per kind (`extensions`, `skills`,
 ```json
 {
   "packages": [
-    "npm:@fschrhunt1/e-diff",
+    "npm:@team/e-tools",
     {
       "source": "npm:@team/e-tools@1.4.0",
       "extensions": ["!extensions/legacy.mjs"],
@@ -213,7 +215,6 @@ both carry it. Tag or version your releases so users can pin what they
 read. A git repository with the same layout installs as
 `git:<host>/<user>/<repo>` without npm.
 
-[fschrhunt/e-diff](https://github.com/fschrhunt/e-diff) shows the shape: one
-extension file and one prompt template, installed with a single
-`e install`. It is also where the `/diff` command comes from; e does not
-build it in.
+A package can contain one extension file and one prompt template, installed
+with a single `e install`. Commands such as `/diff` can live in an extension
+package; e does not need to build them in.

@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|workflows|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|workflows|links|repository-settings|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -76,6 +76,13 @@ case "$command" in
   workflows)
     [ "$#" -eq 0 ] || usage
     python3 scripts/ci/workflows.py
+    ;;
+  links)
+    [ "$#" -eq 0 ] || usage
+    python3 scripts/ci/links.py
+    ;;
+  repository-settings)
+    python3 scripts/ci/settings.py "$@"
     ;;
   packages)
     [ "$#" -eq 0 ] || usage

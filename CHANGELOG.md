@@ -99,7 +99,7 @@ panes and a fuller tool-output reader, with fixes for interrupted and resumed wo
 
 - **Upgrade:** Local Cargo builds now use `~/.e-dev` instead of the production home. Set `E_HOME` explicitly to select another dedicated home.
 
-- **Upgrade:** `/diff` is now the separate [e-diff](https://github.com/fschrhunt/e-diff) package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
+- **Upgrade:** `/diff` is now the separate `e-diff` package. Install it with `e install git:github.com/fschrhunt/e-diff`; the old in-repository package and its build instructions are removed.
 - **Upgrade:** `e ask` is removed. Use `e -p` for a headless turn or `e rpc` for JSONL automation. Piped stdin requires a supported headless mode.
 - **Upgrade:** read-only mode and the `ask` tool are removed. Use `--no-tools` or a tool allowlist; extensions should obtain required input through configuration or their supported interface requests.
 - **Upgrade:** Ctrl+D deletes forward. Press Ctrl+C twice to exit, or change the keybindings. Unlabeled code fences no longer guess a language, and footnotes remain literal text.
