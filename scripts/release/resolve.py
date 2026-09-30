@@ -2,6 +2,7 @@
 """Select a trusted source commit and emit workflow outputs without publishing anything."""
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,10 @@ def resolve():
     kind = os.environ['GITHUB_EVENT_NAME']
     mode = event.get('inputs', {}).get('action', 'build')
     if kind == 'push':
-        sha, channel = git('rev-parse', 'HEAD'), 'production'
+        pushed = event['after']
+        if not re.fullmatch('[0-9a-f]{40}', pushed):
+            raise ValueError('invalid pushed source')
+        sha, channel = git('rev-parse', '--verify', f'{pushed}^{{commit}}'), 'production'
     elif mode == 'retry':
         tag = event['inputs']['tag']
         release = identity(tag)

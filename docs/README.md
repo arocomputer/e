@@ -113,6 +113,10 @@ YAML dependency.
 
 ## Checking your work
 
+`./x site` builds the pinned `arocomputer/web` renderer against these exact guides;
+CI selects it for published documentation changes. Merged guides are refreshed
+by the website's trusted scheduled deployment.
+
 `./x docs` covers `docs/guides/`: every guide has complete front matter, the
 topic names are unique, every relative link resolves, and `e docs` serves every
 topic. No network, no build.

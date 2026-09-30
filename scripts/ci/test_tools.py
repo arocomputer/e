@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import tools
+import zipfile
 
 
 class ToolTests(unittest.TestCase):
@@ -43,3 +44,25 @@ class ToolTests(unittest.TestCase):
     def test_rejects_archive_without_expected_binary(self):
         with self.assertRaisesRegex(ValueError, 'expected one executable'):
             self.install('unexpected')
+
+
+class WindowsTools(unittest.TestCase):
+    def test_verified_zip_binary_uses_fixed_destination_and_exe_suffix(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as bundle:
+            bundle.writestr('../../escaped/tool.exe', b'windows executable')
+        data = archive.getvalue()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / '.github').mkdir()
+            (root / '.github/infra-tools.json').write_text(json.dumps({'tool': {
+                'version': '1', 'platforms': {'windows-amd64': {
+                    'url': 'https://github.com/owner/tool/releases/download/v1/tool.zip',
+                    'sha256': hashlib.sha256(data).hexdigest()}}}}))
+            with patch.object(tools, 'ROOT', root), patch('tools.platform.machine', return_value='AMD64'), \
+                    patch('tools.platform.system', return_value='Windows'), \
+                    patch('tools.urllib.request.urlopen', return_value=io.BytesIO(data)):
+                result = Path(tools.ensure('tool'))
+                self.assertEqual(result.name, 'tool.exe')
+                self.assertEqual(result.read_bytes(), b'windows executable')
+                self.assertFalse((root / 'escaped').exists())

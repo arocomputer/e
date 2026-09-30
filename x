@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 usage() {
-  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|workflows|links|repository-settings|guard|packages|channels|audit-channels|container|ui|bench|audit|sbom|release-check] [args...]" >&2
+  echo "usage: ./x [dev|scenario|preview|hooks|check|fmt|lint|test|crates|docs|site|fuzz-check|workflows|links|repository-settings|guard|packages|channels|audit-channels|container|ui|bench|audit|audit-python|sbom|release-check] [args...]" >&2
   exit 2
 }
 
@@ -155,12 +155,19 @@ case "$command" in
     [ "$#" -eq 0 ] || usage
     python3 benchmarks/run.py --build --check
     ;;
-  audit)
-    [ "$#" -eq 0 ] || usage
-    # RustSec advisories against Cargo.lock.
-    cargo install cargo-audit --version 0.22.2 --locked
-    cargo audit
+  fuzz-check)
+    cargo check --manifest-path fuzz/Cargo.toml --locked "$@"
     ;;
+  site)
+    python3 scripts/ci/site.py "$@"
+    ;;
+  audit)
+    python3 scripts/ci/audit.py rust
+    ;;
+  audit-python)
+    python3 scripts/ci/audit.py python
+    ;;
+
   sbom)
     [ "$#" -eq 1 ] || usage
     cargo install cargo-cyclonedx --version 0.5.9 --locked

@@ -71,11 +71,35 @@ Apply the desired settings explicitly:
 ```
 
 This enables merged-branch deletion, secret scanning, and secret-scanning push
-protection, and requires `ready` on an up-to-date default branch. Existing required
+protection, and binds `ready` to the GitHub Actions app on an up-to-date default branch.
+Version tags can be created only by repository admins and cannot be moved or
+deleted; the creation bypass does not bypass immutability. Before any settings
+write, the latest Actions `ready` check must succeed on current main. A snapshot
+of existing policy is saved under `target/settings/before.json`. Existing required
 checks and their app identities are retained. Existing review requirements,
 restrictions, and bypass rules are not replaced. If no legacy branch protection
-exists, the command creates protection with the required status check; maintainer
+exists, the command creates protection with the required status check enforced
+for administrators too; maintainer
 review remains project policy. Authentication or administration failures stop
 before further changes. The default invocation is read-only and returns nonzero
 for drift or inaccessible settings. GitHub feature availability can also block
 a setting; inspect the GitHub error before retrying.
+
+## CI selection and website integration
+
+Maintenance workflows and reporting/settings tooling run the always-required
+lint, guard, and workflow scanners without rebuilding the application. Pure
+runtime test edits run both native test platforms without repeating UI and
+packed-consumer checks. Unknown inputs select every layer. The selector emits
+one job plan; both job conditions and `ready` use it, so an unexpected skip fails.
+
+Published guide changes run `./x site`, which uses the exact website commit in
+`.github/site-source.json` with this checkout's guides. Update that pin deliberately
+when changing the site importer contract. `./x site --source /path/to/web` uses a
+local renderer for development. The website's trusted main workflow checks for
+merged guide changes twice an hour and deploys a build of the exact selected e
+commit. That scheduled integration becomes active when its web changes merge.
+
+`./x fuzz-check` compiles active targets when their code, lockfile, or core/TUI
+source changes. The expanded audit identified and patched the fuzz workspace's
+rustls TLS advisory (RUSTSEC-2026-0285) and replaced yanked chacha20 0.10.1.

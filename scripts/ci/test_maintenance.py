@@ -92,7 +92,7 @@ class SettingsTests(unittest.TestCase):
     def test_required_checks_preserve_other_checks_and_their_app_ids(self):
         current = {'strict': False, 'checks': [{'context': 'other', 'app_id': 123}]}
         desired = settings.required_checks(current)
-        self.assertEqual(desired['checks'], [{'context': 'other', 'app_id': 123}, {'context': 'ready'}])
+        self.assertEqual(desired['checks'], [{'context': 'other', 'app_id': 123}, {'context': 'ready', 'app_id': settings.ACTION_APP}])
         self.assertTrue(desired['strict'])
         self.assertEqual(settings.required_checks(desired), desired)
 
@@ -102,11 +102,12 @@ class SettingsTests(unittest.TestCase):
                  ('secret_scanning', 'secret_scanning_push_protection')}}
         policy = {'required_status_checks': {'strict': False, 'contexts': ['other']},
                   'required_pull_request_reviews': {'required_approving_review_count': 2}}
-        with patch('settings.request', side_effect=[repo, policy, None]) as api:
+        with patch('settings.request', side_effect=[repo, policy, [], None, None, None]) as api, patch('settings.verify_main'):
             settings.configure('owner/repo', apply=True)
-        self.assertEqual(api.call_args.args[0], 'repos/owner/repo/branches/main/protection/required_status_checks')
-        self.assertEqual(api.call_args.args[1], 'PATCH')
-        self.assertNotIn('required_pull_request_reviews', api.call_args.args[2])
+        call = api.call_args_list[3]
+        self.assertEqual(call.args[0], 'repos/owner/repo/branches/main/protection/required_status_checks')
+        self.assertEqual(call.args[1], 'PATCH')
+        self.assertNotIn('required_pull_request_reviews', call.args[2])
 
     def test_admin_denial_stops_before_any_write(self):
         repo = {'default_branch': 'main', 'delete_branch_on_merge': False}
@@ -115,3 +116,34 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 settings.configure('owner/repo', apply=True)
         self.assertEqual(api.call_count, 2)
+
+
+class ProtectionTests(unittest.TestCase):
+    def test_ready_is_bound_without_mutating_other_app_identities(self):
+        current = {'checks': [{'context': 'ready'}, {'context': 'other', 'app_id': 44}]}
+        desired = settings.required_checks(copy.deepcopy(current))
+        self.assertEqual(desired['checks'], [{'context': 'ready', 'app_id': settings.ACTION_APP},
+                                             {'context': 'other', 'app_id': 44}])
+        self.assertNotIn('app_id', current['checks'][0])
+
+    def test_creation_bypass_cannot_move_or_delete_tags(self):
+        creation, immutable = settings.tag_rules()
+        self.assertEqual(creation['rules'], [{'type': 'creation'}])
+        self.assertEqual(immutable['bypass_actors'], [])
+        self.assertEqual(immutable['rules'], [{'type': 'update'}, {'type': 'deletion'}])
+
+    def test_failed_main_gate_prevents_all_writes(self):
+        with patch('settings.request', side_effect=[{'default_branch': 'main'}, {}, []]) as api, \
+                patch('settings.verify_main', side_effect=ValueError('failed')):
+            with self.assertRaises(ValueError):
+                settings.configure('owner/repo', apply=True)
+        self.assertTrue(all(len(call.args) == 1 for call in api.call_args_list))
+
+    def test_newer_failed_attempt_and_wrong_app_do_not_activate_protection(self):
+        checks = [{'id': 1, 'name': 'ready', 'app': {'id': settings.ACTION_APP}, 'conclusion': 'success'},
+                  {'id': 2, 'name': 'ready', 'app': {'id': settings.ACTION_APP}, 'conclusion': 'failure'},
+                  {'id': 3, 'name': 'ready', 'app': {'id': 88}, 'conclusion': 'success'}]
+        with patch('settings.request', return_value={'commit': {'sha': 'a'*40}}), \
+                patch('settings.pages', return_value=[{'check_runs': checks}]):
+            with self.assertRaises(ValueError):
+                settings.verify_main('owner/repo', 'main')

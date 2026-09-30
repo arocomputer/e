@@ -67,10 +67,11 @@ repeated here.
 
 The `ci` workflow runs these commands, one job per `./x` command and named
 after it: `lint`, `test (linux)`, `test (macos)`, `ui`, `docs`,
-`packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
-`bench`, plus `glibc` for the release's Linux floor. The `changes` job decides
+`site`, `packages (linux)`, `packages (macos)`, `crates`, `channels`, `audit`, and
+`bench`, `fuzz-check`, plus `glibc` for the release's Linux floor. The `changes` job decides
 which of them a change needs; the others show as skipped. Branch protection
-requires only `ready`, which passes when every job passed or was skipped.
+requires only `ready`, which validates the job plan and requires selected jobs
+to succeed and unselected jobs to skip. Unexpected skips or cancelled work fail.
 
 ```sh
 ./x fmt --check   # formatting, fuzz targets included
@@ -89,14 +90,15 @@ requires only `ready`, which passes when every job passed or was skipped.
 ./x sbom /tmp/e-sbom.cdx.json  # application dependency inventory
 ```
 
-The full suite includes the docs contract. Prose-only changes run that contract
-and the site build without the full suite. Performance-related PRs run benchmarks;
+The full suite includes the docs contract. Prose-only changes run the docs contract without the full suite; published guide
+changes also build the pinned website against the proposed commit with `./x site`. Performance-related PRs run benchmarks;
 main code changes and the weekly schedule run them too. Rust jobs cache
 dependencies and build outputs by platform, job, toolchain, and dependency set.
 
 Dependabot combines Cargo, npm, GitHub Actions, and Docker version updates into
 one weekly PR. Docker coverage includes the Slack runtime and CI container images;
-security updates can arrive separately. `./x audit` pins cargo-audit to 0.22.2;
+security updates can arrive separately. `./x audit` covers the root and active fuzz lockfiles and pins cargo-audit to 0.22.2;
+`./x audit-python` covers the pinned PTY dependencies;
 update that version deliberately when upgrading the advisory checker.
 
 `./x` is the single definition of green; CI runs the same commands, so
@@ -153,13 +155,12 @@ condition: the content is yours to own.
 
 - Review everything the AI produced — code, prose, commit messages —
   before you ask anyone here to review it for you.
-- Never attribute a commit to AI/LLM as author, co-author, committer, or
-  signatory: no `Assisted-by`, `Co-authored-by`, or similar trailer, and
-  no generated footer naming the model or harness. Attribution here is
-  human only.
-- Answer maintainer questions and review comments yourself; what an
-  agent wrote is input to your reply, not the reply.
-- One AI-assisted pull request open at a time.
+- A human contributor owns the change, its verification, and follow-up review.
+- Preserve accurate author, committer, service-account, signature, and co-author
+  metadata. Agent attribution is allowed; it does not replace human accountability.
+  Never rewrite history merely to add or remove attribution.
+- Contributors may use cloud agents and open multiple focused PRs. Keep each
+  reviewable and respond to maintainer feedback.
 
 If you reach the point where you feel unwilling or unable to do the
 above, close your issue or pull request.

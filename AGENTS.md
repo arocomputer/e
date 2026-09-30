@@ -240,9 +240,9 @@ surface? Route it through `panel.rs` so it can't diverge.
   `git log`.
 - Body: use `.github/pull_request_template.md`. Explain the problem, what changed,
   why it works, and the checks run with their results. Link an issue when applicable.
-  Use enough detail for review; there is no fixed sentence limit. Never attribute work to
-  AI: no `Co-authored-by`, `Assisted-by`, or similar trailer, no model or
-  harness line, no agent self-mention. The AI/LLM rules live in CONTRIBUTING.md.
+  Use enough detail for review; there is no fixed sentence limit. Preserve accurate
+  authorship and agent/service attribution. A human remains accountable; follow
+  CONTRIBUTING.md without rewriting provenance.
 - Do not apply PR labels or add automatic PR labeling. Describe the change type
   and any incompatibility in the title and template. Issue labels are separate.
 - Rendering changes carry a captured frame (`scripts/ptycap.py`), not a

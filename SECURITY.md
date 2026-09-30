@@ -19,3 +19,8 @@ e runs model-directed tools as your user without a permission prompt by
 default — that is the documented design (see the
 [sandboxing guide](docs/guides/usage/sandboxing.md)), not a flaw. Use a container, VM, or OS sandbox when
 work needs containment.
+
+CI audits the active root and fuzz Cargo lockfiles, Slack production dependencies,
+and the pinned Python PTY requirements. SDK publication verifies tagged source
+without credentials and uses a separate OIDC publishing job. Workflow syntax and
+security scans run in the required lint gate.
