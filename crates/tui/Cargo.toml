@@ -21,7 +21,7 @@ name = "e_tui"
 [dependencies]
 e-core.workspace = true
 # Typed text, cell rendering, and Markdown; e owns presentation and terminal modes.
-wove = { version = "=0.0.1", git = "https://github.com/arocomputer/wove", rev = "6edc92fcd0ab23ef35d10992009b8c57634e3ca0", default-features = false, features = ["markdown"] }
+wove = { version = "=0.0.1", git = "https://github.com/arocomputer/wove", rev = "2ca5b6dbf00eecd37c9bfbae970b54f24e1a2f06", default-features = false, features = ["markdown"] }
 serde.workspace = true
 serde_json.workspace = true
 unicode-width.workspace = true
