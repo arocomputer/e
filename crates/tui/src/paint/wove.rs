@@ -4,35 +4,32 @@
 use std::io::{self, Write};
 use wove::{
     text::{Span, TextLayout, Wrap},
-    Buffer, Canvas, Color, Element, Id, Renderer, Style, Tree,
+    Buffer, Color, Rect, Renderer, Style,
 };
 
-/// Reuses a headless tree to turn bounded presenter rows into typed cells.
+/// Reuses a typed frame for rows whose positions e has already chosen.
 #[derive(Default)]
 pub(super) struct Frame {
-    tree: Tree,
-    content: Option<Id>,
+    buffer: Option<Buffer>,
 }
 
 impl Frame {
-    /// Lay out preformatted rows without changing their application-owned wrapping.
-    pub fn layout(&mut self, lines: &[String], cols: u16, rows: u16) -> io::Result<&Buffer> {
-        let content = Rows {
-            width: cols,
-            lines: lines
-                .iter()
-                .map(|line| TextLayout::new(&spans(line), Some(cols), Wrap::None))
-                .collect(),
-        };
-        let map = |error| io::Error::other(format!("terminal layout failed: {error}"));
-        match self.content {
-            Some(id) => self
-                .tree
-                .update::<Rows>(id, |rows| *rows = content)
-                .map_err(map)?,
-            None => self.content = Some(self.tree.add(self.tree.root(), content).map_err(map)?),
+    /// Lay out preformatted rows without changing application-owned wrapping.
+    pub fn layout(&mut self, lines: &[String], cols: u16, rows: u16) -> &Buffer {
+        let area = Rect::new(0, 0, cols, rows);
+        let frame = self.buffer.get_or_insert_with(|| Buffer::new(cols, rows));
+        if frame.area() != area {
+            *frame = Buffer::new(cols, rows);
         }
-        self.tree.frame(cols, rows).map_err(map)
+        frame.clear();
+        {
+            let mut canvas = frame.canvas(area);
+            for (row, line) in lines.iter().take(usize::from(rows)).enumerate() {
+                TextLayout::new(&spans(line), Some(cols), Wrap::None)
+                    .paint_at(&mut canvas, row as i32);
+            }
+        }
+        frame
     }
 }
 
@@ -59,27 +56,7 @@ impl Fullscreen {
     ) -> io::Result<()> {
         let lines = &lines[lines.len().saturating_sub(usize::from(rows))..];
         self.renderer
-            .draw(out, self.frame.layout(lines, cols, rows)?)
-    }
-}
-
-/// Preformatted rows use Wove's shared text layout without introducing reflow.
-struct Rows {
-    width: u16,
-    lines: Vec<TextLayout>,
-}
-
-impl Element for Rows {
-    fn measure(&self, _: Option<u16>) -> (u16, u16) {
-        (
-            self.width,
-            self.lines.len().min(usize::from(u16::MAX)) as u16,
-        )
-    }
-    fn paint(&self, canvas: &mut Canvas<'_>) {
-        for (row, line) in self.lines.iter().enumerate() {
-            line.paint_at(canvas, row as i32);
-        }
+            .draw(out, self.frame.layout(lines, cols, rows))
     }
 }
 
@@ -217,7 +194,7 @@ mod tests {
         let lines = vec!["\x1b[38;5;245m\x1b[1mDim \x1b[22m\x1b]8;id=test;https://example.com\x1b\\\x1b[4mlink\x1b[24m\x1b]8;;\x1b\\\x1b[39m \x1b[7m界\x1b[27m".into()];
         let mut bytes = Vec::new();
         view.paint_to(&lines, 20, 3, &mut bytes).unwrap();
-        let frame = view.frame.tree.frame(20, 3).unwrap();
+        let frame = view.frame.buffer.as_ref().unwrap();
         assert_eq!(frame.cell(0, 0).unwrap().style().fg, Color::Indexed(245));
         assert!(frame.cell(0, 0).unwrap().style().bold);
         assert!(frame.cell(4, 0).unwrap().style().underline);
@@ -233,8 +210,8 @@ mod tests {
         view.paint_to(&[], 20, 3, &mut bytes).unwrap();
         assert!(view
             .frame
-            .tree
-            .frame(20, 3)
+            .buffer
+            .as_ref()
             .unwrap()
             .lines()
             .iter()

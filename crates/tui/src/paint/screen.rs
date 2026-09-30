@@ -66,7 +66,7 @@ impl Screen {
             let end = len.min(self.base.saturating_add(batch));
             let frame =
                 self.frame
-                    .layout(&lines[self.base..end], self.cols, (end - self.base) as u16)?;
+                    .layout(&lines[self.base..end], self.cols, (end - self.base) as u16);
             if let Err(error) = self.inline.draw(out, frame, self.rows) {
                 self.redraw_pending = true;
                 return Err(error);

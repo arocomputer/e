@@ -3,6 +3,7 @@
 # pickers, and the app loop that drives a core session.
 name = "e-tui"
 version.workspace = true
+publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,8 +20,8 @@ name = "e_tui"
 
 [dependencies]
 e-core.workspace = true
-# Headless layout, rendering, and Markdown; e owns presentation and terminal modes.
-wove = { version = "=0.0.1", git = "https://github.com/arocomputer/wove", rev = "3fb8fe3382d6779477f6057d9a6dbbc294cc3556", default-features = false, features = ["markdown"] }
+# Typed text, cell rendering, and Markdown; e owns presentation and terminal modes.
+wove = { version = "=0.0.1", git = "https://github.com/arocomputer/wove", rev = "6edc92fcd0ab23ef35d10992009b8c57634e3ca0", default-features = false, features = ["markdown"] }
 serde.workspace = true
 serde_json.workspace = true
 unicode-width.workspace = true

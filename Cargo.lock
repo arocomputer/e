@@ -1940,7 +1940,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wove"
 version = "0.0.1"
-source = "git+https://github.com/arocomputer/wove?rev=3fb8fe3382d6779477f6057d9a6dbbc294cc3556#3fb8fe3382d6779477f6057d9a6dbbc294cc3556"
+source = "git+https://github.com/arocomputer/wove?rev=6edc92fcd0ab23ef35d10992009b8c57634e3ca0#6edc92fcd0ab23ef35d10992009b8c57634e3ca0"
 dependencies = [
  "pulldown-cmark",
  "taffy",
