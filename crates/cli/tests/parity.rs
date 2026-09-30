@@ -1185,3 +1185,14 @@ fn a_loose_list_item_keeps_every_paragraph() {
     let second = out.find("Step two").unwrap();
     assert!(first < details && details < second, "{out:?}");
 }
+
+#[test]
+fn markdown_html_retains_the_literal_inline_and_inert_block_policy() {
+    let (theme, _) = read_theme("dark");
+    let inline = "before <a href=\"https://example.com\">after</a>";
+    assert_eq!(
+        e::tui::markdown::render_markdown(&theme, inline, 80),
+        [inline]
+    );
+    assert!(e::tui::markdown::render_markdown(&theme, "<div>raw block</div>", 80).is_empty());
+}

@@ -58,11 +58,12 @@ case "$command" in
     CARGO_TARGET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/e-crates.XXXXXX")
     export CARGO_TARGET_DIR
     trap 'rm -rf "$CARGO_TARGET_DIR"' EXIT HUP INT TERM
-    # The published crates: the application crates are packaged and built end
-    # to end in dependency order, and the SDK is compiled by an external
-    # consumer from its packed crate.
+    # Only core and SDK publish to crates.io. The application frontends ship
+    # in the binary and may depend on pinned Git libraries. Their workspace
+    # builds, tests, and release binary checks run separately. The SDK consumer
+    # compiles both published crates from their normalized archives.
     cargo publish --dry-run --locked --allow-dirty \
-      -p e-core -p e-tui -p e-rpc -p e
+      -p e-core
     python3 scripts/check-sdk.py
     ;;
   docs)

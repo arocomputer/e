@@ -246,11 +246,16 @@ credentials and release checks. Deploy the site after the relevant guide and
 installer changes are available on this repository's `main` branch.
 
 The application does not publish to crates.io. Its installers are the shell
-script, Homebrew, and the npm packages. The one crate that publishes is the
-embedded SDK (`e-sdk`), which versions itself and is the only way to embed e
-in a Rust program. Publishing it uses `CARGO_REGISTRY_TOKEN`, a token scoped to
-`e-sdk` and `e-core` (the SDK depends on it) and no others. Create the
-token at https://crates.io/settings/tokens and set the first publication up
+script, Homebrew, and the npm packages. The application crates (`e`, `e-tui`,
+and `e-rpc`) set `publish = false`; their builds, tests, and binary budgets
+cover pinned dependencies separately, including Git sources.
+
+The embedded SDK (`e-sdk`) and its core dependency publish to crates.io. The
+SDK versions itself and is the only way to embed e in a Rust program.
+`./x crates` verifies core publication and compiles an external SDK consumer
+from the packed core and SDK archives. Publishing uses `CARGO_REGISTRY_TOKEN`,
+a token scoped to `e-sdk` and `e-core` (the SDK depends on it) and no others.
+Create the token at https://crates.io/settings/tokens and set the first publication up
 interactively with `cargo login` if it is rotated.
 
 The renamed crates require their own publishing setup before SDK publication.

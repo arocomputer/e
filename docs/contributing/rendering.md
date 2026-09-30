@@ -49,6 +49,37 @@ assembles the cached transcript rows, but the painter takes ownership of
 that frame and compares only the reachable suffix. Further incremental
 parsing or shared-row storage should be justified by a measured bottleneck.
 
+## Wove rendering
+
+All terminal views paint through Wove's typed buffers, text layout, and cell
+renderers. e owns the terminal modes, event loop, paint mailbox, and visual
+presentation. The dependency is pinned to a Git revision with its terminal
+feature disabled and Markdown enabled; core, RPC, and SDK do not depend on it.
+
+The application frontends are not published to crates.io. Their pinned Wove
+Git dependency builds with the release binary. The crate check verifies the
+published core and SDK archives, which remain independent of Wove. No Wove
+registry release is needed to build or distribute the application.
+
+The current presenters produce styled rows. `crates/tui/src/paint/wove.rs`
+converts their SGR styling and OSC 8 destinations into typed spans, then uses
+Wove's grapheme layout and differential output. Other terminal commands are
+consumed rather than forwarded. This adapter keeps e's established styled-row
+contract at the application boundary. Wove never receives raw terminal commands.
+Application palettes, Markdown shapes, tool trees, and pane behavior stay in e.
+Markdown parsing uses
+Wove's semantic blocks and inline content; e formats them with its reference
+heading styles, source list numbers, table shapes, code panels, and hyperlink
+policy.
+
+Inline conversations use Wove's `Inline` renderer. `Screen` sends the logical
+transcript in bounded batches. Released rows remain visible until Wove scrolls
+them into native history. The retained comparison rows and cell frames stay bounded by terminal
+height, even when a transcript exceeds 65,535 rows. Collapse and resize restart
+from the visible tail without replaying history. Review preserves the inline
+renderer while the alternate buffer is open. The inline contract above remains
+the same.
+
 ## Tool trees and shell input
 
 Running and completed calls occupy the same tree positions, in provider order.

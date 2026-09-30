@@ -18,11 +18,11 @@
 //!              inline-code gray; links underline-only with OSC 8; bare
 //!              http(s) URLs autolink with trailing punctuation trimmed
 //!
-//! Parsing uses pulldown-cmark; rendering owns the width, so blocks land on
-//! their final lines directly.
+//! Wove supplies semantic Markdown blocks; e owns width and presentation,
+//! so blocks land on their final lines directly.
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use unicode_width::UnicodeWidthChar;
+use wove::markdown::{parse, Alignment, Block, Inline};
 
 use crate::highlight::highlight_block;
 use crate::render::*;
@@ -657,27 +657,15 @@ struct TableState {
 
 /// Render a markdown document to lines at `width`, one blank row between blocks.
 pub fn render_markdown(theme: &Theme, markdown: &str, width: usize) -> Vec<String> {
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    opts.insert(Options::ENABLE_TABLES);
-    opts.insert(Options::ENABLE_TASKLISTS);
-    // Footnote syntax stays inert: `[^label]` renders as the literal text
-    // the author wrote and `[^a]: note` as an ordinary paragraph. The
-    // reference's footnote grammar was ported once and retired — a coding
-    // session's prose doesn't carry academic apparatus.
-    let mut doc = Document::new(theme, markdown, width);
-    for (event, range) in Parser::new_ext(markdown, opts).into_offset_iter() {
-        doc.event(event, range.start);
-    }
+    let mut doc = Document::new(theme, width);
+    doc.blocks(&parse(markdown));
     doc.out
 }
 
-/// One document's rendering state as parser events stream through it.
-/// Inline events accumulate styled text in `inline`; a block's end wraps
-/// that text at `width` and pushes the finished block onto `out`.
+/// Render semantic blocks with e's palette, wrapping, and panel shapes.
+/// Inline content accumulates styling; each completed block becomes rows.
 struct Document<'a> {
     theme: &'a Theme,
-    source: &'a str,
     width: usize,
     out: Vec<String>,
     inline: String,
@@ -700,10 +688,9 @@ struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
-    fn new(theme: &'a Theme, source: &'a str, width: usize) -> Self {
+    fn new(theme: &'a Theme, width: usize) -> Self {
         Self {
             theme,
-            source,
             width,
             out: Vec::new(),
             inline: String::new(),
@@ -721,76 +708,123 @@ impl<'a> Document<'a> {
         }
     }
 
-    /// Fold one parser event in; `start` is its byte offset in the source.
-    fn event(&mut self, event: Event, start: usize) {
-        match event {
-            Event::Start(Tag::Heading { level, .. }) => {
-                self.heading = Some(level as u8);
-                self.inline.clear();
-            }
-            Event::End(TagEnd::Heading(_)) => self.end_heading(),
-            Event::Start(Tag::Paragraph) => self.start_paragraph(),
-            Event::End(TagEnd::Paragraph) => self.end_paragraph(),
-            Event::Start(Tag::BlockQuote(_)) => self.quote_depth += 1,
-            Event::End(TagEnd::BlockQuote(_)) => {
-                self.quote_depth = self.quote_depth.saturating_sub(1)
-            }
-            Event::Start(Tag::List(first)) => self.start_list(first),
-            Event::End(TagEnd::List(_)) => self.end_list(),
-            Event::Start(Tag::Item) => self.start_item(start),
-            Event::End(TagEnd::Item) => self.end_item(),
-            Event::TaskListMarker(done) => self.current_task = Some(done),
-            Event::Start(Tag::CodeBlock(kind)) => self.start_code(kind),
-            Event::End(TagEnd::CodeBlock) => self.end_code(),
-            Event::Start(Tag::Table(aligns)) => self.start_table(aligns),
-            Event::Start(Tag::TableHead) => self.set_table_head(true),
-            Event::End(TagEnd::TableHead) => self.set_table_head(false),
-            Event::Start(Tag::TableRow) => self.start_table_row(),
-            Event::Start(Tag::TableCell) => self.inline.clear(),
-            Event::End(TagEnd::TableCell) => self.end_table_cell(),
-            Event::End(TagEnd::Table) => self.end_table(),
-            Event::Rule => push_block(&mut self.out, vec![rule()]),
-            // The reference strips bold/italic markers inside a heading
-            // rather than nesting SGR into the level style.
-            Event::Start(Tag::Strong)
-            | Event::End(TagEnd::Strong)
-            | Event::Start(Tag::Emphasis)
-            | Event::End(TagEnd::Emphasis)
-                if self.heading.is_some() => {}
-            Event::Start(Tag::Strong) => self.inline.push_str(BOLD_ON),
-            Event::End(TagEnd::Strong) => self.inline.push_str(WEIGHT_OFF),
-            Event::Start(Tag::Emphasis) => self.inline.push_str(ITALIC_ON),
-            Event::End(TagEnd::Emphasis) => self.inline.push_str(ITALIC_OFF),
-            Event::Start(Tag::Strikethrough) => self.inline.push_str(STRIKE_ON),
-            Event::End(TagEnd::Strikethrough) => self.inline.push_str(STRIKE_OFF),
-            Event::Start(Tag::Link { dest_url, .. }) => self.open_link(&dest_url),
-            Event::End(TagEnd::Link) => {
-                if !self.close_link() && matches!(self.heading, Some(1) | Some(3) | Some(5)) {
-                    // An underlined heading level reopens its underline after
-                    // the link closes its own.
-                    self.inline.push_str(UNDERLINE_ON);
+    /// Walk document blocks while retaining list, quote, and link context.
+    fn blocks(&mut self, blocks: &[Block]) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(content) => {
+                    self.start_paragraph();
+                    self.inlines(content);
+                    self.end_paragraph();
                 }
-            }
-            Event::Start(Tag::Image { dest_url, .. }) => {
-                self.open_link(&dest_url);
-                self.inline.push_str("▧ ");
-                self.image_mark = Some(self.inline.len());
-            }
-            Event::End(TagEnd::Image) => {
-                // Empty alt text names the thing for what it is.
-                if self.image_mark.take() == Some(self.inline.len()) {
-                    self.inline.push_str("image");
+                Block::Html(source) => self.inline.push_str(source),
+                Block::Heading { level, content } => {
+                    self.heading = Some(*level);
+                    self.inline.clear();
+                    self.inlines(content);
+                    self.end_heading();
                 }
-                self.close_link();
+                Block::Quote(blocks) => {
+                    self.quote_depth += 1;
+                    self.blocks(blocks);
+                    self.quote_depth -= 1;
+                }
+                Block::List { start, items, .. } => {
+                    self.start_list(*start);
+                    for item in items {
+                        self.start_item(item.number);
+                        self.current_task = item.checked;
+                        self.blocks(&item.blocks);
+                        self.end_item();
+                    }
+                    self.end_list();
+                }
+                Block::Code { info, source } => {
+                    let language = info.split_whitespace().next().unwrap_or("").to_owned();
+                    self.code = Some((language, source.clone()));
+                    self.end_code();
+                }
+                Block::Table {
+                    alignment,
+                    header,
+                    rows,
+                } => {
+                    self.start_table(alignment.clone());
+                    self.set_table_head(true);
+                    for cell in header {
+                        self.inline.clear();
+                        self.inlines(cell);
+                        self.end_table_cell();
+                    }
+                    self.set_table_head(false);
+                    for row in rows {
+                        self.start_table_row();
+                        for cell in row {
+                            self.inline.clear();
+                            self.inlines(cell);
+                            self.end_table_cell();
+                        }
+                    }
+                    self.end_table();
+                }
+                Block::Rule => push_block(&mut self.out, vec![rule()]),
             }
-            Event::Code(text) => self.inline.push_str(&self.theme.fg("mdCode", &text)),
-            Event::Text(text) => self.text(&text),
-            // The reference preserves the author's line breaks: a soft break
-            // is a real row boundary, not a joining space.
-            Event::SoftBreak => self.inline.push('\n'),
-            Event::HardBreak => self.inline.push('\n'),
-            Event::Html(html) | Event::InlineHtml(html) => self.inline.push_str(&html),
-            _ => {}
+        }
+    }
+
+    /// Apply inline roles, preserving source breaks and e's hyperlink policy.
+    fn inlines(&mut self, content: &[Inline]) {
+        for inline in content {
+            match inline {
+                Inline::Text(text) => self.text(text),
+                Inline::Html(html) => self.inline.push_str(html),
+                Inline::Code(text) => self.inline.push_str(&self.theme.fg("mdCode", text)),
+                Inline::Strong(content) | Inline::Emphasis(content) => {
+                    // Headings supply their own level style without nested weight.
+                    let styled = self.heading.is_none();
+                    let (open, close) = if matches!(inline, Inline::Strong(_)) {
+                        (BOLD_ON, WEIGHT_OFF)
+                    } else {
+                        (ITALIC_ON, ITALIC_OFF)
+                    };
+                    if styled {
+                        self.inline.push_str(open);
+                    }
+                    self.inlines(content);
+                    if styled {
+                        self.inline.push_str(close);
+                    }
+                }
+                Inline::Strikethrough(content) => {
+                    self.inline.push_str(STRIKE_ON);
+                    self.inlines(content);
+                    self.inline.push_str(STRIKE_OFF);
+                }
+                Inline::Link {
+                    destination,
+                    content,
+                } => {
+                    self.open_link(destination);
+                    self.inlines(content);
+                    if !self.close_link() && matches!(self.heading, Some(1) | Some(3) | Some(5)) {
+                        self.inline.push_str(UNDERLINE_ON);
+                    }
+                }
+                Inline::Image {
+                    destination,
+                    content,
+                } => {
+                    self.open_link(destination);
+                    self.inline.push_str("▧ ");
+                    self.image_mark = Some(self.inline.len());
+                    self.inlines(content);
+                    if self.image_mark.take() == Some(self.inline.len()) {
+                        self.inline.push_str("image");
+                    }
+                    self.close_link();
+                }
+                Inline::SoftBreak | Inline::HardBreak => self.inline.push('\n'),
+            }
         }
     }
 
@@ -863,19 +897,12 @@ impl<'a> Document<'a> {
         }
     }
 
-    /// The reference echoes the source's ordered markers; read the number as
-    /// the author wrote it at the item's `start` offset.
-    fn start_item(&mut self, start: usize) {
+    /// Start an item with the source number retained by Wove's parser.
+    fn start_item(&mut self, number: Option<u64>) {
         self.item_stack.push(false);
         self.current_task = None;
         if let Some(state) = self.lists.last_mut() {
-            if state.ordered.is_some() {
-                let digits: String = self.source[start..]
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect();
-                state.source = digits.parse().ok();
-            }
+            state.source = number;
         }
         self.inline.clear();
     }
@@ -914,15 +941,6 @@ impl<'a> Document<'a> {
             }
         }
         self.inline.clear();
-    }
-
-    /// Open a code block; a fence's first info word names its language.
-    fn start_code(&mut self, kind: CodeBlockKind) {
-        let lang = match kind {
-            CodeBlockKind::Fenced(l) => l.split_whitespace().next().unwrap_or("").to_string(),
-            _ => String::new(),
-        };
-        self.code = Some((lang, String::new()));
     }
 
     fn end_code(&mut self) {
@@ -1011,12 +1029,9 @@ impl<'a> Document<'a> {
         true
     }
 
-    /// Text lands in the open code block, verbatim inside links and headings,
-    /// and autolinked everywhere else.
+    /// Keep text literal inside links and headings; autolink ordinary prose.
     fn text(&mut self, text: &str) {
-        if let Some((_, buffer)) = &mut self.code {
-            buffer.push_str(text);
-        } else if !self.link_stack.is_empty() || self.heading.is_some() {
+        if !self.link_stack.is_empty() || self.heading.is_some() {
             self.inline.push_str(text);
         } else {
             push_text_autolinked(&mut self.inline, text, &mut self.link_seq);
