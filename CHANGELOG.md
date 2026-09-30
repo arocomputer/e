@@ -4,6 +4,7 @@
 
 ### Improvements
 
+- Inline conversations, fullscreen conversations, and review views now paint through Wove, retaining e's themes, layout, and native scrollback. Markdown parsing uses Wove's semantic API with e's existing presentation.
 - Replaced the README header wordmark with the split-arc logo.
 - Restored the `e` name and command while retaining the split-arc mark. The website now lives at `e.aro.computer` in `arocomputer/web`.
 - Paused public package distribution during development. The website points to source builds and no longer lists withdrawn releases.

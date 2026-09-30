@@ -168,6 +168,9 @@ def visible_work(frames):
     assert any(frame.find('5 earlier successful tools') is not None for frame in frames), 'successful command history was not folded'
     assert any(frame.find('exit 7') is not None for frame in collapsed), 'folding hid a failed command'
     review = [frame for frame in frames if frame.find('┃ Review ·') is not None]
+    for frame in review:
+        assert frame.rows[-3].rstrip() == '┃ Review · ←/→ switch · ctrl o close · PgUp/PgDn scroll · Esc close', \
+            'review footer changed or moved from its dock'
     assert any(frame.find('RETAINED_THINKING_DETAIL') is not None for frame in review), 'review lost hidden thinking'
     assert any(frame.find('work-00') is not None for frame in review), 'review lost folded successful commands'
     assert frames[-1].find('RETAINED_THINKING_DETAIL') is not None, 'settings did not reveal earlier thinking'

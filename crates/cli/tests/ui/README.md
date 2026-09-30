@@ -28,7 +28,7 @@ Choose one scenario or a fresh output directory:
 | --- | --- |
 | `scroll-chat` | Wheel scrolling in inline chat preserves the draft and reading position through new output, resize, and a visit to the detail reader. |
 | `scroll-fullscreen` | Page and wheel navigation scroll fullscreen chat independently of the composer; End resumes following output. |
-| `visible-work` | Collapsed thinking remains available in review and after a settings toggle; folded successful tools remain in review and failures stay visible. |
+| `visible-work` | Collapsed thinking remains available in review and after a settings toggle; folded successful tools remain in review and failures stay visible. The exact review footer stays on its dock row. |
 | `single-tool` | One command stays within two label rows, retains connected rails, and reveals its full label after widening the terminal. |
 | `heredoc-tool` | The main tree shows only the heredoc invocation; Ctrl+O retains its body and connects the branch through output in both review depths. |
 | `tui-mode` | Startup is inline by default; the settings switch pins and unpins the composer. |
