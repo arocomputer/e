@@ -133,9 +133,9 @@ Title the PR as a conventional commit in plain language, scoped by area:
 commit on `main`.
 
 Use the [PR template](.github/pull_request_template.md). Link a related issue when
-one exists, select the change type, explain the problem and why the change works,
-and list verification commands and results. Include captured frames for visual
-changes; remove that section when it does not apply. Write enough detail to review
+one exists, explain the problem and why the change works under **What and why**,
+and list actual commands and results under **Verification**, including skipped
+checks and limitations. Include captured frames for visual changes. Write enough detail to review
 the change without a fixed sentence limit.
 
 Keep each PR about one coherent change and leave unrelated cleanup for another
