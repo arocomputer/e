@@ -53,8 +53,8 @@ deliberately; Dependabot does not update the JSON archive catalog.
 
 Automatic deletion of merged branches is already enabled. The connected GitHub
 app cannot inspect legacy branch protection or the repository's secret-scanning
-settings. No repository rulesets were visible at review time; that does not
-establish whether legacy branch protection is configured.
+settings. No branch-protection rules were visible at review time; that does not
+establish whether another protection mechanism is configured.
 
 With an authenticated GitHub CLI account that has repository administration
 access, inspect the requested settings locally:
