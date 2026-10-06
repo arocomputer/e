@@ -1,32 +1,14 @@
-<!-- Use a conventional title, such as fix(tui): preserve tool tree connections. -->
+## What and why
 
-### Related issue
+<!-- Explain the problem, what changed, and why. Link related issues.
+     Note migrations for persisted data, CLI, or extension contract changes. -->
 
-<!-- Link an issue when applicable, for example Closes #123. -->
+## Verification
 
-### Type of change
+- `./x check` —
+- Additional path-specific checks —
 
-- [ ] Bug fix
-- [ ] Feature
-- [ ] Refactor
-- [ ] Documentation
-- [ ] Repository tooling
-
-### What does this PR do?
-
-<!-- Explain the problem, what changed, and why it works.
-     Include migration notes for persisted data, CLI, or extension contract changes. -->
-
-### How was it verified?
-
-<!-- List the checks run and their results. -->
-
-### Screenshots or recordings
-
-<!-- Include a captured frame for visual changes; otherwise remove this section. -->
-
-### Checklist
-
-- [ ] Relevant checks pass
-- [ ] Affected documentation is updated
-- [ ] The PR contains no unrelated changes
+<!-- Covers fmt, native/Wasm lint, workspace tests, packed crates, guards, and workflows.
+     Choose additional checks from CONTRIBUTING.md; include captured frames for UI changes.
+     Record actual results, failures/skips, and limitations (or why a check is N/A).
+     Add focused behavior tests and update affected docs/changelog. -->
