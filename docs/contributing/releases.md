@@ -70,7 +70,7 @@ available during development.
 curl -fsSL https://e.aro.computer/install.sh | sh
 npm install -g @arocomputer/e
 bun add -g @arocomputer/e
-brew install arocomputer/tap/e
+brew tap arocomputer/e https://github.com/arocomputer/e && brew install arocomputer/e/e
 ```
 
 To reinstall an older version with curl, pass `--version X.Y.Z`. npm and
@@ -191,9 +191,10 @@ builds require an explicit request.
 
 ## Publishing credentials
 
-Homebrew uses `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to Contents
-read/write on `arocomputer/homebrew-tap`. Deploy keys are disabled by repository
-policy. Renew the token before its expiry.
+Homebrew and the release job push `Formula/e.rb` to `main` with the org secret
+`RELEASE_TOKEN`, a fine-grained token limited to Contents read/write on `e`,
+`ask`, `tap`, and `search`. Deploy keys are disabled by org policy. Renew the
+token before its expiry.
 npm uses trusted publishing (OIDC); no npm token is stored. Each of the six
 packages (`e` and its four platform packages, plus `e-slack`) trusts the GitHub
 organization `arocomputer`, repository `e`, workflow `release.yml`, with direct

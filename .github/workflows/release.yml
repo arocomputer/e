@@ -546,19 +546,19 @@ jobs:
           python3 scripts/packaging/prepare.py "$TAG" "$RUNNER_TEMP/brew-assets" dist
       - name: Check publishing access
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: test -n "$TAP_TOKEN" || { echo 'Configure HOMEBREW_TAP_TOKEN before publishing.'; exit 1; }
-      - name: Check out tap
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] -- tap publishing needs git push credentials
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: test -n "$TOKEN" || { echo 'Configure RELEASE_TOKEN before publishing.'; exit 1; }
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] -- formula publishing needs git push credentials
         with:
-          repository: arocomputer/homebrew-tap
-          path: tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ref: main
+          path: brew
+          token: ${{ secrets.RELEASE_TOKEN }}
       - name: Publish formula
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
           COMMAND: ${{ needs.resolve.outputs.command }}
-        run: scripts/packaging/publish-brew.sh "dist/$COMMAND.rb" tap
+        run: scripts/packaging/publish-brew.sh "dist/$COMMAND.rb" brew
 
   installer:
     name: installer
