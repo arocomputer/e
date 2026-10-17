@@ -89,8 +89,19 @@ jobs:
           prs=$(gh pr list --state open --base main --head "$owner:$branch" --json number,author)
           pr_count=$(jq 'length' <<< "$prs")
           pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]")][0].number // empty' <<< "$prs")
+          remote_ref="refs/heads/$branch"
+          remote_sha=$(git ls-remote origin "$remote_ref" | awk 'NR == 1 { print $1 }')
           if [ "$pr_count" -gt 0 ] && [ -z "$pr_number" ]; then
             echo 'The reserved dependency branch has an open PR not created by this workflow.' >&2
+            exit 1
+          fi
+          if [ "$pr_count" -eq 0 ] && [ -n "$remote_sha" ]; then
+            echo 'The reserved dependency branch exists without an open updater PR; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          if [ -n "$pr_number" ] && gh pr view "$pr_number" --json commits \
+              --jq '.commits[] | select(.messageHeadline != "chore: update dependencies") | .messageHeadline' | grep -q .; then
+            echo 'The updater PR contains non-automation commits; refusing to replace them.' >&2
             exit 1
           fi
           git apply --cached --binary "$RUNNER_TEMP/dependency-update.patch"
@@ -125,8 +136,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -c core.hooksPath=/dev/null commit -m 'chore: update dependencies'
           gh auth setup-git
-          remote_ref="refs/heads/$branch"
-          remote_sha=$(git ls-remote origin "$remote_ref" | awk 'NR == 1 { print $1 }')
           if [ -n "$remote_sha" ]; then
             git push --force-with-lease="$remote_ref:$remote_sha" origin "HEAD:$remote_ref"
           else
