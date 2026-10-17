@@ -97,8 +97,7 @@ permissions, no publishing credentials, and no persisted checkout token.
 
 ## Ship production
 
-Only when ready to publish, configure the credentials below and enable
-publication. These commands allow subsequent version tags to publish publicly:
+When ready to publish, enable the release workflow:
 
 ```sh
 gh variable set RELEASE_PUBLISHING_ENABLED --repo arocomputer/e --body true
@@ -189,22 +188,9 @@ times, twenty seconds apart, with a fresh prefix and cache each time. This
 covers delayed wrapper metadata and missing optional platform packages. Preview
 builds require an explicit request.
 
-## Publishing credentials
-
-Homebrew and the release job push `Formula/e.rb` to `main` with the org secret
-`RELEASE_TOKEN`, a fine-grained token limited to Contents read/write on `e`,
-`ask`, `tap`, and `search`. Deploy keys are disabled by org policy. Renew the
-token before its expiry.
-npm uses trusted publishing (OIDC); no npm token is stored. Each of the six
-packages (`e` and its four platform packages, plus `e-slack`) trusts the GitHub
-organization `arocomputer`, repository `e`, workflow `release.yml`, with direct
-publishing allowed. Use Node 24 with npm 11.5.1 or newer.
-
-Trusted publishing can only be attached to a package that already exists, so the
-first publication under a new scope needs another auth method — an interactive
-`npm login` with 2FA, or a temporary publishing token. After that first publish,
-configure the trust relationships with an interactive npm login (2FA enabled,
-npm 11.15.0 or newer).
+Package publishing is automated by the release workflow. Keep publishing
+credentials and organization-level configuration in repository administration,
+not in this guide.
 
 For the first release, let the workflow build and publish its verified GitHub
 archives. The npm job may fail until the package names exist. In a checkout
