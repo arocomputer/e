@@ -5,29 +5,34 @@ on:
     - cron: '0 9 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
 
 concurrency:
   group: deps-${{ github.repository }}
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   update:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.capture.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
+          node-version: 24
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
-          toolchain: stable
+          toolchain: 1.98.0
       - run: cargo update
       - run: cargo update --manifest-path fuzz/Cargo.toml
       - run: npm ci
@@ -39,27 +44,110 @@ jobs:
         working-directory: services/slack
       - name: Check the updated dependencies
         run: ./x check
-      - name: Open a grouped dependency PR
+      - name: Capture checked dependency changes
+        id: capture
+        run: |
+          files=(Cargo.lock fuzz/Cargo.lock services/slack/package.json services/slack/package-lock.json)
+          if git diff --quiet -- "${files[@]}"; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --binary -- "${files[@]}" > "$RUNNER_TEMP/dependency-update.patch"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.capture.outputs.changed == 'true'
+        with:
+          name: dependency-update
+          path: ${{ runner.temp }}/dependency-update.patch
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: update
+    if: needs.update.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dependency-update
+          path: ${{ runner.temp }}
+      - name: Publish only the checked dependency patch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="Cargo.lock fuzz/Cargo.lock crates/web/Cargo.lock services/slack/package.json services/slack/package-lock.json"
-          read -r -a update_files <<< "$files"
-          if git diff --quiet -- "${update_files[@]}"; then
-            echo 'No dependency updates.'
-            exit 0
+          branch='chore/dependency-updates'
+          owner="${GITHUB_REPOSITORY%%/*}"
+          prs=$(gh pr list --state open --base main --head "$owner:$branch" --json number,author)
+          pr_count=$(jq 'length' <<< "$prs")
+          pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]")][0].number // empty' <<< "$prs")
+          if [ "$pr_count" -gt 0 ] && [ -z "$pr_number" ]; then
+            echo 'The reserved dependency branch has an open PR not created by this workflow.' >&2
+            exit 1
           fi
-          git config user.name github-actions[bot]
+          git apply --cached --binary "$RUNNER_TEMP/dependency-update.patch"
+          mapfile -d '' -t changed_files < <(git diff --cached --name-only -z)
+          allowed_files=(Cargo.lock fuzz/Cargo.lock services/slack/package.json services/slack/package-lock.json)
+          for file in "${changed_files[@]}"; do
+            allowed=false
+            for allowed_file in "${allowed_files[@]}"; do
+              [ "$file" = "$allowed_file" ] && allowed=true
+            done
+            [ "$allowed" = true ] || { echo 'Update patch contains an unexpected path.' >&2; exit 1; }
+          done
+          [ -n "$(git diff --cached --name-only)" ] || { echo 'Update patch is empty.' >&2; exit 1; }
+          [ -z "$(git diff --cached --summary)" ] || { echo 'Update patch changes file modes or types.' >&2; exit 1; }
+          git diff --cached --check
+          python3 - services/slack/package.json <<'PY'
+          import json
+          import subprocess
+          import sys
+          groups = {'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'}
+          for path in sys.argv[1:]:
+              before = json.loads(subprocess.check_output(['git', 'show', f'HEAD:{path}']))
+              after = json.loads(subprocess.check_output(['git', 'show', f':{path}']))
+              if any(before.get(key) != after.get(key) for key in before.keys() | after.keys() if key not in groups):
+                  raise SystemExit(f'Unexpected non-dependency edit in {path}')
+              for group in groups:
+                  old, new = before.get(group, {}), after.get(group, {})
+                  if old.keys() != new.keys() or any(not isinstance(v, str) for v in new.values()):
+                      raise SystemExit(f'Unexpected dependency shape change in {path}')
+          PY
+          git config user.name 'github-actions[bot]'
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git checkout -B chore/dependency-updates
-          git add -- "${update_files[@]}"
-          git commit -m 'chore: update dependencies'
-          if [ "$(gh pr list --state open --head chore/dependency-updates --json number --jq length)" -gt 0 ]; then
-            echo 'An update PR is already open; leaving it for review.'
-            exit 0
-          fi
+          git -c core.hooksPath=/dev/null commit -m 'chore: update dependencies'
           gh auth setup-git
-          git push origin --delete chore/dependency-updates 2>/dev/null || true
-          git push origin chore/dependency-updates
-          gh pr create --base main --head chore/dependency-updates --title 'chore: update dependencies' --body 'Grouped dependency updates. The repository check ran before opening this PR.'
-          gh pr merge chore/dependency-updates --auto --squash
+          remote_ref="refs/heads/$branch"
+          remote_sha=$(git ls-remote origin "$remote_ref" | awk 'NR == 1 { print $1 }')
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="$remote_ref:$remote_sha" origin "HEAD:$remote_ref"
+          else
+            git push origin "HEAD:$remote_ref"
+          fi
+          sha=$(git rev-parse HEAD)
+          gh workflow run ci.yml --ref "$branch"
+          run_id=''
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow ci.yml --branch "$branch" --limit 20 \
+              --json databaseId,headSha,event \
+              --jq ".[] | select(.headSha == \"$sha\" and .event == \"workflow_dispatch\") | .databaseId" \
+              | head -n 1)
+            [ -n "$run_id" ] && break
+            sleep 2
+          done
+          [ -n "$run_id" ] || { echo 'Could not find the validation run for the exact update commit.' >&2; exit 1; }
+          gh run watch "$run_id" --exit-status
+          if [ -z "$pr_number" ]; then
+            gh pr create --base main --head "$branch" \
+              --title 'chore: update dependencies' \
+              --body 'CI was dispatched on the exact update commit and passed before opening this PR.'
+            pr_number=$(gh pr view "$branch" --json number --jq .number)
+          fi
