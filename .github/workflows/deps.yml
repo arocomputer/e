@@ -90,7 +90,9 @@ jobs:
           pr_count=$(jq 'length' <<< "$prs")
           pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]" or .author.login == "app/github-actions")][0].number // empty' <<< "$prs")
           remote_ref="refs/heads/$branch"
-          remote_sha=$(git ls-remote origin "$remote_ref" | awk 'NR == 1 { print $1 }')
+          gh auth setup-git
+          remote_refs=$(git ls-remote origin "$remote_ref")
+          remote_sha=$(awk 'NR == 1 { print $1 }' <<< "$remote_refs")
           if [ "$pr_count" -gt 0 ] && [ -z "$pr_number" ]; then
             echo 'The reserved dependency branch has an open PR not created by this workflow.' >&2
             exit 1
@@ -225,7 +227,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -c core.hooksPath=/dev/null commit -m 'chore: update dependencies'
-          gh auth setup-git
           if [ -n "$remote_sha" ]; then
             git push --force-with-lease="$remote_ref:$remote_sha" origin "HEAD:$remote_ref"
           else
