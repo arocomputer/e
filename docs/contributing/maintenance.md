@@ -7,8 +7,9 @@ gate; `./x workflows` runs syntax and security checks in its existing lint job.
 ## Scheduled checks
 
 - Monday: CI audits Rust and Slack production dependencies and runs performance
-  checks. Dependency updates are combined in one weekly Dependabot PR across
-  Cargo, npm, GitHub Actions, and Docker; security updates can arrive separately.
+  checks. The custom dependency workflow updates compatible Cargo versions and
+  groups Slack npm minor and patch updates into one weekly PR. Major updates and
+  security advisories remain manual.
 - Tuesday: `links` runs `./x links` over root Markdown files and `docs/`. Relative
   links remain covered by `./x docs`. Live HTTP/HTTPS links are checked with
   bounded retries; reserved example domains and local/private addresses are
@@ -47,7 +48,7 @@ Published GitHub release assets are separate and are not cleaned up.
 lychee archives under `target/infra-tools/`. Their versions and Linux/macOS
 archive hashes are pinned in `.github/infra-tools.json`. Update version and hashes
 together. `./x audit` pins cargo-audit in `x`. These tool pins are maintained
-deliberately; Dependabot does not update the JSON archive catalog.
+deliberately; the dependency workflow does not update the JSON archive catalog.
 
 ## GitHub settings
 

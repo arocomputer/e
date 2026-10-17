@@ -1,0 +1,59 @@
+name: Dependency updates
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: deps-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - run: cargo update
+      - run: cargo update --manifest-path fuzz/Cargo.toml
+      - run: npm ci
+        working-directory: services/slack
+      - name: Update Slack minor and patch versions
+        run: npx --yes npm-check-updates --target minor --upgrade && npm install --package-lock-only
+        working-directory: services/slack
+      - run: npm ci
+        working-directory: services/slack
+      - name: Check the updated dependencies
+        run: ./x check
+      - name: Open a grouped dependency PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="Cargo.lock fuzz/Cargo.lock crates/web/Cargo.lock services/slack/package.json services/slack/package-lock.json"
+          read -r -a update_files <<< "$files"
+          if git diff --quiet -- "${update_files[@]}"; then
+            echo 'No dependency updates.'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -B chore/dependency-updates
+          git add -- "${update_files[@]}"
+          git commit -m 'chore: update dependencies'
+          git push --force origin chore/dependency-updates
+          gh pr create --base main --head chore/dependency-updates --title 'chore: update dependencies' --body 'Grouped dependency updates. The repository check ran before opening this PR.' || true
+          gh pr merge chore/dependency-updates --auto --squash

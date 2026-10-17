@@ -29,7 +29,8 @@ def classify(paths):
             continue
         if path.startswith(('assets/', 'benchmarks/results/')) or path in (
                 'LICENSE', '.gitignore', '.gitattributes', '.editorconfig',
-                '.github/CODEOWNERS', '.github/dependabot.yml', '.github/infra-tools.json', '.lychee.toml'):
+                '.github/CODEOWNERS', '.github/workflows/deps.yml',
+                '.github/infra-tools.json', '.lychee.toml'):
             continue
         if path.startswith(('services/slack/', 'services/github/', 'crates/cli/tests/fixtures/channels/')):
             gates['channels'] = True
