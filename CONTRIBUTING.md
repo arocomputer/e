@@ -96,8 +96,8 @@ main code changes and the weekly schedule run them too. Rust jobs cache
 dependencies and build outputs by platform, job, toolchain, and dependency set.
 
 The custom workflow updates compatible Cargo versions and groups Slack npm
-minor and patch updates into one weekly PR. Auto-merge requires required checks;
-major updates and security advisories remain manual. Docker images are not
+minor and patch updates into one weekly PR for maintainer review.
+Major updates and security advisories remain manual. Docker images are not
 auto-updated. `./x audit`
 covers the root and active fuzz lockfiles and pins cargo-audit to 0.22.2;
 `./x audit-python` covers the pinned PTY dependencies;
