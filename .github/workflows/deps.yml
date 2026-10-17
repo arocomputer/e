@@ -58,6 +58,7 @@ jobs:
             echo 'An update PR is already open; leaving it for review.'
             exit 0
           fi
+          gh auth setup-git
           git push origin --delete chore/dependency-updates 2>/dev/null || true
           git push origin chore/dependency-updates
           gh pr create --base main --head chore/dependency-updates --title 'chore: update dependencies' --body 'Grouped dependency updates. The repository check ran before opening this PR.'
