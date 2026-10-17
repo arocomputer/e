@@ -85,8 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           branch='chore/dependency-updates'
-          owner="${GITHUB_REPOSITORY%%/*}"
-          prs=$(gh pr list --state open --base main --head "$owner:$branch" --json number,author)
+          prs=$(gh pr list --state open --base main --head "$branch" --json number,author)
           pr_count=$(jq 'length' <<< "$prs")
           pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]" or .author.login == "app/github-actions")][0].number // empty' <<< "$prs")
           remote_ref="refs/heads/$branch"
