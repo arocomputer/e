@@ -88,7 +88,7 @@ jobs:
           owner="${GITHUB_REPOSITORY%%/*}"
           prs=$(gh pr list --state open --base main --head "$owner:$branch" --json number,author)
           pr_count=$(jq 'length' <<< "$prs")
-          pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]")][0].number // empty' <<< "$prs")
+          pr_number=$(jq -r '[.[] | select(.author.login == "github-actions[bot]" or .author.login == "app/github-actions")][0].number // empty' <<< "$prs")
           remote_ref="refs/heads/$branch"
           remote_sha=$(git ls-remote origin "$remote_ref" | awk 'NR == 1 { print $1 }')
           if [ "$pr_count" -gt 0 ] && [ -z "$pr_number" ]; then
@@ -132,6 +132,96 @@ jobs:
                   if old.keys() != new.keys() or any(not isinstance(v, str) for v in new.values()):
                       raise SystemExit(f'Unexpected dependency shape change in {path}')
           PY
+          python3 - "${changed_files[@]}" "$RUNNER_TEMP/dependency-summary.md" <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          rows = set()
+
+          def read_blob(spec):
+              return subprocess.check_output(['git', 'show', spec], text=True)
+
+          def add_changes(old, new):
+              for name in old.keys() | new.keys():
+                  before, after = old.get(name, []), new.get(name, [])
+                  before = [before] if isinstance(before, str) else before
+                  after = [after] if isinstance(after, str) else after
+                  if before != after:
+                      rows.add((name, ', '.join(before) or '—', ', '.join(after) or '—'))
+
+          def cargo_versions(text):
+              data = tomllib.loads(text)
+              packages = {}
+              for package in data.get('package', []):
+                  key = package['name']
+                  packages.setdefault(key, set()).add(package['version'])
+              return {name: sorted(versions) for name, versions in packages.items()}
+
+          def go_versions(text):
+              packages, in_require = {}, False
+              for line in text.splitlines():
+                  line = line.split('//', 1)[0].strip()
+                  if not line:
+                      continue
+                  if line == ')':
+                      in_require = False
+                      continue
+                  if line.startswith('require '):
+                      line = line[len('require '):].strip()
+                      if line == '(':
+                          in_require = True
+                          continue
+                  elif not in_require:
+                      continue
+                  fields = line.split()
+                  if len(fields) >= 2 and fields[1].startswith('v'):
+                      packages[fields[0]] = [fields[1]]
+              return packages
+
+          def pip_versions(text):
+              return {m.group(1).lower().replace('_', '-'): [m.group(2)]
+                      for line in text.splitlines()
+                      if (m := re.match(r'^([A-Za-z0-9_.-]+)==([^\s;]+)', line))}
+
+          for path in sys.argv[1:-1]:
+              try:
+                  before, after = read_blob(f'HEAD:{path}'), read_blob(f':{path}')
+              except subprocess.CalledProcessError:
+                  continue
+              if path.endswith('package.json'):
+                  old, new = json.loads(before), json.loads(after)
+                  for group in ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'):
+                      add_changes(old.get(group, {}), new.get(group, {}))
+              elif path.endswith('Cargo.lock'):
+                  add_changes(cargo_versions(before), cargo_versions(after))
+              elif path.endswith('go.mod'):
+                  add_changes(go_versions(before), go_versions(after))
+              elif path.endswith('requirements.lock'):
+                  add_changes(pip_versions(before), pip_versions(after))
+
+          ordered = sorted(rows)
+          lines = ['### Updated packages']
+          if not ordered:
+              lines.append('Lockfile changes were checked; no direct version changes were found.')
+          else:
+              lines.extend(['| Package | From | To |', '| --- | --- | --- |'])
+              for name, before, after in ordered[:20]:
+                  clean = lambda value: value.replace('|', r'\|')
+                  lines.append(f'| `{clean(name)}` | `{clean(before)}` | `{clean(after)}` |')
+              if len(ordered) > 20:
+                  lines.extend(['', f'<details><summary>{len(ordered) - 20} additional package updates</summary>', '',
+                                '| Package | From | To |', '| --- | --- | --- |'])
+                  for name, before, after in ordered[20:]:
+                      clean = lambda value: value.replace('|', r'\|')
+                      lines.append(f'| `{clean(name)}` | `{clean(before)}` | `{clean(after)}` |')
+                  lines.append('</details>')
+              lines.extend(['', f'Total: {len(ordered)} package changes.'])
+          Path(sys.argv[-1]).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
           git config user.name 'github-actions[bot]'
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -c core.hooksPath=/dev/null commit -m 'chore: update dependencies'
@@ -154,9 +244,27 @@ jobs:
           done
           [ -n "$run_id" ] || { echo 'Could not find the validation run for the exact update commit.' >&2; exit 1; }
           gh run watch "$run_id" --exit-status
+          body_file="$RUNNER_TEMP/dependency-pr-body.md"
+          {
+            cat <<EOF
+          ## Grouped dependency update
+
+          This PR contains compatible dependency updates produced by the scheduled updater.
+
+          EOF
+            cat "$RUNNER_TEMP/dependency-summary.md"
+            cat <<EOF
+
+          ### Validation
+          - The repository check suite passed in the isolated update job.
+          - GitHub Actions CI passed on the exact dependency-update commit $sha before publication.
+          EOF
+          } > "$body_file"
           if [ -z "$pr_number" ]; then
             gh pr create --base main --head "$branch" \
               --title 'chore: update dependencies' \
-              --body 'CI was dispatched on the exact update commit and passed before opening this PR.'
+              --body-file "$body_file"
             pr_number=$(gh pr view "$branch" --json number --jq .number)
+          else
+            gh pr edit "$pr_number" --body-file "$body_file"
           fi
